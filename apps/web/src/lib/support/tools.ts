@@ -72,7 +72,10 @@ export async function runSupportTool(
 ): Promise<SupportToolResult> {
   if (name === "search_support_kb") {
     const query = typeof input.query === "string" ? input.query : "";
-    const res = await searchSupportKnowledge(query, { moduleTags: ctx.moduleTags });
+    const res = await searchSupportKnowledge(query, {
+      moduleTags: ctx.moduleTags,
+      attributionOrgId: ctx.orgId,
+    });
     return {
       content: JSON.stringify({
         mode: res.mode,

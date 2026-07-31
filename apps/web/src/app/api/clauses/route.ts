@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { createKnowledgeItem } from "@/lib/ai/knowledge";
+import { knowledgeScopeWhere } from "@/lib/ai/knowledge-scope";
 
 /**
  * /api/clauses — biblioteca de cláusulas padronizadas da org.
@@ -25,7 +26,7 @@ export async function GET(req: NextRequest) {
 
   const clauses = await prisma.knowledgeItem.findMany({
     where: {
-      orgId: org.id,
+      ...knowledgeScopeWhere(org.id),
       category: "clause",
       status: "approved",
       ...(subcategory ? { subcategory } : {}),

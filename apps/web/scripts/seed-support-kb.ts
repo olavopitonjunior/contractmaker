@@ -21,13 +21,13 @@
  */
 import { prisma } from "@/lib/db/prisma";
 import { isEmbeddingsConfigured } from "@/lib/ai/embeddings";
-import { resolveSupportOrgId } from "@/lib/support/org";
 import { collectSupportSeedItems, seedSupportKb } from "@/lib/support/seed";
 
 const APPLY = process.argv.includes("--apply");
 
 async function main() {
-  const orgId = await resolveSupportOrgId();
+  // Base de suporte = escopo de PLATAFORMA (orgId nulo).
+  const orgId = null;
   const items = collectSupportSeedItems();
   const willEmbed = isEmbeddingsConfigured();
 

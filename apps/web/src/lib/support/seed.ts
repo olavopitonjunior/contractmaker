@@ -54,7 +54,8 @@ export function collectSupportSeedItems(): SupportSeedItem[] {
  * mesmo assim e a busca cai no ILIKE.
  */
 export async function seedSupportKb(
-  orgId: string,
+  /** `null` = base de plataforma, que é onde a base de suporte vive. */
+  orgId: string | null,
   opts: { createdBy?: string | null } = {}
 ): Promise<{ created: number }> {
   const items = collectSupportSeedItems();
@@ -67,6 +68,7 @@ export async function seedSupportKb(
     try {
       await createKnowledgeItem({
         orgId,
+        allowPlatformScope: true,
         category: SUPPORT_CATEGORY,
         title: item.title,
         content: item.content,

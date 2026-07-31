@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { createKnowledgeItem } from "@/lib/ai/knowledge";
+import { knowledgeScopeWhere } from "@/lib/ai/knowledge-scope";
 import { VoyageError } from "@/lib/ai/embeddings";
 
 const VALID_CATEGORIES = ["legislation", "model", "rule", "glossary", "clause"] as const;
@@ -22,8 +23,11 @@ export async function GET(req: NextRequest) {
   const category = url.searchParams.get("category");
   const search = url.searchParams.get("q");
 
+  // Lê a base da org + a de plataforma. A UI marca as de plataforma como
+  // somente-leitura — o PATCH/DELETE já filtra por `orgId` concreto, então
+  // mostrar não é o mesmo que deixar editar.
   const where: Record<string, unknown> = {
-    orgId: org.id,
+    ...knowledgeScopeWhere(org.id),
     parentId: null, // top-level items only; chunks stay hidden
   };
   if (category && VALID_CATEGORIES.includes(category as Category)) {
@@ -48,6 +52,7 @@ export async function GET(req: NextRequest) {
       chunkTotal: true,
       tags: true,
       source: true,
+      orgId: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -56,7 +61,7 @@ export async function GET(req: NextRequest) {
   // Counts per category for the sidebar
   const counts = await prisma.knowledgeItem.groupBy({
     by: ["category"],
-    where: { orgId: org.id, parentId: null },
+    where: { ...knowledgeScopeWhere(org.id), parentId: null },
     _count: { _all: true },
   });
   const countsMap = Object.fromEntries(

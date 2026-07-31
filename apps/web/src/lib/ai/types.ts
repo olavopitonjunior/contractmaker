@@ -1,3 +1,5 @@
+import type { AgentKey } from "./agents/registry";
+
 export interface AgentContext {
   contractId: string;
   userId: string;
@@ -19,6 +21,10 @@ export interface AgentContext {
   /** Session ativa do chat (necessário pra `propose_plan` persistir o ChatPlan
    *  com sessionId correto). Setado pelo streamContractAgent ao montar contexto. */
   sessionId?: string;
+  /** Agente que está executando o turn — define o escopo de RAG (`AgentProfile.ragScope`
+   *  + `KnowledgeItem.visibleToAgents`). Ausente = escopo aberto, que é o
+   *  comportamento do chat legado e de quem chama tool fora do orquestrador. */
+  agentKey?: AgentKey;
   /** ID pre-alocado da mensagem assistant que vai carregar o turn atual.
    *  Necessario pra `propose_plan` linkar ChatPlan.messageId antes da msg
    *  existir no DB (1:1 unique). Setado pelo streamContractAgent. */

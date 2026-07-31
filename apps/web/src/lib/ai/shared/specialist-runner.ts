@@ -233,14 +233,21 @@ export async function runSpecialist(
 
       // F5: pre-popula context com sessionId + pendingAssistantMessageId
       // pra handlers que dependem disso (propose_plan, suggestions vinculadas).
-      const handlerContext = config.sessionId
-        ? {
-            ...context,
-            sessionId: config.sessionId,
-            pendingAssistantMessageId:
-              context.pendingAssistantMessageId ?? `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          }
-        : context;
+      // `agentKey` vai sempre: é o que dá escopo de RAG por agente às tools de
+      // consulta (`knowledge-scope.ts`). Os 4 especialistas têm o mesmo nome no
+      // registry de agentes, então `agentName` serve direto.
+      const handlerContext = {
+        ...context,
+        agentKey: agentName,
+        ...(config.sessionId
+          ? {
+              sessionId: config.sessionId,
+              pendingAssistantMessageId:
+                context.pendingAssistantMessageId ??
+                `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            }
+          : {}),
+      };
 
       let result: ToolOutput;
       try {

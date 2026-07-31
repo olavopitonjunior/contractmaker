@@ -20,7 +20,17 @@ export type KnowledgeCategory =
   | "support";
 
 export interface CreateKnowledgeItemInput {
-  orgId: string;
+  /** `null` = base de PLATAFORMA. Exige `allowPlatformScope` — ver `assertScopeAllowed`. */
+  orgId: string | null;
+  /**
+   * Confirma que o caller é super_admin e QUER escrever na base de plataforma.
+   *
+   * Existe porque `orgId` virou nullable: sem este opt-in, um `orgId` que chega
+   * undefined por um bug de resolução de sessão deixaria de ser erro e viraria
+   * escrita silenciosa na base que todos os tenants leem. Com ele, escrever na
+   * plataforma é sempre uma decisão explícita e grep-ável.
+   */
+  allowPlatformScope?: boolean;
   category: KnowledgeCategory;
   title: string;
   content: string;
@@ -79,9 +89,26 @@ export function normalizeKnowledgeContent(text: string): string {
   return text.replace(/\r\n/g, "\n").trim();
 }
 
+/**
+ * Barra escrita na base de plataforma que não foi pedida explicitamente.
+ * O controle de PERMISSÃO (super_admin) é da rota — `requirePlatform`; este
+ * guard só garante que ninguém chegue em `orgId = null` por acidente.
+ */
+export function assertScopeAllowed(
+  orgId: string | null,
+  allowPlatformScope: boolean | undefined,
+  op: string
+): void {
+  if (orgId === null && !allowPlatformScope) {
+    throw new Error(
+      `[knowledge] ${op} com orgId nulo sem allowPlatformScope — escrita na base de plataforma precisa ser explícita.`
+    );
+  }
+}
+
 export interface KnowledgeItemRow {
   id: string;
-  orgId: string;
+  orgId: string | null;
   category: string;
   title: string;
   content: string;
@@ -145,6 +172,7 @@ export async function createKnowledgeItemRows(
   input: CreateKnowledgeItemInput,
   db: KnowledgeWriteClient = prisma
 ): Promise<{ parentId: string; embedTargets: EmbedTarget[] }> {
+  assertScopeAllowed(input.orgId, input.allowPlatformScope, "create");
   const chunks = chunkText(input.content);
   if (chunks.length === 0) {
     throw new Error("Conteúdo vazio após limpeza");
@@ -234,13 +262,20 @@ export async function createKnowledgeItemRows(
  */
 export async function embedKnowledgeItem(
   targets: EmbedTarget[],
-  ctx: { orgId: string; userId?: string | null }
+  ctx: { orgId: string | null; userId?: string | null }
 ): Promise<void> {
   if (!isEmbeddingsConfigured() || targets.length === 0) return;
+  // Item de plataforma não tem org a quem cobrar e `AIUsage.orgId` é NOT NULL —
+  // sem ctx, `embed` só não registra o uso. É um punhado de embeddings feitos à
+  // mão pelo super_admin, não custo de runtime; a atribuição fica pro lote que
+  // levar `agentKey` pro AIUsage.
+  const usageCtx = ctx.orgId
+    ? { orgId: ctx.orgId, userId: ctx.userId, operation: "embed_kb" as const }
+    : undefined;
   const vectors = await embed(
     targets.map((t) => t.text),
     "document",
-    { orgId: ctx.orgId, userId: ctx.userId, operation: "embed_kb" }
+    usageCtx
   );
   for (let i = 0; i < targets.length; i++) {
     await prisma.$executeRawUnsafe(
@@ -272,9 +307,15 @@ export async function createKnowledgeItem(
  */
 export async function updateKnowledgeItem(
   id: string,
-  orgId: string,
-  patch: Partial<Omit<CreateKnowledgeItemInput, "orgId" | "category">>
+  orgId: string | null,
+  patch: Partial<Omit<CreateKnowledgeItemInput, "orgId" | "category">> & {
+    allowPlatformScope?: boolean;
+  }
 ): Promise<void> {
+  assertScopeAllowed(orgId, patch.allowPlatformScope, "update");
+  // `orgId` aqui é o do USUÁRIO, não o da linha — é ele que impede escrita
+  // cross-org, e agora também impede o tenant de editar item de plataforma
+  // (`orgId = "abc"` não casa com a linha `orgId = NULL`).
   const current = await prisma.knowledgeItem.findFirst({
     where: { id, orgId },
   });
@@ -313,7 +354,7 @@ export async function updateKnowledgeItem(
     const [vec] = await embed(
       [`${patch.title ?? current.title}\n\n${patch.content}`],
       "document",
-      { orgId, operation: "embed_kb" }
+      orgId ? { orgId, operation: "embed_kb" } : undefined
     );
     await prisma.$executeRawUnsafe(
       `UPDATE "KnowledgeItem" SET embedding = $1::vector WHERE id = $2`,
@@ -326,6 +367,11 @@ export async function updateKnowledgeItem(
 /**
  * Delete an item and its chunks (cascade handled by the FK).
  */
-export async function deleteKnowledgeItem(id: string, orgId: string): Promise<void> {
+export async function deleteKnowledgeItem(
+  id: string,
+  orgId: string | null,
+  opts: { allowPlatformScope?: boolean } = {}
+): Promise<void> {
+  assertScopeAllowed(orgId, opts.allowPlatformScope, "delete");
   await prisma.knowledgeItem.deleteMany({ where: { id, orgId } });
 }

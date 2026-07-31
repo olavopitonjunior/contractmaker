@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import { knowledgeScopeWhere } from "@/lib/ai/knowledge-scope";
 import { KnowledgeBaseClient } from "@/components/settings/KnowledgeBaseClient";
 
 export default async function KnowledgeBasePage() {
@@ -12,7 +13,7 @@ export default async function KnowledgeBasePage() {
 
   const [items, counts] = await Promise.all([
     prisma.knowledgeItem.findMany({
-      where: { orgId: org.id, parentId: null },
+      where: { ...knowledgeScopeWhere(org.id), parentId: null },
       orderBy: { updatedAt: "desc" },
       take: 100,
       select: {
@@ -23,13 +24,14 @@ export default async function KnowledgeBasePage() {
         chunkTotal: true,
         tags: true,
         source: true,
+        orgId: true,
         createdAt: true,
         updatedAt: true,
       },
     }),
     prisma.knowledgeItem.groupBy({
       by: ["category"],
-      where: { orgId: org.id, parentId: null },
+      where: { ...knowledgeScopeWhere(org.id), parentId: null },
       _count: { _all: true },
     }),
   ]);

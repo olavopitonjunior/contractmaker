@@ -14,6 +14,7 @@
 
 import { prisma } from "@/lib/db/prisma";
 import { findSimilarContracts } from "./memory";
+import { knowledgeScopeWhere } from "./knowledge-scope";
 import type { AgentContext } from "./types";
 
 const TOP_SIMILAR_CONTRACTS = 3;
@@ -149,7 +150,7 @@ async function loadTopClauses(context: AgentContext) {
 
   return prisma.knowledgeItem.findMany({
     where: {
-      orgId: context.orgId,
+      ...knowledgeScopeWhere(context.orgId, { agentKey: context.agentKey }),
       category: "clause",
       status: "approved",
       ...clauseFilter,

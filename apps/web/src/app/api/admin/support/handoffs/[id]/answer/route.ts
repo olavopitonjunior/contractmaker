@@ -5,7 +5,6 @@ import { prisma } from "@/lib/db/prisma";
 import { requirePlatform } from "@/lib/admin/gate";
 import { createKnowledgeItem } from "@/lib/ai/knowledge";
 import { emitNotification } from "@/lib/notifications/emit";
-import { resolveSupportOrgId } from "@/lib/support/org";
 import { SUPPORT_CATEGORY, SUPPORT_MODULE_TAGS } from "@/lib/support/constants";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +42,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   }
 
   // (1) Retroalimenta a base de suporte.
-  const orgId = await resolveSupportOrgId();
+  // Base de suporte = escopo de PLATAFORMA (orgId nulo).
+  const orgId = null;
   const { parentId } = await createKnowledgeItem({
     orgId,
     category: SUPPORT_CATEGORY,

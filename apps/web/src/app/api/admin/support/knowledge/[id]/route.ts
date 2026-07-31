@@ -4,7 +4,6 @@ import { auth } from "@/lib/auth/auth";
 import { requirePlatform } from "@/lib/admin/gate";
 import { updateKnowledgeItem, deleteKnowledgeItem } from "@/lib/ai/knowledge";
 import { VoyageError } from "@/lib/ai/embeddings";
-import { resolveSupportOrgId } from "@/lib/support/org";
 import { SUPPORT_MODULE_TAGS } from "@/lib/support/constants";
 
 export const dynamic = "force-dynamic";
@@ -32,9 +31,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: "Validation failed" }, { status: 422 });
   }
 
-  const orgId = await resolveSupportOrgId();
+  // Base de suporte = escopo de PLATAFORMA (orgId nulo).
+
+  const orgId = null;
   try {
-    await updateKnowledgeItem(params.id, orgId, parsed.data);
+    await updateKnowledgeItem(params.id, orgId, { ...parsed.data, allowPlatformScope: true });
     return NextResponse.json({ ok: true });
   } catch (err) {
     if (err instanceof VoyageError) {
@@ -52,7 +53,9 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
   const g = await requirePlatform(session?.user?.id, "support");
   if (!g.ok) return g.res;
 
-  const orgId = await resolveSupportOrgId();
-  await deleteKnowledgeItem(params.id, orgId);
+  // Base de suporte = escopo de PLATAFORMA (orgId nulo).
+
+  const orgId = null;
+  await deleteKnowledgeItem(params.id, orgId, { allowPlatformScope: true });
   return NextResponse.json({ ok: true });
 }
