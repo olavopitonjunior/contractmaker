@@ -16,6 +16,10 @@ import {
   slotTagsFor,
   slotToken,
   SLOT_TAG_PREFIX,
+  slugifyProviderTag,
+  providerTag,
+  providerTagsOf,
+  rankSlotCandidates,
 } from "../clause-slots";
 import { CANONICAL_TEMPLATE_SOURCES } from "../canonical-sources.generated";
 import { renderContratoHTML } from "@/lib/render/handlebars";
@@ -35,7 +39,9 @@ const CAUCAO_DATA = {
   locatarios: [{ tipo_pessoa: "fisica", nome: "Maria" }],
 };
 
-function dbWith(rows: Array<{ id: string; content: string; chunkTotal?: number }>) {
+function dbWith(
+  rows: Array<{ id: string; content: string; chunkTotal?: number; tags?: string[] }>
+) {
   return { knowledgeItem: { findMany: vi.fn().mockResolvedValue(rows) } };
 }
 
@@ -212,6 +218,171 @@ describe("resolveClauseSlots", () => {
   it("a opção lida pelo slot é a MESMA que escolhe a variante do template", () => {
     expect(CLAUSE_SLOTS.garantia.selectedValue(FIADOR_DATA)).toBe("fiador");
     expect(CLAUSE_SLOTS.garantia.valueLabel("seguro_fianca")).toBe("Seguro fiança");
+  });
+});
+
+/**
+ * Seleção por GARANTIDOR. 11 das 20 cláusulas do pacote curado da Ativa dividem
+ * `garantia:seguro_fianca` e só se distinguem por `provider:*` — sem esta
+ * dimensão, o contrato de quem escolheu a Pottencial saía com a redação da
+ * Porto Seguro (o `take: 1` por `updatedAt` pegava a última ingerida).
+ */
+describe("slugifyProviderTag — formato das tags do pacote curado", () => {
+  it("rótulo humano do catálogo vira o slug com `_` das tags do acervo", () => {
+    // Confirmado nos arquivos reais do pacote da Ativa.
+    expect(slugifyProviderTag("Porto Seguro")).toBe("porto_seguro");
+    expect(slugifyProviderTag("Tokio Marine Seguradora")).toBe("tokio_marine_seguradora");
+    expect(slugifyProviderTag("Tokio Marine")).toBe("tokio_marine");
+    expect(slugifyProviderTag("Pottencial")).toBe("pottencial");
+    expect(slugifyProviderTag("Too")).toBe("too");
+  });
+
+  it("acento, pontuação e espaço extra não geram tag diferente", () => {
+    expect(slugifyProviderTag("  Garantia Fiança & Cia.  ")).toBe("garantia_fianca_cia");
+    expect(slugifyProviderTag("São Paulo Seguros")).toBe("sao_paulo_seguros");
+  });
+
+  it("não-string / vazio → sem garantidor", () => {
+    expect(slugifyProviderTag(undefined)).toBe("");
+    expect(slugifyProviderTag(null)).toBe("");
+    expect(slugifyProviderTag("   ")).toBe("");
+    expect(slugifyProviderTag("—")).toBe("");
+  });
+
+  it("providerTag / providerTagsOf fecham o ciclo", () => {
+    expect(providerTag("Porto Seguro")).toBe("provider:porto_seguro");
+    expect(
+      providerTagsOf(["slot:garantia", "garantia:seguro_fianca", "provider:pottencial"])
+    ).toEqual(["pottencial"]);
+    expect(providerTagsOf(["slot:garantia", "garantia:caucao"])).toEqual([]);
+    expect(providerTagsOf(null)).toEqual([]);
+  });
+});
+
+describe("rankSlotCandidates — eleição em 3 níveis", () => {
+  const porto = { id: "porto", content: "porto", tags: ["provider:porto_seguro"] };
+  const pottencial = { id: "pott", content: "pott", tags: ["provider:pottencial"] };
+  const generica = { id: "gen", content: "gen", tags: ["garantia:seguro_fianca"] };
+  const coberturaPott = {
+    id: "cob",
+    content: "cobertura",
+    tags: ["provider:pottencial", "cobertura:pintura"],
+  };
+
+  it("(1) garantidor exato vence o genérico E o mais recente errado", () => {
+    // Ordem de entrada = `updatedAt desc` (a da Porto foi ingerida por último).
+    const { hit } = rankSlotCandidates([porto, generica, pottencial], "pottencial");
+    expect(hit?.id).toBe("pott");
+  });
+
+  it("(2) form sem garantidor → a genérica vence, e nenhuma de garantidor entra", () => {
+    const { hit, rejectedProviders } = rankSlotCandidates([porto, generica], null);
+    expect(hit?.id).toBe("gen");
+    expect(rejectedProviders).toEqual([]);
+  });
+
+  it("(2) garantidor sem cláusula própria cai na genérica do tipo", () => {
+    const { hit } = rankSlotCandidates([porto, generica], "tokio_marine");
+    expect(hit?.id).toBe("gen");
+  });
+
+  it("(3) só garantidores errados → nada elegível, e reporta quais existem", () => {
+    const { hit, rejectedProviders } = rankSlotCandidates([porto, pottencial], "tokio_marine");
+    expect(hit).toBeNull();
+    expect(rejectedProviders).toEqual(["porto_seguro", "pottencial"]);
+  });
+
+  it("`cobertura:*` não seleciona — a cláusula principal do garantidor vence", () => {
+    // A acessória vem primeiro (ingerida depois) e mesmo assim perde.
+    const { hit } = rankSlotCandidates([coberturaPott, pottencial], "pottencial");
+    expect(hit?.id).toBe("pott");
+  });
+
+  it("cláusula acessória sozinha ainda é elegível — nada é descartado em silêncio", () => {
+    const { hit } = rankSlotCandidates([coberturaPott], "pottencial");
+    expect(hit?.id).toBe("cob");
+  });
+
+  it("acervo vazio → sem hit e sem mismatch (é o fallback normal)", () => {
+    expect(rankSlotCandidates([], "pottencial")).toEqual({ hit: null, rejectedProviders: [] });
+  });
+});
+
+describe("resolveClauseSlots — garantidor do formulário", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const seguroData = (provider?: string) => ({
+    garantia: { tipo: "seguro_fianca", ...(provider ? { provider } : {}) },
+    locatarios: [{ tipo_pessoa: "fisica", nome: "Maria" }],
+    aluguel: { valor: 2500, dia_vencimento: 5 },
+  });
+
+  async function resolve(
+    rows: Array<{ id: string; content: string; tags?: string[] }>,
+    provider?: string
+  ) {
+    return resolveClauseSlots({
+      orgId: "org1",
+      templateSource: slotMarkerHandlebars("garantia"),
+      data: seguroData(provider),
+      format: "html",
+      db: dbWith(rows),
+    });
+  }
+
+  it("o rótulo do catálogo casa com a tag do acervo (Porto Seguro → porto_seguro)", async () => {
+    const out = await resolve(
+      [
+        { id: "ki-pott", content: "<p>Redação Pottencial.</p>", tags: ["provider:pottencial"] },
+        { id: "ki-porto", content: "<p>Redação Porto Seguro.</p>", tags: ["provider:porto_seguro"] },
+      ],
+      "Porto Seguro"
+    );
+    expect(out.values.slot_garantia).toContain("Redação Porto Seguro");
+    expect(out.resolved[0]).toMatchObject({ source: "knowledge", knowledgeItemId: "ki-porto" });
+    expect(out.failures).toEqual([]);
+  });
+
+  it("só existem OUTROS garantidores → fallback canônico + provider_mismatch", async () => {
+    const out = await resolve(
+      [
+        { id: "ki-porto", content: "<p>Redação Porto Seguro.</p>", tags: ["provider:porto_seguro"] },
+        { id: "ki-pott", content: "<p>Redação Pottencial.</p>", tags: ["provider:pottencial"] },
+      ],
+      "Tokio Marine"
+    );
+    expect(out.resolved[0].source).toBe("fallback");
+    expect(out.failures).toEqual([
+      expect.objectContaining({ slot: "garantia", reason: "provider_mismatch" }),
+    ]);
+    expect(out.failures[0].message).toContain("tokio_marine");
+    expect(out.failures[0].message).toContain("porto_seguro, pottencial");
+    expect(out.values.slot_garantia).not.toContain("Redação Porto Seguro");
+    // O contrato ainda sai inteiro.
+    expect(out.values.slot_garantia.trim().length).toBeGreaterThan(0);
+  });
+
+  it("candidatos são buscados por tipo (não só o mais recente) pra eleger em memória", async () => {
+    const db = dbWith([{ id: "ki", content: "<p>x</p>", tags: [] }]);
+    await resolveClauseSlots({
+      orgId: "org1",
+      templateSource: slotMarkerHandlebars("garantia"),
+      data: seguroData("Tokio Marine"),
+      format: "html",
+      db,
+    });
+    const args = db.knowledgeItem.findMany.mock.calls[0][0];
+    expect(args.take).toBeGreaterThan(1);
+    expect(args.select.tags).toBe(true);
+    expect(args.where.tags).toEqual({
+      hasEvery: ["slot:garantia", "garantia:seguro_fianca"],
+    });
+  });
+
+  it("acervo legado sem tags no select segue funcionando (cláusula genérica)", async () => {
+    const out = await resolve([{ id: "ki-legado", content: "<p>Sem tags.</p>" }], "Tokio Marine");
+    expect(out.values.slot_garantia).toContain("Sem tags.");
+    expect(out.failures).toEqual([]);
   });
 });
 

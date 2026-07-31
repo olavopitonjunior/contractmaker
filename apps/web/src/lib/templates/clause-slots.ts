@@ -31,8 +31,11 @@
  *     `failures`. Contrato com a cláusula genérica > contrato com `{{chave}}`.
  *
  * Tags no `KnowledgeItem`: `slot:garantia` (qual slot) + `garantia:<tipo>` (qual
- * opção do form). Os tipos são os do `garantiaSchema` — mesma fonte do <select>
- * da triagem, do form e do `matchCriteria`.
+ * opção do form) + opcionalmente `provider:<garantidor>` (qual seguradora). Os
+ * tipos são os do `garantiaSchema` — mesma fonte do <select> da triagem, do form
+ * e do `matchCriteria`; o garantidor vem do catálogo da org
+ * (`lib/forms/garantia-catalog.ts`) e é slugificado por `slugifyProviderTag`.
+ * Ver `rankSlotCandidates` pros três níveis de eleição.
  */
 
 import { htmlToPlainText, clausulaGarantiaHtml } from "./composed-blocks";
@@ -63,6 +66,60 @@ export function slotValueTag(slot: ClauseSlotKey, value: string): string {
 /** As duas tags de uma cláusula de slot, na ordem em que são gravadas. */
 export function slotTagsFor(slot: ClauseSlotKey, value: string): string[] {
   return [slotTag(slot), slotValueTag(slot, value)];
+}
+
+/**
+ * `provider:porto_seguro` — o GARANTIDOR que a cláusula atende.
+ *
+ * Dimensão secundária da seleção: 11 das 20 cláusulas do pacote da Ativa
+ * dividem `garantia:seguro_fianca` e só se distinguem pelo garantidor. Sem isso,
+ * o contrato de um form que escolheu a Pottencial podia sair com a redação da
+ * Porto Seguro.
+ */
+export const PROVIDER_TAG_PREFIX = "provider:";
+
+/**
+ * `cobertura:pintura` — METADADO de cláusula acessória (cobertura adicional).
+ * NÃO seleciona nada; só desempata (ver `rankSlotCandidates`).
+ */
+export const COVERAGE_TAG_PREFIX = "cobertura:";
+
+/** Acentos decompostos pelo NFD (mesma constante de `lib/utils/slug.ts`). */
+const COMBINING_MARKS = new RegExp("[\\u0300-\\u036f]", "g");
+
+/**
+ * `"Porto Seguro"` → `"porto_seguro"`. Formato confirmado no pacote curado da
+ * Ativa (`provider:porto_seguro`, `provider:tokio_marine`, `provider:pottencial`,
+ * `provider:too`, `provider:loft`, `provider:almada`): minúsculas, sem acento,
+ * qualquer separador vira `_`.
+ *
+ * NÃO é o `slugify` de `lib/utils/slug.ts` — aquele usa hífen (`porto-seguro`) e
+ * serve a URL. Aqui o separador é `_`, que é o que as tags do acervo usam. O
+ * form grava o RÓTULO humano (`garantia.provider = "Porto Seguro"`, vindo do
+ * catálogo em `lib/forms/garantia-catalog.ts`), então a normalização acontece na
+ * hora de casar.
+ */
+export function slugifyProviderTag(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value
+    .normalize("NFD")
+    .replace(COMBINING_MARKS, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+/** `provider:porto_seguro` a partir do rótulo humano. */
+export function providerTag(provider: string): string {
+  return `${PROVIDER_TAG_PREFIX}${slugifyProviderTag(provider)}`;
+}
+
+/** Garantidores declarados nas tags de uma cláusula (já sem o prefixo). */
+export function providerTagsOf(tags: string[] | null | undefined): string[] {
+  return (tags ?? [])
+    .filter((t) => t.startsWith(PROVIDER_TAG_PREFIX))
+    .map((t) => t.slice(PROVIDER_TAG_PREFIX.length))
+    .filter(Boolean);
 }
 
 /** Token do slot dentro do template/Doc (`slot_garantia`). */
@@ -108,6 +165,12 @@ interface ClauseSlotDef {
   label: string;
   /** Opção do formulário que seleciona a cláusula, ou null se indeterminada. */
   selectedValue(data: Record<string, unknown>): string | null;
+  /**
+   * Dimensão SECUNDÁRIA da seleção, já slugificada pro formato das tags
+   * (`porto_seguro`). Ausente/`null` = o form não escolheu garantidor, e só as
+   * cláusulas genéricas do tipo são elegíveis. Slot sem essa dimensão omite.
+   */
+  selectedProvider?(data: Record<string, unknown>): string | null;
   /** Rótulo humano de uma opção (badge na UI, título da cláusula criada). */
   valueLabel(value: string): string;
   /** Condicional embutida do canônico — o fallback quando o acervo não cobre. */
@@ -120,6 +183,13 @@ const GARANTIA_SLOT: ClauseSlotDef = {
   // Mesma leitura que escolhe o template por `matchCriteria` — o slot e a
   // seleção de variante NUNCA podem discordar sobre qual é a garantia do form.
   selectedValue: (data) => deriveTemplateFacts(data).garantia,
+  // `garantia.provider` é o RÓTULO do catálogo da org ("Porto Seguro") — o
+  // mesmo campo que o <select> do GarantiaStep grava. Slugificado aqui pra
+  // casar com `provider:porto_seguro` do acervo.
+  selectedProvider: (data) => {
+    const garantia = data.garantia as { provider?: unknown } | undefined;
+    return slugifyProviderTag(garantia?.provider) || null;
+  },
   valueLabel: (value) => GARANTIA_LABELS[value as GarantiaTipo] ?? value,
   fallbackHtml: (data) => clausulaGarantiaHtml(data),
 };
@@ -167,12 +237,17 @@ export type ClauseSlotFailureReason =
   /** Renderizou, mas sobrou `{{` — chave que ninguém mais vai resolver. */
   | "residual_placeholder"
   /** Row legada repartida em chunks: o `content` é preview/pedaço, não a cláusula. */
-  | "chunked_content";
+  | "chunked_content"
+  /** Só existem cláusulas de OUTROS garantidores — a da seguradora escolhida falta. */
+  | "provider_mismatch";
 
 export interface ClauseSlotFailure {
   slot: ClauseSlotKey;
-  /** A cláusula do acervo que foi descartada (pra corrigir na origem). */
-  knowledgeItemId: string;
+  /**
+   * A cláusula descartada (pra corrigir na origem). Ausente em
+   * `provider_mismatch`, onde a falta é de cláusula, não de uma linha ruim.
+   */
+  knowledgeItemId?: string;
   reason: ClauseSlotFailureReason;
   /** Mensagem do erro, ou o trecho que sobrou com chave. */
   message: string;
@@ -212,12 +287,83 @@ function emptyResult(): ResolveClauseSlotsResult {
  */
 const RESIDUAL_PLACEHOLDER = /\{\{/;
 
+/**
+ * Teto de candidatos trazidos por slot. A eleição do garantidor acontece em
+ * memória, então precisamos de mais de um — mas não de todos: o pacote curado
+ * da Ativa, o maior que existe, tem 11 cláusulas no tipo mais povoado
+ * (`garantia:seguro_fianca`, entre garantidores e coberturas).
+ */
+const CANDIDATE_LIMIT = 50;
+
 /** Linha do acervo consumida pelo slot. */
-interface ClauseHit {
+export interface ClauseHit {
   id: string;
   content: string;
   /** >1 = row legada repartida (parent-resumo). Ausente = row íntegra. */
   chunkTotal?: number | null;
+  /** Tags da linha — é por elas que o garantidor é escolhido. */
+  tags?: string[] | null;
+}
+
+export interface SlotCandidateRanking {
+  /** A cláusula eleita, ou null se nenhuma é elegível. */
+  hit: ClauseHit | null;
+  /**
+   * Garantidores que EXISTEM no acervo mas não servem. Só preenchido quando
+   * nada foi eleito — é o que a falha `provider_mismatch` reporta.
+   */
+  rejectedProviders: string[];
+}
+
+/**
+ * Elege a cláusula do slot entre os candidatos do tipo de garantia.
+ *
+ * Três níveis, determinísticos (a ordem de entrada — `updatedAt desc, id desc` —
+ * desempata dentro de cada nível):
+ *
+ *  1. **Garantidor exato** — a cláusula tagueada `provider:<slug>` igual ao que
+ *     o form escolheu. É o nível que impede o contrato da Pottencial de sair com
+ *     a redação da Porto Seguro.
+ *  2. **Genérica do tipo** — cláusula SEM nenhuma tag `provider:*`. Vale quando
+ *     o form não escolheu garantidor, e também quando escolheu um que o acervo
+ *     não cobre por cláusula própria.
+ *  3. **Garantidor diferente NUNCA é elegível.** Sem elegível e com providers
+ *     rejeitados, o caller emite `provider_mismatch` e usa o fallback canônico.
+ *
+ * `cobertura:*` NÃO seleciona — é metadado de cláusula ACESSÓRIA ("cobertura
+ * adicional — pintura"), que compartilha slot+tipo+garantidor com a cláusula
+ * principal. Ela só é DESEMPATADA pra baixo dentro do nível: com as duas no
+ * acervo (o caso real da Pottencial e da Porto), a principal vence sempre. Não
+ * excluímos de vez pra não descartar em silêncio a única cláusula que a org tem.
+ */
+export function rankSlotCandidates(
+  candidates: readonly ClauseHit[],
+  provider: string | null
+): SlotCandidateRanking {
+  const exact: ClauseHit[] = [];
+  const generic: ClauseHit[] = [];
+  const rejected = new Set<string>();
+
+  for (const candidate of candidates) {
+    const providers = providerTagsOf(candidate.tags);
+    if (providers.length === 0) {
+      generic.push(candidate);
+    } else if (provider && providers.includes(provider)) {
+      exact.push(candidate);
+    } else {
+      for (const p of providers) rejected.add(p);
+    }
+  }
+
+  const isAddon = (c: ClauseHit) =>
+    (c.tags ?? []).some((t) => t.startsWith(COVERAGE_TAG_PREFIX));
+  const pick = (list: ClauseHit[]) => list.find((c) => !isAddon(c)) ?? list[0] ?? null;
+
+  const hit = pick(exact) ?? pick(generic);
+  return {
+    hit,
+    rejectedProviders: hit ? [] : Array.from(rejected).sort(),
+  };
 }
 
 /**
@@ -319,16 +465,39 @@ export async function resolveClauseSlots(
             parentId: null,
             tags: { hasEvery: slotTagsFor(slot, value) },
           },
-          select: { id: true, content: true, chunkTotal: true },
+          select: { id: true, content: true, chunkTotal: true, tags: true },
           // Mais recente vence: reingerir o modelo atualiza a cláusula do slot
           // sem obrigar o operador a apagar a antiga. `id` é o desempate — duas
           // cláusulas gravadas na MESMA transação têm `updatedAt` idêntico e a
           // ordem viraria a do plano de execução do Postgres, ou seja, o
           // contrato poderia sair com uma cláusula diferente a cada geração.
           orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-          take: 1,
+          // Trazemos os CANDIDATOS do tipo (não só o mais recente) porque o
+          // garantidor é escolhido em memória — `hasEvery` não sabe expressar
+          // "o provider certo, ou nenhum provider, mas nunca o errado". O teto
+          // é folgado: uma org tem punhados de cláusulas por tipo de garantia.
+          take: CANDIDATE_LIMIT,
         })) as ClauseHit[];
-        const hit = rows?.[0];
+
+        // Garantidor do form (`provider:porto_seguro`) — dimensão secundária.
+        const provider = def.selectedProvider?.(input.data) ?? null;
+        const ranking = rankSlotCandidates(rows ?? [], provider);
+        const hit = ranking.hit;
+
+        if (!hit && ranking.rejectedProviders.length > 0) {
+          failure = {
+            slot,
+            reason: "provider_mismatch",
+            message:
+              (provider
+                ? `o formulário escolheu o garantidor "${provider}"`
+                : `o formulário não informou garantidor`) +
+              `, mas o acervo só tem cláusula de: ${ranking.rejectedProviders.join(", ")}` +
+              ` (${slotValueTag(slot, value)}). Sai o texto canônico.`,
+          };
+          console.error(`[clause-slots] ${failure.message}`);
+        }
+
         if (hit?.content) {
           // A cláusula do acervo é Handlebars como qualquer outra (o agente já
           // as insere assim) — renderizar aqui é o que faz `{{aluguel.valor}}`
