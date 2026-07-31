@@ -62,6 +62,11 @@ export default async function AdminOrgsPage() {
           <a href="/admin/agents" className="text-primary hover:underline">
             Agentes de IA
           </a>
+          {/* A tela existia desde o lote do RAG global e não tinha link nenhum
+              no repo — só era alcançável digitando a URL. */}
+          <a href="/admin/knowledge" className="text-primary hover:underline">
+            Base de conhecimento
+          </a>
         </nav>
       </header>
       <AdminOrgsClient orgs={orgs} canCreate={canCreate} />

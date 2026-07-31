@@ -53,6 +53,8 @@ interface Props {
    * `supports.ragScope`.
    */
   ragAgents?: Array<{ key: string; label: string }>;
+  /** Quantos tenants leem a base de plataforma — vira alcance na confirmação. */
+  orgCount?: number;
 }
 
 const API_BASE: Record<"org" | "platform", string> = {
@@ -90,6 +92,7 @@ export function KnowledgeBaseClient({
   embeddingsConfigured,
   scope = "org",
   ragAgents = [],
+  orgCount,
 }: Props) {
   const apiBase = API_BASE[scope];
   const router = useRouter();
@@ -150,15 +153,16 @@ export function KnowledgeBaseClient({
     }
   }
 
-  async function handleSearch() {
-    if (!searchQuery.trim()) return;
+  async function handleSearch(queryOverride?: string) {
+    const q = (queryOverride ?? searchQuery).trim();
+    if (!q) return;
     setSearching(true);
     try {
       const res = await fetch(`${apiBase}/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          query: searchQuery,
+          query: q,
           category: activeTab === "all" ? undefined : activeTab,
           topK: 5,
           ...(searchAgent ? { agentKey: searchAgent } : {}),
@@ -185,13 +189,20 @@ export function KnowledgeBaseClient({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-display tracking-tight text-2xl font-semibold">Base de Conhecimento</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Legislação, modelos, regras e glossário que o agente consulta via RAG antes de
-          responder ou editar cláusulas.
-        </p>
-      </div>
+      {/* No /admin a página já tem o próprio <h1> (com o texto certo sobre
+          alcance); repetir aqui dava dois títulos empilhados e dois h1 na mesma
+          página. */}
+      {scope === "org" && (
+        <div>
+          <h1 className="font-display tracking-tight text-2xl font-semibold">
+            Base de Conhecimento
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Legislação, modelos, regras, glossário e cláusulas que o agente consulta
+            via RAG antes de responder ou editar.
+          </p>
+        </div>
+      )}
 
       {!embeddingsConfigured && (
         <Card className="border-amber-500 bg-amber-50 dark:bg-amber-950/20">
@@ -242,7 +253,12 @@ export function KnowledgeBaseClient({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setSearchQuery(search)}
+            // Antes só preparava o painel e exigia um segundo clique em
+            // "Rodar" — dois cliques para uma ação de um clique.
+            onClick={() => {
+              setSearchQuery(search);
+              void handleSearch(search);
+            }}
             disabled={!search.trim()}
           >
             <Sparkles className="h-4 w-4 mr-1" />
@@ -305,7 +321,12 @@ export function KnowledgeBaseClient({
                     ))}
                   </select>
                 )}
-                <Button size="sm" variant="ghost" onClick={handleSearch} disabled={searching}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => void handleSearch()}
+                  disabled={searching}
+                >
                   {searching ? "Buscando…" : "Rodar"}
                 </Button>
                 <Button
@@ -470,6 +491,8 @@ export function KnowledgeBaseClient({
       <KnowledgeItemForm
         open={formOpen}
         apiBase={apiBase}
+        scope={scope}
+        orgCount={orgCount}
         item={editingItem}
         onClose={() => setFormOpen(false)}
         onSaved={async () => {

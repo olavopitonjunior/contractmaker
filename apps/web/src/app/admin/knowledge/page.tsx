@@ -29,7 +29,7 @@ export default async function PlatformKnowledgePage() {
     category: { not: "support" },
   } as const;
 
-  const [items, counts] = await Promise.all([
+  const [items, counts, orgCount] = await Promise.all([
     prisma.knowledgeItem.findMany({
       where,
       orderBy: { updatedAt: "desc" },
@@ -52,6 +52,7 @@ export default async function PlatformKnowledgePage() {
       where,
       _count: { _all: true },
     }),
+    prisma.organization.count(),
   ]);
 
   return (
@@ -80,6 +81,7 @@ export default async function PlatformKnowledgePage() {
           counts.map((c) => [c.category, c._count._all])
         )}
         embeddingsConfigured={!!process.env.VOYAGE_API_KEY}
+        orgCount={orgCount}
       />
     </div>
   );
