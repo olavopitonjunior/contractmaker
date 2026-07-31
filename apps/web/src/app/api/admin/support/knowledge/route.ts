@@ -5,7 +5,6 @@ import { prisma } from "@/lib/db/prisma";
 import { requirePlatform } from "@/lib/admin/gate";
 import { createKnowledgeItem } from "@/lib/ai/knowledge";
 import { VoyageError } from "@/lib/ai/embeddings";
-import { resolveSupportOrgId } from "@/lib/support/org";
 import { SUPPORT_CATEGORY, SUPPORT_MODULE_TAGS } from "@/lib/support/constants";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +16,9 @@ export async function GET(req: NextRequest) {
   const g = await requirePlatform(session?.user?.id, "support");
   if (!g.ok) return g.res;
 
-  const orgId = await resolveSupportOrgId();
+  // Base de suporte = escopo de PLATAFORMA (orgId nulo).
+
+  const orgId = null;
   const q = req.nextUrl.searchParams.get("q")?.trim();
   const tag = req.nextUrl.searchParams.get("tag")?.trim();
 
@@ -92,10 +93,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const orgId = await resolveSupportOrgId();
+  // Base de suporte = escopo de PLATAFORMA (orgId nulo).
+
+  const orgId = null;
   try {
     const { parentId, chunksCreated } = await createKnowledgeItem({
       orgId,
+      allowPlatformScope: true,
+      visibleToAgents: ["support"],
       category: SUPPORT_CATEGORY,
       title: parsed.data.title,
       content: parsed.data.content,

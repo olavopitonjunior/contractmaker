@@ -26,11 +26,20 @@ export const DOCUMENT_KINDS = [
   "conjuge_comprador",
   "representante_vendedor",
   "representante_comprador",
+  // Procurador PF de venda (subobjeto `procurador` da parte) — aditivo em
+  // 2026-07-31. Documento de procuração não tinha destino antes disso.
+  "procurador_vendedor",
+  "procurador_comprador",
   "locador",
   "locatario",
   "fiador",
   "representante_locador",
   "representante_locatario",
+  // Cônjuge de locação (o schema tem outorga uxória desde 2026-07-24, mas o
+  // OCR não tinha kind pra ela).
+  "conjuge_locador",
+  "conjuge_locatario",
+  "conjuge_fiador",
   "imovel",
   "outro",
 ] as const;
@@ -77,18 +86,24 @@ export function topKeyForKind(kind: string, esteira: Esteira): string | null {
     case "vendedor":
     case "conjuge_vendedor":
     case "representante_vendedor":
+    case "procurador_vendedor":
       return "vendedores";
     case "comprador":
     case "conjuge_comprador":
     case "representante_comprador":
+    case "procurador_comprador":
       return "compradores";
     case "locador":
     case "representante_locador":
+    case "conjuge_locador":
       return "locadores";
     case "locatario":
     case "representante_locatario":
+    case "conjuge_locatario":
       return "locatarios";
+    // Fiador e cônjuge do fiador vivem dentro de `garantia` (ROLE_PATHS.fiador).
     case "fiador":
+    case "conjuge_fiador":
       return "garantia";
     case "imovel":
       return esteira === "locacao" ? "imovel" : "imoveis";

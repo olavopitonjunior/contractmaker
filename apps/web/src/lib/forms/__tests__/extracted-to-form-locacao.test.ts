@@ -62,6 +62,18 @@ describe("resolveLocacaoBasePath", () => {
     expect(resolveLocacaoBasePath({ kind: "imovel", index: 0 })).toBe("imovel");
     expect(resolveLocacaoBasePath({ kind: "outro", index: 0 })).toBeNull();
   });
+
+  it("cônjuges (2026-07-31): indexados nas partes, sem índice no fiador", () => {
+    expect(resolveLocacaoBasePath({ kind: "conjuge_locador", index: 1 })).toBe(
+      "locadores.1.conjuge"
+    );
+    expect(resolveLocacaoBasePath({ kind: "conjuge_locatario", index: 0 })).toBe(
+      "locatarios.0.conjuge"
+    );
+    expect(resolveLocacaoBasePath({ kind: "conjuge_fiador", index: 0 })).toBe(
+      "garantia.fiador.conjuge"
+    );
+  });
 });
 
 describe("mapExtractedToLocacaoForm", () => {
@@ -101,6 +113,54 @@ describe("mapExtractedToLocacaoForm", () => {
     expect(store.get("imovel.area")).toBe(75.5);
   });
 
+  it("RG do cônjuge do locador preenche o subobjeto + estado civil do pai (D2)", () => {
+    const { form, store } = makeFormStub({ "locadores.0.nome": "João Locador" });
+    const filled = mapExtractedToLocacaoForm(
+      RG_EXTRACTION,
+      { kind: "conjuge_locador", index: 0 },
+      form
+    );
+    expect(filled).toBeGreaterThan(0);
+    expect(store.get("locadores.0.conjuge.nome")).toBe("Maria Locatária");
+    expect(store.get("locadores.0.conjuge.cpf")).toBe("98765432100");
+    expect(store.get("locadores.0.estado_civil")).toBe("Casado(a)");
+  });
+
+  it("certidão de casamento no cônjuge do fiador escolhe o nubente certo (D1)", () => {
+    const { form, store } = makeFormStub({
+      "garantia.fiador.nome": "Pedro Fiador",
+      "garantia.fiador.cpf": "55566677788",
+    });
+    mapExtractedToLocacaoForm(
+      {
+        category: "certidao_casamento",
+        fields: {
+          conjuge1_nome: "Pedro Fiador",
+          conjuge1_cpf: "555.666.777-88",
+          conjuge2_nome: "Clara Fiadora",
+          conjuge2_cpf: "444.333.222-11",
+        },
+      },
+      { kind: "conjuge_fiador", index: 0 },
+      form
+    );
+    expect(store.get("garantia.fiador.conjuge.nome")).toBe("Clara Fiadora");
+    expect(store.get("garantia.fiador.conjuge.cpf")).toBe("44433322211");
+    expect(store.get("garantia.fiador.estado_civil")).toBe("Casado(a)");
+  });
+
+  it("representante de locação só recebe nome/cpf (schema não tem o resto)", () => {
+    const { form, store } = makeFormStub();
+    mapExtractedToLocacaoForm(
+      RG_EXTRACTION,
+      { kind: "representante_locatario", index: 0 },
+      form
+    );
+    expect(store.get("locatarios.0.representante.nome")).toBe("Maria Locatária");
+    expect(store.get("locatarios.0.representante.cpf")).toBe("98765432100");
+    expect(store.get("locatarios.0.representante.rg")).toBeUndefined();
+  });
+
   it("skipIfDirty preserva campo já preenchido", () => {
     const { form, store } = makeFormStub({ "locatarios.0.nome": "Nome Digitado" });
     mapExtractedToLocacaoForm(RG_EXTRACTION, { kind: "locatario", index: 0 }, form);
@@ -136,6 +196,43 @@ describe("suggestLocacaoAssignment", () => {
     expect(
       suggestLocacaoAssignment("rg", { cpf_numero: "55566677788" }, snapshot)
     ).toEqual({ kind: "fiador", index: 0 });
+  });
+
+  it("match do cônjuge cadastrado em locadores → conjuge_locador", () => {
+    expect(
+      suggestLocacaoAssignment(
+        "rg",
+        { cpf_numero: "22233344455" },
+        {
+          ...snapshot,
+          locadores: [
+            {
+              ...snapshot.locadores[0],
+              conjuge: { nome: "Joana Locadora", cpf: "22233344455" },
+            },
+          ],
+        }
+      )
+    ).toEqual({ kind: "conjuge_locador", index: 0 });
+  });
+
+  it("match do cônjuge do fiador → conjuge_fiador (sem índice)", () => {
+    expect(
+      suggestLocacaoAssignment(
+        "certidao_casamento",
+        { nome_completo: "clara fiadora" },
+        {
+          ...snapshot,
+          garantia: {
+            tipo: "fiador",
+            fiador: {
+              ...snapshot.garantia.fiador,
+              conjuge: { nome: "Clara Fiadora" },
+            },
+          },
+        }
+      )
+    ).toEqual({ kind: "conjuge_fiador", index: 0 });
   });
 
   it("doc de imóvel sempre vai pro imovel", () => {

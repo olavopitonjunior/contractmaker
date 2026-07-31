@@ -62,6 +62,27 @@ describe("topKeyForKind — imovel depende da esteira", () => {
     expect(topKeyForKind("fiador", "locacao")).toBe("garantia");
     expect(topKeyForKind("outro", "venda")).toBeNull();
   });
+  it("sub-slots novos herdam o topKey do pai", () => {
+    expect(topKeyForKind("procurador_vendedor", "venda")).toBe("vendedores");
+    expect(topKeyForKind("procurador_comprador", "venda")).toBe("compradores");
+    expect(topKeyForKind("conjuge_locador", "locacao")).toBe("locadores");
+    expect(topKeyForKind("conjuge_locatario", "locacao")).toBe("locatarios");
+    expect(topKeyForKind("conjuge_fiador", "locacao")).toBe("garantia");
+  });
+});
+
+describe("parseAssignment — kinds novos (2026-07-31)", () => {
+  it("aceita os 5 kinds aditivos", () => {
+    for (const kind of [
+      "procurador_vendedor",
+      "procurador_comprador",
+      "conjuge_locador",
+      "conjuge_locatario",
+      "conjuge_fiador",
+    ]) {
+      expect(parseAssignment({ kind, index: 0 })).toEqual({ kind, index: 0 });
+    }
+  });
 });
 
 describe("assignmentAllowedForRole — escopo cross-role (segurança)", () => {
@@ -92,5 +113,30 @@ describe("assignmentAllowedForRole — escopo cross-role (segurança)", () => {
   });
   it("outro (não escreve) é sempre permitido", () => {
     expect(assignmentAllowedForRole("outro", "comprador", "venda")).toBe(true);
+  });
+
+  it("procurador segue o papel do pai (comprador não forja o do vendedor)", () => {
+    expect(
+      assignmentAllowedForRole("procurador_comprador", "comprador", "venda")
+    ).toBe(true);
+    expect(
+      assignmentAllowedForRole("procurador_vendedor", "comprador", "venda")
+    ).toBe(false);
+    expect(
+      assignmentAllowedForRole("procurador_vendedor", "vendedor", "venda")
+    ).toBe(true);
+  });
+
+  it("cônjuge de locação: locatário não escreve no locador; fiador escreve no dele", () => {
+    expect(assignmentAllowedForRole("conjuge_locatario", "locatario", "locacao")).toBe(
+      true
+    );
+    expect(assignmentAllowedForRole("conjuge_locador", "locatario", "locacao")).toBe(
+      false
+    );
+    expect(assignmentAllowedForRole("conjuge_fiador", "fiador", "locacao")).toBe(true);
+    expect(assignmentAllowedForRole("conjuge_fiador", "locatario", "locacao")).toBe(
+      false
+    );
   });
 });

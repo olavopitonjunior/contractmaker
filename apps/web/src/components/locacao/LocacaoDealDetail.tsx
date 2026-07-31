@@ -249,7 +249,9 @@ export function LocacaoDealDetail({
     (deal.dataJson.locadores as { nome?: string; razao_social?: string }[] | undefined) ?? [];
   const locatarios =
     (deal.dataJson.locatarios as { nome?: string; razao_social?: string }[] | undefined) ?? [];
-  const garantiaTipo = (deal.dataJson.garantia as { tipo?: string } | undefined)?.tipo;
+  const garantia = deal.dataJson.garantia as
+    | { tipo?: string; fiador?: Record<string, unknown> }
+    | undefined;
   // Bloco operador-only que alimenta o contrato de ADMINISTRAÇÃO — coletado no
   // diálogo da aba Administração (não mais na criação do formulário). O
   // LeaseContract é espelho desse mesmo bloco, então o dataJson basta.
@@ -478,7 +480,7 @@ export function LocacaoDealDetail({
             attachments={deal.attachments}
             locadores={locadores}
             locatarios={locatarios}
-            hasFiador={garantiaTipo === "fiador"}
+            garantia={garantia}
           />
         </TabsContent>
 

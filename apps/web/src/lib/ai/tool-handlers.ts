@@ -15,6 +15,13 @@ import {
   googleInsertImage,
 } from "./google-tool-handlers";
 import type { AgentContext, ValidationIssue, ClauseSuggestion } from "./types";
+import {
+  knowledgeScopeWhere,
+  knowledgeScopeSql,
+  TENANT_FIRST_ORDER_BY,
+  type KnowledgeScopeOptions,
+} from "./knowledge-scope";
+import { resolveAgentProfile } from "./agents/resolve";
 import { logError } from "@/lib/observability/log";
 
 /**
@@ -720,6 +727,7 @@ interface KbRow {
   agentNotes: string | null;
   tags: string[];
   source: string | null;
+  orgId?: string | null;
 }
 
 /**
@@ -738,7 +746,21 @@ function mapKbRow(r: KbRow) {
     agentNotes: r.agentNotes,
     tags: r.tags,
     source: r.source,
+    // Diz ao agente de ONDE veio o trecho. Sem isso ele cita conteúdo da
+    // plataforma como se fosse política da imobiliária.
+    scope: r.orgId === null ? ("plataforma" as const) : ("imobiliaria" as const),
   };
+}
+
+/**
+ * Escopo de RAG do agente que está fazendo a consulta. Sem `agentKey` no
+ * contexto (chat legado, tools chamadas fora do orquestrador) o escopo é aberto
+ * — que é o comportamento de sempre.
+ */
+async function ragScopeFor(context: AgentContext): Promise<KnowledgeScopeOptions> {
+  if (!context.agentKey) return {};
+  const profile = await resolveAgentProfile(context.agentKey, context.orgId);
+  return { agentKey: context.agentKey, ragScope: profile.ragScope };
 }
 
 async function knowledgeBaseKeywordFallback(
@@ -747,10 +769,11 @@ async function knowledgeBaseKeywordFallback(
   groupCode: string | undefined,
   topK: number,
   orgId: string,
-  reason: string
+  reason: string,
+  scopeOpts: KnowledgeScopeOptions = {}
 ): Promise<Record<string, unknown>> {
   const baseWhere = {
-    orgId,
+    ...knowledgeScopeWhere(orgId, scopeOpts),
     ...(category ? { category } : {}),
     ...(groupCode ? { groupCode } : {}),
   };
@@ -764,6 +787,7 @@ async function knowledgeBaseKeywordFallback(
     agentNotes: true,
     tags: true,
     source: true,
+    orgId: true,
   } as const;
 
   // Tokeniza a query (sem acento, >=4 chars, sem stopwords) e casa por QUALQUER
@@ -868,7 +892,8 @@ async function handleQueryKnowledgeBase(
       groupCode,
       topK,
       context.orgId,
-      "VOYAGE_API_KEY não configurada"
+      "VOYAGE_API_KEY não configurada",
+      await ragScopeFor(context)
     );
   }
 
@@ -880,11 +905,13 @@ async function handleQueryKnowledgeBase(
     });
     const vecLiteral = toPgVector(queryVec);
 
-    // Raw SQL with pgvector cosine similarity; filter by org, optional
-    // category, and (for category='clause') optional groupCode.
-    const params: unknown[] = [vecLiteral, context.orgId];
-    let paramIdx = 3;
-    const filters: string[] = [];
+    // Raw SQL with pgvector cosine similarity. O escopo (org + plataforma +
+    // visibilidade por agente) vem de `knowledgeScopeSql` — $1 é o vetor, então
+    // a numeração dos params do escopo começa em 2.
+    const scope = knowledgeScopeSql(context.orgId, await ragScopeFor(context), 2);
+    const params: unknown[] = [vecLiteral, ...scope.params];
+    let paramIdx = scope.nextParamIndex;
+    const filters: string[] = [scope.sql];
     if (category) {
       filters.push(`AND category = $${paramIdx++}`);
       params.push(category);
@@ -905,6 +932,7 @@ async function handleQueryKnowledgeBase(
         agentNotes: string | null;
         tags: string[];
         source: string | null;
+        orgId: string | null;
         similarity: number;
       }>
     >(
@@ -919,12 +947,12 @@ async function handleQueryKnowledgeBase(
         "agentNotes",
         tags,
         source,
+        "orgId",
         1 - (embedding <=> $1::vector) AS similarity
       FROM "KnowledgeItem"
-      WHERE "orgId" = $2
-        AND embedding IS NOT NULL
+      WHERE embedding IS NOT NULL
         ${filters.join("\n        ")}
-      ORDER BY embedding <=> $1::vector
+      ORDER BY embedding <=> $1::vector, ${TENANT_FIRST_ORDER_BY}
       LIMIT ${topK}
       `,
       ...params
@@ -978,7 +1006,8 @@ async function handleQueryKnowledgeBase(
         groupCode,
         topK,
         context.orgId,
-        reason
+        reason,
+        await ragScopeFor(context)
       );
       return fallback;
     } catch (fallbackErr) {
@@ -1431,8 +1460,17 @@ async function handleInsertClause(
     };
   }
 
+  // O escopo aqui NÃO é decorativo: `knowledgeItemId` vem do modelo, não da UI.
+  // Sem ele a busca era por id puro, e uma cláusula de OUTRO tenant podia entrar
+  // no contrato se o id vazasse. Com o helper, resolve na base da org + na de
+  // plataforma — que é exatamente o conjunto que o `query_knowledge_base` daquele
+  // agente devolveu.
   const clause = await prisma.knowledgeItem.findFirst({
-    where: { id: knowledgeItemId, category: "clause" },
+    where: {
+      id: knowledgeItemId,
+      category: "clause",
+      ...knowledgeScopeWhere(context.orgId, await ragScopeFor(context)),
+    },
   });
   if (!clause) {
     return {

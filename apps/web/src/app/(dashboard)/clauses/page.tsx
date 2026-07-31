@@ -1,5 +1,6 @@
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import { knowledgeScopeWhere } from "@/lib/ai/knowledge-scope";
 import { ClausesPageClient } from "@/components/clauses/ClausesPageClient";
 
 export default async function ClausesPage() {
@@ -15,7 +16,7 @@ export default async function ClausesPage() {
   // pra retrocompat com ClausesPageClient (campos antigos preservados).
   const rows = await prisma.knowledgeItem.findMany({
     where: {
-      orgId: org.id,
+      ...knowledgeScopeWhere(org.id),
       category: "clause",
       status: { not: "archived" },
     },

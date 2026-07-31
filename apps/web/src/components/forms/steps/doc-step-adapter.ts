@@ -109,14 +109,16 @@ export function createVendaAdapter(
       if (
         kind === "vendedor" ||
         kind === "conjuge_vendedor" ||
-        kind === "representante_vendedor"
+        kind === "representante_vendedor" ||
+        kind === "procurador_vendedor"
       ) {
         return { key: "vendedores", emptyItem: { tipo_pessoa: "fisica" } };
       }
       if (
         kind === "comprador" ||
         kind === "conjuge_comprador" ||
-        kind === "representante_comprador"
+        kind === "representante_comprador" ||
+        kind === "procurador_comprador"
       ) {
         return { key: "compradores", emptyItem: { tipo_pessoa: "fisica" } };
       }
@@ -135,10 +137,12 @@ export function vendaTopKeyForKind(kind: DocumentKind): string | null {
     case "vendedor":
     case "conjuge_vendedor":
     case "representante_vendedor":
+    case "procurador_vendedor":
       return "vendedores";
     case "comprador":
     case "conjuge_comprador":
     case "representante_comprador":
+    case "procurador_comprador":
       return "compradores";
     case "imovel":
       return "imoveis";
@@ -147,6 +151,40 @@ export function vendaTopKeyForKind(kind: DocumentKind): string | null {
       // no dataJson de venda — nunca filtra.
       return null;
   }
+}
+
+/**
+ * Simula o `adapter.apply` de um doc SEM tocar o form real e devolve o mapa
+ * `path → valor` que ele escreveria.
+ *
+ * Serve à limpeza do slot antigo quando o operador REATRIBUI um doc já aplicado
+ * (D7): rodamos isto com o assignment ANTIGO e, pra cada path cujo valor atual
+ * ainda é exatamente o que o autofill gravou, apagamos. A comparação estrita é
+ * o que garante que digitação do usuário nunca é apagada.
+ *
+ * `getValues` DELEGA ao form real (o mapper lê flags como
+ * `endereco_igual_ao_titular` e o estado atual dos campos), mas `setValue` cai
+ * num Map. `skipIfDirty: false` porque queremos o conjunto completo de writes,
+ * não só os que caberiam agora.
+ */
+export function computeDocWrites(
+  adapter: DocumentosStepAdapter,
+  extraction: ExtractedDoc,
+  assignment: Assignment,
+  form: UseFormReturn<Record<string, unknown>>
+): Map<string, unknown> {
+  const writes = new Map<string, unknown>();
+  const probe = {
+    getValues: (path?: string) =>
+      path === undefined
+        ? (form.getValues() as unknown)
+        : (form.getValues(path as never) as unknown),
+    setValue: (path: string, value: unknown) => {
+      writes.set(path, value);
+    },
+  } as unknown as UseFormReturn<Record<string, unknown>>;
+  adapter.apply(extraction, assignment, probe, { skipIfDirty: false });
+  return writes;
 }
 
 /**

@@ -133,7 +133,7 @@ describe("DocumentosStep — reflexão de OCR/categoria nos campos", () => {
     expect(capturedForm!.getValues("compradores.0.nome")).toBe("Nome Digitado");
   });
 
-  it("Fix 2: no link do comprador o dropdown 'Mover para' só oferece Compradores + Outros", async () => {
+  it("Fix 2: no link do comprador o dropdown 'Mover para' só oferece slots de comprador", async () => {
     mockAttachments([compradorRg()]);
     const { container } = render(<Harness allowedTopKeys={["compradores"]} />);
 
@@ -146,9 +146,22 @@ describe("DocumentosStep — reflexão de OCR/categoria nos campos", () => {
     const groups = Array.from(select.querySelectorAll("optgroup")).map(
       (g) => g.getAttribute("label")
     );
-    expect(groups).toEqual(["Compradores", "Outros"]);
+    // Os sub-slots do comprador (cônjuge/procurador/representante) passam a
+    // aparecer desde 2026-07-31 (os gates por estado_civil/PJ escondiam grupos
+    // inteiros na etapa 0). O que importa aqui é o ESCOPO: nada de vendedor.
+    expect(groups).toEqual([
+      "Compradores",
+      "Cônjuges",
+      "Procuradores",
+      "Representantes legais",
+      "Outros",
+    ]);
     expect(groups).not.toContain("Vendedores");
     expect(groups).not.toContain("Imóveis");
+    const values = Array.from(select.querySelectorAll("option")).map(
+      (o) => o.getAttribute("value") ?? ""
+    );
+    expect(values.some((v) => v.includes("vendedor"))).toBe(false);
     // Fix 1: o select reflete o slot PERSISTIDO escolhido pela parte.
     expect(select.value).toBe("comprador:0");
   });

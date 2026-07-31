@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth/auth";
 import { requirePlatform } from "@/lib/admin/gate";
-import { resolveSupportOrgId } from "@/lib/support/org";
 import { seedSupportKb } from "@/lib/support/seed";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +15,9 @@ export async function POST() {
   const g = await requirePlatform(session?.user?.id, "super_admin");
   if (!g.ok) return g.res;
 
-  const orgId = await resolveSupportOrgId();
+  // Base de suporte = escopo de PLATAFORMA (orgId nulo).
+
+  const orgId = null;
   const { created } = await seedSupportKb(orgId, { createdBy: session!.user!.id });
 
   return NextResponse.json({ ok: true, orgId, created });

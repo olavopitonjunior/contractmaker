@@ -20,7 +20,26 @@ export type KnowledgeCategory =
   | "support";
 
 export interface CreateKnowledgeItemInput {
-  orgId: string;
+  /** `null` = base de PLATAFORMA. Exige `allowPlatformScope` — ver `assertScopeAllowed`. */
+  orgId: string | null;
+  /**
+   * Confirma que o caller é super_admin e QUER escrever na base de plataforma.
+   *
+   * Existe porque `orgId` virou nullable: sem este opt-in, um `orgId` que chega
+   * undefined por um bug de resolução de sessão deixaria de ser erro e viraria
+   * escrita silenciosa na base que todos os tenants leem. Com ele, escrever na
+   * plataforma é sempre uma decisão explícita e grep-ável.
+   */
+  allowPlatformScope?: boolean;
+  /**
+   * Agentes que enxergam o item. Vazio/ausente = todos.
+   *
+   * A base de suporte usa isto pra não vazar pro RAG jurídico: "o que faz a
+   * tela Pipeline" não é resposta pra busca de cláusula. O filtro por categoria
+   * em `knowledge-scope.ts` já cobre a leitura; marcar na linha mantém o dado
+   * autoexplicativo pra quem for ler o banco depois.
+   */
+  visibleToAgents?: string[];
   category: KnowledgeCategory;
   title: string;
   content: string;
@@ -79,9 +98,56 @@ export function normalizeKnowledgeContent(text: string): string {
   return text.replace(/\r\n/g, "\n").trim();
 }
 
+/**
+ * Barra escrita na base de plataforma que não foi pedida explicitamente.
+ * O controle de PERMISSÃO (super_admin) é da rota — `requirePlatform`; este
+ * guard só garante que ninguém chegue em `orgId = null` por acidente.
+ */
+export function assertScopeAllowed(
+  orgId: string | null,
+  allowPlatformScope: boolean | undefined,
+  op: string
+): void {
+  if (orgId === null && !allowPlatformScope) {
+    throw new Error(
+      `[knowledge] ${op} com orgId nulo sem allowPlatformScope — escrita na base de plataforma precisa ser explícita.`
+    );
+  }
+}
+
+/**
+ * Alvo não existe DENTRO do escopo pedido. Classe própria pra rota responder
+ * 404: antes o `Error` genérico caía no catch-all e virava 500 "Erro ao
+ * atualizar", o que confunde ausência com falha do servidor.
+ */
+export class KnowledgeItemNotFoundError extends Error {
+  constructor() {
+    super("Item não encontrado");
+    this.name = "KnowledgeItemNotFoundError";
+  }
+}
+
+/**
+ * Restringe a escrita a UMA categoria.
+ *
+ * `orgId` sozinho parou de ser escopo suficiente quando `orgId = NULL` virou
+ * "a base que todos leem": as rotas de /admin/support/* são gateadas em
+ * `PlatformRole = "support"` e escrevem com orgId nulo, então sem esta trava
+ * elas alcançariam também `legislation`/`clause`/`rule` — justamente o que
+ * /api/admin/knowledge reservou ao `super_admin`. Quem escreve numa base
+ * específica declara qual é.
+ */
+export interface KnowledgeScopeGuard {
+  scopeCategory?: KnowledgeCategory;
+}
+
+function scopeCategoryWhere(opts: KnowledgeScopeGuard) {
+  return opts.scopeCategory ? { category: opts.scopeCategory } : {};
+}
+
 export interface KnowledgeItemRow {
   id: string;
-  orgId: string;
+  orgId: string | null;
   category: string;
   title: string;
   content: string;
@@ -145,6 +211,7 @@ export async function createKnowledgeItemRows(
   input: CreateKnowledgeItemInput,
   db: KnowledgeWriteClient = prisma
 ): Promise<{ parentId: string; embedTargets: EmbedTarget[] }> {
+  assertScopeAllowed(input.orgId, input.allowPlatformScope, "create");
   const chunks = chunkText(input.content);
   if (chunks.length === 0) {
     throw new Error("Conteúdo vazio após limpeza");
@@ -172,6 +239,7 @@ export async function createKnowledgeItemRows(
         tags: input.tags ?? [],
         source: input.source ?? "manual",
         createdBy: input.createdBy ?? null,
+        visibleToAgents: input.visibleToAgents ?? [],
         ...extras,
       },
     });
@@ -196,6 +264,7 @@ export async function createKnowledgeItemRows(
       tags: input.tags ?? [],
       source: input.source ?? "manual",
       createdBy: input.createdBy ?? null,
+      visibleToAgents: input.visibleToAgents ?? [],
       ...extras,
     },
   });
@@ -214,6 +283,9 @@ export async function createKnowledgeItemRows(
           tags: input.tags ?? [],
           source: input.source ?? "manual",
           createdBy: input.createdBy ?? null,
+          // Chunk herda a visibilidade do pai — senão a busca semântica, que só
+          // vê as filhas, ignoraria a restrição.
+          visibleToAgents: input.visibleToAgents ?? [],
         },
       })
     )
@@ -234,13 +306,20 @@ export async function createKnowledgeItemRows(
  */
 export async function embedKnowledgeItem(
   targets: EmbedTarget[],
-  ctx: { orgId: string; userId?: string | null }
+  ctx: { orgId: string | null; userId?: string | null }
 ): Promise<void> {
   if (!isEmbeddingsConfigured() || targets.length === 0) return;
+  // Item de plataforma não tem org a quem cobrar e `AIUsage.orgId` é NOT NULL —
+  // sem ctx, `embed` só não registra o uso. É um punhado de embeddings feitos à
+  // mão pelo super_admin, não custo de runtime; a atribuição fica pro lote que
+  // levar `agentKey` pro AIUsage.
+  const usageCtx = ctx.orgId
+    ? { orgId: ctx.orgId, userId: ctx.userId, operation: "embed_kb" as const }
+    : undefined;
   const vectors = await embed(
     targets.map((t) => t.text),
     "document",
-    { orgId: ctx.orgId, userId: ctx.userId, operation: "embed_kb" }
+    usageCtx
   );
   for (let i = 0; i < targets.length; i++) {
     await prisma.$executeRawUnsafe(
@@ -272,13 +351,20 @@ export async function createKnowledgeItem(
  */
 export async function updateKnowledgeItem(
   id: string,
-  orgId: string,
-  patch: Partial<Omit<CreateKnowledgeItemInput, "orgId" | "category">>
+  orgId: string | null,
+  patch: Partial<Omit<CreateKnowledgeItemInput, "orgId" | "category">> & {
+    allowPlatformScope?: boolean;
+  },
+  opts: KnowledgeScopeGuard = {}
 ): Promise<void> {
+  assertScopeAllowed(orgId, patch.allowPlatformScope, "update");
+  // `orgId` aqui é o do USUÁRIO, não o da linha — é ele que impede escrita
+  // cross-org, e agora também impede o tenant de editar item de plataforma
+  // (`orgId = "abc"` não casa com a linha `orgId = NULL`).
   const current = await prisma.knowledgeItem.findFirst({
-    where: { id, orgId },
+    where: { id, orgId, ...scopeCategoryWhere(opts) },
   });
-  if (!current) throw new Error("Item não encontrado");
+  if (!current) throw new KnowledgeItemNotFoundError();
 
   const contentChanged =
     typeof patch.content === "string" && patch.content !== current.content;
@@ -313,7 +399,7 @@ export async function updateKnowledgeItem(
     const [vec] = await embed(
       [`${patch.title ?? current.title}\n\n${patch.content}`],
       "document",
-      { orgId, operation: "embed_kb" }
+      orgId ? { orgId, operation: "embed_kb" } : undefined
     );
     await prisma.$executeRawUnsafe(
       `UPDATE "KnowledgeItem" SET embedding = $1::vector WHERE id = $2`,
@@ -326,6 +412,23 @@ export async function updateKnowledgeItem(
 /**
  * Delete an item and its chunks (cascade handled by the FK).
  */
-export async function deleteKnowledgeItem(id: string, orgId: string): Promise<void> {
-  await prisma.knowledgeItem.deleteMany({ where: { id, orgId } });
+/**
+ * Remove o item e seus chunks (cascade pela FK).
+ *
+ * Devolve `false` quando o `where` escopado não casou com nada — o chamador
+ * PRECISA disso pra responder 404. `deleteMany` não erra em alvo inexistente,
+ * então sem o retorno a rota respondia 200 `{ok:true}` depois de não apagar
+ * nada: quem tentasse apagar item fora do próprio escopo era informado de
+ * sucesso. Verificado em staging antes de existir este retorno.
+ */
+export async function deleteKnowledgeItem(
+  id: string,
+  orgId: string | null,
+  opts: KnowledgeScopeGuard & { allowPlatformScope?: boolean } = {}
+): Promise<boolean> {
+  assertScopeAllowed(orgId, opts.allowPlatformScope, "delete");
+  const { count } = await prisma.knowledgeItem.deleteMany({
+    where: { id, orgId, ...scopeCategoryWhere(opts) },
+  });
+  return count > 0;
 }

@@ -34,11 +34,20 @@ interface Item {
 interface Props {
   open: boolean;
   item: Item | null;
+  /** Base da API do escopo em que este form escreve — /api/knowledge (tenant)
+   *  ou /api/admin/knowledge (plataforma). Ver KnowledgeBaseClient. */
+  apiBase?: string;
   onClose: () => void;
   onSaved: () => void;
 }
 
-export function KnowledgeItemForm({ open, item, onClose, onSaved }: Props) {
+export function KnowledgeItemForm({
+  open,
+  item,
+  apiBase = "/api/knowledge",
+  onClose,
+  onSaved,
+}: Props) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [category, setCategory] = useState<string>("legislation");
@@ -83,7 +92,7 @@ export function KnowledgeItemForm({ open, item, onClose, onSaved }: Props) {
         tags,
         source: source || undefined,
       };
-      const url = item ? `/api/knowledge/${item.id}` : "/api/knowledge";
+      const url = item ? `${apiBase}/${item.id}` : apiBase;
       const method = item ? "PATCH" : "POST";
       const res = await fetch(url, {
         method,

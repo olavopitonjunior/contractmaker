@@ -2,9 +2,14 @@
  * Busca na base de conhecimento de suporte.
  *
  * Espelha lib/ai/tool-handlers.ts::handleQueryKnowledgeBase, mas fixando
- * category="support" + o orgId de plataforma, e filtrando por tags de módulo
- * (o tenant só vê conteúdo dos módulos que tem habilitados + "geral").
- * Semântico (Voyage + pgvector <=>) quando configurado; senão, fallback ILIKE.
+ * category="support" + o escopo de PLATAFORMA (`orgId IS NULL`), e filtrando
+ * por tags de módulo (o tenant só vê conteúdo dos módulos que tem habilitados +
+ * "geral"). Semântico (Voyage + pgvector <=>) quando configurado; senão ILIKE.
+ *
+ * Até 2026-07 esta base vivia numa org-sentinela resolvida por env
+ * (`lib/support/org.ts`, removido): sem `SUPPORT_KB_ORG_ID`/`SHARED_ORG_ID` o
+ * código caía na "org mais antiga" do banco, e seed e runtime podiam mirar orgs
+ * diferentes entre ambientes — o bug que fazia a base "sumir" em staging.
  */
 
 import { prisma } from "@/lib/db/prisma";
@@ -15,7 +20,6 @@ import {
   VoyageError,
 } from "@/lib/ai/embeddings";
 import { SUPPORT_CATEGORY, isSupportModuleTag, type SupportModuleTag } from "./constants";
-import { resolveSupportOrgId } from "./org";
 
 export interface SupportHit {
   id: string;
@@ -75,7 +79,6 @@ function sqlTagArray(tags: SupportModuleTag[]): string {
 async function keywordFallback(
   query: string,
   topK: number,
-  orgId: string,
   moduleTags: SupportModuleTag[]
 ): Promise<SupportSearchResult> {
   const tags = moduleTags.filter(isSupportModuleTag);
@@ -88,7 +91,7 @@ async function keywordFallback(
   );
 
   const baseWhere = {
-    orgId,
+    orgId: null,
     category: SUPPORT_CATEGORY,
     ...(tags.length ? { tags: { hasSome: tags } } : {}),
   } as const;
@@ -147,7 +150,17 @@ async function keywordFallback(
 
 export async function searchSupportKnowledge(
   query: string,
-  opts: { topK?: number; moduleTags?: SupportModuleTag[] } = {}
+  opts: {
+    topK?: number;
+    moduleTags?: SupportModuleTag[];
+    /**
+     * Org do usuário que PERGUNTOU — só pra atribuir o custo do embedding em
+     * `AIUsage`. Não é escopo de busca: a base do suporte é da plataforma e é a
+     * mesma pra todo mundo. Separar as duas coisas é o que permite o conteúdo
+     * ser global sem o gasto virar anônimo.
+     */
+    attributionOrgId?: string | null;
+  } = {}
 ): Promise<SupportSearchResult> {
   const q = (query || "").trim();
   const topK = Math.min(opts.topK && opts.topK > 0 ? Math.floor(opts.topK) : 5, 10);
@@ -155,28 +168,33 @@ export async function searchSupportKnowledge(
   const moduleTags = Array.from(
     new Set<SupportModuleTag>(["geral", ...(opts.moduleTags ?? [])])
   );
-  const orgId = await resolveSupportOrgId();
 
   if (!q) return { results: [], mode: "keyword_fallback", topSimilarity: null };
 
-  // Observabilidade: base vazia pra uma pergunta costuma ser mismatch de org
-  // (seed num banco/org diferente do runtime) — logamos o orgId resolvido pra
-  // diagnosticar via Vercel logs sem precisar acessar o banco.
+  // Observabilidade: base vazia pra uma pergunta agora só pode ser base não
+  // semeada NESTE banco — o escopo deixou de depender de env, então mismatch de
+  // org saiu da lista de suspeitos.
   const logResult = (r: SupportSearchResult) => {
     if (r.results.length === 0) {
       console.warn(
-        `[searchSupportKnowledge] 0 hits — orgId=${orgId} mode=${r.mode} q="${q.slice(0, 60)}"`
+        `[searchSupportKnowledge] 0 hits na base de plataforma — mode=${r.mode} q="${q.slice(0, 60)}"`
       );
     }
     return r;
   };
 
   if (!isEmbeddingsConfigured()) {
-    return logResult(await keywordFallback(q, topK, orgId, moduleTags));
+    return logResult(await keywordFallback(q, topK, moduleTags));
   }
 
   try {
-    const queryVec = await embedOne(q, "query", { orgId, operation: "embed_query" });
+    const queryVec = await embedOne(
+      q,
+      "query",
+      opts.attributionOrgId
+        ? { orgId: opts.attributionOrgId, operation: "embed_query" }
+        : undefined
+    );
     const vecLiteral = toPgVector(queryVec);
 
     const rows = await prisma.$queryRawUnsafe<
@@ -193,15 +211,14 @@ export async function searchSupportKnowledge(
       SELECT id, title, content, tags, source,
              1 - (embedding <=> $1::vector) AS similarity
       FROM "KnowledgeItem"
-      WHERE "orgId" = $2
-        AND category = $3
+      WHERE "orgId" IS NULL
+        AND category = $2
         AND embedding IS NOT NULL
         AND tags && ${sqlTagArray(moduleTags)}
       ORDER BY embedding <=> $1::vector
       LIMIT ${topK}
       `,
       vecLiteral,
-      orgId,
       SUPPORT_CATEGORY
     );
 
@@ -227,6 +244,6 @@ export async function searchSupportKnowledge(
         ? err.message.slice(0, 160)
         : String(err).slice(0, 160);
     console.error("[searchSupportKnowledge] fallback acionado:", reason);
-    return logResult(await keywordFallback(q, topK, orgId, moduleTags));
+    return logResult(await keywordFallback(q, topK, moduleTags));
   }
 }

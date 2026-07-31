@@ -28,7 +28,9 @@ const RESERVED_CATEGORIES = new Set([
 const patchSchema = z.object({
   // Reclassificação ("mover para outra pasta"): grava em
   // extractedData.assignment. kind = vendedor|comprador|imovel|outro (+
-  // variantes conjuge/representante que groupKindOf normaliza no front).
+  // variantes conjuge/representante/procurador — e as de locação — que o
+  // groupKindOf normaliza no front). String livre de propósito: kinds novos
+  // são aditivos e não exigem deploy coordenado desta rota.
   assignment: z
     .object({
       kind: z.string(),

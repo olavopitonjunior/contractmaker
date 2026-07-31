@@ -35,6 +35,10 @@ vi.mock("@/lib/db/prisma", () => {
       // (POST /api/templates/ingest/clauses).
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       delete: vi.fn(),
+      // Remoção escopada (`deleteKnowledgeItem`) — o `where` carrega o filtro de
+      // org/categoria que impede escrita fora do escopo, então os testes precisam
+      // conseguir inspecionar a chamada.
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       count: vi.fn().mockResolvedValue(0),
       groupBy: vi.fn().mockResolvedValue([]),
     },
