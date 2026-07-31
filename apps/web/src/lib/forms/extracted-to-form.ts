@@ -867,9 +867,14 @@ export function suggestAssignment(
       cpf_numero: fields.outorgante_cpf,
       nome_completo: fields.outorgante_nome,
     };
-    const vMatch = matchPersonIndex(snapshot.vendedores, outorgante);
+    // `procurador` só existe em PF — parte PJ não pode receber a sugestão
+    // (chave stale de cpf/nome sobrevive ao toggle PF→PJ no wizard). Entradas
+    // PJ viram objeto vazio pra preservar os índices do match.
+    const pfOnly = (list?: Array<Record<string, unknown>>) =>
+      list?.map((p) => (p?.tipo_pessoa === "juridica" ? {} : p));
+    const vMatch = matchPersonIndex(pfOnly(snapshot.vendedores), outorgante);
     if (vMatch !== null) return { kind: "procurador_vendedor", index: vMatch };
-    const cMatch = matchPersonIndex(snapshot.compradores, outorgante);
+    const cMatch = matchPersonIndex(pfOnly(snapshot.compradores), outorgante);
     if (cMatch !== null) return { kind: "procurador_comprador", index: cMatch };
     // Sem outorgante conhecido, o fluxo normal roda sobre pseudo-campos do
     // OUTORGADO (é ele quem o doc qualifica) — assim um procurador/representante

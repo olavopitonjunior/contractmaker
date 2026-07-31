@@ -48,7 +48,15 @@ export function buildLocacaoOptions(
     list: Array<Record<string, unknown>> | undefined,
     singular: string
   ) => {
-    const count = Math.max(1, list?.length ?? 1, maxAssigned(kind) + 1);
+    // Doc atribuído a um sub-slot (cônjuge/representante) de índice alto também
+    // implica a existência da parte pai — espelha o vCount/cCount da venda.
+    const count = Math.max(
+      1,
+      list?.length ?? 1,
+      maxAssigned(kind) + 1,
+      maxAssigned(`conjuge_${kind}` as DocumentKind) + 1,
+      maxAssigned(`representante_${kind}` as DocumentKind) + 1
+    );
     const opts: Array<{ value: string; label: string }> = [];
     for (let i = 0; i < count; i++) {
       const name = nameOf(list?.[i]);
@@ -109,7 +117,8 @@ export function buildLocacaoOptions(
   };
   pushConjuges("conjuge_locador", "locador", snapshot.locadores, "Locador");
   pushConjuges("conjuge_locatario", "locatario", snapshot.locatarios, "Locatário");
-  if (hasFiador) {
+  // Fiador PJ (fiança comercial) não tem cônjuge — mesmo guard dos demais pais.
+  if (hasFiador && snapshot.garantia?.fiador?.tipo_pessoa !== "juridica") {
     const fiadorName = nameOf(snapshot.garantia?.fiador);
     conjugeOptions.push({
       value: "conjuge_fiador:0",
