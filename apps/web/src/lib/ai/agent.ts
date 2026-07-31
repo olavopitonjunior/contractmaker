@@ -12,6 +12,7 @@ import {
   OrgAiBudgetExceededError,
 } from "./budget";
 import { loadExpertContext } from "./expert-context";
+import { resolveAgentProfile } from "./agents/resolve";
 import { getAnthropicClient, HAIKU_MODEL, SONNET_MODEL, resolveModel } from "./shared/anthropic-client";
 import { loadContext } from "./shared/context";
 import { resolveSession, loadChatHistory } from "./shared/session";
@@ -51,25 +52,32 @@ interface AgentParams {
 }
 
 async function getAgentConfig(orgId: string, mode: AgentMode) {
-  const config = await prisma.agentConfig.findUnique({ where: { orgId } });
+  // AgentProfile substituiu AgentConfig como fonte: org → plataforma →
+  // hardcoded. O agente legado é o `chat_legacy` do catálogo.
+  const profile = await resolveAgentProfile("chat_legacy", orgId);
 
   // Resolução de modelo por modo:
-  // - fast: SEMPRE Haiku (sobrepõe AgentConfig.model). Otimizado pra latência.
-  // - plan: respeita AgentConfig.model > ANTHROPIC_MODEL env > default Sonnet
+  // - fast: SEMPRE Haiku (sobrepõe o perfil). Otimizado pra latência.
+  // - plan: respeita o perfil > ANTHROPIC_MODEL env > default do catálogo
   //   (raciocínio mais profundo justifica o custo 3× maior).
   // resolveModel migra IDs aposentados que sobrevivam no banco/env (404 na API).
   let model: string;
   if (mode === "fast") {
     model = HAIKU_MODEL;
   } else {
-    model = resolveModel(config?.model || process.env.ANTHROPIC_MODEL);
+    model = profile.model || resolveModel(process.env.ANTHROPIC_MODEL);
   }
 
+  // As instruções do tenant eram o `AgentConfig.systemPrompt` inteiro e
+  // SUBSTITUÍAM o prompt default. Migradas pra `instructions`, seguem com a
+  // mesma semântica AQUI (o legado nunca teve prompt por-domínio), mas nos
+  // especialistas entram como apêndice cercado — que é o comportamento certo.
   return {
     model,
-    temperature: config?.temperature ?? 0.3,
-    maxTokens: config?.maxTokens ?? 4096,
-    systemPrompt: config?.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+    temperature: profile.temperature ?? 0.3,
+    maxTokens: profile.maxTokens ?? 4096,
+    systemPrompt: profile.tenantInstructions || DEFAULT_SYSTEM_PROMPT,
+    enabled: profile.enabled,
   };
 }
 

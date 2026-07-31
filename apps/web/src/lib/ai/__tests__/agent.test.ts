@@ -6,6 +6,7 @@ import {
   createAnthropicTextResponse,
   createAnthropicToolUseResponse,
 } from "@/__tests__/helpers";
+import { __resetAgentProfileCacheForTests } from "../agents/resolve";
 
 const mockPrisma = vi.mocked(prisma);
 
@@ -14,6 +15,9 @@ let mockCreate: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // O resolvedor de AgentProfile cacheia por 60s em módulo — sem reset, o
+  // primeiro caso decidiria o modelo de todos os seguintes.
+  __resetAgentProfileCacheForTests();
 
   // Get the mock create function from the Anthropic constructor
   const instance = new Anthropic();
@@ -31,8 +35,9 @@ beforeEach(() => {
     userId: "user-1",
   } as any);
 
-  // Default: no agent config
-  mockPrisma.agentConfig.findUnique.mockResolvedValue(null);
+  // Default: nenhum perfil de agente (nem plataforma, nem org) → hardcoded
+  mockPrisma.agentProfile.findFirst.mockResolvedValue(null);
+  mockPrisma.agentProfile.findUnique.mockResolvedValue(null);
 
   // Default: no chat session
   mockPrisma.chatSession.findFirst.mockResolvedValue(null);
@@ -296,11 +301,19 @@ describe("runContractAgent", () => {
   });
 
   it("uses agent config from database when available", async () => {
-    mockPrisma.agentConfig.findUnique.mockResolvedValueOnce({
+    // AgentProfile substituiu AgentConfig: o override da org é a linha
+    // (orgId, "chat_legacy"); a instrução do tenant vira o system prompt do
+    // caminho legado (que nunca teve prompt por-domínio).
+    mockPrisma.agentProfile.findUnique.mockResolvedValueOnce({
+      enabled: true,
       model: "claude-opus-4-20250514",
+      fallbackModel: null,
       temperature: 0.5,
       maxTokens: 8192,
-      systemPrompt: "Custom prompt",
+      instructions: "Custom prompt",
+      ragScope: null,
+      monthlyBudgetUsd: null,
+      config: null,
     } as any);
 
     mockCreate.mockResolvedValueOnce(

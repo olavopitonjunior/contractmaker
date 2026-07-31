@@ -14,11 +14,9 @@
  */
 
 import { AGENT_TOOLS, DIRECT_WRITE_TOOLS } from "../tools";
-import { SONNET_MODEL, resolveModel } from "../shared/anthropic-client";
-import {
-  getPlatformAgentDefaults,
-  buildPlatformPromptOverrideBlock,
-} from "./platform-defaults";
+import { resolveAgentProfile } from "../agents/resolve";
+import { composeSystemPrompt } from "../agents/prompt-blocks";
+import { agentDisabledOutput } from "../agents/disabled";
 import { runSpecialist, type ToolUseGuard } from "../shared/specialist-runner";
 import { applyPolicy } from "../sentinel/middleware";
 import { pickSpecialistPrompt } from "./prompts-locacao";
@@ -131,20 +129,19 @@ export async function runEditor(state: OrchestratorState): Promise<SpecialistOut
 
   const userPrompt = buildEditorPrompt(state, policy);
 
-  const overrides = await getPlatformAgentDefaults();
+  // Perfil resolvido: org → plataforma → hardcoded (/admin/agents e
+  // /settings/ai-agents). Instruções são APÊNDICE ao prompt-base por-domínio
+  // (venda×locação); o modelo, esse sim, substitui.
+  const profile = await resolveAgentProfile("editor", state.orgId);
+  if (!profile.enabled) return agentDisabledOutput("editor");
 
   return runSpecialist({
     agentName: "editor",
-    // Overrides de plataforma (/admin/agent-defaults) — null = hardcoded.
-    model: resolveModel(overrides.editorModel ?? undefined, SONNET_MODEL),
-    // Prompt override é APÊNDICE ao base por-domínio (venda×locação) — não
-    // substitui, senão a variante de locação sumiria (singleton só tem o
-    // baseline de venda). Modelo, esse sim, substitui.
-    systemPrompt:
-      pickSpecialistPrompt("editor", state.contractContext) +
-      (overrides.editorPrompt
-        ? buildPlatformPromptOverrideBlock(overrides.editorPrompt)
-        : ""),
+    model: profile.model,
+    systemPrompt: composeSystemPrompt(
+      pickSpecialistPrompt("editor", state.contractContext),
+      profile
+    ),
     tools,
     maxIterations: 3,
     userPrompt,
@@ -152,6 +149,7 @@ export async function runEditor(state: OrchestratorState): Promise<SpecialistOut
     contractId: state.contractId,
     orgId: state.orgId,
     userId: state.userId,
+    profile,
     toolGuard: guard,
     captureSnapshots: true,
     forceToolUse: policy.forceToolUse,

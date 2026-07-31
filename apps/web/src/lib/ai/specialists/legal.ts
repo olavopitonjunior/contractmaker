@@ -13,11 +13,9 @@
  */
 
 import { AGENT_TOOLS } from "../tools";
-import { HAIKU_MODEL, resolveModel } from "../shared/anthropic-client";
-import {
-  getPlatformAgentDefaults,
-  buildPlatformPromptOverrideBlock,
-} from "./platform-defaults";
+import { resolveAgentProfile } from "../agents/resolve";
+import { composeSystemPrompt } from "../agents/prompt-blocks";
+import { agentDisabledOutput } from "../agents/disabled";
 import { runSpecialist } from "../shared/specialist-runner";
 import { pickSpecialistPrompt } from "./prompts-locacao";
 import type { OrchestratorState, SpecialistOutput } from "../orchestrator/state";
@@ -50,20 +48,19 @@ export async function runLegal(state: OrchestratorState): Promise<SpecialistOutp
 
   const userPrompt = buildLegalPrompt(state);
 
-  const overrides = await getPlatformAgentDefaults();
+  // Perfil resolvido: org → plataforma → hardcoded (/admin/agents e
+  // /settings/ai-agents). Instruções são APÊNDICE ao prompt-base por-domínio
+  // (venda×locação); o modelo, esse sim, substitui.
+  const profile = await resolveAgentProfile("legal", state.orgId);
+  if (!profile.enabled) return agentDisabledOutput("legal");
 
   return runSpecialist({
     agentName: "legal",
-    // Overrides de plataforma (/admin/agent-defaults) — null = hardcoded.
-    model: resolveModel(overrides.legalModel ?? undefined, HAIKU_MODEL),
-    // Prompt override é APÊNDICE ao base por-domínio (venda×locação) — não
-    // substitui, senão a variante de locação sumiria (singleton só tem o
-    // baseline de venda). Modelo, esse sim, substitui.
-    systemPrompt:
-      pickSpecialistPrompt("legal", state.contractContext) +
-      (overrides.legalPrompt
-        ? buildPlatformPromptOverrideBlock(overrides.legalPrompt)
-        : ""),
+    model: profile.model,
+    systemPrompt: composeSystemPrompt(
+      pickSpecialistPrompt("legal", state.contractContext),
+      profile
+    ),
     tools: LEGAL_TOOLS,
     maxIterations: 2,
     userPrompt,
@@ -71,6 +68,7 @@ export async function runLegal(state: OrchestratorState): Promise<SpecialistOutp
     contractId: state.contractId,
     orgId: state.orgId,
     userId: state.userId,
+    profile,
     forceToolUse: QUERY_VERBS_REGEX.test(state.userMessage),
   });
 }
