@@ -116,6 +116,18 @@ export function assertScopeAllowed(
 }
 
 /**
+ * Alvo não existe DENTRO do escopo pedido. Classe própria pra rota responder
+ * 404: antes o `Error` genérico caía no catch-all e virava 500 "Erro ao
+ * atualizar", o que confunde ausência com falha do servidor.
+ */
+export class KnowledgeItemNotFoundError extends Error {
+  constructor() {
+    super("Item não encontrado");
+    this.name = "KnowledgeItemNotFoundError";
+  }
+}
+
+/**
  * Restringe a escrita a UMA categoria.
  *
  * `orgId` sozinho parou de ser escopo suficiente quando `orgId = NULL` virou
@@ -352,7 +364,7 @@ export async function updateKnowledgeItem(
   const current = await prisma.knowledgeItem.findFirst({
     where: { id, orgId, ...scopeCategoryWhere(opts) },
   });
-  if (!current) throw new Error("Item não encontrado");
+  if (!current) throw new KnowledgeItemNotFoundError();
 
   const contentChanged =
     typeof patch.content === "string" && patch.content !== current.content;
@@ -400,13 +412,23 @@ export async function updateKnowledgeItem(
 /**
  * Delete an item and its chunks (cascade handled by the FK).
  */
+/**
+ * Remove o item e seus chunks (cascade pela FK).
+ *
+ * Devolve `false` quando o `where` escopado não casou com nada — o chamador
+ * PRECISA disso pra responder 404. `deleteMany` não erra em alvo inexistente,
+ * então sem o retorno a rota respondia 200 `{ok:true}` depois de não apagar
+ * nada: quem tentasse apagar item fora do próprio escopo era informado de
+ * sucesso. Verificado em staging antes de existir este retorno.
+ */
 export async function deleteKnowledgeItem(
   id: string,
   orgId: string | null,
   opts: KnowledgeScopeGuard & { allowPlatformScope?: boolean } = {}
-): Promise<void> {
+): Promise<boolean> {
   assertScopeAllowed(orgId, opts.allowPlatformScope, "delete");
-  await prisma.knowledgeItem.deleteMany({
+  const { count } = await prisma.knowledgeItem.deleteMany({
     where: { id, orgId, ...scopeCategoryWhere(opts) },
   });
+  return count > 0;
 }

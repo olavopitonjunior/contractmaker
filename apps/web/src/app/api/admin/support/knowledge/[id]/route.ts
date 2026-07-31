@@ -59,9 +59,12 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
   if (!g.ok) return g.res;
 
   // Ver a nota de `scopeCategory` no PATCH acima.
-  await deleteKnowledgeItem(params.id, null, {
+  const removed = await deleteKnowledgeItem(params.id, null, {
     allowPlatformScope: true,
     scopeCategory: SUPPORT_CATEGORY,
   });
+  if (!removed) {
+    return NextResponse.json({ error: "Item não encontrado" }, { status: 404 });
+  }
   return NextResponse.json({ ok: true });
 }

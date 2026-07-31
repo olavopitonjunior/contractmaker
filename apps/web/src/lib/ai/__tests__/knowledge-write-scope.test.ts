@@ -74,6 +74,26 @@ describe("scopeCategory tranca a escrita numa base específica", () => {
     });
   });
 
+  it("delete que não casa devolve false — a rota vira isso em 404", async () => {
+    // `deleteMany` não erra em alvo inexistente. Sem este retorno, a rota
+    // respondia 200 {ok:true} depois de não apagar nada: quem tentasse remover
+    // item fora do próprio escopo era informado de sucesso. Visto em staging.
+    mockPrisma.knowledgeItem.deleteMany.mockResolvedValue({ count: 0 });
+    await expect(
+      deleteKnowledgeItem("clausula-da-plataforma", null, {
+        allowPlatformScope: true,
+        scopeCategory: "support",
+      })
+    ).resolves.toBe(false);
+  });
+
+  it("delete que casa devolve true", async () => {
+    mockPrisma.knowledgeItem.deleteMany.mockResolvedValue({ count: 1 });
+    await expect(
+      deleteKnowledgeItem("k1", null, { allowPlatformScope: true })
+    ).resolves.toBe(true);
+  });
+
   it("um item jurídico não é encontrado pelo escopo do suporte", async () => {
     // O findFirst filtrado por category='support' não casa com a linha jurídica:
     // é assim que a rota do suporte responde 404 em vez de reescrever a base

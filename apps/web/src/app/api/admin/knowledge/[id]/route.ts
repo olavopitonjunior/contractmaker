@@ -91,7 +91,12 @@ export async function DELETE(
   const g = await requirePlatform(session?.user?.id, "super_admin");
   if (!g.ok) return g.res;
 
-  await deleteKnowledgeItem(params.id, null, { allowPlatformScope: true });
+  const removed = await deleteKnowledgeItem(params.id, null, {
+    allowPlatformScope: true,
+  });
+  if (!removed) {
+    return NextResponse.json({ error: "Item não encontrado" }, { status: 404 });
+  }
 
   await audit(
     { ...extractAuditContextFromRequest(req, "", session!.user!.id), orgId: null },
