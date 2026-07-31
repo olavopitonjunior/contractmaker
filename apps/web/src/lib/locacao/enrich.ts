@@ -27,6 +27,19 @@ const TIPO_IMOVEL_TEXTO: Record<string, string> = {
   temporada: "imóvel de temporada",
 };
 
+// Seguro-fiança / garantia digital: tomador da apólice e vigência escolhidos no
+// formulário viram texto pronto pra cláusula de garantia. Sem escolha, nenhuma
+// chave é materializada — o template mantém a redação genérica.
+const SEGURO_TOMADOR_TEXTO: Record<string, string> = {
+  inquilino: "o LOCATÁRIO",
+  proprietario: "o LOCADOR",
+};
+
+const SEGURO_VIGENCIA_TEXTO: Record<string, string> = {
+  anual_renovavel: "com renovação anual obrigatória enquanto durar a locação",
+  prazo_contrato: "pelo prazo integral da locação",
+};
+
 // Parse YYYY-MM-DD âncora ao meio-dia local (estável em UTC-3).
 function parseLocalDate(raw: string): Date | null {
   const s = raw.trim();
@@ -148,6 +161,22 @@ export function enrichLocacaoData(
       (typeof enriched.foro === "string" && enriched.foro.trim()) ||
       (typeof config.foro === "string" ? (config.foro as string).trim() : "");
     if (foro) config.foro_texto = foro;
+  }
+
+  // Seguro-fiança/garantia digital: tomador e vigência da apólice em texto.
+  // Idempotente e sem default — quem não escolheu não ganha frase.
+  const garantia = (enriched.garantia as Record<string, unknown> | undefined) || {};
+  if (config.seguro_tomador_texto == null || config.seguro_tomador_texto === "") {
+    const tomador =
+      typeof garantia.seguro_tomador === "string" ? garantia.seguro_tomador : "";
+    const txt = SEGURO_TOMADOR_TEXTO[tomador];
+    if (txt) config.seguro_tomador_texto = txt;
+  }
+  if (config.seguro_vigencia_texto == null || config.seguro_vigencia_texto === "") {
+    const vig =
+      typeof garantia.seguro_vigencia === "string" ? garantia.seguro_vigencia : "";
+    const txt = SEGURO_VIGENCIA_TEXTO[vig];
+    if (txt) config.seguro_vigencia_texto = txt;
   }
 
   // Vigência início/fim em texto longo PT-BR a partir de início + meses.

@@ -22,14 +22,29 @@ const TIPO_OPTIONS = [
   { value: "sem_garantia", label: "Sem garantia" },
 ];
 
+// Seguro-fiança e garantia digital: quem paga a apólice e por quanto tempo ela
+// vale. Sem opção pré-selecionada — o padrão varia por seguradora/imobiliária,
+// então quem preenche escolhe (o schema deixa os dois opcionais).
+const TOMADOR_OPTIONS = [
+  { value: "inquilino", label: "O inquilino (locatário)" },
+  { value: "proprietario", label: "O proprietário (locador)" },
+];
+
+const VIGENCIA_OPTIONS = [
+  { value: "anual_renovavel", label: "Renovação anual" },
+  { value: "prazo_contrato", label: "Prazo do contrato" },
+];
+
 /**
  * Garantia locatícia (garantiaSchema, art. 37 Lei 8.245/91). Campos condicionais
  * por tipo: caução → nº de aluguéis (≤3, art. 38 §2º); fiador → dados do fiador;
- * seguro/garantia digital → provider.
+ * seguro/garantia digital → provider, tomador e vigência da apólice.
  */
 export function GarantiaStep({ form }: { form: UseFormReturn<any> }) {
   const tipo = form.watch("garantia.tipo") || "caucao";
   const fiadorTipoPessoa = form.watch("garantia.fiador.tipo_pessoa");
+  const tomador = form.watch("garantia.seguro_tomador");
+  const vigencia = form.watch("garantia.seguro_vigencia");
 
   return (
     <Card className="border border-border">
@@ -87,6 +102,26 @@ export function GarantiaStep({ form }: { form: UseFormReturn<any> }) {
                 type="number"
                 inputMode="numeric"
                 placeholder="30"
+              />
+            </FormField>
+            <FormField label="Quem contrata o seguro?">
+              <NativeSelect
+                value={tomador ?? ""}
+                onChange={(v) =>
+                  form.setValue("garantia.seguro_tomador", v, { shouldDirty: true })
+                }
+                placeholder="Selecione"
+                options={TOMADOR_OPTIONS}
+              />
+            </FormField>
+            <FormField label="Vigência da apólice">
+              <NativeSelect
+                value={vigencia ?? ""}
+                onChange={(v) =>
+                  form.setValue("garantia.seguro_vigencia", v, { shouldDirty: true })
+                }
+                placeholder="Selecione"
+                options={VIGENCIA_OPTIONS}
               />
             </FormField>
           </div>

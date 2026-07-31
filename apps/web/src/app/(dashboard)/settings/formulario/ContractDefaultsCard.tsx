@@ -429,6 +429,26 @@ function LocacaoDefaults({ initial }: { initial: LocacaoSettings }) {
             }
           />
         </div>
+
+        <div className="flex flex-col gap-1.5 md:col-span-2">
+          <Label className="text-sm text-muted-foreground">
+            Honorários advocatícios (%)
+          </Label>
+          <Input
+            type="number"
+            step="0.01"
+            min={0}
+            value={values.config.honorarios_advocaticios_percent}
+            onChange={(e) =>
+              patchConfig({
+                honorarios_advocaticios_percent: num(e.target.value, 10),
+              })
+            }
+          />
+          <p className="text-xs text-muted-foreground">
+            Percentual sobre o débito na cobrança judicial ou extrajudicial.
+          </p>
+        </div>
       </div>
 
       <div className="flex items-center gap-2 pt-2">
