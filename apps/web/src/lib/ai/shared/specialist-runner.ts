@@ -58,6 +58,13 @@ export interface SpecialistRunnerConfig {
   userId: string;
   /** Quando true, força o LLM a chamar pelo menos 1 tool. */
   forceToolUse?: boolean;
+  /**
+   * Força uma tool ESPECÍFICA na 1ª chamada (`tool_choice: {type:"tool"}`).
+   * Tem precedência sobre `forceToolUse`. Usado pelo modo Planejar: o Editor
+   * é obrigado a chamar `propose_plan` antes de qualquer write — enforcement
+   * determinístico, não dependente do prompt.
+   */
+  forceToolName?: string;
   /** Pre-check Sentinel (passado pelo Editor/Curator; Analyst/Legal não precisam). */
   toolGuard?: ToolUseGuard;
   /** Quando true, captura htmlBefore/htmlAfter em edits (GDocs). */
@@ -84,6 +91,7 @@ export async function runSpecialist(
     orgId,
     userId,
     forceToolUse,
+    forceToolName,
   } = config;
 
   // Budget guard antes da 1ª chamada
@@ -144,7 +152,13 @@ export async function runSpecialist(
     temperature: 0.3,
     system: systemBlocks,
     tools,
-    ...(forceToolUse ? { tool_choice: { type: "any" as const } } : {}),
+    // tool_choice nomeado vence o "any": em modo Planejar o Editor precisa
+    // cair em propose_plan, não em qualquer tool.
+    ...(forceToolName
+      ? { tool_choice: { type: "tool" as const, name: forceToolName } }
+      : forceToolUse
+        ? { tool_choice: { type: "any" as const } }
+        : {}),
     messages,
     stream: true,
   };

@@ -830,8 +830,11 @@ function routeAfterRouter(state: GraphState): RouteTarget | RouteTarget[] {
       return ["legal", "curator"];
     case "edit_multi":
       // F5: edit_multi vai pro Editor com instrução de usar propose_plan.
-      // Editor é forçado a chamar propose_plan (forceToolUse via prompt),
-      // que escreve ChatPlan — UI mostra PlanCard pra aprovação.
+      // ATENÇÃO: em mode="fast" isso é só um HINT de prompt — nada impede o
+      // Editor de escrever direto. O enforcement real de plan-and-approve vem
+      // do mode, não do intent: resolveEditorToolPolicy (specialists/editor.ts)
+      // tira os writes diretos do toolbox e força propose_plan quando
+      // mode="plan". Ver PR do item 22.
       return "editor";
     case "informational":
     default:

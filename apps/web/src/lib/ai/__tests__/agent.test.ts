@@ -330,3 +330,74 @@ describe("runContractAgent", () => {
     );
   });
 });
+
+/**
+ * Item 22 — paridade do gate do modo Planejar no caminho legado
+ * (ENABLE_MULTI_AGENT=false). O orquestrador tem a mesma matriz testada em
+ * specialists/__tests__/editor-mode.test.ts; aqui garantimos que o rollback
+ * não reabre a porta do write direto.
+ */
+describe("runContractAgent — gate do modo Planejar", () => {
+  const editMsg = "altere a multa para 3%";
+
+  const firstCallParams = () => mockCreate.mock.calls[0][0] as any;
+  const toolNames = () => firstCallParams().tools.map((t: any) => t.name);
+
+  beforeEach(() => {
+    mockCreate.mockResolvedValue(createAnthropicTextResponse("ok"));
+  });
+
+  it("plan (default): sem writes diretos e tool_choice fixo em propose_plan", async () => {
+    await runContractAgent({
+      message: editMsg,
+      contractId: "contract-1",
+      userId: "user-1",
+      orgId: "org-1",
+    });
+
+    expect(toolNames()).not.toContain("edit_contract_section");
+    expect(toolNames()).not.toContain("update_contract_data");
+    expect(toolNames()).toContain("propose_plan");
+    expect(firstCallParams().tool_choice).toEqual({
+      type: "tool",
+      name: "propose_plan",
+    });
+  });
+
+  it("fast: comportamento histórico — write direto e tool_choice any", async () => {
+    await runContractAgent({
+      message: editMsg,
+      mode: "fast",
+      contractId: "contract-1",
+      userId: "user-1",
+      orgId: "org-1",
+    });
+
+    expect(toolNames()).toContain("edit_contract_section");
+    expect(firstCallParams().tool_choice).toEqual({ type: "any" });
+  });
+
+  it("plan + 'aplique direto': escape libera o write direto", async () => {
+    await runContractAgent({
+      message: `aplique direto: ${editMsg}`,
+      contractId: "contract-1",
+      userId: "user-1",
+      orgId: "org-1",
+    });
+
+    expect(toolNames()).toContain("edit_contract_section");
+    expect(firstCallParams().tool_choice).toEqual({ type: "any" });
+  });
+
+  it("plan sem comando de edição: nenhuma tool forçada", async () => {
+    await runContractAgent({
+      message: "qual é a multa deste contrato?",
+      contractId: "contract-1",
+      userId: "user-1",
+      orgId: "org-1",
+    });
+
+    expect(firstCallParams().tool_choice).toBeUndefined();
+    expect(toolNames()).not.toContain("edit_contract_section");
+  });
+});

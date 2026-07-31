@@ -28,9 +28,18 @@ export type Intent = NonNullable<OrchestratorState["intent"]>;
 const EDIT_INTENT_REGEX =
   /\b(altere|mude|troque|substitua|atualize|corrija|modifique|remova|insira|adicione|coloque|ponha|apague|delete|reescreva|inclua|retire|exclua|preencha|preencher|preenche|complete|completar|completa|informe|informar|defina|definir|registre|registrar|ajuste|ajustar|conserte|consertar|escreva|escrever)\b/i;
 
-/** Pedido explícito de edição imediata sem revisão. `agent.ts:483-484`. */
+/**
+ * Pedido explícito de edição imediata sem revisão — o escape do modo Planejar.
+ *
+ * Termina em `(?!\w)` e NÃO em `\b`: as alternativas que acabam em vogal
+ * acentuada ("aplique já", "faça já") nunca casavam, porque `á` não é
+ * caractere de palavra em JS e a fronteira `\b` exigia a transição
+ * palavra→não-palavra que ali não existe. Passou despercebido enquanto o
+ * escape era só uma preferência de prompt; com o gate do modo Planejar
+ * (`specialists/editor.ts::resolveEditorToolPolicy`) ele é a única saída.
+ */
 const FORCE_DIRECT_EDIT_REGEX =
-  /\b(aplique\s+direto|aplique\s+já|faça\s+já|faça\s+agora|sem\s+revis[ãa]o|edite\s+direto|altere\s+agora|aplica\s+direto|sem\s+sugest[ãa]o)\b/i;
+  /\b(aplique\s+direto|aplique\s+já|faça\s+já|faça\s+agora|sem\s+revis[ãa]o|edite\s+direto|altere\s+agora|aplica\s+direto|sem\s+sugest[ãa]o)(?!\w)/i;
 
 /** Pedido explícito de análise sem edição. */
 const REVIEW_INTENT_REGEX =
