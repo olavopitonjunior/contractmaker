@@ -68,6 +68,61 @@ describe("applyExtractedToDataJson", () => {
     expect((merged.compradores as Array<Record<string, unknown>>)[0].nome).toBe("João");
   });
 
+  // Os kinds de sub-slot criados em 2026-07-31 precisam funcionar server-side
+  // (rota admin `/attachments/[id]/apply`) sem mudança de código — o adaptador
+  // de path cria o objeto aninhado sozinho.
+  it("procurador_vendedor cria vendedores.0.procurador + tem_procurador", () => {
+    const { merged, filled } = applyExtractedToDataJson(
+      { vendedores: [{ nome: "João Vendedor", cpf: "55566677788" }] },
+      {
+        category: "procuracao",
+        fields: {
+          outorgante_nome: "João Vendedor",
+          outorgante_cpf: "55566677788",
+          outorgado_nome: "Carlos Procurador",
+          outorgado_cpf: "99988877766",
+        },
+      },
+      { kind: "procurador_vendedor", index: 0 }
+    );
+    expect(filled).toBeGreaterThan(0);
+    const vendedor = (merged.vendedores as Array<Record<string, unknown>>)[0];
+    const procurador = vendedor.procurador as Record<string, unknown>;
+    expect(procurador.nome).toBe("Carlos Procurador");
+    expect(procurador.cpf).toBe("99988877766");
+    expect(vendedor.tem_procurador).toBe(true);
+    // Titular intocado.
+    expect(vendedor.nome).toBe("João Vendedor");
+  });
+
+  it("conjuge_locador (locação) cria locadores.0.conjuge + estado civil", () => {
+    const { merged } = applyExtractedToDataJson(
+      { locadores: [{ nome: "João Locador" }] },
+      {
+        category: "rg",
+        fields: { nome_completo: "Joana Locadora", cpf_numero: "22233344455" },
+      },
+      { kind: "conjuge_locador", index: 0 },
+      { kind: "locacao" }
+    );
+    const locador = (merged.locadores as Array<Record<string, unknown>>)[0];
+    expect((locador.conjuge as Record<string, unknown>).nome).toBe("Joana Locadora");
+    expect(locador.estado_civil).toBe("Casado(a)");
+  });
+
+  it("conjuge_fiador (locação) aninha em garantia.fiador.conjuge", () => {
+    const { merged } = applyExtractedToDataJson(
+      { garantia: { tipo: "fiador", fiador: { nome: "Pedro Fiador" } } },
+      { category: "cnh", fields: { nome_completo: "Clara Fiadora" } },
+      { kind: "conjuge_fiador", index: 0 },
+      { kind: "locacao" }
+    );
+    const garantia = merged.garantia as Record<string, unknown>;
+    const fiador = garantia.fiador as Record<string, unknown>;
+    expect((fiador.conjuge as Record<string, unknown>).nome).toBe("Clara Fiadora");
+    expect(fiador.estado_civil).toBe("Casado(a)");
+  });
+
   it("não muta o dataJson original", () => {
     const original = { vendedores: [{ nome: "X" }] };
     applyExtractedToDataJson(

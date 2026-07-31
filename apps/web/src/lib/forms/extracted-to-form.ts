@@ -6,8 +6,15 @@ import type { UseFormReturn } from "react-hook-form";
  * - conjuge_vendedor / conjuge_comprador: cônjuge inline da parte titular
  * - representante_vendedor / representante_comprador: representante legal de
  *   parte PJ (subobjeto `representante`)
+ * - procurador_vendedor / procurador_comprador: procurador PF da parte
+ *   (subobjeto `procurador`) — destino da procuração
  * - imovel: endereço/matrícula
  * - outro: documento avulso (sem aplicar campos)
+ *
+ * O shape persistido em `FormAttachment.extractedData.assignment` continua
+ * `{kind,index}` FLAT: kinds novos são sempre aditivos (um subKind quebraria os
+ * assignments já gravados — `parseAssignment` devolveria null e o auto-apply
+ * do Fix 3 morreria em silêncio).
  */
 export type DocumentKind =
   | "vendedor"
@@ -16,6 +23,8 @@ export type DocumentKind =
   | "conjuge_comprador"
   | "representante_vendedor"
   | "representante_comprador"
+  | "procurador_vendedor"
+  | "procurador_comprador"
   // Locação (módulo aditivo): Assignment é compartilhado pelo DocumentCard e
   // pelo PATCH de classificação dos anexos, então os papéis vivem no mesmo
   // union. O mapeamento de campos de locação fica em extracted-to-form-locacao.
@@ -24,6 +33,9 @@ export type DocumentKind =
   | "fiador"
   | "representante_locador"
   | "representante_locatario"
+  | "conjuge_locador"
+  | "conjuge_locatario"
+  | "conjuge_fiador"
   | "imovel"
   | "outro";
 
@@ -59,13 +71,61 @@ const REPRESENTANTE_KINDS = new Set<DocumentKind>([
   "representante_vendedor",
   "representante_comprador",
 ]);
+export const PROCURADOR_KINDS = new Set<DocumentKind>([
+  "procurador_vendedor",
+  "procurador_comprador",
+]);
 
-/** Kinds de VENDA cujo basePath é uma pessoa (titular, cônjuge ou representante). */
+/**
+ * Kinds de VENDA cujo basePath é uma pessoa (titular, cônjuge, representante
+ * ou procurador).
+ */
 const PERSON_KINDS_VENDA = new Set<DocumentKind>([
   ...TITULAR_KINDS,
   ...CONJUGE_KINDS,
   ...REPRESENTANTE_KINDS,
+  ...PROCURADOR_KINDS,
 ]);
+
+/**
+ * Allowlist de campos por SUB-SLOT. `FIELD_MAP_PERSON` foi desenhado pro
+ * titular, que tem todos os campos; os subobjetos são mais pobres e, sem esta
+ * trava, o autofill gravava chaves que o Zod não conhece (`representante.cep`,
+ * `procurador.nome_mae`, …) — lixo no dataJson que nenhuma tela lê.
+ *
+ * - `representante` (`validation.ts` pessoaJuridicaSchema): sem endereço
+ * - `procurador` (`validation.ts` pessoaFisicaSchema): tem endereço, sem
+ *   nome_mae/naturalidade/data_nascimento
+ * - `conjuge`: sem restrição — o schema tem tudo que o map produz
+ */
+const REPRESENTANTE_ALLOWED_FIELDS = new Set([
+  "nome",
+  "cpf",
+  "rg",
+  "data_nascimento",
+  "nome_mae",
+  "sexo",
+  "naturalidade",
+]);
+const PROCURADOR_ALLOWED_FIELDS = new Set([
+  "nome",
+  "cpf",
+  "rg",
+  "sexo",
+  "endereco",
+  "numero",
+  "cidade",
+  "uf",
+]);
+
+/** `true` quando o campo existe no schema do slot destino. */
+function isFieldAllowedForKind(kind: DocumentKind, formField: string): boolean {
+  if (REPRESENTANTE_KINDS.has(kind)) {
+    return REPRESENTANTE_ALLOWED_FIELDS.has(formField);
+  }
+  if (PROCURADOR_KINDS.has(kind)) return PROCURADOR_ALLOWED_FIELDS.has(formField);
+  return true;
+}
 
 /**
  * Campos que provam que o OCR leu um documento de IDENTIDADE de pessoa, mesmo
@@ -109,7 +169,7 @@ export function isUncatalogedPersonDoc(
 // Maps the free-text "regime de bens" string extracted from a marriage
 // certificate to the estado civil dropdown value used by the form. Accepts
 // "Comunhao parcial", "Comunhao universal", "Separacao total", etc.
-function inferEstadoCivilFromRegime(regime: unknown): string | null {
+export function inferEstadoCivilFromRegime(regime: unknown): string | null {
   if (typeof regime !== "string" || !regime.trim()) return null;
   // Anything that mentions "comunhao" or "separacao de bens" implies married
   const lower = regime
@@ -207,9 +267,9 @@ export function coerce(field: string, value: unknown): unknown {
 
 /**
  * Resolve o basePath onde aplicar os campos extraídos com base no kind do
- * doc. Cônjuge e representante apontam pra subobjeto da parte pai.
+ * doc. Cônjuge, representante e procurador apontam pra subobjeto da parte pai.
  */
-function resolveBasePath(assignment: Assignment): string | null {
+export function resolveBasePath(assignment: Assignment): string | null {
   switch (assignment.kind) {
     case "vendedor":
       return `vendedores.${assignment.index}`;
@@ -223,11 +283,69 @@ function resolveBasePath(assignment: Assignment): string | null {
       return `vendedores.${assignment.index}.representante`;
     case "representante_comprador":
       return `compradores.${assignment.index}.representante`;
+    case "procurador_vendedor":
+      return `vendedores.${assignment.index}.procurador`;
+    case "procurador_comprador":
+      return `compradores.${assignment.index}.procurador`;
     case "imovel":
       return `imoveis.${assignment.index}`;
     default:
       return null;
   }
+}
+
+/** Remove acentos e caixa pra comparar nomes vindos de OCR. */
+function normalizeName(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    // eslint-disable-next-line no-misleading-character-class
+    .replace(new RegExp("[\\u0300-\\u036f]", "g"), "");
+}
+
+export interface CertidaoSpouse {
+  nome: string | null;
+  cpf: string | null;
+}
+
+/**
+ * D1 — desambigua `conjuge1_*` / `conjuge2_*` de uma certidão de casamento.
+ *
+ * A certidão nomeia os DOIS nubentes sem dizer qual deles é a parte do negócio.
+ * Comparamos o titular pai (CPF sanitizado; sem CPF, nome normalizado) com cada
+ * nubente: o cônjuge do slot é **o outro**. Sem match (parte ainda em branco na
+ * etapa 0) cai em conjuge2 — mesma convenção do ramo embutido histórico, que
+ * assume titular = conjuge1.
+ */
+export function pickSpouseFromCertidao(
+  fields: Record<string, unknown>,
+  parent: { nome?: unknown; cpf?: unknown } | null | undefined
+): CertidaoSpouse {
+  const spouse = (n: 1 | 2): CertidaoSpouse => ({
+    nome:
+      typeof fields[`conjuge${n}_nome`] === "string"
+        ? (fields[`conjuge${n}_nome`] as string).trim()
+        : null,
+    cpf: sanitizeCpf(fields[`conjuge${n}_cpf`]),
+  });
+
+  const parentCpf = sanitizeCpf(parent?.cpf);
+  if (parentCpf) {
+    const cpf1 = sanitizeCpf(fields.conjuge1_cpf);
+    const cpf2 = sanitizeCpf(fields.conjuge2_cpf);
+    if (cpf1 && cpf1 === parentCpf) return spouse(2);
+    if (cpf2 && cpf2 === parentCpf) return spouse(1);
+  }
+  const parentNome = normalizeName(parent?.nome);
+  if (parentNome) {
+    const nome1 = normalizeName(fields.conjuge1_nome);
+    const nome2 = normalizeName(fields.conjuge2_nome);
+    if (nome1 && nome1 === parentNome) return spouse(2);
+    if (nome2 && nome2 === parentNome) return spouse(1);
+  }
+  return spouse(2);
 }
 
 export function mapExtractedToForm(
@@ -250,6 +368,8 @@ export function mapExtractedToForm(
 
   const isTitular = TITULAR_KINDS.has(assignment.kind);
   const isConjuge = CONJUGE_KINDS.has(assignment.kind);
+  const isProcurador = PROCURADOR_KINDS.has(assignment.kind);
+  const isRepresentante = REPRESENTANTE_KINDS.has(assignment.kind);
   // Categoria conhecida decide como antes. Categoria fora do catálogo (ex.:
   // carteira da OAB → "outro") entra pelo caminho de PESSOA por EVIDÊNCIA:
   // o slot destino é de pessoa E os campos têm identidade (nome/cpf/rg).
@@ -272,8 +392,18 @@ export function mapExtractedToForm(
     skipAddressForConjuge = flagValue !== false;
   }
 
+  // Path da parte PAI quando o slot é um subobjeto (`…0.conjuge`,
+  // `…0.procurador`). null quando o slot não é sub (ou quando `forceBasePath`
+  // apontou pra outro lugar) — os writes colaterais no pai são pulados.
+  const parentPathOf = (suffix: string): string | null =>
+    basePath.endsWith(`.${suffix}`)
+      ? basePath.slice(0, -(suffix.length + 1))
+      : null;
+
   const applyField = (formField: string, raw: unknown) => {
     if (skipAddressForConjuge && ADDRESS_FIELDS.has(formField)) return;
+    // Sub-slot só aceita o que existe no schema dele (mata as chaves órfãs).
+    if (!isFieldAllowedForKind(assignment.kind, formField)) return;
     const value = coerce(formField, raw);
     if (value === undefined || value === null || value === "") return;
     const fullPath = `${basePath}.${formField}`;
@@ -353,6 +483,81 @@ export function mapExtractedToForm(
         const curr = form.getValues(`${basePath}.conjuge.cpf`);
         if (!curr) {
           form.setValue(`${basePath}.conjuge.cpf`, conjugeCpf as never, {
+            shouldDirty: true,
+            shouldTouch: true,
+          });
+          filled += 1;
+        }
+      }
+    }
+
+    // Certidão de casamento atribuída ao PRÓPRIO cônjuge: a certidão nomeia os
+    // dois nubentes, então escolhemos qual deles é o cônjuge do slot (D1) em
+    // vez de assumir conjuge2 como o ramo do titular acima.
+    if (isConjuge && category === "certidao_casamento") {
+      const parentPath = parentPathOf("conjuge");
+      const parent = parentPath
+        ? {
+            nome: form.getValues(`${parentPath}.nome`),
+            cpf: form.getValues(`${parentPath}.cpf`),
+          }
+        : null;
+      const spouse = pickSpouseFromCertidao(fields, parent);
+      if (spouse.nome) applyField("nome", spouse.nome);
+      if (spouse.cpf) applyField("cpf", spouse.cpf);
+    }
+
+    // D2 — estado civil colateral do PAI. Atribuir um doc ao cônjuge é
+    // afirmação de que a parte é casada; sem isto os campos aplicados ficam
+    // invisíveis (a UI do cônjuge só renderiza pra parte casada). Nunca
+    // sobrescreve valor não-vazio.
+    if (isConjuge) {
+      const parentPath = parentPathOf("conjuge");
+      if (parentPath) {
+        const currentEstadoCivil = form.getValues(`${parentPath}.estado_civil`);
+        if (
+          currentEstadoCivil === undefined ||
+          currentEstadoCivil === null ||
+          currentEstadoCivil === ""
+        ) {
+          const inferred =
+            (category === "certidao_casamento"
+              ? inferEstadoCivilFromRegime(fields.regime_bens)
+              : null) ?? "Casado(a)";
+          form.setValue(`${parentPath}.estado_civil`, inferred as never, {
+            shouldDirty: true,
+            shouldTouch: true,
+          });
+          filled += 1;
+        }
+      }
+    }
+
+    // Procuração: o OCR devolve `outorgante_*` (quem dá poderes = a parte) e
+    // `outorgado_*` (quem recebe = procurador/representante). Antes deste ramo
+    // uma procuração preenchia ZERO campos — FIELD_MAP_PERSON não conhece
+    // nenhuma dessas chaves.
+    if (category === "procuracao") {
+      if (isProcurador || isRepresentante) {
+        applyField("nome", fields.outorgado_nome);
+        applyField("cpf", fields.outorgado_cpf);
+      } else if (isTitular) {
+        // D5 — procuração atribuída à própria parte: o outorgante É ela.
+        applyField("nome", fields.outorgante_nome);
+        applyField("cpf", fields.outorgante_cpf);
+      }
+    }
+
+    // D3 — `tem_procurador` colateral no pai. É booleano com default false e a
+    // atribuição do doc é intenção explícita, então ligamos incondicionalmente
+    // (sem isso o sub-form do procurador nunca aparece). Só conta em `filled`
+    // quando muda de fato.
+    if (isProcurador) {
+      const parentPath = parentPathOf("procurador");
+      if (parentPath) {
+        const current = form.getValues(`${parentPath}.tem_procurador`);
+        if (current !== true) {
+          form.setValue(`${parentPath}.tem_procurador`, true as never, {
             shouldDirty: true,
             shouldTouch: true,
           });
@@ -468,6 +673,34 @@ function matchRepresentanteIndex(
   return null;
 }
 
+/** Match contra parte.procurador.cpf/nome em vendedores/compradores PF. */
+function matchProcuradorIndex(
+  list: Array<Record<string, unknown>> | undefined,
+  fields: Record<string, unknown>
+): number | null {
+  if (!list) return null;
+  const extractedCpf = sanitizeCpf(fields.cpf_numero);
+  const extractedNome =
+    typeof fields.nome_completo === "string"
+      ? fields.nome_completo.trim().toLowerCase()
+      : null;
+  for (let i = 0; i < list.length; i++) {
+    // `procurador` só existe em pessoaFisicaSchema.
+    if (list[i]?.tipo_pessoa === "juridica") continue;
+    const p = (list[i]?.procurador ?? {}) as Record<string, unknown>;
+    const pCpf = sanitizeCpf(p.cpf);
+    if (extractedCpf && pCpf && extractedCpf === pCpf) return i;
+    if (
+      extractedNome &&
+      typeof p.nome === "string" &&
+      p.nome.trim().toLowerCase() === extractedNome
+    ) {
+      return i;
+    }
+  }
+  return null;
+}
+
 function personKey(fields: Record<string, unknown>): string | null {
   const cpf = sanitizeCpf(fields.cpf_numero);
   if (cpf) return `cpf:${cpf}`;
@@ -494,6 +727,8 @@ const FICHA_PAPEIS: ReadonlySet<DocumentKind> = new Set<DocumentKind>([
   "conjuge_comprador",
   "representante_vendedor",
   "representante_comprador",
+  "procurador_vendedor",
+  "procurador_comprador",
 ]);
 
 /**
@@ -580,6 +815,14 @@ function suggestPersonAssignment(
   if (repCompradorMatch !== null)
     return { kind: "representante_comprador", index: repCompradorMatch };
 
+  // 4b. Match contra procurador já cadastrado na parte PF
+  const procVendedorMatch = matchProcuradorIndex(snapshot.vendedores, fields);
+  if (procVendedorMatch !== null)
+    return { kind: "procurador_vendedor", index: procVendedorMatch };
+  const procCompradorMatch = matchProcuradorIndex(snapshot.compradores, fields);
+  if (procCompradorMatch !== null)
+    return { kind: "procurador_comprador", index: procCompradorMatch };
+
   // 5. Sibling identity match — same CPF/nome num doc já processado
   const myKey = personKey(fields);
   if (myKey) {
@@ -614,6 +857,36 @@ export function suggestAssignment(
 
   if (PROPERTY_CATEGORIES.has(category)) {
     return { kind: "imovel", index: 0 };
+  }
+
+  // Procuração descreve DUAS pessoas: o outorgante (a parte) e o outorgado
+  // (o procurador). O destino natural do doc é o slot do procurador da parte
+  // que outorgou — por isso casamos o outorgante contra os titulares primeiro.
+  if (category === "procuracao") {
+    const outorgante = {
+      cpf_numero: fields.outorgante_cpf,
+      nome_completo: fields.outorgante_nome,
+    };
+    // `procurador` só existe em PF — parte PJ não pode receber a sugestão
+    // (chave stale de cpf/nome sobrevive ao toggle PF→PJ no wizard). Entradas
+    // PJ viram objeto vazio pra preservar os índices do match.
+    const pfOnly = (list?: Array<Record<string, unknown>>) =>
+      list?.map((p) => (p?.tipo_pessoa === "juridica" ? {} : p));
+    const vMatch = matchPersonIndex(pfOnly(snapshot.vendedores), outorgante);
+    if (vMatch !== null) return { kind: "procurador_vendedor", index: vMatch };
+    const cMatch = matchPersonIndex(pfOnly(snapshot.compradores), outorgante);
+    if (cMatch !== null) return { kind: "procurador_comprador", index: cMatch };
+    // Sem outorgante conhecido, o fluxo normal roda sobre pseudo-campos do
+    // OUTORGADO (é ele quem o doc qualifica) — assim um procurador/representante
+    // já cadastrado casa pelo CPF/nome.
+    const pseudoFields: Record<string, unknown> = { ...fields };
+    if (!pseudoFields.cpf_numero && fields.outorgado_cpf) {
+      pseudoFields.cpf_numero = fields.outorgado_cpf;
+    }
+    if (!pseudoFields.nome_completo && fields.outorgado_nome) {
+      pseudoFields.nome_completo = fields.outorgado_nome;
+    }
+    return suggestPersonAssignment(pseudoFields, snapshot, siblings);
   }
 
   // Categoria de pessoa OU doc fora do catálogo com evidência de identidade
@@ -769,11 +1042,22 @@ export function applyFichaResumo(
       const isTitular = TITULAR_KINDS.has(papel);
       const isConjuge = CONJUGE_KINDS.has(papel);
       const isRep = REPRESENTANTE_KINDS.has(papel);
+      const isProc = PROCURADOR_KINDS.has(papel);
 
       let listKey: "vendedores" | "compradores" | null = null;
-      if (papel === "vendedor" || papel === "conjuge_vendedor" || papel === "representante_vendedor") {
+      if (
+        papel === "vendedor" ||
+        papel === "conjuge_vendedor" ||
+        papel === "representante_vendedor" ||
+        papel === "procurador_vendedor"
+      ) {
         listKey = "vendedores";
-      } else if (papel === "comprador" || papel === "conjuge_comprador" || papel === "representante_comprador") {
+      } else if (
+        papel === "comprador" ||
+        papel === "conjuge_comprador" ||
+        papel === "representante_comprador" ||
+        papel === "procurador_comprador"
+      ) {
         listKey = "compradores";
       }
       if (!listKey) continue;
@@ -781,9 +1065,36 @@ export function applyFichaResumo(
       const isPj = !!p.cnpj || !!p.razao_social;
       ensureSlot(listKey, idx, isPj ? { tipo_pessoa: "juridica" } : { tipo_pessoa: "fisica" });
 
-      let prefix = `${listKey}.${idx}`;
+      const parentPrefix = `${listKey}.${idx}`;
+      let prefix = parentPrefix;
       if (isConjuge) prefix = `${prefix}.conjuge`;
       else if (isRep) prefix = `${prefix}.representante`;
+      else if (isProc) prefix = `${prefix}.procurador`;
+
+      // D3 — a ficha declarando um procurador é intenção explícita; sem a flag
+      // o sub-form nunca aparece pro operador.
+      if (isProc && form.getValues(`${parentPrefix}.tem_procurador`) !== true) {
+        form.setValue(`${parentPrefix}.tem_procurador`, true as never, {
+          shouldDirty: true,
+          shouldTouch: true,
+        });
+        filled += 1;
+      }
+
+      // O subobjeto `procurador` é o mais pobre do schema — escrever fora dele
+      // (nome_mae/profissao/…) só geraria chave órfã no dataJson.
+      if (isProc) {
+        setIfEmpty(`${prefix}.nome`, p.nome);
+        const procCpf = sanitizeCpf(p.cpf);
+        if (procCpf) setIfEmpty(`${prefix}.cpf`, procCpf);
+        setIfEmpty(`${prefix}.rg`, p.rg);
+        setIfEmpty(`${prefix}.endereco`, p.endereco);
+        setIfEmpty(`${prefix}.numero`, p.numero);
+        setIfEmpty(`${prefix}.cidade`, p.cidade);
+        const procUf = sanitizeUf(p.uf);
+        if (procUf) setIfEmpty(`${prefix}.uf`, procUf);
+        continue;
+      }
 
       // Pessoa titular PJ ou PF
       if (isTitular) {

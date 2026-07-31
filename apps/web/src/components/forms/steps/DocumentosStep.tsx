@@ -8,7 +8,6 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
-import type { SelectGroup } from "@/components/forms/NativeSelect";
 import {
   isUncatalogedPersonDoc,
   type Assignment,
@@ -17,11 +16,13 @@ import {
   type ProcessedDocHint,
 } from "@/lib/forms/extracted-to-form";
 import {
+  computeDocWrites,
   createVendaAdapter,
   filterAssignmentOptionsByScope,
   readPersistedAssignment,
   type DocumentosStepAdapter,
 } from "@/components/forms/steps/doc-step-adapter";
+import { buildAssignmentOptions } from "@/components/forms/steps/build-assignment-options";
 import { MAX_ASSIGNMENT_INDEX } from "@/lib/forms/assignment-scope";
 import { mapAttachmentStatusToCard } from "@/lib/forms/attachment-status";
 
@@ -136,194 +137,6 @@ async function resizeImage(file: File, maxSide: number): Promise<File> {
   } catch {
     return file;
   }
-}
-
-interface FormSlotData {
-  vendedores?: any[];
-  compradores?: any[];
-  imoveis?: any[];
-}
-
-const PARENT_KINDS = new Set<DocumentKind>(["vendedor", "comprador", "imovel"]);
-
-function slotName(
-  kind: DocumentKind,
-  index: number,
-  snapshot: FormSlotData,
-  docs: DocumentCardData[]
-): string | null {
-  // 1. Form-typed name takes precedence
-  const list =
-    kind === "vendedor"
-      ? snapshot.vendedores
-      : kind === "comprador"
-      ? snapshot.compradores
-      : kind === "imovel"
-      ? snapshot.imoveis
-      : null;
-  const slot = list?.[index];
-  if (slot) {
-    if (kind === "imovel") {
-      const rua = slot.rua as string | undefined;
-      const numero = slot.numero as string | undefined;
-      if (rua) return numero ? `${rua}, ${numero}` : rua;
-    } else {
-      const nome = (slot.nome || slot.razao_social) as string | undefined;
-      if (nome && nome.trim()) return nome.trim();
-    }
-  }
-  // 2. Fall back to a doc already assigned to this slot with extracted name
-  const docInSlot = docs.find(
-    (d) =>
-      d.assignment.kind === kind &&
-      d.assignment.index === index &&
-      d.fields &&
-      d.status === "ready"
-  );
-  if (docInSlot?.fields) {
-    if (kind === "imovel") {
-      const rua = docInSlot.fields.endereco_completo || docInSlot.fields.endereco;
-      if (typeof rua === "string" && rua.trim()) return rua.trim().slice(0, 40);
-    } else {
-      const nome = docInSlot.fields.nome_completo || docInSlot.fields.titular_nome;
-      if (typeof nome === "string" && nome.trim()) return nome.trim();
-    }
-  }
-  return null;
-}
-
-function buildAssignmentOptions(
-  snapshot: FormSlotData,
-  docs: DocumentCardData[]
-): SelectGroup[] {
-  // Compute the visible count for each kind: max of (form snapshot length,
-  // highest index any doc is assigned to + 1, default 1)
-  const maxAssigned = (kind: DocumentKind) =>
-    docs.reduce(
-      (m, d) => (d.assignment.kind === kind ? Math.max(m, d.assignment.index) : m),
-      -1
-    );
-  const vCount = Math.max(
-    1,
-    snapshot.vendedores?.length ?? 1,
-    maxAssigned("vendedor") + 1
-  );
-  const cCount = Math.max(
-    1,
-    snapshot.compradores?.length ?? 1,
-    maxAssigned("comprador") + 1
-  );
-  const iCount = Math.max(
-    1,
-    snapshot.imoveis?.length ?? 1,
-    maxAssigned("imovel") + 1
-  );
-
-  const buildKindOptions = (
-    kind: DocumentKind,
-    count: number,
-    singularLabel: string
-  ) => {
-    const opts: Array<{ value: string; label: string }> = [];
-    for (let i = 0; i < count; i++) {
-      const name = slotName(kind, i, snapshot, docs);
-      const ord = `${singularLabel} ${i + 1}`;
-      opts.push({
-        value: `${kind}:${i}`,
-        label: name ? `${ord} — ${name}` : ord,
-      });
-    }
-    if (PARENT_KINDS.has(kind)) {
-      opts.push({
-        value: `${kind}:new`,
-        label: `+ Novo ${singularLabel.toLowerCase()}`,
-      });
-    }
-    return opts;
-  };
-
-  /**
-   * Cônjuges e representantes derivam do papel da parte pai. Renderizamos só
-   * os slots cuja parte pai é casada (cônjuge) ou PJ (representante).
-   */
-  const buildSubKindOptions = (
-    kind:
-      | "conjuge_vendedor"
-      | "conjuge_comprador"
-      | "representante_vendedor"
-      | "representante_comprador",
-    parentList: any[] | undefined,
-    parentLabel: string,
-    sub: "conjuge" | "representante"
-  ) => {
-    const opts: Array<{ value: string; label: string }> = [];
-    if (!Array.isArray(parentList)) return opts;
-    for (let i = 0; i < parentList.length; i++) {
-      const parent = parentList[i];
-      if (sub === "conjuge") {
-        if (parent?.tipo_pessoa === "juridica") continue;
-        if (
-          parent?.estado_civil !== "Casado(a)" &&
-          parent?.estado_civil !== "União Estável"
-        ) {
-          continue;
-        }
-      } else {
-        if (parent?.tipo_pessoa !== "juridica") continue;
-      }
-      const parentName =
-        sub === "conjuge"
-          ? (parent?.nome as string | undefined)
-          : (parent?.razao_social as string | undefined);
-      const baseLabel =
-        sub === "conjuge"
-          ? `Cônjuge de ${parentLabel} ${i + 1}`
-          : `Representante de ${parentLabel} ${i + 1}`;
-      opts.push({
-        value: `${kind}:${i}`,
-        label: parentName ? `${baseLabel} — ${parentName.trim()}` : baseLabel,
-      });
-    }
-    return opts;
-  };
-
-  const groups: SelectGroup[] = [
-    {
-      label: "Vendedores",
-      options: buildKindOptions("vendedor", vCount, "Vendedor"),
-    },
-    {
-      label: "Compradores",
-      options: buildKindOptions("comprador", cCount, "Comprador"),
-    },
-  ];
-
-  const conjugeOptions = [
-    ...buildSubKindOptions("conjuge_vendedor", snapshot.vendedores, "Vendedor", "conjuge"),
-    ...buildSubKindOptions("conjuge_comprador", snapshot.compradores, "Comprador", "conjuge"),
-  ];
-  if (conjugeOptions.length > 0) {
-    groups.push({ label: "Cônjuges", options: conjugeOptions });
-  }
-
-  const representanteOptions = [
-    ...buildSubKindOptions("representante_vendedor", snapshot.vendedores, "Vendedor", "representante"),
-    ...buildSubKindOptions("representante_comprador", snapshot.compradores, "Comprador", "representante"),
-  ];
-  if (representanteOptions.length > 0) {
-    groups.push({ label: "Representantes legais", options: representanteOptions });
-  }
-
-  groups.push({
-    label: "Imóveis",
-    options: buildKindOptions("imovel", iCount, "Imóvel"),
-  });
-  groups.push({
-    label: "Outros",
-    options: [{ value: "outro:0", label: "Outros (sem aplicar)" }],
-  });
-
-  return groups;
 }
 
 /**
@@ -1074,6 +887,38 @@ export function DocumentosStep({
     (id: string, assignmentValue: string) => {
       const [rawKind, rawIdx] = assignmentValue.split(":");
       const kind = rawKind as DocumentKind;
+
+      // D7 — reatribuição de doc JÁ APLICADO: limpa o slot antigo antes de
+      // mover. Recomputamos (sem tocar o form) o que aquele apply escreveu e
+      // apagamos só os paths cujo valor atual AINDA é exatamente o valor
+      // gravado pelo autofill — se o usuário digitou por cima, a comparação
+      // falha e o que ele escreveu fica. Sem isso, mover um doc do Vendedor 1
+      // pro Vendedor 2 deixava o CPF errado no slot antigo.
+      const previous = docs.find((d) => d.id === id);
+      if (
+        previous?.applied &&
+        previous.assignment.kind !== "outro" &&
+        (previous.assignment.kind !== kind ||
+          previous.assignment.index !== Number(rawIdx))
+      ) {
+        const writes = computeDocWrites(
+          adapter,
+          {
+            category: previous.category,
+            fields: previous.fields || {},
+            confidence: previous.confidence ?? 0,
+          },
+          previous.assignment,
+          form as UseFormReturn<Record<string, unknown>>
+        );
+        for (const [path, value] of writes) {
+          if (form.getValues(path) !== value) continue;
+          form.setValue(path, (typeof value === "string" ? "" : undefined) as never, {
+            shouldDirty: true,
+          });
+        }
+      }
+
       let index: number;
       if (rawIdx === "new") {
         // "+ Novo X" — append a fresh slot to the form array and assign here.
@@ -1099,7 +944,7 @@ export function DocumentosStep({
         assignmentPersisted: false,
       });
     },
-    [updateDoc, form, ensureSlot, adapter]
+    [updateDoc, form, ensureSlot, adapter, docs]
   );
 
   const handleRemove = useCallback(
@@ -1171,8 +1016,10 @@ export function DocumentosStep({
   const hasPending = docs.some((d) => d.status === "uploading" || d.status === "extracting");
   // H.5 (Phase H, 2026-04-18) — bloquear "Aplicar" se houver doc de pessoa
   // ainda sem atribuição explícita (kind === "outro"). Força o usuário a
-  // escolher vendedor/comprador/diligenciado no dropdown antes de aplicar,
-  // evitando troca comprador↔vendedor do fallback antigo.
+  // escolher o destino no dropdown antes de aplicar, evitando troca
+  // comprador↔vendedor do fallback antigo. O "deadlock" relatado (certidão do
+  // cônjuge sem destino possível) era efeito dos grupos escondidos por gate —
+  // desde 2026-07-31 cônjuge/procurador/representante aparecem sempre.
   const unassignedPersonDocs = docs.filter(
     (d) =>
       d.status === "ready" &&
@@ -1277,7 +1124,7 @@ export function DocumentosStep({
                 size="sm"
                 title={
                   needsExplicitAssignment
-                    ? `${unassignedPersonDocs.length} documento(s) sem atribuição — escolha vendedor/comprador no dropdown antes de aplicar`
+                    ? `${unassignedPersonDocs.length} documento(s) sem atribuição — escolha o destino no dropdown (parte, cônjuge, procurador, representante ou imóvel) antes de aplicar`
                     : undefined
                 }
               >

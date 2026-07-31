@@ -1,11 +1,15 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import type { UseFormReturn } from "react-hook-form";
 import type { SelectGroup } from "@/components/forms/NativeSelect";
 import {
+  computeDocWrites,
+  createVendaAdapter,
   filterAssignmentOptionsByScope,
   readPersistedAssignment,
   vendaTopKeyForKind,
 } from "@/components/forms/steps/doc-step-adapter";
 import { locacaoDocAdapter } from "@/components/forms/steps/locacao/locacao-doc-adapter";
+import { buildAssignmentOptions } from "@/components/forms/steps/build-assignment-options";
 
 // Fix 2 (links por parte): nos subtokens só devem aparecer slots de atribuição
 // do papel da pessoa (ROLE_PATHS[role]). Sem isso, um comprador conseguia
@@ -82,6 +86,41 @@ describe("filterAssignmentOptionsByScope (venda)", () => {
   });
 });
 
+describe("escopo por subtoken sobre os grupos REAIS (com sub-slots)", () => {
+  const groups = buildAssignmentOptions(
+    {
+      vendedores: [{ tipo_pessoa: "fisica" }],
+      compradores: [{ tipo_pessoa: "fisica" }],
+    },
+    []
+  );
+
+  it("subtoken do vendedor vê cônjuge/procurador/representante DO VENDEDOR", () => {
+    const out = filterAssignmentOptionsByScope(
+      groups,
+      ["vendedores", "imoveis"],
+      vendaTopKeyForKind
+    );
+    const values = out.flatMap((g) => g.options.map((o) => o.value));
+    expect(values).toContain("conjuge_vendedor:0");
+    expect(values).toContain("procurador_vendedor:0");
+    expect(values).toContain("representante_vendedor:0");
+    expect(values.some((v) => v.includes("comprador"))).toBe(false);
+  });
+
+  it("subtoken do comprador não enxerga nenhum slot de vendedor", () => {
+    const out = filterAssignmentOptionsByScope(
+      groups,
+      ["compradores"],
+      vendaTopKeyForKind
+    );
+    const values = out.flatMap((g) => g.options.map((o) => o.value));
+    expect(values).toContain("procurador_comprador:0");
+    expect(values.some((v) => v.includes("vendedor"))).toBe(false);
+    expect(values.some((v) => v.startsWith("imovel"))).toBe(false);
+  });
+});
+
 describe("filterAssignmentOptionsByScope (locação)", () => {
   const LOCACAO_GROUPS: SelectGroup[] = [
     { label: "Locadores", options: [{ value: "locador:0", label: "Locador 1" }] },
@@ -107,6 +146,90 @@ describe("filterAssignmentOptionsByScope (locação)", () => {
       locacaoDocAdapter.topKeyForKind
     );
     expect(groupLabels(out)).toEqual(["Fiador", "Outros"]);
+  });
+});
+
+// D7 (2026-07-31) — reatribuir um doc já aplicado precisa limpar o slot ANTIGO.
+// `computeDocWrites` recalcula o que aquele apply escreveu sem tocar no form.
+describe("computeDocWrites + limpeza da reatribuição", () => {
+  const adapter = createVendaAdapter(buildAssignmentOptions);
+  const RG = {
+    category: "rg",
+    fields: {
+      nome_completo: "Maria Vendedora",
+      cpf_numero: "12345678909",
+      rg_numero: "1234567",
+    },
+    confidence: 0.9,
+  };
+
+  function makeFormStub(initial: Record<string, unknown> = {}) {
+    const store = new Map<string, unknown>(Object.entries(initial));
+    const form = {
+      setValue: vi.fn((path: string, value: unknown) => store.set(path, value)),
+      getValues: vi.fn((path?: string) =>
+        path === undefined ? Object.fromEntries(store) : store.get(path)
+      ),
+    } as unknown as UseFormReturn<Record<string, unknown>>;
+    return { form, store };
+  }
+
+  /** Espelha o trecho de limpeza do handleAssignmentChange. */
+  function clearOldSlot(
+    form: UseFormReturn<Record<string, unknown>>,
+    assignment: { kind: string; index: number }
+  ) {
+    const writes = computeDocWrites(adapter, RG, assignment as never, form);
+    for (const [path, value] of writes) {
+      if (form.getValues(path as never) !== value) continue;
+      form.setValue(path, (typeof value === "string" ? "" : undefined) as never, {
+        shouldDirty: true,
+      });
+    }
+  }
+
+  it("devolve o mapa de writes sem tocar o form real", () => {
+    const { form, store } = makeFormStub();
+    const writes = computeDocWrites(adapter, RG, { kind: "vendedor", index: 0 }, form);
+    expect(writes.get("vendedores.0.nome")).toBe("Maria Vendedora");
+    expect(writes.get("vendedores.0.cpf")).toBe("12345678909");
+    expect(store.size).toBe(0);
+  });
+
+  it("ignora skipIfDirty — captura writes mesmo com o campo já preenchido", () => {
+    const { form } = makeFormStub({ "vendedores.0.nome": "Digitado" });
+    const writes = computeDocWrites(adapter, RG, { kind: "vendedor", index: 0 }, form);
+    expect(writes.get("vendedores.0.nome")).toBe("Maria Vendedora");
+  });
+
+  it("limpa o slot antigo mas preserva o que o usuário digitou por cima", () => {
+    const { form, store } = makeFormStub();
+    adapter.apply(RG, { kind: "vendedor", index: 0 }, form, { skipIfDirty: true });
+    expect(store.get("vendedores.0.cpf")).toBe("12345678909");
+    // Operador corrigiu o nome à mão antes de perceber que o doc era do V2.
+    store.set("vendedores.0.nome", "Nome Corrigido À Mão");
+
+    clearOldSlot(form, { kind: "vendedor", index: 0 });
+
+    expect(store.get("vendedores.0.cpf")).toBe("");
+    expect(store.get("vendedores.0.rg")).toBe("");
+    expect(store.get("vendedores.0.nome")).toBe("Nome Corrigido À Mão");
+  });
+
+  it("limpeza de sub-slot não estoura pra fora do subobjeto", () => {
+    const { form, store } = makeFormStub({ "vendedores.0.nome": "João Titular" });
+    adapter.apply(RG, { kind: "procurador_vendedor", index: 0 }, form, {
+      skipIfDirty: true,
+    });
+    expect(store.get("vendedores.0.procurador.nome")).toBe("Maria Vendedora");
+    expect(store.get("vendedores.0.tem_procurador")).toBe(true);
+
+    clearOldSlot(form, { kind: "procurador_vendedor", index: 0 });
+
+    expect(store.get("vendedores.0.procurador.nome")).toBe("");
+    expect(store.get("vendedores.0.nome")).toBe("João Titular");
+    // `tem_procurador` já estava true no form real → não entra no mapa e fica.
+    expect(store.get("vendedores.0.tem_procurador")).toBe(true);
   });
 });
 

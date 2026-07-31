@@ -18,6 +18,7 @@ import { DocumentCard, type DocumentCardData } from "@/components/forms/Document
 import { AddDocumentsCard } from "@/components/pipeline/AddDocumentsCard";
 import type { SelectGroup } from "@/components/forms/NativeSelect";
 import type { Assignment, DocumentKind } from "@/lib/forms/extracted-to-form";
+import { buildLocacaoOptions } from "@/components/forms/steps/locacao/locacao-doc-adapter";
 import { FileText } from "lucide-react";
 
 export interface LocacaoAttachment {
@@ -33,6 +34,7 @@ export interface LocacaoAttachment {
 interface ParteOption {
   nome?: string;
   razao_social?: string;
+  tipo_pessoa?: string;
 }
 
 interface LocacaoDocumentsTabProps {
@@ -40,7 +42,13 @@ interface LocacaoDocumentsTabProps {
   attachments: LocacaoAttachment[];
   locadores: ParteOption[];
   locatarios: ParteOption[];
-  hasFiador: boolean;
+  /**
+   * Recorte lite do `dataJson` só com o que o seletor precisa. Substituiu a
+   * prop booleana `hasFiador`: o builder compartilhado com a etapa 0 decide
+   * sozinho quando mostrar Fiador/Cônjuge do fiador e usa o nome da parte no
+   * rótulo.
+   */
+  garantia?: { tipo?: string; fiador?: Record<string, unknown> };
 }
 
 type GroupKind = "locador" | "locatario" | "fiador" | "imovel" | "outro";
@@ -53,11 +61,23 @@ const GROUP_LABELS: Record<GroupKind, string> = {
   outro: "Outros",
 };
 
-/** Normaliza kinds (incl. representantes) pro grupo visual. */
+/** Normaliza kinds (incl. representantes e cônjuges) pro grupo visual. */
 function groupKindOf(kind: DocumentKind): GroupKind {
-  if (kind === "locador" || kind === "representante_locador") return "locador";
-  if (kind === "locatario" || kind === "representante_locatario") return "locatario";
-  if (kind === "fiador") return "fiador";
+  if (
+    kind === "locador" ||
+    kind === "representante_locador" ||
+    kind === "conjuge_locador"
+  ) {
+    return "locador";
+  }
+  if (
+    kind === "locatario" ||
+    kind === "representante_locatario" ||
+    kind === "conjuge_locatario"
+  ) {
+    return "locatario";
+  }
+  if (kind === "fiador" || kind === "conjuge_fiador") return "fiador";
   if (kind === "imovel") return "imovel";
   return "outro";
 }
@@ -72,7 +92,7 @@ export function LocacaoDocumentsTab({
   attachments,
   locadores,
   locatarios,
-  hasFiador,
+  garantia,
 }: LocacaoDocumentsTabProps) {
   const router = useRouter();
   const [extractingIds, setExtractingIds] = useState<Set<string>>(new Set());
@@ -120,31 +140,13 @@ export function LocacaoDocumentsTab({
     });
   }
 
-  const parteLabel = (p: ParteOption, fallback: string) =>
-    p.nome || p.razao_social || fallback;
-
-  const assignmentOptions: SelectGroup[] = [
-    {
-      label: "Locadores",
-      options: locadores.map((p, i) => ({
-        value: `locador:${i}`,
-        label: `Locador: ${parteLabel(p, `Parte ${i + 1}`)}`,
-      })),
-    },
-    {
-      label: "Locatários",
-      options: locatarios.map((p, i) => ({
-        value: `locatario:${i}`,
-        label: `Locatário: ${parteLabel(p, `Parte ${i + 1}`)}`,
-      })),
-    },
-    {
-      label: "Fiador",
-      options: hasFiador ? [{ value: "fiador:0", label: "Fiador" }] : [],
-    },
-    { label: "Imóvel", options: [{ value: "imovel:0", label: "Imóvel" }] },
-    { label: "Outros", options: [{ value: "outro:0", label: "Outros" }] },
-  ].filter((g) => g.options.length > 0);
+  // Mesmo builder da etapa 0 do formulário de locação (paridade admin ↔
+  // cliente): antes daqui o operador não tinha pra onde mover o documento do
+  // cônjuge de uma parte.
+  const assignmentOptions: SelectGroup[] = buildLocacaoOptions(
+    { locadores, locatarios, garantia },
+    Object.values(groups).flat()
+  );
 
   async function handleReassign(id: string, value: string) {
     const [kind, idxStr] = value.split(":");
