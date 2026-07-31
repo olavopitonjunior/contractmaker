@@ -74,13 +74,13 @@ export const STEP_META: Record<OnboardingStepKey, StepMeta> = {
   templates: {
     key: "templates",
     short: "Modelos",
-    title: "Modelos de contrato",
+    title: "Enviar seus modelos de contrato",
     eyebrow: "Documentos",
-    desc: "Seu modelo timbrado vira contrato.",
+    desc: "Mande os seus — nós organizamos.",
     blurb:
-      "O painel “Modelos do sistema” mostra o que a esteira precisa ter: contrato de compra e venda (à vista e financiado), proposta de venda, proposta de locação e contrato de locação. Mande os DOCX timbrados de vocês de uma vez — nós dizemos o que cada um é, juntamos os que são o mesmo contrato variando a garantia, e você revisa antes de ativar.",
+      "Envie os contratos e propostas de vocês do jeito que estão — pode mandar os repetidos (com fiador, com caução, um por seguradora). Nós lemos os arquivos, juntamos os parecidos num modelo só, separamos o que é cláusula e montamos a biblioteca da imobiliária; você só confirma. O painel “Modelos do sistema” mostra o que ainda falta.",
     icon: FileText,
-    cta: "Ver modelos do sistema",
+    cta: "Enviar meus modelos",
   },
   clicksign: {
     key: "clicksign",
@@ -143,7 +143,10 @@ export function stepUrl(
     case "profile":
       return "/settings/perfil";
     case "templates":
-      return "/templates";
+      // `?ingest=1` abre a Central de envio já na tela — o passo é "mande seus
+      // arquivos", não "olhe a lista". Fechando o diálogo, o painel "Modelos do
+      // sistema" fica atrás mostrando o que ainda falta.
+      return "/templates?ingest=1";
     case "clicksign":
       return "/settings/signatures?tab=conexao";
     case "form":

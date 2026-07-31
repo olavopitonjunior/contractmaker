@@ -32,8 +32,9 @@ export function SystemTemplatesPanel({ report }: { report: CoverageReport }) {
           {report.requiredDone} de {report.requiredTotal} essenciais
         </span>
         <p className="w-full text-xs text-muted-foreground sm:w-auto sm:flex-1">
-          Estes são os documentos que a esteira usa. Enquanto faltar um, a
-          geração daquele tipo de negócio não acontece.
+          Este painel mede o kit mínimo da esteira: enquanto faltar um, aquele
+          tipo de negócio não gera contrato. Em “Enviar modelo” você manda os
+          arquivos de vocês do jeito que estão e nós montamos o que falta.
         </p>
       </header>
 

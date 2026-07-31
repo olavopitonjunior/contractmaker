@@ -480,16 +480,47 @@ export function DocumentIngestionDialog({
       </Button>
       <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Documentos da imobiliária</DialogTitle>
+          <DialogTitle>Mande seus modelos do jeito que eles estão</DialogTitle>
           <DialogDescription>
-            Mande tudo de uma vez — contratos, propostas e cláusulas, em DOCX ou
-            PDF. Nós lemos cada arquivo, dizemos o que achamos que é e você
-            confirma. Modelos parecidos são consolidados num só.
+            Contratos, propostas e cláusulas, em DOCX ou PDF, todos de uma vez.
+            Nós lemos cada arquivo, dizemos o que achamos que é e você confirma.
           </DialogDescription>
         </DialogHeader>
 
         {phase === "pick" && (
           <div className="space-y-4">
+            <ol className="grid gap-2.5 rounded-lg border bg-muted/40 p-3">
+              {[
+                {
+                  t: "Você envia",
+                  d: "Arraste tudo que a imobiliária usa hoje — não precisa arrumar nada antes.",
+                },
+                {
+                  t: "Nós organizamos",
+                  d: "Agrupamos os parecidos num modelo só e separamos o que é cláusula.",
+                },
+                {
+                  t: "Você confirma",
+                  d: "Confere a sugestão e a biblioteca da sua imobiliária fica montada.",
+                },
+              ].map((s, i) => (
+                <li key={s.t} className="flex items-start gap-2.5">
+                  <span className="mt-0.5 grid h-5 w-5 flex-none place-items-center rounded-full bg-background text-[11px] font-bold tabular-nums">
+                    {i + 1}
+                  </span>
+                  <span className="text-sm leading-snug">
+                    <strong className="font-semibold">{s.t}</strong>
+                    <span className="text-muted-foreground"> — {s.d}</span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+            <p className="rounded-lg border border-violet-300 bg-violet-50/50 px-3 py-2 text-xs leading-snug dark:border-violet-900 dark:bg-violet-950/20">
+              Pode enviar vários arquivos repetidos — o mesmo contrato com
+              fiador, com caução, um por seguradora. É esperado: nós juntamos os
+              parecidos e mostramos o que muda entre eles antes de criar
+              qualquer coisa.
+            </p>
             <div className="space-y-1.5">
               <Label>Arquivos (DOCX ou PDF, até 20MB cada)</Label>
               <Input ref={fileRef} type="file" accept=".docx,.pdf" multiple />
