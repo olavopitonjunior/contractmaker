@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
-import { updateKnowledgeItem, deleteKnowledgeItem } from "@/lib/ai/knowledge";
+import {
+  updateKnowledgeItem,
+  deleteKnowledgeItem,
+  KnowledgeItemNotFoundError,
+} from "@/lib/ai/knowledge";
 import { VoyageError } from "@/lib/ai/embeddings";
 
 export async function GET(
@@ -52,6 +56,9 @@ export async function PATCH(
     });
     return NextResponse.json({ ok: true });
   } catch (err) {
+    if (err instanceof KnowledgeItemNotFoundError) {
+      return NextResponse.json({ error: err.message }, { status: 404 });
+    }
     if (err instanceof VoyageError) {
       return NextResponse.json(
         { error: `Falha no embedding: ${err.message}`, code: err.code },
@@ -74,6 +81,11 @@ export async function DELETE(
   const org = await getUserOrg(session.user.id);
   if (!org) return NextResponse.json({ error: "No organization" }, { status: 400 });
 
-  await deleteKnowledgeItem(params.id, org.id);
+  // 404 quando o escopo não casou: sem isso o 200 dizia "apagado" pra quem
+  // tentou remover item de OUTRO escopo (ex.: linha de plataforma).
+  const removed = await deleteKnowledgeItem(params.id, org.id);
+  if (!removed) {
+    return NextResponse.json({ error: "Item não encontrado" }, { status: 404 });
+  }
   return NextResponse.json({ ok: true });
 }
