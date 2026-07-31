@@ -17,6 +17,9 @@ interface AgentRow {
   description: string;
   instructions: string;
   ragScope: RagScope | null;
+  /** Escopo que a PLATAFORMA impôs, quando a org não tem o seu. Só exibição. */
+  inheritedRagScope: RagScope | null;
+  supportsRagScope: boolean;
   model: string;
   enabled: boolean;
 }
@@ -50,7 +53,8 @@ export function AiAgentsClient({ canEdit }: { canEdit: boolean }) {
         body: JSON.stringify({
           agentKey: row.agentKey,
           instructions: row.instructions,
-          ragScope: row.ragScope,
+          // Não manda o campo pra agente que não o honra — a rota recusaria.
+          ...(row.supportsRagScope ? { ragScope: row.ragScope } : {}),
         }),
       });
       const data = await res.json();
@@ -100,11 +104,31 @@ export function AiAgentsClient({ canEdit }: { canEdit: boolean }) {
             </div>
 
             <div className="border-t pt-3">
-              <p className="text-xs font-medium mb-2">Base de conhecimento</p>
+              <div className="flex flex-wrap items-center gap-2 mb-2">
+                <p className="text-xs font-medium">Base de conhecimento</p>
+                {!row.supportsRagScope && (
+                  <Badge variant="outline" className="text-[10px]">
+                    este agente não consulta a base
+                  </Badge>
+                )}
+              </div>
+              {/* Herança é tudo-ou-nada: marcar UMA categoria descarta o escopo
+                  inteiro da plataforma, inclusive um includePlatform:false que
+                  ela tenha imposto. Sem esta linha o editor mostra "consulta
+                  todas" onde existe restrição. */}
+              {row.supportsRagScope && !row.ragScope && row.inheritedRagScope && (
+                <p className="text-[11px] text-muted-foreground mb-2">
+                  Sem escopo próprio — valendo o da plataforma:{" "}
+                  <code className="font-mono">
+                    {JSON.stringify(row.inheritedRagScope)}
+                  </code>
+                  . Marcar qualquer coisa aqui substitui esse escopo por inteiro.
+                </p>
+              )}
               <RagScopeEditor
                 value={row.ragScope}
                 categories={RAG_CATEGORIES}
-                disabled={!canEdit}
+                disabled={!canEdit || !row.supportsRagScope}
                 onChange={(next) =>
                   setAgents((rows) =>
                     rows.map((r) =>

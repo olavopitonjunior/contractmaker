@@ -66,6 +66,11 @@ export async function GET() {
         // Idem: só o escopo da própria org. O `resolved.ragScope` herdaria o da
         // plataforma e salvar o congelaria como se fosse escolha do tenant.
         ragScope: (own.get(def.key)?.ragScope as unknown) ?? null,
+        // Escopo herdado, só pra EXIBIR: sem isto a tela escreve "consulta
+        // todas" enquanto a plataforma restringe. Não vai pro editor — salvar
+        // o herdado congelaria como se fosse escolha do tenant.
+        inheritedRagScope: own.get(def.key)?.ragScope ? null : resolved.ragScope,
+        supportsRagScope: def.supports.ragScope,
         model: resolved.model,
         enabled: resolved.enabled,
       };
@@ -103,6 +108,12 @@ export async function PATCH(req: NextRequest) {
   const agentKey = parsed.data.agentKey as AgentKey;
 
   const def = AGENT_REGISTRY[agentKey];
+  if (parsed.data.ragScope !== undefined && !def.supports.ragScope) {
+    return NextResponse.json(
+      { error: "Este agente não consulta a base de conhecimento." },
+      { status: 400 }
+    );
+  }
   if (!def.tenantEditable || !def.supports.instructions) {
     return NextResponse.json(
       { error: "Este agente é configurado pela plataforma." },

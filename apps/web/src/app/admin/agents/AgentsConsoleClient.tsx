@@ -36,7 +36,12 @@ interface AgentRow {
   description: string;
   external: boolean;
   tenantEditable: boolean;
-  supports: { enabled: boolean; model: boolean; instructions: boolean };
+  supports: {
+    enabled: boolean;
+    model: boolean;
+    instructions: boolean;
+    ragScope: boolean;
+  };
   defaultModel: string;
   own: {
     enabled: boolean;
@@ -117,7 +122,7 @@ export function AgentsConsoleClient({
           temperature: row.own.temperature,
           maxTokens: row.own.maxTokens,
           instructions: row.own.instructions,
-          ragScope: row.own.ragScope,
+          ...(row.supports.ragScope ? { ragScope: row.own.ragScope } : {}),
           monthlyBudgetUsd: row.own.monthlyBudgetUsd,
         }),
       });
@@ -304,13 +309,18 @@ export function AgentsConsoleClient({
               </div>
 
               <div className="border-t pt-3">
-                <Label className="mb-2 block text-xs">
-                  Base de conhecimento que este agente consulta
-                </Label>
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <Label className="text-xs">
+                    Base de conhecimento que este agente consulta
+                  </Label>
+                  {!row.supports.ragScope && (
+                    <Badge variant="outline">este agente não consulta a base</Badge>
+                  )}
+                </div>
                 <RagScopeEditor
                   value={row.own.ragScope}
                   categories={RAG_CATEGORIES}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !row.supports.ragScope}
                   onChange={(next) => patchLocal(row.agentKey, { ragScope: next })}
                 />
                 {/* Herança tem que ser visível: com o escopo vazio neste nível, o

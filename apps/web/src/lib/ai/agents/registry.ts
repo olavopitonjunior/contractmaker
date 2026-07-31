@@ -64,14 +64,31 @@ export interface AgentDefinition {
    * um campo de instruções que ninguém lê, é pior que a ausência do controle —
    * o operador acha que agiu.
    */
-  supports: { enabled: boolean; model: boolean; instructions: boolean };
+  supports: {
+    enabled: boolean;
+    model: boolean;
+    instructions: boolean;
+    /**
+     * O agente consulta a base de conhecimento E carimba `agentKey` no
+     * contexto? Só quem faz as duas coisas honra `ragScope`/`visibleToAgents`.
+     *
+     * `passive` e `insights` chamam o modelo SEM `tools` — não há base a
+     * escopar, então oferecer o controle não seria "inerte", seria sem
+     * sentido. `ocr` roda no Gemini e `max` é externo.
+     */
+    ragScope: boolean;
+  };
 }
 
 const ALL: AgentDefinition["supports"] = {
   enabled: true,
   model: true,
   instructions: true,
+  ragScope: true,
 };
+
+/** Consome LLM e aceita configuração, mas não consulta a base de conhecimento. */
+const SEM_RAG: AgentDefinition["supports"] = { ...ALL, ragScope: false };
 
 export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
   analyst: {
@@ -118,7 +135,7 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
     tenantEditable: true,
     operations: ["passive_open", "passive_edit"],
     // Instruções ainda não plugadas no prompt da análise passiva.
-    supports: { enabled: true, model: true, instructions: false },
+    supports: { enabled: true, model: true, instructions: false, ragScope: false },
   },
   support: {
     key: "support",
@@ -130,7 +147,7 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
     // Base e persona são da plataforma — tenant não escreve instrução aqui.
     tenantEditable: false,
     operations: ["support_chat", "assistant_chat"],
-    supports: ALL,
+    supports: SEM_RAG,
   },
   ocr: {
     key: "ocr",
@@ -147,7 +164,7 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
       "extract_locacao_doc",
       "voice_extract",
     ],
-    supports: { enabled: false, model: false, instructions: false },
+    supports: { enabled: false, model: false, instructions: false, ragScope: false },
   },
   insights: {
     key: "insights",
@@ -156,7 +173,7 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
     defaultModel: HAIKU_MODEL,
     tenantEditable: true,
     operations: ["insights"],
-    supports: ALL,
+    supports: SEM_RAG,
   },
   chat_legacy: {
     key: "chat_legacy",
@@ -180,7 +197,7 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
     external: true,
     operations: [],
     // Passa a valer quando o endpoint do PR5 existir e o Max consumi-lo.
-    supports: { enabled: false, model: false, instructions: false },
+    supports: { enabled: false, model: false, instructions: false, ragScope: false },
   },
 };
 

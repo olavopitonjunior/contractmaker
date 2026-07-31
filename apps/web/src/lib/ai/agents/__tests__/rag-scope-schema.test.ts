@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from "vitest";
 import { ragScopeSchema, RAG_SCOPE_CATEGORIES } from "../store";
+import { AGENT_DEFINITIONS, AGENT_REGISTRY } from "../registry";
 
 describe("ragScopeSchema", () => {
   it("aceita escopo completo", () => {
@@ -53,5 +54,24 @@ describe("ragScopeSchema", () => {
       ragScopeSchema.safeParse({ tags: Array.from({ length: 21 }, (_, i) => `t${i}`) })
         .success
     ).toBe(false);
+  });
+});
+
+describe("supports.ragScope — quem realmente honra escopo", () => {
+  // O registry é a fonte de verdade da UI: oferecer editor de escopo pra agente
+  // que não consulta a base não é "controle inerte", é controle SEM SENTIDO.
+  // `passive` e `insights` chamam o modelo sem `tools`; `support` lê a base por
+  // caminho próprio (category explícita, fora do helper de escopo).
+  it("só os agentes que consultam a base via helper honram ragScope", () => {
+    const honram = AGENT_DEFINITIONS.filter((d) => d.supports.ragScope).map((d) => d.key);
+    expect(honram.sort()).toEqual(
+      ["analyst", "chat_legacy", "curator", "editor", "legal"].sort()
+    );
+  });
+
+  it("passive e insights ficam de fora — não chamam o modelo com tools", () => {
+    for (const key of ["passive", "insights"] as const) {
+      expect(AGENT_REGISTRY[key].supports.ragScope).toBe(false);
+    }
   });
 });

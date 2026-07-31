@@ -185,6 +185,13 @@ export async function* streamContractAgent(
 
     // 3. Context
     const context = await loadContext(params.contractId, params.orgId);
+    // Carimba o agente ANTES de qualquer uso: é o que dá escopo de RAG às
+    // tools de consulta (`ragScopeFor` em tool-handlers). Este caminho usa
+    // `AGENT_TOOLS` inteiro, incluindo `query_knowledge_base`, então o escopo
+    // é tão legítimo aqui quanto no orquestrador — e este é o caminho de
+    // ROLLBACK (`ENABLE_MULTI_AGENT=false`): desligar o orquestrador não pode
+    // desligar em silêncio o escopo que o tenant configurou.
+    context.agentKey = "chat_legacy";
 
     // 3.5. Expert context só em modo Plan. Fast pula pra cortar 200-500ms
     //      + 3 Prisma queries + Voyage call.
