@@ -5,6 +5,10 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { RagScopeEditor, type RagScope } from "@/components/settings/RagScopeEditor";
+
+/** Espelha RAG_SCOPE_CATEGORIES do servidor. */
+const RAG_CATEGORIES = ["legislation", "model", "rule", "glossary", "clause"] as const;
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -41,9 +45,15 @@ interface AgentRow {
     temperature: number | null;
     maxTokens: number | null;
     instructions: string;
+    ragScope: RagScope | null;
     monthlyBudgetUsd: number | null;
   };
-  resolved: { model: string; fallbackModel: string | null; enabled: boolean };
+  resolved: {
+    model: string;
+    fallbackModel: string | null;
+    enabled: boolean;
+    ragScope: RagScope | null;
+  };
 }
 
 interface OrgOption {
@@ -107,6 +117,7 @@ export function AgentsConsoleClient({
           temperature: row.own.temperature,
           maxTokens: row.own.maxTokens,
           instructions: row.own.instructions,
+          ragScope: row.own.ragScope,
           monthlyBudgetUsd: row.own.monthlyBudgetUsd,
         }),
       });
@@ -290,6 +301,29 @@ export function AgentsConsoleClient({
                   }
                   className="font-mono text-xs"
                 />
+              </div>
+
+              <div className="border-t pt-3">
+                <Label className="mb-2 block text-xs">
+                  Base de conhecimento que este agente consulta
+                </Label>
+                <RagScopeEditor
+                  value={row.own.ragScope}
+                  categories={RAG_CATEGORIES}
+                  disabled={!canEdit}
+                  onChange={(next) => patchLocal(row.agentKey, { ragScope: next })}
+                />
+                {/* Herança tem que ser visível: com o escopo vazio neste nível, o
+                    que vale é o de cima, e sem esta linha o admin lê "sem
+                    restrição" onde na verdade há uma. */}
+                {!row.own.ragScope && row.resolved.ragScope && (
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    Sem escopo próprio — herdando o da plataforma:{" "}
+                    <code className="font-mono">
+                      {JSON.stringify(row.resolved.ragScope)}
+                    </code>
+                  </p>
+                )}
               </div>
 
               {canEdit && (
