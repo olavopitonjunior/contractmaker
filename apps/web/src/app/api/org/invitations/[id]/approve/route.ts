@@ -118,9 +118,21 @@ export async function POST(
 
   const baseUrl = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
 
-  // Sem senha definida → link que CRIA a senha (não existe "senha atual" pra
-  // pedir). Com senha → só login.
-  const needsPassword = !result.user.passwordHash;
+  // `passwordHash != null` NÃO significa "sabe a senha": provisionamento de
+  // tenant (api/admin/orgs) e api/org/members criam a conta com hash aleatório
+  // de placeholder. Quem nunca autenticou em org nenhuma cai nesse caso — e
+  // mandar "use sua senha de sempre" pra essa pessoa é o mesmo beco sem saída
+  // que este fluxo existe pra fechar.
+  //
+  // A membership desta org acabou de ser criada com lastActiveAt null, então
+  // o count só enxerga atividade anterior e real.
+  const previousActivity = await prisma.orgMembership.count({
+    where: { userId: result.user.id, lastActiveAt: { not: null } },
+  });
+  // Erra pro lado seguro: na dúvida manda o link que CRIA a senha — ele
+  // funciona mesmo pra quem já tinha uma. O inverso tranca a pessoa do lado
+  // de fora.
+  const needsPassword = !result.user.passwordHash || previousActivity === 0;
   let actionUrl = `${baseUrl}/login?email=${encodeURIComponent(invitation.email)}`;
   if (needsPassword) {
     const { token } = await createPasswordResetToken(invitation.email, "welcome");

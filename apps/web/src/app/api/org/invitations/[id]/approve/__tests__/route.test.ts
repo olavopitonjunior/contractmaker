@@ -88,6 +88,8 @@ beforeEach(() => {
   p.orgInvitation.update = vi.fn().mockResolvedValue({ id: INVITE_ID });
   p.orgMembership.findUnique = vi.fn().mockResolvedValue(null);
   p.orgMembership.create = vi.fn().mockResolvedValue({ id: "mem-1" });
+  // Nenhuma atividade anterior por padrão (conta nova).
+  p.orgMembership.count = vi.fn().mockResolvedValue(0);
   p.user.create = vi.fn().mockResolvedValue({
     id: "u-new",
     email: "convidado@teste.com",
@@ -114,13 +116,14 @@ describe("POST /api/org/invitations/[id]/approve — e-mail de primeiro acesso",
     expect(props.actionUrl).toBe("https://app.test/reset-password?token=tok-123");
   });
 
-  it("conta que já existia COM senha recebe link de login e nenhum token", async () => {
+  it("conta ATIVA com senha recebe link de login e nenhum token", async () => {
     p.user.findUnique = vi.fn().mockResolvedValue({
       id: "u-old",
       email: "convidado@teste.com",
       name: "Convidado",
       passwordHash: "$2a$10$hash",
     });
+    p.orgMembership.count = vi.fn().mockResolvedValue(1); // já usou o produto
 
     const res = await POST(req(), { params });
     expect(res.status).toBe(200);
@@ -133,5 +136,39 @@ describe("POST /api/org/invitations/[id]/approve — e-mail de primeiro acesso",
     expect(props.actionUrl).toBe(
       "https://app.test/login?email=convidado%40teste.com"
     );
+  });
+
+  // `passwordHash != null` não prova que a pessoa SABE a senha: provisionamento
+  // de tenant e api/org/members gravam hash aleatório de placeholder. Mandar
+  // "use sua senha de sempre" pra quem nunca entrou reabre o beco sem saída.
+  it("hash de placeholder + nunca autenticou → link que CRIA a senha", async () => {
+    p.user.findUnique = vi.fn().mockResolvedValue({
+      id: "u-provisionado",
+      email: "convidado@teste.com",
+      name: "Convidado",
+      passwordHash: "$2a$10$placeholder-aleatorio",
+    });
+    p.orgMembership.count = vi.fn().mockResolvedValue(0); // nunca autenticou
+
+    const res = await POST(req(), { params });
+    expect(res.status).toBe(200);
+
+    expect(createTokenMock).toHaveBeenCalledWith(
+      "convidado@teste.com",
+      "welcome"
+    );
+    const props = emailTemplateMock.mock.calls[0][0];
+    expect(props.mode).toBe("set-password");
+    expect(props.actionUrl).toBe("https://app.test/reset-password?token=tok-123");
+  });
+
+  it("falha de envio não passa por sucesso silencioso — devolve emailSent:false", async () => {
+    p.user.findUnique = vi.fn().mockResolvedValue(null);
+    sendEmailMock.mockResolvedValueOnce({ id: null, ok: false, error: "smtp" });
+
+    const res = await POST(req(), { params });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ emailSent: false });
   });
 });
