@@ -539,3 +539,99 @@ describe("render do content da cláusula (anti-chave-literal)", () => {
     expect(html).not.toContain("2500");
   });
 });
+
+/**
+ * A cláusula do slot vai PARA DENTRO do contrato e congela no `dataJson` — não
+ * é sugestão que alguém revisa depois. Por isso, aqui a precedência do tenant é
+ * chave PRIMÁRIA, não desempate (o oposto da decisão do RAG, onde o melhor
+ * conteúdo vence porque esconder resultado bom regride recall).
+ *
+ * Decisão do dono em 2026-07-31: a geração nunca troca a cláusula da
+ * imobiliária pela da plataforma; a descoberta de uma versão mais nova acontece
+ * na tela, com adoção manual.
+ */
+describe("precedência do tenant sobre a plataforma", () => {
+  /** Mock que responde diferente para org e para plataforma. */
+  function dbPorEscopo(
+    daOrg: Array<{ id: string; content: string; tags?: string[] }>,
+    daPlataforma: Array<{ id: string; content: string; tags?: string[] }>
+  ) {
+    return {
+      knowledgeItem: {
+        findMany: vi.fn(async (args: { where: { orgId: string | null } }) =>
+          args.where.orgId === null ? daPlataforma : daOrg
+        ),
+      },
+    };
+  }
+
+  it("cláusula da org vence a da plataforma MESMO se a da plataforma for mais recente", async () => {
+    // É o cenário que só a regressão pega: o `orderBy` interno é por
+    // `updatedAt`, então jogar as duas no mesmo conjunto faria a universal
+    // sobrescrever o texto que a imobiliária escreveu — em silêncio.
+    const db = dbPorEscopo(
+      [{ id: "org-1", content: "<p>Redação da imobiliária.</p>" }],
+      [{ id: "plat-1", content: "<p>Redação universal, publicada depois.</p>" }]
+    );
+
+    const out = await resolveClauseSlots({
+      orgId: "org1",
+      templateSource: slotMarkerHandlebars("garantia"),
+      data: FIADOR_DATA,
+      format: "html",
+      db,
+    });
+
+    expect(out.values.slot_garantia).toContain("Redação da imobiliária");
+    expect(out.resolved[0]).toMatchObject({ knowledgeItemId: "org-1" });
+    expect(out.resolved[0].fromPlatform).toBeUndefined();
+  });
+
+  it("a plataforma preenche a LACUNA quando a org não tem cláusula pro slot", async () => {
+    const db = dbPorEscopo([], [{ id: "plat-1", content: "<p>Redação universal.</p>" }]);
+
+    const out = await resolveClauseSlots({
+      orgId: "org1",
+      templateSource: slotMarkerHandlebars("garantia"),
+      data: FIADOR_DATA,
+      format: "html",
+      db,
+    });
+
+    expect(out.values.slot_garantia).toContain("Redação universal");
+    expect(out.resolved[0]).toMatchObject({
+      knowledgeItemId: "plat-1",
+      // Rastreável: o contrato saiu com texto que a imobiliária não escreveu.
+      fromPlatform: true,
+    });
+  });
+
+  it("sem cláusula em nenhum dos dois escopos, cai no fallback canônico", async () => {
+    const db = dbPorEscopo([], []);
+
+    const out = await resolveClauseSlots({
+      orgId: "org1",
+      templateSource: slotMarkerHandlebars("garantia"),
+      data: FIADOR_DATA,
+      format: "html",
+      db,
+    });
+
+    expect(out.resolved[0].source).toBe("fallback");
+    expect(out.values.slot_garantia).toBeTruthy();
+  });
+
+  it("não consulta a plataforma quando a org já resolveu — uma query, não duas", async () => {
+    const db = dbPorEscopo([{ id: "org-1", content: "<p>Da casa.</p>" }], []);
+
+    await resolveClauseSlots({
+      orgId: "org1",
+      templateSource: slotMarkerHandlebars("garantia"),
+      data: FIADOR_DATA,
+      format: "html",
+      db,
+    });
+
+    expect(db.knowledgeItem.findMany).toHaveBeenCalledTimes(1);
+  });
+});

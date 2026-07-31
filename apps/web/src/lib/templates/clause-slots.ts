@@ -260,6 +260,12 @@ export interface ResolvedClauseSlot {
   /** De onde veio o conteúdo. */
   source: "knowledge" | "fallback";
   knowledgeItemId?: string;
+  /**
+   * A cláusula usada veio da base da PLATAFORMA (a org não tinha uma usável
+   * pro slot). Serve pra auditoria de geração: o contrato saiu com texto que a
+   * imobiliária não escreveu, e isso precisa ser rastreável.
+   */
+  fromPlatform?: boolean;
   /** Presente quando havia cláusula no acervo mas ela foi descartada. */
   failure?: ClauseSlotFailure;
 }
@@ -451,37 +457,64 @@ export async function resolveClauseSlots(
     let html: string | null = null;
     let knowledgeItemId: string | undefined;
     let failure: ClauseSlotFailure | undefined;
+    let fromPlatform = false;
 
     if (value) {
       try {
-        const rows = (await db.knowledgeItem.findMany({
-          where: {
-            orgId: input.orgId,
-            category: "clause",
-            status: "approved",
-            // Só a RAIZ. As linhas-filhas de um item chunkado herdam as mesmas
-            // tags e nascem `approved` — sem este filtro, o `take: 1` podia
-            // injetar um PEDAÇO DO MEIO da cláusula dentro do contrato.
-            parentId: null,
-            tags: { hasEvery: slotTagsFor(slot, value) },
-          },
-          select: { id: true, content: true, chunkTotal: true, tags: true },
-          // Mais recente vence: reingerir o modelo atualiza a cláusula do slot
-          // sem obrigar o operador a apagar a antiga. `id` é o desempate — duas
-          // cláusulas gravadas na MESMA transação têm `updatedAt` idêntico e a
-          // ordem viraria a do plano de execução do Postgres, ou seja, o
-          // contrato poderia sair com uma cláusula diferente a cada geração.
-          orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-          // Trazemos os CANDIDATOS do tipo (não só o mais recente) porque o
-          // garantidor é escolhido em memória — `hasEvery` não sabe expressar
-          // "o provider certo, ou nenhum provider, mas nunca o errado". O teto
-          // é folgado: uma org tem punhados de cláusulas por tipo de garantia.
-          take: CANDIDATE_LIMIT,
-        })) as ClauseHit[];
+        const buscarCandidatas = async (escopo: string | null) =>
+          (await db.knowledgeItem.findMany({
+            where: {
+              orgId: escopo,
+              category: "clause",
+              status: "approved",
+              // Só a RAIZ. As linhas-filhas de um item chunkado herdam as mesmas
+              // tags e nascem `approved` — sem este filtro, o `take: 1` podia
+              // injetar um PEDAÇO DO MEIO da cláusula dentro do contrato.
+              parentId: null,
+              tags: { hasEvery: slotTagsFor(slot, value) },
+            },
+            select: { id: true, content: true, chunkTotal: true, tags: true },
+            // Mais recente vence: reingerir o modelo atualiza a cláusula do slot
+            // sem obrigar o operador a apagar a antiga. `id` é o desempate — duas
+            // cláusulas gravadas na MESMA transação têm `updatedAt` idêntico e a
+            // ordem viraria a do plano de execução do Postgres, ou seja, o
+            // contrato poderia sair com uma cláusula diferente a cada geração.
+            orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+            // Trazemos os CANDIDATOS do tipo (não só o mais recente) porque o
+            // garantidor é escolhido em memória — `hasEvery` não sabe expressar
+            // "o provider certo, ou nenhum provider, mas nunca o errado". O teto
+            // é folgado: uma org tem punhados de cláusulas por tipo de garantia.
+            take: CANDIDATE_LIMIT,
+          })) as ClauseHit[];
 
         // Garantidor do form (`provider:porto_seguro`) — dimensão secundária.
         const provider = def.selectedProvider?.(input.data) ?? null;
-        const ranking = rankSlotCandidates(rows ?? [], provider);
+
+        /**
+         * Precedência do tenant é chave PRIMÁRIA aqui — o oposto do RAG.
+         *
+         * Duas consultas em vez de uma, de propósito: se a org tem cláusula
+         * usável pro slot, a da plataforma NEM ENTRA no ranking. Jogar as duas
+         * no mesmo conjunto faria uma cláusula universal mais recente vencer a
+         * que a imobiliária escreveu — o `orderBy` é por `updatedAt` —, ou
+         * seja, atualização da plataforma sobrescrevendo texto de contrato
+         * alheio, em silêncio. Aqui o conteúdo vai PRA DENTRO do contrato e
+         * congela no `dataJson`; não é sugestão que alguém revisa.
+         *
+         * (No RAG a decisão é a inversa e continua valendo: lá o melhor
+         * conteúdo vence, porque esconder resultado melhor regride recall.)
+         *
+         * A plataforma preenche LACUNA: org sem cláusula pro slot, ou sem
+         * cláusula compatível com o garantidor escolhido.
+         */
+        let ranking = rankSlotCandidates(await buscarCandidatas(input.orgId), provider);
+        if (!ranking.hit) {
+          const daPlataforma = rankSlotCandidates(await buscarCandidatas(null), provider);
+          if (daPlataforma.hit) {
+            ranking = daPlataforma;
+            fromPlatform = true;
+          }
+        }
         const hit = ranking.hit;
 
         if (!hit && ranking.rejectedProviders.length > 0) {
@@ -530,6 +563,7 @@ export async function resolveClauseSlots(
       value,
       source: knowledgeItemId ? "knowledge" : "fallback",
       knowledgeItemId,
+      ...(knowledgeItemId && fromPlatform ? { fromPlatform: true } : {}),
       ...(failure ? { failure } : {}),
     });
     if (failure) failures.push(failure);
