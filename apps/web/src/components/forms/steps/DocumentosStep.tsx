@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
 import type { SelectGroup } from "@/components/forms/NativeSelect";
 import {
+  isUncatalogedPersonDoc,
   type Assignment,
   type DocumentKind,
   type FichaResumoData,
@@ -337,6 +338,22 @@ const SELF_ASSIGN_CATEGORIES = new Set([
   "comprovante_residencia",
   "certidao_casamento",
 ]);
+
+/**
+ * Doc elegível pro auto-assign do link individual: categoria da whitelist OU
+ * doc fora do catálogo do classificador ("outro") com evidência de identidade
+ * pessoal (carteira da OAB/CRM/CTPS trazem nome+cpf+rg). Mesma regra por
+ * evidência do `mapExtractedToForm`.
+ */
+function isSelfAssignable(
+  category: string | null,
+  fields: Record<string, unknown> | null
+): boolean {
+  if (!category) return false;
+  return (
+    SELF_ASSIGN_CATEGORIES.has(category) || isUncatalogedPersonDoc(category, fields)
+  );
+}
 
 export function DocumentosStep({
   form,
@@ -707,8 +724,7 @@ export function DocumentosStep({
       (d) =>
         d.status === "ready" &&
         d.fields &&
-        d.category &&
-        SELF_ASSIGN_CATEGORIES.has(d.category) &&
+        isSelfAssignable(d.category, d.fields) &&
         d.assignment.kind === "outro" &&
         !selfAssignedRef.current.has(d.id)
     );

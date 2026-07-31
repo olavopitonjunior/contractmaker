@@ -60,6 +60,52 @@ const REPRESENTANTE_KINDS = new Set<DocumentKind>([
   "representante_comprador",
 ]);
 
+/** Kinds de VENDA cujo basePath é uma pessoa (titular, cônjuge ou representante). */
+const PERSON_KINDS_VENDA = new Set<DocumentKind>([
+  ...TITULAR_KINDS,
+  ...CONJUGE_KINDS,
+  ...REPRESENTANTE_KINDS,
+]);
+
+/**
+ * Campos que provam que o OCR leu um documento de IDENTIDADE de pessoa, mesmo
+ * quando a categoria não está no catálogo do classificador (ex.: carteira da
+ * OAB, CRM, carteira de trabalho → `category: "outro"`).
+ *
+ * Sem isso, um doc pessoal fora do catálogo caía nos dois lados do gate por
+ * categoria (nem PERSON_CATEGORIES nem PROPERTY_CATEGORIES) e o "Aplicar aos
+ * campos" preenchia ZERO campos silenciosamente.
+ */
+const PERSON_IDENTITY_FIELDS = ["nome_completo", "cpf_numero", "rg_numero"] as const;
+
+export function hasPersonIdentityEvidence(
+  fields: Record<string, unknown> | null | undefined
+): boolean {
+  if (!fields || typeof fields !== "object") return false;
+  return PERSON_IDENTITY_FIELDS.some((key) => {
+    const value = fields[key];
+    if (typeof value === "string") return value.trim().length > 0;
+    return value !== null && value !== undefined && value !== "";
+  });
+}
+
+/**
+ * Categoria fora das duas whitelists (tipicamente "outro"): tratamos como doc
+ * pessoal SÓ quando há evidência de identidade nos campos. Deliberadamente NÃO
+ * existe o análogo pra imóvel — aplicar endereço de um doc não catalogado no
+ * slot do imóvel sujaria a matrícula com o endereço da parte.
+ */
+export function isUncatalogedPersonDoc(
+  category: string | null,
+  fields: Record<string, unknown> | null | undefined
+): boolean {
+  if (!category) return false;
+  if (PERSON_CATEGORIES.has(category) || PROPERTY_CATEGORIES.has(category)) return false;
+  // Ficha-resumo tem fluxo próprio (applyFichaResumo) — nunca vira doc pessoal.
+  if (category === "ficha_resumo") return false;
+  return hasPersonIdentityEvidence(fields);
+}
+
 // Maps the free-text "regime de bens" string extracted from a marriage
 // certificate to the estado civil dropdown value used by the form. Accepts
 // "Comunhao parcial", "Comunhao universal", "Separacao total", etc.
@@ -202,10 +248,18 @@ export function mapExtractedToForm(
   const basePath = forceBasePath ?? resolveBasePath(assignment);
   if (!basePath) return 0;
 
-  const isPerson = PERSON_CATEGORIES.has(category);
-  const isProperty = PROPERTY_CATEGORIES.has(category);
   const isTitular = TITULAR_KINDS.has(assignment.kind);
   const isConjuge = CONJUGE_KINDS.has(assignment.kind);
+  // Categoria conhecida decide como antes. Categoria fora do catálogo (ex.:
+  // carteira da OAB → "outro") entra pelo caminho de PESSOA por EVIDÊNCIA:
+  // o slot destino é de pessoa E os campos têm identidade (nome/cpf/rg).
+  // Os ramos específicos de categoria abaixo (certidao_casamento, averbação de
+  // cônjuge em rg/cnh) continuam presos à categoria, então não rodam aqui.
+  const isPerson =
+    PERSON_CATEGORIES.has(category) ||
+    (PERSON_KINDS_VENDA.has(assignment.kind) &&
+      isUncatalogedPersonDoc(category, fields));
+  const isProperty = PROPERTY_CATEGORIES.has(category);
   let filled = 0;
 
   // Quando o doc é do cônjuge e a flag "endereço igual ao do titular" está
@@ -531,7 +585,13 @@ function suggestPersonAssignment(
   if (myKey) {
     for (const sib of siblings) {
       if (!sib.fields) continue;
-      if (!sib.category || !PERSON_CATEGORIES.has(sib.category)) continue;
+      if (!sib.category) continue;
+      if (
+        !PERSON_CATEGORIES.has(sib.category) &&
+        !isUncatalogedPersonDoc(sib.category, sib.fields)
+      ) {
+        continue;
+      }
       const sibKey = personKey(sib.fields);
       if (sibKey === myKey) {
         return sib.assignment;
@@ -556,7 +616,9 @@ export function suggestAssignment(
     return { kind: "imovel", index: 0 };
   }
 
-  if (PERSON_CATEGORIES.has(category)) {
+  // Categoria de pessoa OU doc fora do catálogo com evidência de identidade
+  // (ex.: carteira da OAB classificada como "outro") — mesmo fluxo de match.
+  if (PERSON_CATEGORIES.has(category) || isUncatalogedPersonDoc(category, fields)) {
     return suggestPersonAssignment(fields, snapshot, siblings);
   }
 
@@ -590,6 +652,22 @@ export function categoryLabel(category: string | null): string {
     default:
       return "—";
   }
+}
+
+/**
+ * Rótulo do chip do DocumentCard. Docs fora do catálogo do classificador
+ * ("outro") costumam trazer `tipo_documento` descrito pelo próprio OCR
+ * (ex.: "Identidade de Advogado") — mostrar isso é mais útil que "Outro".
+ */
+export function documentLabel(
+  category: string | null,
+  fields?: Record<string, unknown> | null
+): string {
+  if (category === "outro" || category === null) {
+    const tipo = fields?.tipo_documento;
+    if (typeof tipo === "string" && tipo.trim()) return tipo.trim();
+  }
+  return categoryLabel(category);
 }
 
 // ============================================================================

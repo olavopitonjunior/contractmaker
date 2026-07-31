@@ -10,7 +10,7 @@ import {
 } from "@/components/forms/NativeSelect";
 import { cn } from "@/lib/utils";
 import type { Assignment } from "@/lib/forms/extracted-to-form";
-import { categoryLabel } from "@/lib/forms/extracted-to-form";
+import { documentLabel } from "@/lib/forms/extracted-to-form";
 
 export type DocumentCardStatus =
   | "uploading"
@@ -150,7 +150,7 @@ export function DocumentCard({
             <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
               {doc.category && (
                 <Badge variant="secondary" className="text-[10px]">
-                  {categoryLabel(doc.category)}
+                  {documentLabel(doc.category, doc.fields)}
                 </Badge>
               )}
               {doc.confidence !== null && doc.confidence !== undefined && (
