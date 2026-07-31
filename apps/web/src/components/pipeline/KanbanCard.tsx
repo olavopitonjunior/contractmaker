@@ -47,6 +47,8 @@ export interface DealCard {
   value: number | null;
   createdAt: string;
   clientName: string | null;
+  /** Gerente responsável (nome ou e-mail) — opcional pra retrocompat de callers. */
+  managerName?: string | null;
   formStatus: string | null;
   formToken: string | null;
   hasContract: boolean;
@@ -177,12 +179,20 @@ export function KanbanCard({
               </div>
             </div>
 
-            {/* Title + cliente */}
+            {/* Title + cliente + gerente */}
             <div className="space-y-0.5">
               <p className="font-medium text-sm leading-snug">{displayTitle}</p>
               {deal.clientName && (
                 <p className="text-[11px] text-muted-foreground leading-tight">
                   Cliente: {deal.clientName}
+                </p>
+              )}
+              {deal.managerName && (
+                <p
+                  className="text-[11px] text-muted-foreground leading-tight truncate"
+                  title={`Gerente: ${deal.managerName}`}
+                >
+                  Gerente: {deal.managerName}
                 </p>
               )}
             </div>
