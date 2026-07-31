@@ -4,7 +4,7 @@ import { auth } from "@/lib/auth/auth";
 import { requirePlatform } from "@/lib/admin/gate";
 import { updateKnowledgeItem, deleteKnowledgeItem } from "@/lib/ai/knowledge";
 import { VoyageError } from "@/lib/ai/embeddings";
-import { SUPPORT_MODULE_TAGS } from "@/lib/support/constants";
+import { SUPPORT_CATEGORY, SUPPORT_MODULE_TAGS } from "@/lib/support/constants";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -31,11 +31,16 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: "Validation failed" }, { status: 422 });
   }
 
-  // Base de suporte = escopo de PLATAFORMA (orgId nulo).
-
-  const orgId = null;
+  // Base de suporte = escopo de PLATAFORMA (orgId nulo). `scopeCategory` é o
+  // que impede esta rota — gateada em `support`, não em `super_admin` — de
+  // alcançar item JURÍDICO da plataforma, que é território do /admin/knowledge.
   try {
-    await updateKnowledgeItem(params.id, orgId, { ...parsed.data, allowPlatformScope: true });
+    await updateKnowledgeItem(
+      params.id,
+      null,
+      { ...parsed.data, allowPlatformScope: true },
+      { scopeCategory: SUPPORT_CATEGORY }
+    );
     return NextResponse.json({ ok: true });
   } catch (err) {
     if (err instanceof VoyageError) {
@@ -53,9 +58,10 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
   const g = await requirePlatform(session?.user?.id, "support");
   if (!g.ok) return g.res;
 
-  // Base de suporte = escopo de PLATAFORMA (orgId nulo).
-
-  const orgId = null;
-  await deleteKnowledgeItem(params.id, orgId, { allowPlatformScope: true });
+  // Ver a nota de `scopeCategory` no PATCH acima.
+  await deleteKnowledgeItem(params.id, null, {
+    allowPlatformScope: true,
+    scopeCategory: SUPPORT_CATEGORY,
+  });
   return NextResponse.json({ ok: true });
 }

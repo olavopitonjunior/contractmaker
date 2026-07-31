@@ -162,6 +162,26 @@ describe("precedência do tenant", () => {
   });
 });
 
+describe("undefined não é escopo — as duas formas falham alto", () => {
+  // No Prisma `{ orgId: undefined }` significa SEM FILTRO: a consulta viraria
+  // "todos os tenants" em silêncio. A versão SQL falha fechada no mesmo caso;
+  // num chokepoint de isolamento, as duas têm que falhar igual.
+  const semEscopo = undefined as unknown as string | null;
+
+  it("knowledgeScopeWhere recusa undefined", () => {
+    expect(() => knowledgeScopeWhere(semEscopo)).toThrow(/undefined/);
+  });
+
+  it("knowledgeScopeSql recusa undefined", () => {
+    expect(() => knowledgeScopeSql(semEscopo)).toThrow(/undefined/);
+  });
+
+  it("null continua válido — é a plataforma, dita de propósito", () => {
+    expect(() => knowledgeScopeWhere(null)).not.toThrow();
+    expect(() => knowledgeScopeSql(null)).not.toThrow();
+  });
+});
+
 describe("guard de escrita", () => {
   it("recusa orgId nulo sem opt-in explícito", () => {
     expect(() => assertScopeAllowed(null, undefined, "create")).toThrow(

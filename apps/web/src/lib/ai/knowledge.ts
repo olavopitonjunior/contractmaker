@@ -115,6 +115,24 @@ export function assertScopeAllowed(
   }
 }
 
+/**
+ * Restringe a escrita a UMA categoria.
+ *
+ * `orgId` sozinho parou de ser escopo suficiente quando `orgId = NULL` virou
+ * "a base que todos leem": as rotas de /admin/support/* são gateadas em
+ * `PlatformRole = "support"` e escrevem com orgId nulo, então sem esta trava
+ * elas alcançariam também `legislation`/`clause`/`rule` — justamente o que
+ * /api/admin/knowledge reservou ao `super_admin`. Quem escreve numa base
+ * específica declara qual é.
+ */
+export interface KnowledgeScopeGuard {
+  scopeCategory?: KnowledgeCategory;
+}
+
+function scopeCategoryWhere(opts: KnowledgeScopeGuard) {
+  return opts.scopeCategory ? { category: opts.scopeCategory } : {};
+}
+
 export interface KnowledgeItemRow {
   id: string;
   orgId: string | null;
@@ -324,14 +342,15 @@ export async function updateKnowledgeItem(
   orgId: string | null,
   patch: Partial<Omit<CreateKnowledgeItemInput, "orgId" | "category">> & {
     allowPlatformScope?: boolean;
-  }
+  },
+  opts: KnowledgeScopeGuard = {}
 ): Promise<void> {
   assertScopeAllowed(orgId, patch.allowPlatformScope, "update");
   // `orgId` aqui é o do USUÁRIO, não o da linha — é ele que impede escrita
   // cross-org, e agora também impede o tenant de editar item de plataforma
   // (`orgId = "abc"` não casa com a linha `orgId = NULL`).
   const current = await prisma.knowledgeItem.findFirst({
-    where: { id, orgId },
+    where: { id, orgId, ...scopeCategoryWhere(opts) },
   });
   if (!current) throw new Error("Item não encontrado");
 
@@ -384,8 +403,10 @@ export async function updateKnowledgeItem(
 export async function deleteKnowledgeItem(
   id: string,
   orgId: string | null,
-  opts: { allowPlatformScope?: boolean } = {}
+  opts: KnowledgeScopeGuard & { allowPlatformScope?: boolean } = {}
 ): Promise<void> {
   assertScopeAllowed(orgId, opts.allowPlatformScope, "delete");
-  await prisma.knowledgeItem.deleteMany({ where: { id, orgId } });
+  await prisma.knowledgeItem.deleteMany({
+    where: { id, orgId, ...scopeCategoryWhere(opts) },
+  });
 }

@@ -11,8 +11,9 @@
  * filtro) vaza conteúdo de um tenant pra outro. Por isso as duas formas moram
  * no mesmo arquivo e são testadas juntas.
  *
- * Escrita NÃO passa por aqui: continua sempre org-scoped, e linha de plataforma
- * exige super_admin (ver `assertPlatformWriteAllowed`).
+ * Escrita NÃO passa por aqui: continua sempre org-scoped, linha de plataforma
+ * exige opt-in (`assertScopeAllowed`, em `knowledge.ts`) e a permissão em si é
+ * das rotas (`requirePlatform`).
  */
 
 import type { AgentKey } from "./agents/registry";
@@ -47,6 +48,24 @@ function nonEmpty(v: string[] | undefined | null): string[] | null {
 }
 
 /**
+ * `undefined` não é escopo — e no Prisma ele falha ABERTO.
+ *
+ * `{ orgId: undefined }` significa "sem filtro" pro query builder, então um
+ * orgId que chegasse undefined (sessão meio resolvida, destructuring errado)
+ * transformaria a consulta em "todos os tenants" em silêncio. A versão SQL
+ * falha fechada no mesmo cenário; num chokepoint de isolamento as duas formas
+ * têm que falhar do mesmo jeito, e alto. `null` segue válido: é a plataforma,
+ * dito de propósito.
+ */
+function assertScopeArg(orgId: string | null): void {
+  if (orgId === undefined) {
+    throw new Error(
+      "[knowledge-scope] orgId undefined — use null pra base de plataforma. undefined viraria 'sem filtro' no Prisma."
+    );
+  }
+}
+
+/**
  * Fragmento `where` do Prisma com o escopo de leitura.
  *
  * @param orgId `null` = consulta SÓ a plataforma (é o que o /admin usa).
@@ -60,6 +79,7 @@ export function knowledgeScopeWhere(
   orgId: string | null,
   opts: KnowledgeScopeOptions = {}
 ): Record<string, unknown> {
+  assertScopeArg(orgId);
   // Dentro do AND, não solto no objeto: um `category` que o caller espalhe ao
   // lado do resultado sobrescreveria uma chave de mesmo nome no nível de cima.
   const and: Record<string, unknown>[] = [
@@ -110,6 +130,7 @@ export function knowledgeScopeSql(
   opts: KnowledgeScopeOptions = {},
   startParamIndex = 1
 ): ScopeSql {
+  assertScopeArg(orgId);
   const parts: string[] = [`category <> ALL($${startParamIndex}::text[])`];
   const params: unknown[] = [NAO_JURIDICAS];
   let i = startParamIndex + 1;
