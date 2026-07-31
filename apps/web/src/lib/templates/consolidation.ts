@@ -72,12 +72,37 @@ export interface ConsolidationDoc {
   family?: string | null;
 }
 
+/**
+ * Piso de tamanho da VISÃO DE COMPARAÇÃO (só o agrupamento; o plano usa tudo).
+ *
+ * Medido no corpus real da Ativa (4 contratos residenciais preenchidos, fixture
+ * em `__tests__/fixtures/ativa-residencial/`): ~20 a 25 dos ~60 parágrafos de
+ * cada arquivo são o BLOCO DE ASSINATURAS e as linhas soltas de qualificação —
+ * "CPF 111.222.333-96", "RG 12.345.678-9 SSP/SP", o nome de cada signatário numa
+ * linha. Isso é DADO DE INSTÂNCIA: muda a cada contrato (4 signatários num
+ * arquivo, 5 no outro; "CPF 111…" num, "CPF sob nº. 111…" no outro) e não diz
+ * nada sobre os arquivos serem ou não o mesmo modelo — mas, contado como
+ * parágrafo, afundava a similaridade justamente do arquivo mais diferente.
+ *
+ * Com o piso em 40 caracteres, a pior similaridade par-a-par do corpus sobe de
+ * 0.574 pra 0.709 e o *spread* fecha (o outlier deixa de existir). Cláusulas
+ * reais têm centenas de caracteres; nada de conteúdo é perdido.
+ */
+export const COMPARISON_MIN_CHARS = 40;
+
 export interface NormalizedDoc {
   id: string;
   name: string;
   family: string | null;
+  /** Parágrafos íntegros — é o que o PLANO usa (o texto vai pro replaceAllText). */
   paragraphs: string[];
+  /** Chaves de todos os parágrafos, na ordem de `paragraphs`. */
   keys: string[];
+  /**
+   * Chaves da VISÃO DE COMPARAÇÃO: só os parágrafos de conteúdo. É o que
+   * `similarity`/`containment`/`groupSimilarDocs` usam — ver COMPARISON_MIN_CHARS.
+   */
+  compareKeys: string[];
 }
 
 export function normalizeDoc(doc: ConsolidationDoc): NormalizedDoc {
@@ -88,6 +113,9 @@ export function normalizeDoc(doc: ConsolidationDoc): NormalizedDoc {
     family: doc.family ?? null,
     paragraphs,
     keys: paragraphs.map(paragraphKey),
+    compareKeys: paragraphs
+      .filter((p) => p.length >= COMPARISON_MIN_CHARS)
+      .map(paragraphKey),
   };
 }
 
@@ -141,13 +169,27 @@ export function lcsKeys(a: readonly string[], b: readonly string[]): string[] {
 }
 
 /**
- * Similaridade estrutural de dois documentos: 2·|LCS| / (|A|+|B|) — 1 = idênticos
- * em parágrafos, 0 = nada em comum. É a métrica do agrupamento.
+ * Similaridade estrutural (coeficiente de Dice): 2·|LCS| / (|A|+|B|) — 1 =
+ * idênticos em parágrafos, 0 = nada em comum. Simétrica e severa com qualquer
+ * diferença de tamanho.
  */
 export function similarity(a: NormalizedDoc, b: NormalizedDoc): number {
-  const total = a.keys.length + b.keys.length;
+  const total = a.compareKeys.length + b.compareKeys.length;
   if (total === 0) return 0;
-  return (2 * lcsKeys(a.keys, b.keys).length) / total;
+  return (2 * lcsKeys(a.compareKeys, b.compareKeys).length) / total;
+}
+
+/**
+ * Contenção: |LCS| / min(|A|,|B|) — "o quanto do documento MENOR está dentro do
+ * maior". É a métrica certa pro caso "tronco comum + bloco opcional grande":
+ * o contrato com o rider da seguradora (6 cláusulas a mais) contém o tronco
+ * inteiro dos outros, mas o Dice o penaliza pela adição e ele fica de fora do
+ * grupo — que é exatamente o modelo que o operador MAIS precisa consolidar.
+ */
+export function containment(a: NormalizedDoc, b: NormalizedDoc): number {
+  const smaller = Math.min(a.compareKeys.length, b.compareKeys.length);
+  if (smaller === 0) return 0;
+  return lcsKeys(a.compareKeys, b.compareKeys).length / smaller;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -162,30 +204,74 @@ export function similarity(a: NormalizedDoc, b: NormalizedDoc): number {
  */
 export const DEFAULT_SIMILARITY_THRESHOLD = 0.75;
 
+/**
+ * Contenção mínima pro critério alternativo. Mais alto que o de Dice porque
+ * contenção é uma métrica mais frouxa por natureza — ela ignora tudo que o
+ * documento maior tem a mais.
+ */
+export const DEFAULT_CONTAINMENT_THRESHOLD = 0.85;
+
+/**
+ * Guarda de tamanho relativo do critério de contenção: o menor documento tem de
+ * ter ao menos metade dos parágrafos do maior.
+ *
+ * Sem ela a contenção degenera — um anexo de 5 parágrafos está 100% contido num
+ * contrato de 60 e viraria "variante" dele. Com ela, "contido" só vale entre
+ * documentos comparáveis, que é o caso do tronco + rider (no corpus da Ativa a
+ * razão do par mais desigual é 0.85).
+ */
+export const MIN_SIZE_RATIO = 0.5;
+
+/** Qual critério sustentou o grupo (ver `groupSimilarDocs`). */
+export type GroupCriterion = "dice" | "containment";
+
 export interface ConsolidationGroup {
   /** Estável: id do 1º membro na ordem de entrada. */
   id: string;
   memberIds: string[];
-  /** Menor similaridade par-a-par observada dentro do grupo (o elo mais fraco). */
+  /** Menor Dice par-a-par dentro do grupo (o elo mais fraco) — é o "% idêntico". */
   minSimilarity: number;
+  /** Menor contenção par-a-par dentro do grupo. */
+  minContainment: number;
+  /**
+   * `"dice"` quando TODAS as ligações do grupo passaram pela similaridade
+   * clássica; `"containment"` quando ao menos uma só existe porque um documento
+   * está contido no outro (o caso "tronco + rider"). Serve de diagnóstico: um
+   * grupo formado só por contenção é o que mais merece o olho do operador.
+   */
+  linkedBy: GroupCriterion;
 }
 
 /**
  * Agrupa documentos quase idênticos. Clustering guloso por ligação simples
- * (union-find): A junta B se `sim(A,B) >= threshold`, e o grupo cresce por
- * transitividade — três variantes de garantia costumam formar um triângulo
- * completo, mas basta a corrente pra elas ficarem juntas.
+ * (union-find), com CRITÉRIO DUPLO por par:
+ *
+ *   Dice ≥ 0.75            — "são quase o mesmo texto"; ou
+ *   contenção ≥ 0.85       — "o menor está quase inteiro dentro do maior",
+ *                            desde que os tamanhos sejam comparáveis
+ *                            (`MIN_SIZE_RATIO`).
+ *
+ * O segundo critério existe por um caso REAL do corpus da Ativa: o contrato com
+ * o rider da seguradora traz 6 cláusulas a mais que os irmãos, e o Dice — que
+ * pune adição — o deixava de fora do próprio grupo. Justo o modelo que mais
+ * precisa ser consolidado.
+ *
+ * O grupo cresce por transitividade: três variantes de garantia costumam formar
+ * um triângulo completo, mas basta a corrente pra ficarem juntas.
  *
  * Documentos de FAMÍLIAS diferentes nunca agrupam (uma proposta de locação e um
- * contrato de locação compartilham preâmbulo, mas não são a mesma coisa).
+ * contrato de locação compartilham preâmbulo, mas não são a mesma coisa) — é
+ * essa guarda que impede a contenção de casar documentos de naturezas distintas.
  *
  * Grupos de 1 membro são omitidos: eles seguem o caminho simples.
  */
 export function groupSimilarDocs(
   docs: NormalizedDoc[],
-  opts?: { threshold?: number }
+  opts?: { threshold?: number; containmentThreshold?: number }
 ): ConsolidationGroup[] {
   const threshold = opts?.threshold ?? DEFAULT_SIMILARITY_THRESHOLD;
+  const containmentThreshold =
+    opts?.containmentThreshold ?? DEFAULT_CONTAINMENT_THRESHOLD;
   const parent = docs.map((_, i) => i);
   const find = (i: number): number => {
     while (parent[i] !== i) {
@@ -200,13 +286,37 @@ export function groupSimilarDocs(
     if (ra !== rb) parent[Math.max(ra, rb)] = Math.min(ra, rb);
   };
 
-  const pairSim = new Map<string, number>();
+  interface PairScore {
+    dice: number;
+    containment: number;
+    linked: GroupCriterion | null;
+  }
+  const pairs = new Map<string, PairScore>();
+
   for (let i = 0; i < docs.length; i++) {
     for (let j = i + 1; j < docs.length; j++) {
       if ((docs[i].family ?? null) !== (docs[j].family ?? null)) continue;
-      const s = similarity(docs[i], docs[j]);
-      pairSim.set(`${i}:${j}`, s);
-      if (s >= threshold) union(i, j);
+
+      const a = docs[i].compareKeys;
+      const b = docs[j].compareKeys;
+      const lcs = lcsKeys(a, b).length;
+      const total = a.length + b.length;
+      const smaller = Math.min(a.length, b.length);
+      const larger = Math.max(a.length, b.length);
+
+      const dice = total === 0 ? 0 : (2 * lcs) / total;
+      const cont = smaller === 0 ? 0 : lcs / smaller;
+      const sizeOk = larger > 0 && smaller / larger >= MIN_SIZE_RATIO;
+
+      const linked: GroupCriterion | null =
+        dice >= threshold
+          ? "dice"
+          : sizeOk && cont >= containmentThreshold
+            ? "containment"
+            : null;
+
+      pairs.set(`${i}:${j}`, { dice, containment: cont, linked });
+      if (linked) union(i, j);
     }
   }
 
@@ -221,17 +331,26 @@ export function groupSimilarDocs(
   const groups: ConsolidationGroup[] = [];
   for (const members of byRoot.values()) {
     if (members.length < 2) continue;
-    let min = 1;
+    let minDice = 1;
+    let minCont = 1;
+    let linkedBy: GroupCriterion = "dice";
     for (let a = 0; a < members.length; a++) {
       for (let b = a + 1; b < members.length; b++) {
         const [i, j] = [members[a], members[b]].sort((x, y) => x - y);
-        min = Math.min(min, pairSim.get(`${i}:${j}`) ?? 0);
+        const score = pairs.get(`${i}:${j}`);
+        minDice = Math.min(minDice, score?.dice ?? 0);
+        minCont = Math.min(minCont, score?.containment ?? 0);
+        // Basta UMA ligação que só existiu por contenção pra o grupo ser
+        // marcado assim — é o sinal de "tem um irmão com bloco a mais aqui".
+        if (score?.linked === "containment") linkedBy = "containment";
       }
     }
     groups.push({
       id: docs[members[0]].id,
       memberIds: members.map((i) => docs[i].id),
-      minSimilarity: Number(min.toFixed(4)),
+      minSimilarity: Number(minDice.toFixed(4)),
+      minContainment: Number(minCont.toFixed(4)),
+      linkedBy,
     });
   }
   // Ordem de entrada do 1º membro — a UI mostra os grupos na ordem da fila.

@@ -45,6 +45,7 @@ import {
   normalizeDoc,
   primaryDifferenceRow,
   suggestGarantiaTipo,
+  type ConsolidationGroup,
   type ConsolidationPlan,
   type DifferenceRow,
 } from "@/lib/templates/consolidation";
@@ -93,10 +94,8 @@ interface GroupDecision {
   values: Record<string, string>;
 }
 
-interface GroupView {
-  id: string;
-  memberIds: string[];
-  minSimilarity: number;
+/** O grupo cru + o que a tela precisa pra mostrar e consolidar. */
+interface GroupView extends ConsolidationGroup {
   plan: ConsolidationPlan;
   matrix: DifferenceRow[];
   primary: DifferenceRow | null;
@@ -813,7 +812,13 @@ function GroupCard({
   const members = group.memberIds
     .map((id) => entries.find((e) => e.id === id))
     .filter((e): e is Entry => Boolean(e));
-  const pct = Math.round(group.minSimilarity * 100);
+  // Quando o grupo se formou por CONTENÇÃO, o "% idêntico" (Dice) subestima a
+  // parecença — é o caso "um dos arquivos tem um bloco grande a mais" (rider de
+  // seguradora, por exemplo). Contar a mesma história com o número errado faria
+  // o operador desconfiar de um agrupamento correto.
+  const pct = Math.round(
+    (group.linkedBy === "containment" ? group.minContainment : group.minSimilarity) * 100
+  );
   const otherRows = group.matrix.filter(
     (r) => r.anchorIndex !== group.primary?.anchorIndex
   );
@@ -827,8 +832,11 @@ function GroupCard({
             Estes {members.length} arquivos parecem o mesmo documento
           </p>
           <p className="text-xs text-muted-foreground">
-            {pct}% do texto é idêntico. O que muda é a cláusula abaixo — dá pra
-            juntar tudo num modelo só, com a cláusula escolhida pelo formulário.
+            {group.linkedBy === "containment"
+              ? `${pct}% do menor está inteiro dentro do maior — um deles traz um bloco a mais.`
+              : `${pct}% do texto é idêntico.`}{" "}
+            O que muda é a cláusula abaixo — dá pra juntar tudo num modelo só,
+            com a cláusula escolhida pelo formulário.
           </p>
         </div>
         <label className="flex shrink-0 items-center gap-1.5 text-xs">
