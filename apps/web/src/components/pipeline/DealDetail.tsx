@@ -21,6 +21,7 @@ import { isFormFinished } from "@/lib/forms/form-status";
 import { formPublicPath } from "@/lib/forms/form-url";
 import type { SelectGroup } from "@/components/forms/NativeSelect";
 import type { Assignment, DocumentKind } from "@/lib/forms/extracted-to-form";
+import { buildAssignmentOptions } from "@/components/forms/steps/build-assignment-options";
 import {
   buildNegotiationSummary,
   type SummarySection,
@@ -1712,9 +1713,9 @@ interface FallbackAttachment {
 }
 
 /**
- * Agrupamento de docs na aba Documentos. Cônjuges e representantes são
- * exibidos junto com a parte titular (vendedor/comprador) — não criam
- * grupo próprio na visualização do deal pra evitar fragmentação.
+ * Agrupamento de docs na aba Documentos. Cônjuges, representantes e
+ * procuradores são exibidos junto com a parte titular (vendedor/comprador) —
+ * não criam grupo próprio na visualização do deal pra evitar fragmentação.
  */
 type DocGroupKind = "vendedor" | "comprador" | "imovel" | "outro";
 
@@ -1737,17 +1738,36 @@ const SIGNED_CATS = new Set([
 ]);
 
 function groupKindOf(kind: DocumentKind): DocGroupKind {
-  if (kind === "vendedor" || kind === "conjuge_vendedor" || kind === "representante_vendedor") {
+  if (
+    kind === "vendedor" ||
+    kind === "conjuge_vendedor" ||
+    kind === "representante_vendedor" ||
+    kind === "procurador_vendedor"
+  ) {
     return "vendedor";
   }
-  if (kind === "comprador" || kind === "conjuge_comprador" || kind === "representante_comprador") {
+  if (
+    kind === "comprador" ||
+    kind === "conjuge_comprador" ||
+    kind === "representante_comprador" ||
+    kind === "procurador_comprador"
+  ) {
     return "comprador";
   }
   if (kind === "imovel") return "imovel";
   return "outro";
 }
 
-const PERSON_CATS = new Set(["rg", "cpf", "cnh", "procuracao", "comprovante_residencia"]);
+// Certidão de casamento entrou aqui em 2026-07-31: é doc de pessoa (qualifica
+// o casal), e ficar de fora fazia o fallback jogá-la em "Outros".
+const PERSON_CATS = new Set([
+  "rg",
+  "cpf",
+  "cnh",
+  "procuracao",
+  "comprovante_residencia",
+  "certidao_casamento",
+]);
 const PROPERTY_CATS = new Set(["matricula", "iptu", "escritura"]);
 
 function resolveKind(
@@ -2046,33 +2066,22 @@ function DocumentsTab({
 
   const kinds: DocGroupKind[] = ["vendedor", "comprador", "imovel", "outro"];
 
-  // Opções do seletor "Mover para…" (pastas = partes/imóvel/outros). Valor no
-  // formato `${kind}:${index}` que o DocumentCard codifica/decodifica.
-  const assignmentOptions: SelectGroup[] = [
-    {
-      label: "Vendedores",
-      options: vendedores.map((v, i) => ({
-        value: `vendedor:${i}`,
-        label: `Vendedor: ${v.nome || v.razao_social || `Parte ${i + 1}`}`,
-      })),
-    },
-    {
-      label: "Compradores",
-      options: compradores.map((c, i) => ({
-        value: `comprador:${i}`,
-        label: `Comprador: ${c.nome || c.razao_social || `Parte ${i + 1}`}`,
-      })),
-    },
-    {
-      label: "Imóveis",
-      options: imoveis.map((im, i) => ({
-        value: `imovel:${i}`,
-        label: `Imóvel ${i + 1}${im.cidade ? ` — ${im.cidade}` : ""}`,
-      })),
-    },
-    { label: "Outros", options: [{ value: "outro:0", label: "Outros" }] },
-  ].filter((g) => g.options.length > 0);
+  // Opções do seletor "Mover para…" (pastas = partes/sub-slots/imóvel/outros).
+  // Valor no formato `${kind}:${index}` que o DocumentCard codifica/decodifica.
+  // Mesmo builder da etapa 0 do formulário (paridade com o lado do cliente):
+  // antes daqui o admin só via vendedor/comprador/imóvel/outro e não conseguia
+  // mover um doc pro cônjuge, procurador ou representante de uma parte.
+  const assignmentOptions: SelectGroup[] = buildAssignmentOptions(
+    { vendedores, compradores, imoveis },
+    kinds.flatMap((k) => groups[k])
+  );
 
+  /**
+   * PATCH só grava o `assignment` — reatribuir aqui NÃO limpa o slot antigo do
+   * `dataJson` (diferente da etapa 0, que roda o D7). É deliberado: no admin o
+   * autofill é ação explícita ("Aplicar"), e mexer no dataJson por baixo de uma
+   * reatribuição visual apagaria dado que o operador pode ter corrigido à mão.
+   */
   const handleReassign = async (id: string, value: string) => {
     const [kind, idxStr] = value.split(":");
     const index = Number.parseInt(idxStr, 10) || 0;

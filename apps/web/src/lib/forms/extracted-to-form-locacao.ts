@@ -3,8 +3,10 @@ import {
   PERSON_CATEGORIES,
   PROPERTY_CATEGORIES,
   coerce,
+  inferEstadoCivilFromRegime,
   isUncatalogedPersonDoc,
   parseEndereco,
+  pickSpouseFromCertidao,
   sanitizeCpf,
   type Assignment,
   type DocumentKind,
@@ -19,11 +21,15 @@ import {
  * SINGULAR, sem índice). Reusa as categorias e helpers de sanitização de lá.
  *
  * Diferenças deliberadas vs venda:
- * - Partes de locação não têm subobjeto `conjuge` — os ramos de certidão de
- *   casamento/averbação não rodam.
+ * - Locação NÃO tem subobjeto `procurador` no schema — procuração só preenche
+ *   o representante (PJ) ou o titular.
  * - `ficha_resumo` declara papéis de venda (vendedor/comprador) — fora do
  *   escopo aqui; docs ficha caem em "outro".
  * - `area_total` do OCR vira `imovel.area` (number no schema de locação).
+ *
+ * O cônjuge EXISTE em locação desde 2026-07-24 (outorga uxória, ver
+ * `validation-locacao.ts`); os kinds `conjuge_*` de locação foram ligados aqui
+ * em 2026-07-31 — antes disso o OCR não tinha destino pra eles.
  */
 
 const ADDRESS_FIELDS = new Set([
@@ -69,14 +75,38 @@ export type LocacaoPartyKind =
   | "representante_locador"
   | "representante_locatario";
 
-/** Kinds de LOCAÇÃO cujo basePath é uma pessoa (parte, fiador ou representante). */
+/**
+ * Kinds de LOCAÇÃO cujo basePath é uma pessoa (parte, fiador, representante ou
+ * cônjuge).
+ */
 const PERSON_KINDS_LOCACAO = new Set<DocumentKind>([
   "locador",
   "locatario",
   "fiador",
   "representante_locador",
   "representante_locatario",
+  "conjuge_locador",
+  "conjuge_locatario",
+  "conjuge_fiador",
 ]);
+
+const CONJUGE_KINDS_LOCACAO = new Set<DocumentKind>([
+  "conjuge_locador",
+  "conjuge_locatario",
+  "conjuge_fiador",
+]);
+
+const REPRESENTANTE_KINDS_LOCACAO = new Set<DocumentKind>([
+  "representante_locador",
+  "representante_locatario",
+]);
+
+/**
+ * O `representante` de locação é bem mais pobre que o de venda — só
+ * nome/cpf/email/mobile_phone (`validation-locacao.ts`). Sem esta trava o
+ * autofill gravava rg/data_nascimento/endereço que nenhuma tela lê.
+ */
+const REPRESENTANTE_ALLOWED_FIELDS_LOCACAO = new Set(["nome", "cpf"]);
 
 /**
  * Resolve o basePath de aplicação dos campos pelo kind do doc. Fiador vive em
@@ -94,6 +124,13 @@ export function resolveLocacaoBasePath(assignment: Assignment): string | null {
       return `locadores.${assignment.index}.representante`;
     case "representante_locatario":
       return `locatarios.${assignment.index}.representante`;
+    case "conjuge_locador":
+      return `locadores.${assignment.index}.conjuge`;
+    case "conjuge_locatario":
+      return `locatarios.${assignment.index}.conjuge`;
+    // Fiador não é indexado — o cônjuge dele também não.
+    case "conjuge_fiador":
+      return "garantia.fiador.conjuge";
     case "imovel":
       return "imovel";
     default:
@@ -123,9 +160,28 @@ export function mapExtractedToLocacaoForm(
     (PERSON_KINDS_LOCACAO.has(assignment.kind) &&
       isUncatalogedPersonDoc(category, fields));
   const isProperty = PROPERTY_CATEGORIES.has(category);
+  const isConjuge = CONJUGE_KINDS_LOCACAO.has(assignment.kind);
+  const isRepresentante = REPRESENTANTE_KINDS_LOCACAO.has(assignment.kind);
   let filled = 0;
 
+  // Espelha a venda: com "endereço igual ao do titular" ligado (default true) o
+  // endereço do cônjuge não é preenchido — o helper lê do titular.
+  let skipAddressForConjuge = false;
+  if (isConjuge) {
+    skipAddressForConjuge =
+      form.getValues(`${basePath}.endereco_igual_ao_titular`) !== false;
+  }
+
+  const parentPathOf = (suffix: string): string | null =>
+    basePath.endsWith(`.${suffix}`)
+      ? basePath.slice(0, -(suffix.length + 1))
+      : null;
+
   const applyField = (formField: string, raw: unknown) => {
+    if (skipAddressForConjuge && ADDRESS_FIELDS.has(formField)) return;
+    if (isRepresentante && !REPRESENTANTE_ALLOWED_FIELDS_LOCACAO.has(formField)) {
+      return;
+    }
     let value = coerce(formField, raw);
     // `area` é number no schema de locação; OCR devolve string.
     if (formField === "area") {
@@ -151,6 +207,42 @@ export function mapExtractedToLocacaoForm(
       const parsed = parseEndereco(enderecoRaw);
       if (parsed.rua) applyField("endereco", parsed.rua);
       if (parsed.numero) applyField("numero", parsed.numero);
+    }
+
+    // Certidão de casamento atribuída ao cônjuge: escolhe qual dos dois
+    // nubentes é o cônjuge do slot comparando com o titular pai (D1, helper
+    // compartilhado com a venda).
+    if (isConjuge && category === "certidao_casamento") {
+      const parentPath = parentPathOf("conjuge");
+      const parent = parentPath
+        ? {
+            nome: form.getValues(`${parentPath}.nome`),
+            cpf: form.getValues(`${parentPath}.cpf`),
+          }
+        : null;
+      const spouse = pickSpouseFromCertidao(fields, parent);
+      if (spouse.nome) applyField("nome", spouse.nome);
+      if (spouse.cpf) applyField("cpf", spouse.cpf);
+    }
+
+    // D2 — estado civil colateral do pai (só se vazio). Sem isso os campos
+    // aplicados ficam invisíveis: a UI do cônjuge só renderiza pra parte casada.
+    if (isConjuge) {
+      const parentPath = parentPathOf("conjuge");
+      if (parentPath) {
+        const current = form.getValues(`${parentPath}.estado_civil`);
+        if (current === undefined || current === null || current === "") {
+          const inferred =
+            (category === "certidao_casamento"
+              ? inferEstadoCivilFromRegime(fields.regime_bens)
+              : null) ?? "Casado(a)";
+          form.setValue(`${parentPath}.estado_civil`, inferred as never, {
+            shouldDirty: true,
+            shouldTouch: true,
+          });
+          filled += 1;
+        }
+      }
     }
   }
 
@@ -231,6 +323,59 @@ function matchRepresentanteIndex(
   return null;
 }
 
+/** Match contra parte.conjuge.cpf/nome em locadores ou locatários. */
+function matchConjugeIndex(
+  list: Array<Record<string, unknown>> | undefined,
+  fields: Record<string, unknown>
+): number | null {
+  if (!list) return null;
+  const extractedCpf = sanitizeCpf(fields.cpf_numero);
+  const extractedNome =
+    typeof fields.nome_completo === "string"
+      ? fields.nome_completo.trim().toLowerCase()
+      : null;
+  for (let i = 0; i < list.length; i++) {
+    const c = (list[i]?.conjuge ?? {}) as Record<string, unknown>;
+    const cCpf = sanitizeCpf(c.cpf);
+    if (extractedCpf && cCpf && extractedCpf === cCpf) return i;
+    if (
+      extractedNome &&
+      typeof c.nome === "string" &&
+      c.nome.trim().toLowerCase() === extractedNome
+    ) {
+      return i;
+    }
+  }
+  return null;
+}
+
+/** Match contra garantia.fiador.conjuge (fiador não é indexado). */
+function matchConjugeFiador(
+  garantia: LocacaoFormSnapshot["garantia"],
+  fields: Record<string, unknown>
+): boolean {
+  const conjuge = (garantia?.fiador?.conjuge ?? null) as Record<
+    string,
+    unknown
+  > | null;
+  if (!conjuge) return false;
+  const extractedCpf = sanitizeCpf(fields.cpf_numero);
+  const extractedNome =
+    typeof fields.nome_completo === "string"
+      ? fields.nome_completo.trim().toLowerCase()
+      : null;
+  const cCpf = sanitizeCpf(conjuge.cpf);
+  if (extractedCpf && cCpf && extractedCpf === cCpf) return true;
+  if (
+    extractedNome &&
+    typeof conjuge.nome === "string" &&
+    conjuge.nome.trim().toLowerCase() === extractedNome
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function matchFiador(
   garantia: LocacaoFormSnapshot["garantia"],
   fields: Record<string, unknown>
@@ -259,9 +404,10 @@ function matchFiador(
  *   1. doc de imóvel (matrícula/IPTU/escritura) → imovel
  *   2. match titular (CPF/nome) em locadores → locatarios
  *   3. match fiador (garantia.fiador)
- *   4. match representante de parte PJ
- *   5. sibling identity — mesma pessoa em outro doc desta sessão
- *   6. fallback "outro" — usuário escolhe no dropdown
+ *   4. match cônjuge (locadores/locatarios/fiador) — espelha a venda
+ *   5. match representante de parte PJ
+ *   6. sibling identity — mesma pessoa em outro doc desta sessão
+ *   7. fallback "outro" — usuário escolhe no dropdown
  */
 export function suggestLocacaoAssignment(
   category: string | null,
@@ -291,6 +437,16 @@ export function suggestLocacaoAssignment(
 
   if (matchFiador(snapshot.garantia, fields)) {
     return { kind: "fiador", index: 0 };
+  }
+
+  const conjugeLocadorMatch = matchConjugeIndex(snapshot.locadores, fields);
+  if (conjugeLocadorMatch !== null)
+    return { kind: "conjuge_locador", index: conjugeLocadorMatch };
+  const conjugeLocatarioMatch = matchConjugeIndex(snapshot.locatarios, fields);
+  if (conjugeLocatarioMatch !== null)
+    return { kind: "conjuge_locatario", index: conjugeLocatarioMatch };
+  if (matchConjugeFiador(snapshot.garantia, fields)) {
+    return { kind: "conjuge_fiador", index: 0 };
   }
 
   const repLocadorMatch = matchRepresentanteIndex(snapshot.locadores, fields);
@@ -339,6 +495,12 @@ export function locacaoSlotLabel(
       return `Representante do locador ${assignment.index + 1}`;
     case "representante_locatario":
       return `Representante do locatário ${assignment.index + 1}`;
+    case "conjuge_locador":
+      return `Cônjuge do locador ${assignment.index + 1}`;
+    case "conjuge_locatario":
+      return `Cônjuge do locatário ${assignment.index + 1}`;
+    case "conjuge_fiador":
+      return "Cônjuge do fiador";
     case "imovel":
       return "Imóvel";
     default:

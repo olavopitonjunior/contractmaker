@@ -20,6 +20,11 @@ const KIND_LABELS: Partial<Record<DocumentKind, string>> = {
   locatario: "Locatário",
   fiador: "Fiador",
   imovel: "Imóvel",
+  conjuge_locador: "Cônjuge do locador",
+  conjuge_locatario: "Cônjuge do locatário",
+  conjuge_fiador: "Cônjuge do fiador",
+  representante_locador: "Representante do locador",
+  representante_locatario: "Representante do locatário",
 };
 
 function nameOf(p: Record<string, unknown> | undefined): string | null {
@@ -27,7 +32,7 @@ function nameOf(p: Record<string, unknown> | undefined): string | null {
   return typeof nome === "string" && nome.trim() ? nome.trim() : null;
 }
 
-function buildLocacaoOptions(
+export function buildLocacaoOptions(
   rawSnapshot: Record<string, unknown>,
   docs: DocumentCardData[]
 ): SelectGroup[] {
@@ -60,7 +65,11 @@ function buildLocacaoOptions(
   ];
 
   // Fiador: só quando a garantia é por fiador (ou já há doc atribuído a ele).
-  if (snapshot.garantia?.tipo === "fiador" || maxAssigned("fiador") >= 0) {
+  const hasFiador =
+    snapshot.garantia?.tipo === "fiador" ||
+    maxAssigned("fiador") >= 0 ||
+    maxAssigned("conjuge_fiador") >= 0;
+  if (hasFiador) {
     const fiadorName = nameOf(snapshot.garantia?.fiador);
     groups.push({
       label: "Fiador",
@@ -68,6 +77,47 @@ function buildLocacaoOptions(
         { value: "fiador:0", label: fiadorName ? `Fiador — ${fiadorName}` : "Fiador" },
       ],
     });
+  }
+
+  // Cônjuges: oferecidos pra todo pai que não é PJ. NÃO exigimos
+  // `estado_civil === "Casado(a)"` — a etapa 0 vem ANTES das etapas de parte,
+  // então o estado civil ainda está vazio e o grupo sumiria justo quando é
+  // preciso. Sub-slot não tem "+ Novo" (deriva do pai).
+  const conjugeOptions: Array<{ value: string; label: string }> = [];
+  const pushConjuges = (
+    kind: "conjuge_locador" | "conjuge_locatario",
+    parentKind: "locador" | "locatario",
+    list: Array<Record<string, unknown>> | undefined,
+    parentLabel: string
+  ) => {
+    const count = Math.max(
+      1,
+      list?.length ?? 1,
+      maxAssigned(parentKind) + 1,
+      maxAssigned(kind) + 1
+    );
+    for (let i = 0; i < count; i++) {
+      const parent = list?.[i];
+      if (parent?.tipo_pessoa === "juridica") continue;
+      const parentName = nameOf(parent);
+      const base = `Cônjuge de ${parentLabel} ${i + 1}`;
+      conjugeOptions.push({
+        value: `${kind}:${i}`,
+        label: parentName ? `${base} — ${parentName}` : base,
+      });
+    }
+  };
+  pushConjuges("conjuge_locador", "locador", snapshot.locadores, "Locador");
+  pushConjuges("conjuge_locatario", "locatario", snapshot.locatarios, "Locatário");
+  if (hasFiador) {
+    const fiadorName = nameOf(snapshot.garantia?.fiador);
+    conjugeOptions.push({
+      value: "conjuge_fiador:0",
+      label: fiadorName ? `Cônjuge do fiador — ${fiadorName}` : "Cônjuge do fiador",
+    });
+  }
+  if (conjugeOptions.length > 0) {
+    groups.push({ label: "Cônjuges", options: conjugeOptions });
   }
 
   // Representantes: só pra partes PJ já cadastradas.
@@ -110,14 +160,22 @@ export const locacaoDocAdapter: DocumentosStepAdapter = {
     mapExtractedToLocacaoForm(extraction, assignment, form, options),
   buildOptions: buildLocacaoOptions,
   fieldKeyForKind(kind) {
-    if (kind === "locador" || kind === "representante_locador") {
+    if (
+      kind === "locador" ||
+      kind === "representante_locador" ||
+      kind === "conjuge_locador"
+    ) {
       return { key: "locadores", emptyItem: { tipo_pessoa: "fisica" } };
     }
-    if (kind === "locatario" || kind === "representante_locatario") {
+    if (
+      kind === "locatario" ||
+      kind === "representante_locatario" ||
+      kind === "conjuge_locatario"
+    ) {
       return { key: "locatarios", emptyItem: { tipo_pessoa: "fisica" } };
     }
-    // fiador (subobjeto de garantia) e imovel (objeto singular) não são
-    // arrays — RHF cria o path no primeiro setValue.
+    // fiador + cônjuge do fiador (subobjetos de garantia) e imovel (objeto
+    // singular) não são arrays — RHF cria o path no primeiro setValue.
     return null;
   },
   kindLabel: (kind) => KIND_LABELS[kind] ?? kind,
@@ -125,15 +183,19 @@ export const locacaoDocAdapter: DocumentosStepAdapter = {
     switch (kind) {
       case "locador":
       case "representante_locador":
+      case "conjuge_locador":
         return "locadores";
       case "locatario":
       case "representante_locatario":
+      case "conjuge_locatario":
         return "locatarios";
       // Singular no schema de locação; casa com ROLE_PATHS.locador = [..,"imovel"].
       case "imovel":
         return "imovel";
-      // Fiador qualifica-se dentro de `garantia` (ROLE_PATHS.fiador = ["garantia"]).
+      // Fiador (e o cônjuge dele) qualificam-se dentro de `garantia`
+      // (ROLE_PATHS.fiador = ["garantia"]).
       case "fiador":
+      case "conjuge_fiador":
         return "garantia";
       default:
         return null;

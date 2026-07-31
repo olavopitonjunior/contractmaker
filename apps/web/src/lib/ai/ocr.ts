@@ -294,7 +294,7 @@ const FICHA_RESUMO_INSTRUCTIONS = `- ficha_resumo: documento mestre/dossie/ficha
   {
     "partes": [
       {
-        "papel": "vendedor" | "comprador" | "conjuge_vendedor" | "conjuge_comprador" | "representante_vendedor" | "representante_comprador",
+        "papel": "vendedor" | "comprador" | "conjuge_vendedor" | "conjuge_comprador" | "representante_vendedor" | "representante_comprador" | "procurador_vendedor" | "procurador_comprador",
         "indice_referencia": 0 (0 para "Vendedor 1", 1 para "Vendedor 2", etc),
         "nome": "...",
         "cpf": "...11 digitos",
