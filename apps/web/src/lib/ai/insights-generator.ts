@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/db/prisma";
 import { recordAIUsage } from "@/lib/ai/usage";
 import { resolveAgentProfile } from "@/lib/ai/agents/resolve";
+import { composeSystemPrompt } from "@/lib/ai/agents/prompt-blocks";
 import {
   cacheKey,
   getCached,
@@ -265,7 +266,9 @@ export async function generateInsights(args: {
     const resp = await client.messages.create({
       model: profile.model || HAIKU,
       max_tokens: profile.maxTokens ?? 600,
-      system: SYSTEM_PROMPT,
+      // Instruções da plataforma/tenant entram como apêndice — sem isto o
+      // campo existiria no console sem ninguém ler.
+      system: composeSystemPrompt(SYSTEM_PROMPT, profile),
       messages: [
         {
           role: "user",

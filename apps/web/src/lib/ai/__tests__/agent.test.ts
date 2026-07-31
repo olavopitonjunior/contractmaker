@@ -327,20 +327,26 @@ describe("runContractAgent", () => {
       orgId: "org-1",
     });
 
-    // system agora é array com cache_control ephemeral (introduzido pra
-    // economizar tokens em chat multi-turn). Validamos só o text.
-    // O AgentConfig do banco carrega o Opus 4 aposentado — resolveModel
-    // migra pro sucessor antes da chamada (senão a API responde 404).
+    // system é array com cache_control ephemeral (economia em chat multi-turn).
+    // O perfil carrega o Opus 4 aposentado — resolveModel migra pro sucessor
+    // antes da chamada (senão a API responde 404).
     expect(mockCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         model: "claude-opus-4-6",
         temperature: 0.5,
         max_tokens: 8192,
-        system: expect.arrayContaining([
-          expect.objectContaining({ type: "text", text: "Custom prompt" }),
-        ]),
       })
     );
+
+    // A instrução do tenant é APÊNDICE cercado, não substituição: antes ela
+    // virava o system prompt inteiro e levava junto os guardrails do
+    // DEFAULT_SYSTEM_PROMPT — com um agente que tem todas as tools.
+    const system = (mockCreate.mock.calls[0][0] as any).system;
+    const text = system[0].text as string;
+    expect(text).toContain("Custom prompt");
+    expect(text).toContain("<instrucoes_da_imobiliaria>");
+    expect(text.indexOf("Custom prompt")).toBeGreaterThan(0);
+    expect(text.length).toBeGreaterThan("Custom prompt".length * 10);
   });
 });
 

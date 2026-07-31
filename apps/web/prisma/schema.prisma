@@ -1646,9 +1646,17 @@ model AgentProfile {
   temperature   Float?
   maxTokens     Int?
 
-  /// APÊNDICE ao prompt-base do agente, nunca substituição: o prompt-base é
-  /// escolhido por domínio (venda × locação) e substituí-lo apagaria a variante
-  /// de locação. Instrução de tenant entra cercada por <instrucoes_da_imobiliaria>.
+  /// APÊNDICE ao prompt-base do agente: o prompt-base é escolhido por domínio
+  /// (venda × locação) e substituí-lo apagaria a variante de locação.
+  /// Instrução de tenant entra cercada por <instrucoes_da_imobiliaria>.
+  ///
+  /// DUAS EXCEÇÕES, herdadas das tabelas que este model unificou:
+  ///  - agentKey="chat_legacy": SUBSTITUI o prompt inteiro (era o
+  ///    `AgentConfig.systemPrompt`, que tinha essa semântica). Só alcança o
+  ///    caminho de rollback ENABLE_MULTI_AGENT=false.
+  ///  - agentKey="support": SUBSTITUI o prompt-base (era o
+  ///    `SupportAgentConfig.systemPrompt` — é a persona inteira do widget).
+  ///    Escopo de plataforma; tenant não escreve nesse agente.
   instructions String? @db.Text
 
   /// { categories: string[], tags: string[], includePlatform: boolean } — filtro

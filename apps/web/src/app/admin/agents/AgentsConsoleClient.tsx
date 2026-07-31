@@ -32,6 +32,7 @@ interface AgentRow {
   description: string;
   external: boolean;
   tenantEditable: boolean;
+  supports: { enabled: boolean; model: boolean; instructions: boolean };
   defaultModel: string;
   own: {
     enabled: boolean;
@@ -168,6 +169,11 @@ export function AgentsConsoleClient({
                 {!row.resolved.enabled && (
                   <Badge variant="destructive">desativado</Badge>
                 )}
+                {!row.supports.enabled &&
+                  !row.supports.model &&
+                  !row.supports.instructions && (
+                    <Badge variant="outline">config ainda não aplicada</Badge>
+                  )}
               </div>
               <p className="text-xs text-muted-foreground">{row.description}</p>
             </CardHeader>
@@ -180,7 +186,7 @@ export function AgentsConsoleClient({
                     onValueChange={(v) =>
                       patchLocal(row.agentKey, { model: v === INHERIT ? null : v })
                     }
-                    disabled={!canEdit}
+                    disabled={!canEdit || !row.supports.model}
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -211,7 +217,7 @@ export function AgentsConsoleClient({
                         fallbackModel: v === INHERIT ? null : v,
                       })
                     }
-                    disabled={!canEdit}
+                    disabled={!canEdit || !row.supports.model}
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -255,7 +261,7 @@ export function AgentsConsoleClient({
                     onCheckedChange={(v) =>
                       patchLocal(row.agentKey, { enabled: v })
                     }
-                    disabled={!canEdit}
+                    disabled={!canEdit || !row.supports.enabled}
                   />
                   <Label
                     htmlFor={`enabled-${row.agentKey}`}
@@ -275,9 +281,13 @@ export function AgentsConsoleClient({
                   onChange={(e) =>
                     patchLocal(row.agentKey, { instructions: e.target.value })
                   }
-                  disabled={!canEdit}
+                  disabled={!canEdit || !row.supports.instructions}
                   rows={5}
-                  placeholder="Apendadas ao prompt-base do agente (que já se adapta a venda × locação). Vazio = sem override."
+                  placeholder={
+                    row.supports.instructions
+                      ? "Apendadas ao prompt-base do agente (que já se adapta a venda × locação). Vazio = sem override."
+                      : "Este agente ainda não lê instruções do console."
+                  }
                   className="font-mono text-xs"
                 />
               </div>
