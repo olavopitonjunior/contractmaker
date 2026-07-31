@@ -31,6 +31,8 @@ export interface SupportConfig {
   maxTokens: number;
   systemPrompt: string;
   handoffMinSimilarity: number;
+  /** Kill switch do console (/admin/agents). */
+  enabled: boolean;
 }
 
 export async function getSupportConfig(): Promise<SupportConfig> {
@@ -46,5 +48,6 @@ export async function getSupportConfig(): Promise<SupportConfig> {
     // um apêndice) — comportamento herdado do SupportAgentConfig.
     systemPrompt: profile.platformInstructions || SUPPORT_DEFAULT_SYSTEM_PROMPT,
     handoffMinSimilarity: Number.isFinite(minSim) ? minSim : 0.55,
+    enabled: profile.enabled,
   };
 }

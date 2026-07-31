@@ -93,6 +93,14 @@ export async function POST(req: NextRequest) {
   ];
 
   const config = await getSupportConfig();
+  // Kill switch do console (/admin/agents) — sem isto o interruptor "Ativo"
+  // da IA de Suporte existiria só na tela.
+  if (!config.enabled) {
+    return NextResponse.json(
+      { error: "A IA de Suporte está desativada no momento." },
+      { status: 503 }
+    );
+  }
   const screen = describeScreen(screenPath);
 
   const enabledLabel =

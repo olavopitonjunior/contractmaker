@@ -61,11 +61,33 @@ export async function upsertAgentProfile(args: {
     updatedBy: updatedBy ?? undefined,
   };
 
-  const row = existing
-    ? await prisma.agentProfile.update({ where: { id: existing.id }, data })
-    : await prisma.agentProfile.create({
-        data: { orgId, agentKey, ...data },
-      });
+  let row;
+  if (existing) {
+    row = await prisma.agentProfile.update({ where: { id: existing.id }, data });
+  } else {
+    try {
+      row = await prisma.agentProfile.create({ data: { orgId, agentKey, ...data } });
+    } catch (err) {
+      // Corrida entre o findFirst e o create (dois admins salvando o mesmo
+      // agente): o unique — composto, ou o parcial das linhas de plataforma —
+      // rejeita o segundo. Reler e atualizar é o resultado que o usuário
+      // esperava; deixar vazar viraria 500 sem explicação na tela.
+      if (
+        typeof err === "object" &&
+        err !== null &&
+        (err as { code?: string }).code === "P2002"
+      ) {
+        const raced = await prisma.agentProfile.findFirst({
+          where: { orgId, agentKey },
+          select: { id: true },
+        });
+        if (!raced) throw err;
+        row = await prisma.agentProfile.update({ where: { id: raced.id }, data });
+      } else {
+        throw err;
+      }
+    }
+  }
 
   invalidateAgentProfileCache(orgId, agentKey);
   return row;

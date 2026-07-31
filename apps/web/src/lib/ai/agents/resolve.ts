@@ -26,6 +26,13 @@ export interface ResolvedAgentProfile {
   agentKey: AgentKey;
   enabled: boolean;
   model: string;
+  /**
+   * De onde o `model` veio. `"default"` significa que ninguém configurou —
+   * é o que permite a um call-site preservar seu próprio fallback (ex.: o
+   * legado ainda respeita `ANTHROPIC_MODEL`) sem confundir "não configurado"
+   * com "configurado igual ao default".
+   */
+  modelSource: "org" | "platform" | "default";
   fallbackModel: string | null;
   temperature: number | null;
   maxTokens: number | null;
@@ -101,6 +108,7 @@ function hardcoded(agentKey: AgentKey): ResolvedAgentProfile {
     agentKey,
     enabled: true,
     model: def.defaultModel,
+    modelSource: "default",
     fallbackModel: null,
     temperature: def.defaultTemperature ?? null,
     maxTokens: def.defaultMaxTokens ?? null,
@@ -149,20 +157,28 @@ export async function resolveAgentProfile(
   const pick = <T>(o: T | null, p: T | null, fallback: T): T =>
     o ?? p ?? fallback;
 
+  const orgModel = norm(org?.model);
+  const platformModel = norm(platform?.model);
+  const modelSource: ResolvedAgentProfile["modelSource"] = orgModel
+    ? "org"
+    : platformModel
+      ? "platform"
+      : "default";
+
   const value: ResolvedAgentProfile = {
     agentKey,
     // `enabled` é o único campo em que o desligamento vence: se a plataforma
     // desligou o agente, o tenant não reativa.
     enabled: (platform?.enabled ?? true) && (org?.enabled ?? true),
-    model: resolveModel(
-      pick(norm(org?.model), norm(platform?.model), null) ?? undefined,
-      base.model
-    ),
-    fallbackModel: pick(
-      norm(org?.fallbackModel),
-      norm(platform?.fallbackModel),
-      null
-    ),
+    model: resolveModel(orgModel ?? platformModel ?? undefined, base.model),
+    modelSource,
+    // Passa por resolveModel igual ao principal: um alias aposentado gravado
+    // aqui daria 404 justamente no caminho de contingência de 429/529, que é
+    // quando ninguém quer descobrir um segundo erro.
+    fallbackModel: (() => {
+      const raw = pick(norm(org?.fallbackModel), norm(platform?.fallbackModel), null);
+      return raw ? resolveModel(raw, raw) : null;
+    })(),
     temperature: pick(
       org?.temperature ?? null,
       platform?.temperature ?? null,

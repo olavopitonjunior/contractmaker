@@ -58,7 +58,20 @@ export interface AgentDefinition {
    * custo por agente em linhas históricas, anteriores à coluna `agentKey`.
    */
   operations: AIOperation[];
+  /**
+   * O que o runtime REALMENTE honra hoje deste perfil. A UI usa isto pra não
+   * oferecer controle inerte: um interruptor "Ativo" que não desliga nada, ou
+   * um campo de instruções que ninguém lê, é pior que a ausência do controle —
+   * o operador acha que agiu.
+   */
+  supports: { enabled: boolean; model: boolean; instructions: boolean };
 }
+
+const ALL: AgentDefinition["supports"] = {
+  enabled: true,
+  model: true,
+  instructions: true,
+};
 
 export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
   analyst: {
@@ -68,6 +81,7 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
     defaultModel: HAIKU_MODEL,
     tenantEditable: true,
     operations: ["specialist_analyst"],
+    supports: ALL,
   },
   legal: {
     key: "legal",
@@ -76,6 +90,7 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
     defaultModel: HAIKU_MODEL,
     tenantEditable: true,
     operations: ["specialist_legal"],
+    supports: ALL,
   },
   editor: {
     key: "editor",
@@ -84,6 +99,7 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
     defaultModel: SONNET_MODEL,
     tenantEditable: true,
     operations: ["specialist_editor"],
+    supports: ALL,
   },
   curator: {
     key: "curator",
@@ -92,6 +108,7 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
     defaultModel: HAIKU_MODEL,
     tenantEditable: true,
     operations: ["specialist_curator"],
+    supports: ALL,
   },
   passive: {
     key: "passive",
@@ -100,6 +117,8 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
     defaultModel: HAIKU_MODEL,
     tenantEditable: true,
     operations: ["passive_open", "passive_edit"],
+    // Instruções ainda não plugadas no prompt da análise passiva.
+    supports: { enabled: true, model: true, instructions: false },
   },
   support: {
     key: "support",
@@ -111,11 +130,14 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
     // Base e persona são da plataforma — tenant não escreve instrução aqui.
     tenantEditable: false,
     operations: ["support_chat", "assistant_chat"],
+    supports: ALL,
   },
   ocr: {
     key: "ocr",
     label: "Leitura de documentos",
-    description: "Extrai dados de RG, CPF, matrícula e contratos enviados.",
+    description:
+      "Extrai dados de RG, CPF, matrícula e contratos enviados. Roda em Gemini 2.5 Flash — ainda não lê este perfil.",
+    // Placeholder: o OCR não consome o perfil (o modelo vem do env do Gemini).
     defaultModel: HAIKU_MODEL,
     tenantEditable: false,
     operations: [
@@ -125,6 +147,7 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
       "extract_locacao_doc",
       "voice_extract",
     ],
+    supports: { enabled: false, model: false, instructions: false },
   },
   insights: {
     key: "insights",
@@ -133,6 +156,7 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
     defaultModel: HAIKU_MODEL,
     tenantEditable: true,
     operations: ["insights"],
+    supports: ALL,
   },
   chat_legacy: {
     key: "chat_legacy",
@@ -144,6 +168,7 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
     defaultMaxTokens: 4096,
     tenantEditable: true,
     operations: ["chat"],
+    supports: ALL,
   },
   max: {
     key: "max",
@@ -154,6 +179,8 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
     tenantEditable: false,
     external: true,
     operations: [],
+    // Passa a valer quando o endpoint do PR5 existir e o Max consumi-lo.
+    supports: { enabled: false, model: false, instructions: false },
   },
 };
 

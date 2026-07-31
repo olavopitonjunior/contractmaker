@@ -20,7 +20,7 @@ import { agentDisabledOutput } from "../agents/disabled";
 import { runSpecialist, type ToolUseGuard } from "../shared/specialist-runner";
 import { applyPolicy } from "../sentinel/middleware";
 import { pickSpecialistPrompt } from "./prompts-locacao";
-import { ROUTER_REGEXES } from "../orchestrator/routing";
+import { wantsDirectEdit as routerWantsDirectEdit } from "../orchestrator/routing";
 import type { OrchestratorState, SpecialistOutput } from "../orchestrator/state";
 
 const EDITOR_TOOL_NAMES = new Set([
@@ -71,7 +71,9 @@ export interface EditorToolPolicy {
 export function resolveEditorToolPolicy(
   state: Pick<OrchestratorState, "mode" | "intent" | "userMessage">
 ): EditorToolPolicy {
-  const wantsDirectEdit = ROUTER_REGEXES.FORCE_DIRECT_EDIT.test(state.userMessage);
+  // Ignora trechos citados: cláusula colada com "sem revisão" no texto não é
+  // pedido de edição direta (ver routing.ts::stripQuotedSpans).
+  const wantsDirectEdit = routerWantsDirectEdit(state.userMessage);
   const isWriteIntent = WRITE_INTENTS.has(state.intent ?? "");
 
   // C4 — Quando o user disse "aplique direto"/"sem revisão", remover
