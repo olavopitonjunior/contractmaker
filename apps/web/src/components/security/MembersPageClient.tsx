@@ -189,7 +189,14 @@ export function MembersPageClient() {
         toast.error(data.error ?? "Falha ao reenviar convite");
         return;
       }
-      toast.success(`Convite reenviado para ${email}`);
+      if (data.emailSent === false) {
+        toast.warning(
+          `O e-mail para ${email} NÃO saiu — o convite não chegou. Verifique a configuração de envio e tente de novo.`,
+          { duration: 10_000 }
+        );
+      } else {
+        toast.success(`Convite reenviado para ${email}`);
+      }
     } finally {
       setResendingId(null);
     }

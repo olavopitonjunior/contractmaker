@@ -3,6 +3,8 @@ import { z } from "zod";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { audit } from "@/lib/security/audit";
+import { resolveAgentProfile } from "@/lib/ai/agents/resolve";
+import { upsertAgentProfile } from "@/lib/ai/agents/store";
 
 export const dynamic = "force-dynamic";
 
@@ -26,13 +28,13 @@ const DEFAULT_CONFIG: AiInsightsConfig = {
 };
 
 async function loadConfig(orgId: string): Promise<AiInsightsConfig> {
-  const ac = await prisma.agentConfig.findUnique({
-    where: { orgId },
-    select: { aiInsightsConfig: true },
-  });
-  const raw = ac?.aiInsightsConfig as unknown;
-  const parsed = configSchema.safeParse(raw);
-  return parsed.success ? parsed.data : DEFAULT_CONFIG;
+  // Migrado de AgentConfig.aiInsightsConfig pro `config` do perfil `insights`.
+  const profile = await resolveAgentProfile("insights", orgId);
+  const parsed = configSchema.safeParse(profile.config);
+  if (!parsed.success) return DEFAULT_CONFIG;
+  // O kill switch do console (enabled=false) desliga tudo, mesmo que o toggle
+  // por contexto diga o contrário.
+  return profile.enabled ? parsed.data : { ...parsed.data, enabled: false };
 }
 
 /**
@@ -80,33 +82,20 @@ export async function PUT(req: NextRequest) {
     );
   }
 
-  // Garante AgentConfig existe — upsert via update + fallback create.
-  const existing = await prisma.agentConfig.findUnique({
-    where: { orgId: org.id },
-    select: { id: true },
+  await upsertAgentProfile({
+    orgId: org.id,
+    agentKey: "insights",
+    patch: { config: parsed.data },
+    updatedBy: session.user.id,
   });
-  if (existing) {
-    await prisma.agentConfig.update({
-      where: { orgId: org.id },
-      data: { aiInsightsConfig: parsed.data },
-    });
-  } else {
-    await prisma.agentConfig.create({
-      data: {
-        orgId: org.id,
-        systemPrompt: "",
-        aiInsightsConfig: parsed.data,
-      },
-    });
-  }
 
   await audit(
     { orgId: org.id, userId: session.user.id },
     {
       action: "AI_INSIGHTS_CONFIG_UPDATE",
       result: "SUCCESS",
-      resource: "AgentConfig",
-      resourceType: "AgentConfig",
+      resource: "AgentProfile",
+      resourceType: "AgentProfile",
       metadata: { enabled: parsed.data.enabled },
     }
   );

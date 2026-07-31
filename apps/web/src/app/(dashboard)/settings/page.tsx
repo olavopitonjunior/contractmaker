@@ -1,12 +1,10 @@
 import Link from "next/link";
 import { auth, getUserOrg } from "@/lib/auth/auth";
-import { prisma } from "@/lib/db/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
-import { AgentSettings } from "@/components/settings/AgentSettings";
-import { BellRing, BookOpen, Palette, Lightbulb, ShieldCheck, Sparkles, KeyRound, Users, UserCog, UsersRound, Split, FileSignature, Wallet, ListChecks, UserRound, Receipt, FileText, Rocket, type LucideIcon } from "lucide-react";
+import { BellRing, Bot, BookOpen, Palette, Lightbulb, ShieldCheck, Sparkles, KeyRound, Users, UserCog, UsersRound, Split, FileSignature, Wallet, ListChecks, UserRound, Receipt, FileText, Rocket, type LucideIcon } from "lucide-react";
 
 type SettingsLink = { href: string; label: string; icon: LucideIcon };
 const SETTINGS_GROUPS: { title: string; items: SettingsLink[] }[] = [
@@ -43,6 +41,7 @@ const SETTINGS_GROUPS: { title: string; items: SettingsLink[] }[] = [
     title: "Certidões, IA & API",
     items: [
       { href: "/settings/certidoes", label: "Certidões", icon: ShieldCheck },
+      { href: "/settings/ai-agents", label: "Agentes de IA", icon: Bot },
       { href: "/settings/ai-usage", label: "Uso de IA", icon: Sparkles },
       { href: "/settings/api-tokens", label: "API tokens", icon: KeyRound },
       { href: "/settings/api-usage", label: "Uso da API", icon: Sparkles },
@@ -68,10 +67,6 @@ export default async function SettingsPage() {
   if (!session?.user) return null;
 
   const org = await getUserOrg(session.user.id);
-
-  const agentConfig = org
-    ? await prisma.agentConfig.findUnique({ where: { orgId: org.id } })
-    : null;
 
   return (
     <div className="space-y-6">
@@ -157,19 +152,24 @@ export default async function SettingsPage() {
         )}
 
         <TabsContent value="agente" className="mt-4">
-          <AgentSettings
-            initialConfig={
-              agentConfig
-                ? {
-                    model: agentConfig.model,
-                    ocrModel: agentConfig.ocrModel,
-                    temperature: agentConfig.temperature,
-                    maxTokens: agentConfig.maxTokens,
-                    systemPrompt: agentConfig.systemPrompt,
-                  }
-                : null
-            }
-          />
+          <Card>
+            <CardHeader>
+              <CardTitle>Agentes de IA</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                As instruções de cada agente agora ficam em uma tela própria, por
+                agente. Modelo e limites de custo passaram a ser definidos pela
+                plataforma.
+              </p>
+              <Button variant="outline" size="sm" asChild>
+                <Link href="/settings/ai-agents">
+                  <Bot className="h-4 w-4 mr-1" />
+                  Configurar agentes de IA
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>

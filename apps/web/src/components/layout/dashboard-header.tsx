@@ -51,6 +51,10 @@ const LABEL_MAP: Record<string, string> = {
   certidoes: "Certidões",
   intents: "Aprovações",
   seguros: "Seguros",
+  // Sem entrada aqui o fallback capitaliza o slug e sai "Ai agents".
+  "ai-agents": "Agentes de IA",
+  "ai-usage": "Uso de IA",
+  "ai-insights": "AI Insights",
 };
 
 interface Segment {

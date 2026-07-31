@@ -5,10 +5,15 @@ import { audit } from "@/lib/security/audit";
 import { sendEmail } from "@/lib/email/client";
 import { InvitationApprovedEmail } from "@/lib/email/templates/invitation-approved";
 import { isApprover } from "@/lib/auth/invitations";
+import { createPasswordResetToken } from "@/lib/auth/password-reset";
 
 /**
- * POST /api/org/invitations/:id/approve — aprova convite, cria User (sem
- * passwordHash) + OrgMembership, e dispara magic link de boas-vindas.
+ * POST /api/org/invitations/:id/approve — aprova convite, cria User +
+ * OrgMembership, e dispara e-mail de primeiro acesso.
+ *
+ * Quem ainda não tem senha (caso normal: conta criada aqui) recebe link de
+ * /reset-password?token= com reason `welcome` e DEFINE a senha na hora. Quem
+ * já tinha conta com senha recebe só o link de login.
  *
  * Gate: apenas emails listados em INVITE_APPROVER_EMAILS (default
  * olavo.piton@gmail.com) podem aprovar.
@@ -54,16 +59,17 @@ export async function POST(
   const result = await prisma.$transaction(async (tx) => {
     let user = await tx.user.findUnique({
       where: { email: invitation.email },
-      select: { id: true, email: true, name: true },
+      select: { id: true, email: true, name: true, passwordHash: true },
     });
     if (!user) {
       user = await tx.user.create({
         data: {
           email: invitation.email,
           name: invitation.name ?? null,
-          // Sem passwordHash: usuário só entra via magic link.
+          // Sem passwordHash: a senha é criada pelo próprio convidado no
+          // link de boas-vindas (/reset-password?token=), abaixo.
         },
-        select: { id: true, email: true, name: true },
+        select: { id: true, email: true, name: true, passwordHash: true },
       });
     }
 
@@ -111,17 +117,53 @@ export async function POST(
   );
 
   const baseUrl = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
-  const loginUrl = `${baseUrl}/login?email=${encodeURIComponent(invitation.email)}`;
 
-  await sendEmail({
+  // `passwordHash != null` NÃO significa "sabe a senha": provisionamento de
+  // tenant (api/admin/orgs) e api/org/members criam a conta com hash aleatório
+  // de placeholder. Quem nunca autenticou em org nenhuma cai nesse caso — e
+  // mandar "use sua senha de sempre" pra essa pessoa é o mesmo beco sem saída
+  // que este fluxo existe pra fechar.
+  //
+  // A membership desta org acabou de ser criada com lastActiveAt null, então
+  // o count só enxerga atividade anterior e real.
+  const previousActivity = await prisma.orgMembership.count({
+    where: { userId: result.user.id, lastActiveAt: { not: null } },
+  });
+  // Erra pro lado seguro: na dúvida manda o link que CRIA a senha — ele
+  // funciona mesmo pra quem já tinha uma. O inverso tranca a pessoa do lado
+  // de fora.
+  const needsPassword = !result.user.passwordHash || previousActivity === 0;
+  let actionUrl = `${baseUrl}/login?email=${encodeURIComponent(invitation.email)}`;
+  if (needsPassword) {
+    const { token } = await createPasswordResetToken(invitation.email, "welcome");
+    actionUrl = `${baseUrl}/reset-password?token=${encodeURIComponent(token)}`;
+  }
+
+  // sendEmail NUNCA lança — devolve { ok:false }. Ler é obrigatório: esse
+  // e-mail carrega o ÚNICO link de criação de senha, então falha silenciosa
+  // deixa o convidado trancado do lado de fora com o aprovador achando que
+  // deu certo.
+  const sent = await sendEmail({
     to: invitation.email,
     subject: `Acesso aprovado — ${ctx.orgName}`,
     react: InvitationApprovedEmail({
       inviteeName: invitation.name,
       orgName: ctx.orgName,
-      loginUrl,
+      actionUrl,
+      mode: needsPassword ? "set-password" : "login",
     }) as React.ReactElement,
   });
 
-  return NextResponse.json({ ok: true, userId: result.user.id });
+  if (!sent.ok) {
+    console.error(
+      "[invitations/approve] falha ao enviar e-mail de primeiro acesso",
+      { invitationId: id, error: sent.error }
+    );
+  }
+
+  return NextResponse.json({
+    ok: true,
+    userId: result.user.id,
+    emailSent: sent.ok,
+  });
 }

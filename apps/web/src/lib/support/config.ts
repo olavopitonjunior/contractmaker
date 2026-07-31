@@ -1,12 +1,13 @@
 /**
- * Config do assistente de suporte (singleton de plataforma).
+ * Config do assistente de suporte.
  *
- * Espelha o padrão de AgentConfig (editor de contrato), mas é único de plataforma
- * e editável pelo super-admin em /admin/support-ai. systemPrompt vazio no DB →
- * usa o SUPPORT_DEFAULT_SYSTEM_PROMPT abaixo.
+ * Desde o AgentProfile isto é o perfil de plataforma do agente `support`
+ * (orgId = null), editável pelo super_admin em /admin/agents. Não há override
+ * por tenant: base e persona do suporte são da plataforma (`tenantEditable:
+ * false` no catálogo). `instructions` vazio → SUPPORT_DEFAULT_SYSTEM_PROMPT.
  */
 
-import { prisma } from "@/lib/db/prisma";
+import { resolveAgentProfile } from "@/lib/ai/agents/resolve";
 
 export const SUPPORT_DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 
@@ -33,13 +34,17 @@ export interface SupportConfig {
 }
 
 export async function getSupportConfig(): Promise<SupportConfig> {
-  const row = await prisma.supportAgentConfig.findFirst();
-  const prompt = row?.systemPrompt?.trim();
+  const profile = await resolveAgentProfile("support", null);
+  // handoffMinSimilarity é específico do suporte e não merece coluna própria —
+  // vive no `config` do perfil (migrado do SupportAgentConfig).
+  const minSim = Number(profile.config?.handoffMinSimilarity);
   return {
-    model: row?.model || SUPPORT_DEFAULT_MODEL,
-    temperature: row?.temperature ?? 0.3,
-    maxTokens: row?.maxTokens ?? 1024,
-    systemPrompt: prompt ? row!.systemPrompt : SUPPORT_DEFAULT_SYSTEM_PROMPT,
-    handoffMinSimilarity: row?.handoffMinSimilarity ?? 0.55,
+    model: profile.model || SUPPORT_DEFAULT_MODEL,
+    temperature: profile.temperature ?? 0.3,
+    maxTokens: profile.maxTokens ?? 1024,
+    // A instrução do suporte SUBSTITUI o prompt-base (é a persona inteira, não
+    // um apêndice) — comportamento herdado do SupportAgentConfig.
+    systemPrompt: profile.platformInstructions || SUPPORT_DEFAULT_SYSTEM_PROMPT,
+    handoffMinSimilarity: Number.isFinite(minSim) ? minSim : 0.55,
   };
 }

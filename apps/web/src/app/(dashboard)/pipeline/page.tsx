@@ -87,6 +87,8 @@ export default async function PipelinePage({
                 orderBy: { createdAt: "asc" },
                 take: 1,
               },
+              // Gerente responsável — nome no card do kanban.
+              manager: { select: { name: true, email: true } },
             },
           },
         },
@@ -133,6 +135,7 @@ export default async function PipelinePage({
       value: deal.value,
       createdAt: deal.createdAt.toISOString(),
       clientName: deal.clientName,
+      managerName: deal.manager ? deal.manager.name?.trim() || deal.manager.email : null,
       formStatus: deal.form?.status || null,
       formToken: deal.form?.token || null,
       hasContract: deal.contracts.length > 0,

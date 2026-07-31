@@ -1,7 +1,7 @@
 import type { Anthropic } from "@anthropic-ai/sdk";
 import { createHash } from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
-import { AGENT_TOOLS } from "./tools";
+import { AGENT_TOOLS, DIRECT_WRITE_TOOLS } from "./tools";
 import { executeToolHandler } from "./tool-handlers";
 import { DEFAULT_SYSTEM_PROMPT, buildContextMessage } from "./prompts";
 import { quickChecks, dedupeKeyFor, type QuickFinding } from "./quickChecks";
@@ -12,6 +12,7 @@ import {
   OrgAiBudgetExceededError,
 } from "./budget";
 import { loadExpertContext } from "./expert-context";
+import { resolveAgentProfile } from "./agents/resolve";
 import { getAnthropicClient, HAIKU_MODEL, SONNET_MODEL, resolveModel } from "./shared/anthropic-client";
 import { loadContext } from "./shared/context";
 import { resolveSession, loadChatHistory } from "./shared/session";
@@ -51,25 +52,32 @@ interface AgentParams {
 }
 
 async function getAgentConfig(orgId: string, mode: AgentMode) {
-  const config = await prisma.agentConfig.findUnique({ where: { orgId } });
+  // AgentProfile substituiu AgentConfig como fonte: org → plataforma →
+  // hardcoded. O agente legado é o `chat_legacy` do catálogo.
+  const profile = await resolveAgentProfile("chat_legacy", orgId);
 
   // Resolução de modelo por modo:
-  // - fast: SEMPRE Haiku (sobrepõe AgentConfig.model). Otimizado pra latência.
-  // - plan: respeita AgentConfig.model > ANTHROPIC_MODEL env > default Sonnet
+  // - fast: SEMPRE Haiku (sobrepõe o perfil). Otimizado pra latência.
+  // - plan: respeita o perfil > ANTHROPIC_MODEL env > default do catálogo
   //   (raciocínio mais profundo justifica o custo 3× maior).
   // resolveModel migra IDs aposentados que sobrevivam no banco/env (404 na API).
   let model: string;
   if (mode === "fast") {
     model = HAIKU_MODEL;
   } else {
-    model = resolveModel(config?.model || process.env.ANTHROPIC_MODEL);
+    model = profile.model || resolveModel(process.env.ANTHROPIC_MODEL);
   }
 
+  // As instruções do tenant eram o `AgentConfig.systemPrompt` inteiro e
+  // SUBSTITUÍAM o prompt default. Migradas pra `instructions`, seguem com a
+  // mesma semântica AQUI (o legado nunca teve prompt por-domínio), mas nos
+  // especialistas entram como apêndice cercado — que é o comportamento certo.
   return {
     model,
-    temperature: config?.temperature ?? 0.3,
-    maxTokens: config?.maxTokens ?? 4096,
-    systemPrompt: config?.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+    temperature: profile.temperature ?? 0.3,
+    maxTokens: profile.maxTokens ?? 4096,
+    systemPrompt: profile.tenantInstructions || DEFAULT_SYSTEM_PROMPT,
+    enabled: profile.enabled,
   };
 }
 
@@ -249,8 +257,11 @@ export async function* streamContractAgent(
       /\b(altere|mude|troque|substitua|atualize|corrija|modifique|remova|insira|adicione|coloque|ponha|apague|delete|reescreva|inclua|retire|exclua|preencha|preencher|preenche|complete|completar|completa|informe|informar|defina|definir|registre|registrar|ajuste|ajustar|conserte|consertar|escreva|escrever)\b/i;
     const isEditCommand = EDIT_INTENT.test(params.message);
 
+    // Mantido em sincronia com FORCE_DIRECT_EDIT_REGEX de
+    // orchestrator/routing.ts — inclusive o `(?!\w)` final, que substitui um
+    // `\b` que nunca casava depois de vogal acentuada ("faça já").
     const FORCE_DIRECT_EDIT =
-      /\b(aplique\s+direto|aplique\s+já|faça\s+já|faça\s+agora|sem\s+revis[ãa]o|edite\s+direto|altere\s+agora|aplica\s+direto|sem\s+sugest[ãa]o)\b/i;
+      /\b(aplique\s+direto|aplique\s+já|faça\s+já|faça\s+agora|sem\s+revis[ãa]o|edite\s+direto|altere\s+agora|aplica\s+direto|sem\s+sugest[ãa]o)(?!\w)/i;
     const wantsDirectEdit = FORCE_DIRECT_EDIT.test(params.message);
     const isGoogleDocs = !!context.googleDocId;
 
@@ -259,9 +270,27 @@ export async function* streamContractAgent(
     // o usuário disser "aplique direto".
     const preferProposeInGDocs = mode === "plan" && isGoogleDocs && !wantsDirectEdit;
 
-    const editReminderTemplate = isEditCommand
-      ? `\n\n---\nLEMBRETE DE FORMATO OBRIGATORIO: este pedido e um comando de edicao. Voce DEVE:\n1. Chamar pelo menos uma tool de edicao (${preferProposeInGDocs ? "PREFIRA propose_suggestion — o contrato esta em modo Google Docs e o usuario quer revisar antes de aplicar; só use edit_contract_section se a mensagem do usuario disser explicitamente 'aplique direto' / 'faça já' / 'sem revisao'" : "edit_contract_section, update_contract_data, insert_clause, remove_clause" + (mode === "plan" ? ", propose_suggestion" : "")}).\n2. Apos executar as tools, responder EXATAMENTE nesta estrutura em markdown (copie os 3 headings literais, sem emoji, sem alterar capitalizacao):\n\n## Alteracoes Realizadas\n(lista do que foi alterado no contrato)\n\n## Justificativa\n(razao juridica da alteracao)\n\n## Verificacao\n(como o usuario pode verificar que a alteracao foi aplicada)\n`
-      : "";
+    // Item 22 — paridade com o gate do orquestrador
+    // (specialists/editor.ts::resolveEditorToolPolicy). Em modo Planejar sem
+    // escape, os writes diretos saem do toolbox e um comando de edição é
+    // obrigado a passar por propose_plan. Antes disso o legado prometia
+    // "revisão antes de aplicar" só no texto do lembrete — e escrevia direto.
+    const planGate = mode === "plan" && !wantsDirectEdit;
+    const activeTools = planGate
+      ? AGENT_TOOLS.filter((t) => !DIRECT_WRITE_TOOLS.has(t.name))
+      : AGENT_TOOLS;
+
+    const editToolsHint = preferProposeInGDocs
+      ? "PREFIRA propose_suggestion — o contrato esta em modo Google Docs e o usuario quer revisar antes de aplicar; só use edit_contract_section se a mensagem do usuario disser explicitamente 'aplique direto' / 'faça já' / 'sem revisao'"
+      : "edit_contract_section, update_contract_data, insert_clause, remove_clause";
+
+    // Em modo Planejar o turn NAO altera nada — pedir os headings de
+    // "Alteracoes Realizadas" ali seria convidar a confabulacao.
+    const editReminderTemplate = !isEditCommand
+      ? ""
+      : planGate
+        ? `\n\n---\nLEMBRETE DE FORMATO OBRIGATORIO (MODO PLANEJAR): este pedido e um comando de edicao, mas NADA sera aplicado neste turn. As tools de escrita direta (edit_contract_section, update_contract_data, insert_clause, remove_clause) NAO estao disponiveis. Voce DEVE:\n1. Chamar propose_plan com a lista completa de steps da alteracao (o usuario aprova depois), ou propose_suggestion para um ajuste pontual de redacao.\n2. Em seguida responder EXATAMENTE nesta estrutura em markdown (copie os headings literais, sem emoji, sem alterar capitalizacao):\n\n## Plano Proposto\n(o que sera alterado, passo a passo — ainda NAO aplicado)\n\n## Justificativa\n(razao juridica da alteracao)\n\n## Proximo Passo\n(diga ao usuario que basta aprovar o plano para aplicar)\n`
+        : `\n\n---\nLEMBRETE DE FORMATO OBRIGATORIO: este pedido e um comando de edicao. Voce DEVE:\n1. Chamar pelo menos uma tool de edicao (${editToolsHint}).\n2. Apos executar as tools, responder EXATAMENTE nesta estrutura em markdown (copie os 3 headings literais, sem emoji, sem alterar capitalizacao):\n\n## Alteracoes Realizadas\n(lista do que foi alterado no contrato)\n\n## Justificativa\n(razao juridica da alteracao)\n\n## Verificacao\n(como o usuario pode verificar que a alteracao foi aplicada)\n`;
 
     const expertBlock = expertContext ? `${expertContext}\n\n---\n` : "";
     const messages: Anthropic.MessageParam[] = [
@@ -302,8 +331,13 @@ export async function* streamContractAgent(
         max_tokens: config.maxTokens,
         temperature: config.temperature,
         system: systemBlocks,
-        tools: AGENT_TOOLS,
-        ...(isEditCommand ? { tool_choice: { type: "any" as const } } : {}),
+        tools: activeTools,
+        // Modo Planejar: comando de edição cai obrigatoriamente em propose_plan.
+        ...(planGate && isEditCommand
+          ? { tool_choice: { type: "tool" as const, name: "propose_plan" } }
+          : isEditCommand
+            ? { tool_choice: { type: "any" as const } }
+            : {}),
         messages,
         stream: true,
       });
@@ -460,7 +494,9 @@ export async function* streamContractAgent(
           max_tokens: config.maxTokens,
           temperature: config.temperature,
           system: systemBlocks,
-          tools: AGENT_TOOLS,
+          // Iterações seguintes herdam o mesmo toolbox: em modo Planejar o
+          // write direto não pode voltar pela porta dos fundos na 2ª volta.
+          tools: activeTools,
           messages,
           stream: true,
         });

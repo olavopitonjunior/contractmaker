@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth/auth";
-import { prisma } from "@/lib/db/prisma";
+import { upsertAgentProfile, isAllowedModel } from "@/lib/ai/agents/store";
 import { requirePlatform } from "@/lib/admin/gate";
 import {
   getSupportConfig,
   SUPPORT_DEFAULT_SYSTEM_PROMPT,
   SUPPORT_DEFAULT_MODEL,
 } from "@/lib/support/config";
-import { SUPPORT_CONFIG_SINGLETON } from "@/lib/support/constants";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -53,10 +52,28 @@ export async function PUT(req: NextRequest) {
     );
   }
 
-  await prisma.supportAgentConfig.upsert({
-    where: { singletonKey: SUPPORT_CONFIG_SINGLETON },
-    create: { singletonKey: SUPPORT_CONFIG_SINGLETON, ...parsed.data, updatedBy: session!.user!.id },
-    update: { ...parsed.data, updatedBy: session!.user!.id },
+  // Allowlist server-side: um ID inválido aqui derrubaria o widget de suporte
+  // pra toda a plataforma.
+  if (!isAllowedModel(parsed.data.model)) {
+    return NextResponse.json(
+      { error: "Modelo não permitido. Use um dos modelos oferecidos." },
+      { status: 400 }
+    );
+  }
+
+  // O suporte é o perfil de PLATAFORMA do agente `support` (orgId = null).
+  // systemPrompt vazio volta a ser null = "usa o default em código".
+  await upsertAgentProfile({
+    orgId: null,
+    agentKey: "support",
+    patch: {
+      model: parsed.data.model,
+      temperature: parsed.data.temperature,
+      maxTokens: parsed.data.maxTokens,
+      instructions: parsed.data.systemPrompt.trim() || null,
+      config: { handoffMinSimilarity: parsed.data.handoffMinSimilarity },
+    },
+    updatedBy: session!.user!.id,
   });
 
   return NextResponse.json({ ok: true });

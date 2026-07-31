@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AiInsightsConfigForm } from "@/components/settings/AiInsightsConfigForm";
 import { DEFAULT_CONFIG, type AiInsightsConfig } from "./types";
+import { resolveAgentProfile } from "@/lib/ai/agents/resolve";
 import { getEffectiveUserId } from "@/lib/auth/impersonation";
 
 export const dynamic = "force-dynamic";
@@ -26,13 +27,12 @@ export default async function AiInsightsSettingsPage() {
   });
   const isOwner = membership?.role === "owner";
 
-  const ac = await prisma.agentConfig.findUnique({
-    where: { orgId: org.id },
-    select: { aiInsightsConfig: true },
-  });
-  const raw = ac?.aiInsightsConfig as Partial<AiInsightsConfig> | null | undefined;
+  // Migrado de AgentConfig.aiInsightsConfig pro perfil `insights`.
+  const profile = await resolveAgentProfile("insights", org.id);
+  const raw = profile.config as Partial<AiInsightsConfig> | null | undefined;
   const config: AiInsightsConfig = {
-    enabled: raw?.enabled ?? DEFAULT_CONFIG.enabled,
+    // O kill switch do console desliga tudo, independente do toggle da org.
+    enabled: profile.enabled ? raw?.enabled ?? DEFAULT_CONFIG.enabled : false,
     contexts: {
       dashboard: raw?.contexts?.dashboard ?? true,
       contract: raw?.contexts?.contract ?? true,

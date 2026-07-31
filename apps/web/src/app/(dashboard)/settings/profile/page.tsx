@@ -32,6 +32,7 @@ export default async function SettingsProfilePage() {
         addressNeighborhood: true,
         addressCity: true,
         addressState: true,
+        passwordHash: true,
       },
     }),
     prisma.twoFactorSecret.findUnique({
@@ -42,13 +43,17 @@ export default async function SettingsProfilePage() {
 
   if (!user) redirect("/login");
 
+  // `passwordHash` nunca cruza a fronteira server→client: só o booleano.
+  const { passwordHash, ...profile } = user;
+
   return (
     <ProfileClient
       initial={{
-        ...user,
+        ...profile,
         birthDate: user.birthDate
           ? user.birthDate.toISOString().slice(0, 10)
           : null,
+        hasPassword: passwordHash != null,
       }}
       twoFAStatus={{ enabled: twoFA?.enabled ?? false }}
     />

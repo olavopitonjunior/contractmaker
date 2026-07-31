@@ -56,6 +56,8 @@ export interface ProfileInitial {
   addressNeighborhood: string | null;
   addressCity: string | null;
   addressState: string | null;
+  /** false = conta veio de convite/provisionamento e nunca definiu senha. */
+  hasPassword: boolean;
 }
 
 export interface TwoFAStatus {
@@ -90,7 +92,10 @@ export function ProfileClient({ initial, twoFAStatus }: Props) {
       <PersonalCard initial={initial} />
       <NotificationChannelsCard />
       <AddressCard initial={initial} />
-      <PasswordCard twoFAEnabled={twoFAStatus.enabled} />
+      <PasswordCard
+        twoFAEnabled={twoFAStatus.enabled}
+        hasPassword={initial.hasPassword}
+      />
       <SecurityShortcuts twoFAEnabled={twoFAStatus.enabled} />
       <PrivacyCard />
     </div>
@@ -362,12 +367,20 @@ function AddressCard({ initial }: { initial: ProfileInitial }) {
   );
 }
 
-function PasswordCard({ twoFAEnabled }: { twoFAEnabled: boolean }) {
+function PasswordCard({
+  twoFAEnabled,
+  hasPassword,
+}: {
+  twoFAEnabled: boolean;
+  hasPassword: boolean;
+}) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
   const [code, setCode] = useState("");
   const [saving, setSaving] = useState(false);
+  // Vira true depois de definir a primeira senha, sem precisar de reload.
+  const [defined, setDefined] = useState(hasPassword);
 
   async function handleSubmit() {
     if (next.length < 8) {
@@ -384,10 +397,8 @@ function PasswordCard({ twoFAEnabled }: { twoFAEnabled: boolean }) {
     }
     setSaving(true);
     try {
-      const body: Record<string, unknown> = {
-        currentPassword: current,
-        newPassword: next,
-      };
+      const body: Record<string, unknown> = { newPassword: next };
+      if (defined) body.currentPassword = current;
       if (twoFAEnabled) body.twoFactorCode = code;
       const res = await fetch("/api/me/password", {
         method: "POST",
@@ -400,8 +411,11 @@ function PasswordCard({ twoFAEnabled }: { twoFAEnabled: boolean }) {
         return;
       }
       toast.success(
-        "Senha alterada. Outros dispositivos serão deslogados na próxima requisição."
+        defined
+          ? "Senha alterada. Outros dispositivos serão deslogados na próxima requisição."
+          : "Senha definida. Agora você pode entrar com e-mail e senha."
       );
+      setDefined(true);
       setCurrent("");
       setNext("");
       setConfirm("");
@@ -418,20 +432,24 @@ function PasswordCard({ twoFAEnabled }: { twoFAEnabled: boolean }) {
           <KeyRound className="h-5 w-5" /> Senha
         </CardTitle>
         <CardDescription>
-          Alterar senha estando logado. Outros dispositivos serão deslogados.
+          {defined
+            ? "Alterar senha estando logado. Outros dispositivos serão deslogados."
+            : "Sua conta ainda não tem senha — você entrou por link no e-mail. Defina uma senha para poder entrar direto."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div>
-            <Label htmlFor="pw-curr">Senha atual</Label>
-            <Input
-              id="pw-curr"
-              type="password"
-              value={current}
-              onChange={(e) => setCurrent(e.target.value)}
-            />
-          </div>
+          {defined && (
+            <div>
+              <Label htmlFor="pw-curr">Senha atual</Label>
+              <Input
+                id="pw-curr"
+                type="password"
+                value={current}
+                onChange={(e) => setCurrent(e.target.value)}
+              />
+            </div>
+          )}
           {twoFAEnabled && (
             <div>
               <Label htmlFor="pw-2fa">Código 2FA</Label>
@@ -446,7 +464,7 @@ function PasswordCard({ twoFAEnabled }: { twoFAEnabled: boolean }) {
             </div>
           )}
           <div>
-            <Label htmlFor="pw-new">Nova senha</Label>
+            <Label htmlFor="pw-new">{defined ? "Nova senha" : "Senha"}</Label>
             <Input
               id="pw-new"
               type="password"
@@ -456,7 +474,9 @@ function PasswordCard({ twoFAEnabled }: { twoFAEnabled: boolean }) {
             <p className="text-xs text-muted-foreground mt-1">Mínimo 8 caracteres.</p>
           </div>
           <div>
-            <Label htmlFor="pw-confirm">Confirmar nova senha</Label>
+            <Label htmlFor="pw-confirm">
+              {defined ? "Confirmar nova senha" : "Confirmar senha"}
+            </Label>
             <Input
               id="pw-confirm"
               type="password"
@@ -466,8 +486,17 @@ function PasswordCard({ twoFAEnabled }: { twoFAEnabled: boolean }) {
           </div>
         </div>
         <div className="flex justify-end">
-          <Button onClick={handleSubmit} disabled={saving || !current || !next}>
-            {saving ? "Trocando..." : "Trocar senha"}
+          <Button
+            onClick={handleSubmit}
+            disabled={saving || !next || (defined && !current)}
+          >
+            {saving
+              ? defined
+                ? "Trocando..."
+                : "Salvando..."
+              : defined
+                ? "Trocar senha"
+                : "Definir senha"}
           </Button>
         </div>
       </CardContent>

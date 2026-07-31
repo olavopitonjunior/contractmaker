@@ -59,8 +59,8 @@ export default async function AdminOrgsPage() {
           <a href="/admin/support-ai" className="text-primary hover:underline">
             IA de Suporte
           </a>
-          <a href="/admin/agent-defaults" className="text-primary hover:underline">
-            Especialistas do Editor
+          <a href="/admin/agents" className="text-primary hover:underline">
+            Agentes de IA
           </a>
         </nav>
       </header>

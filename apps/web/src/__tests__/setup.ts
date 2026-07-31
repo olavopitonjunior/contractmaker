@@ -103,6 +103,16 @@ vi.mock("@/lib/db/prisma", () => {
       findFirst: vi.fn().mockResolvedValue(null),
       upsert: vi.fn().mockResolvedValue({}),
     },
+    // Fonte única de config de agente desde o AgentProfile. Default null nos
+    // dois níveis = cai no hardcoded do registry, que é o que a maioria dos
+    // testes espera.
+    agentProfile: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      findUnique: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn().mockResolvedValue({}),
+      update: vi.fn().mockResolvedValue({}),
+    },
     formAttachment: {
       findUnique: vi.fn(),
       findFirst: vi.fn().mockResolvedValue(null),
