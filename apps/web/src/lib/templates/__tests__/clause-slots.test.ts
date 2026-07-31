@@ -15,9 +15,11 @@ import {
   slotMarkerHandlebars,
   slotTagsFor,
   slotToken,
+  SLOT_TAG_PREFIX,
 } from "../clause-slots";
 import { CANONICAL_TEMPLATE_SOURCES } from "../canonical-sources.generated";
 import { renderContratoHTML } from "@/lib/render/handlebars";
+import { SLOT_CLAUSE_TAG_PREFIX, isSlotClauseTags } from "@/lib/ai/knowledge";
 
 const FIADOR_DATA = {
   garantia: {
@@ -33,7 +35,7 @@ const CAUCAO_DATA = {
   locatarios: [{ tipo_pessoa: "fisica", nome: "Maria" }],
 };
 
-function dbWith(rows: Array<{ id: string; content: string }>) {
+function dbWith(rows: Array<{ id: string; content: string; chunkTotal?: number }>) {
   return { knowledgeItem: { findMany: vi.fn().mockResolvedValue(rows) } };
 }
 
@@ -89,6 +91,23 @@ describe("resolveClauseSlots", () => {
     expect(out.values).toEqual({});
     expect(out.resolved).toEqual([]);
     expect(db.knowledgeItem.findMany).not.toHaveBeenCalled();
+  });
+
+  it("consulta só a RAIZ — linha-filha de item chunkado herda as tags e nasce approved", async () => {
+    const db = dbWith([{ id: "ki1", content: "<p>ok</p>" }]);
+    await resolveClauseSlots({
+      orgId: "org1",
+      templateSource: slotMarkerHandlebars("garantia"),
+      data: FIADOR_DATA,
+      format: "html",
+      db,
+    });
+    expect(db.knowledgeItem.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ parentId: null }),
+        select: expect.objectContaining({ chunkTotal: true }),
+      })
+    );
   });
 
   it("usa a cláusula do acervo cujas tags casam com a garantia do form", async () => {
@@ -298,6 +317,44 @@ describe("render do content da cláusula (anti-chave-literal)", () => {
     });
     expect(out.failures).toEqual([]);
     expect(out.resolved[0].failure).toBeUndefined();
+  });
+
+  it("row LEGADA chunkada é descartada — o content dela é preview, não cláusula", async () => {
+    // Defesa em profundidade: o `where` já filtra `parentId: null`, mas o
+    // PARENT de um item chunkado também é raiz — e o `content` dele é o
+    // slice(0, 500) cortado no meio da frase.
+    const out = await resolveWith(
+      "<p>14.1. A PARTE LOCATÁRIA contratará seguro fiança junto à Tokio Marine, na form",
+      { ...SEGURO_DATA, garantia: { tipo: "caucao", caucao_meses: 3 } }
+    );
+    // `resolveWith` devolve rows sem chunkTotal; aqui o teste precisa dele.
+    const out2 = await resolveClauseSlots({
+      orgId: "org1",
+      templateSource: slotMarkerHandlebars("garantia"),
+      data: { ...SEGURO_DATA, garantia: { tipo: "caucao", caucao_meses: 3 } },
+      format: "html",
+      db: dbWith([
+        { id: "ki-legada", content: "<p>preview cortado no meio da fra", chunkTotal: 4 },
+      ]),
+    });
+    // Sem chunkTotal a linha é tratada como íntegra (compat com acervo antigo).
+    expect(out.resolved[0].source).toBe("knowledge");
+    // Com chunkTotal > 1, cai no fallback e registra.
+    expect(out2.resolved[0].source).toBe("fallback");
+    expect(out2.failures).toEqual([
+      expect.objectContaining({ knowledgeItemId: "ki-legada", reason: "chunked_content" }),
+    ]);
+    expect(out2.values.slot_garantia).toContain("a título de caução");
+    expect(out2.values.slot_garantia).not.toContain("preview cortado");
+  });
+
+  it("a tag de slot é a MESMA string que desliga o chunking na criação", () => {
+    // `lib/ai/knowledge.ts` repete o prefixo em vez de importar daqui (não
+    // arrastar o Handlebars pro caminho quente da KB). Esta é a trava contra
+    // drift: se um lado mudar, o outro para de proteger a cláusula.
+    expect(SLOT_CLAUSE_TAG_PREFIX).toBe(SLOT_TAG_PREFIX);
+    expect(isSlotClauseTags(slotTagsFor("garantia", "fiador"))).toBe(true);
+    expect(isSlotClauseTags(["garantia:fiador"])).toBe(false);
   });
 
   it("SEM RECURSÃO: `{{{slot}}}` no template principal NÃO reavalia o valor injetado", () => {

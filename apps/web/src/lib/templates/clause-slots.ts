@@ -165,7 +165,9 @@ export type ClauseSlotFailureReason =
   /** Handlebars não compilou ou estourou durante o render. */
   | "render_error"
   /** Renderizou, mas sobrou `{{` — chave que ninguém mais vai resolver. */
-  | "residual_placeholder";
+  | "residual_placeholder"
+  /** Row legada repartida em chunks: o `content` é preview/pedaço, não a cláusula. */
+  | "chunked_content";
 
 export interface ClauseSlotFailure {
   slot: ClauseSlotKey;
@@ -210,15 +212,42 @@ function emptyResult(): ResolveClauseSlotsResult {
  */
 const RESIDUAL_PLACEHOLDER = /\{\{/;
 
+/** Linha do acervo consumida pelo slot. */
+interface ClauseHit {
+  id: string;
+  content: string;
+  /** >1 = row legada repartida (parent-resumo). Ausente = row íntegra. */
+  chunkTotal?: number | null;
+}
+
 /**
- * Renderiza o `content` da cláusula do acervo contra o dataJson enriquecido.
- * Devolve o HTML, ou a falha que manda o slot pro fallback canônico.
+ * Valida e renderiza o `content` da cláusula do acervo contra o dataJson
+ * enriquecido. Devolve o HTML, ou a falha que manda o slot pro fallback
+ * canônico.
  */
-function renderClauseContent(
+function resolveClauseContent(
   slot: ClauseSlotKey,
-  hit: { id: string; content: string },
+  hit: ClauseHit,
   data: Record<string, unknown>
 ): { html: string } | { failure: ClauseSlotFailure } {
+  // Defesa em profundidade contra o chunking do acervo. A criação já grava
+  // cláusula de slot como row única (`noChunk` em lib/ai/knowledge.ts), mas uma
+  // row LEGADA multi-chunk tem `content` = preview de 500 chars cortado no meio
+  // da frase. O `where` já filtra `parentId: null` (as filhas herdam as mesmas
+  // tags e nascem approved); isto pega o parent que sobrou.
+  if ((hit.chunkTotal ?? 1) > 1) {
+    return {
+      failure: {
+        slot,
+        knowledgeItemId: hit.id,
+        reason: "chunked_content",
+        message:
+          `cláusula gravada em ${hit.chunkTotal} chunks — o content da raiz é só um ` +
+          `preview. Reingira a cláusula (o seed grava row única).`,
+      },
+    };
+  }
+
   let rendered: string;
   try {
     rendered = renderContratoHTML(hit.content, data);
@@ -284,9 +313,13 @@ export async function resolveClauseSlots(
             orgId: input.orgId,
             category: "clause",
             status: "approved",
+            // Só a RAIZ. As linhas-filhas de um item chunkado herdam as mesmas
+            // tags e nascem `approved` — sem este filtro, o `take: 1` podia
+            // injetar um PEDAÇO DO MEIO da cláusula dentro do contrato.
+            parentId: null,
             tags: { hasEvery: slotTagsFor(slot, value) },
           },
-          select: { id: true, content: true },
+          select: { id: true, content: true, chunkTotal: true },
           // Mais recente vence: reingerir o modelo atualiza a cláusula do slot
           // sem obrigar o operador a apagar a antiga. `id` é o desempate — duas
           // cláusulas gravadas na MESMA transação têm `updatedAt` idêntico e a
@@ -294,14 +327,14 @@ export async function resolveClauseSlots(
           // contrato poderia sair com uma cláusula diferente a cada geração.
           orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
           take: 1,
-        })) as Array<{ id: string; content: string }>;
+        })) as ClauseHit[];
         const hit = rows?.[0];
         if (hit?.content) {
           // A cláusula do acervo é Handlebars como qualquer outra (o agente já
           // as insere assim) — renderizar aqui é o que faz `{{aluguel.valor}}`
-          // dentro dela virar valor. Render quebrado ou chave sobrando não
-          // derruba a geração: vira falha registrada + fallback canônico.
-          const out = renderClauseContent(slot, hit, input.data);
+          // dentro dela virar valor. Render quebrado, chave sobrando ou row
+          // chunkada não derrubam a geração: viram falha registrada + fallback.
+          const out = resolveClauseContent(slot, hit, input.data);
           if ("html" in out) {
             html = out.html;
             knowledgeItemId = hit.id;
