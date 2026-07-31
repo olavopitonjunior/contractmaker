@@ -193,46 +193,165 @@ export function modalidadeForIngest(
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * Palavras-chave que identificam a família do documento. Testadas na ordem: o
- * contrato de administração cita "locação" o tempo todo, então vem antes; a
- * proposta cita "compra e venda", então "proposta" vem antes do CCV.
+ * Quantas linhas com conteúdo formam o "título" do documento. `suggestDocType`
+ * antepõe o NOME DO ARQUIVO ao texto, então a linha 1 é o nome e as seguintes
+ * são o título/subtítulo do instrumento.
  */
-function familyFromText(text: string): {
+const TITLE_LINES = 4;
+const TITLE_CHARS = 400;
+
+/**
+ * Bloco de título: as primeiras linhas não-vazias, em minúsculas.
+ *
+ * Exportado porque é o coração do palpite — e porque o bug que ele conserta era
+ * invisível: a heurística antiga usava os primeiros 4.000 CARACTERES como
+ * proxy de título. Num contrato longo isso funciona por acidente (o corpo fica
+ * fora da janela); num contrato CURTO a janela engole o documento inteiro e
+ * qualquer menção de passagem a "proposta" no meio de uma cláusula ("conforme a
+ * proposta de seguro", "protocolo da proposta") passava a decidir o tipo. Foi
+ * assim que um "CONTRATO DE LOCAÇÃO RESIDENCIAL" de 8 cláusulas virou modelo de
+ * PROPOSTA no QA — e nasceu na modalidade errada.
+ */
+export function documentTitleBlock(text: string): string {
+  return text
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, TITLE_LINES)
+    .join("\n")
+    .slice(0, TITLE_CHARS)
+    .toLowerCase();
+}
+
+/** O instrumento é de administração — qualificador, vence a corrida abaixo. */
+const RE_ADMINISTRACAO =
+  /administra[çc][ãa]o|presta[çc][ãa]o de servi[çc]os de administrar/;
+const RE_PROPOSTA = /\bpropostas?\b/;
+/** Palavras que nomeiam um instrumento definitivo (não uma oferta). */
+const RE_INSTRUMENTO =
+  /\bcontratos?\b|\binstrumentos?\b|\bcompromissos?\b|\bescrituras?\b|\bminutas?\b|\btermos?\b/;
+const RE_LOCACAO = /loca[çc][ãa]o|locat[áa]ri|locador|aluguel|inquilin/;
+const RE_VENDA =
+  /compra e venda|venda e compra|comprador|vendedor|\bccv\b|promessa de venda/;
+const RE_COMERCIAL = /n[ãa]o[- ]residencial|comercial/;
+const RE_FINANCIADO =
+  /financiamento|aliena[çc][ãa]o fiduci[áa]ri|carta de cr[ée]dito|cons[óo]rcio|fgts/;
+
+/**
+ * Proposta DE VERDADE no corpo: a peça que se DECLARA proposta. Não casa a que
+ * apenas cita uma ("proposta de seguro", "protocolo da proposta") — que é
+ * exatamente o que um contrato de locação com seguro-fiança ou título de
+ * capitalização faz, e o que quebrava o palpite.
+ */
+const RE_PROPOSTA_BODY =
+  /\b(?:a\s+)?(?:presente|esta)\s+propostas?\b|\bpropostas?\s+de\s+(?:loca|compra|venda|aquisi)|\bproponente\b/;
+
+/** Sinais de que o documento é o instrumento definitivo, não uma oferta. */
+const RE_FECHO =
+  /por\s+estarem\s+(?:assim\s+)?justos|firmam\s+o\s+presente|assinam\s+o\s+presente|em\s+\d+\s*\(?[a-zà-ú]*\)?\s*vias|^\s*testemunhas?\s*:?\s*$/im;
+const RE_RESCISAO = /rescis[ãa]o|rescindir|resili[çc]/;
+const RE_VIGENCIA = /prazo\s+de\s+\d+|vig[êe]ncia|prorroga/;
+
+function firstIndex(re: RegExp, s: string): number {
+  const m = re.exec(s);
+  return m ? m.index : Number.POSITIVE_INFINITY;
+}
+
+function locacaoSubOption(scope: string): string {
+  return RE_COMERCIAL.test(scope) ? "comercial" : "residencial";
+}
+
+/**
+ * Família do documento. O TÍTULO manda; o corpo só decide quando o título não
+ * nomeia o instrumento.
+ *
+ * Regra 1 — TÍTULO DOMINANTE. "CONTRATO DE LOCAÇÃO" é contrato, ponto final,
+ * por mais vezes que a palavra "proposta" apareça nas cláusulas. Entre
+ * "proposta" e "contrato" no mesmo título, vence QUEM APARECE PRIMEIRO — é como
+ * se lê um título ("Contrato de locação … conforme proposta" é contrato).
+ *
+ * Regra 2 — DESEMPATE NO CORPO. Sem título conclusivo, um texto que parece
+ * proposta ainda é tratado como CONTRATO quando tem fecho de assinaturas com
+ * locador e locatário E cláusula de vigência ou rescisão: proposta é oferta,
+ * não rescinde nem se assina em duas vias com testemunhas.
+ */
+function familyFromText(
+  filename: string,
+  text: string
+): {
   type: IngestDocType;
   subOption?: string;
+  via: "title" | "body";
 } {
-  const head = text.slice(0, 4000).toLowerCase();
-  const all = text.toLowerCase();
-  const has = (re: RegExp) => re.test(head) || re.test(all.slice(0, 20_000));
+  const title = documentTitleBlock(`${filename}\n${text}`);
+  const body = text.slice(0, 20_000).toLowerCase();
+  const scope = `${title}\n${body}`;
 
-  const isProposta = /\bproposta\b/.test(head);
-  const isAdministracao =
-    /contrato de administra|administra[çc][ãa]o de loca|presta[çc][ãa]o de servi[çc]os de administra/.test(
-      head
-    );
-  const isLocacao = /loca[çc][ãa]o|locat[áa]ri|locador/.test(head);
-  const isComercial = /n[ãa]o residencial|comercial/.test(head);
-
-  if (isAdministracao) return { type: "contrato_administracao" };
-  if (isProposta && isLocacao) {
-    return {
-      type: "proposta_locacao",
-      subOption: isComercial ? "comercial" : "residencial",
-    };
+  // ── Regra 1: título ──────────────────────────────────────────────────────
+  if (RE_ADMINISTRACAO.test(title)) {
+    return { type: "contrato_administracao", via: "title" };
   }
-  if (isProposta) return { type: "proposta_venda" };
+
+  const iProposta = firstIndex(RE_PROPOSTA, title);
+  const iInstrumento = firstIndex(RE_INSTRUMENTO, title);
+  const titleDecides = Number.isFinite(iProposta) || Number.isFinite(iInstrumento);
+
+  if (titleDecides) {
+    const isProposta = iProposta < iInstrumento;
+    // A família (locação × venda) sai do título quando ele a nomeia; senão do
+    // corpo — "PROPOSTA" sozinha no título não diz de quê.
+    const isLocacao = RE_LOCACAO.test(title)
+      ? true
+      : RE_VENDA.test(title)
+        ? false
+        : RE_LOCACAO.test(body) && !RE_VENDA.test(body);
+
+    if (isProposta) {
+      return isLocacao
+        ? {
+            type: "proposta_locacao",
+            subOption: locacaoSubOption(scope),
+            via: "title",
+          }
+        : { type: "proposta_venda", via: "title" };
+    }
+    return isLocacao
+      ? { type: "contrato_locacao", subOption: locacaoSubOption(scope), via: "title" }
+      : {
+          type: "contrato_venda",
+          subOption: RE_FINANCIADO.test(scope) ? "financiamento" : "a_vista",
+          via: "title",
+        };
+  }
+
+  // ── Regra 2: corpo (título mudo) ─────────────────────────────────────────
+  if (RE_ADMINISTRACAO.test(body)) {
+    return { type: "contrato_administracao", via: "body" };
+  }
+
+  const isLocacao = RE_LOCACAO.test(scope);
+  const parecerProposta = RE_PROPOSTA_BODY.test(scope);
+  // Fecho de assinaturas das duas partes + vigência/rescisão = instrumento
+  // definitivo. Proposta não rescinde.
+  const pareceContrato =
+    RE_FECHO.test(text) &&
+    /locador/.test(scope) &&
+    /locat[áa]ri/.test(scope) &&
+    (RE_RESCISAO.test(scope) || RE_VIGENCIA.test(scope));
+
+  if (parecerProposta && !pareceContrato) {
+    return isLocacao
+      ? { type: "proposta_locacao", subOption: locacaoSubOption(scope), via: "body" }
+      : { type: "proposta_venda", via: "body" };
+  }
   if (isLocacao) {
-    return {
-      type: "contrato_locacao",
-      subOption: isComercial ? "comercial" : "residencial",
-    };
+    return { type: "contrato_locacao", subOption: locacaoSubOption(scope), via: "body" };
   }
-  const financiado = has(
-    /financiamento|aliena[çc][ãa]o fiduci[áa]ri|carta de cr[ée]dito|consórcio|cons[óo]rcio|fgts/
-  );
   return {
     type: "contrato_venda",
-    subOption: financiado ? "financiamento" : "a_vista",
+    subOption: RE_FINANCIADO.test(scope) ? "financiamento" : "a_vista",
+    via: "body",
   };
 }
 
@@ -263,15 +382,22 @@ export function suggestDocType(input: {
           : "Parece material de referência, não um contrato inteiro.",
     };
   }
-  const fam = familyFromText(`${input.filename}\n${input.text}`);
+  const fam = familyFromText(input.filename, input.text);
   const def = ingestDocTypeDef(fam.type);
   const sub = fam.subOption
     ? def.subOptions.find((o) => o.value === fam.subOption)?.label
     : null;
+  const nome = `${def.label.replace(/^Modelo de /, "")}${
+    sub ? ` (${sub.toLowerCase()})` : ""
+  }`;
   return {
-    ...fam,
-    reason: `Estrutura de contrato completo; o texto indica ${def.label.replace(/^Modelo de /, "")}${
-      sub ? ` (${sub.toLowerCase()})` : ""
-    }.`,
+    type: fam.type,
+    subOption: fam.subOption,
+    // Dizer DE ONDE veio o palpite é o que permite ao operador discordar com
+    // conhecimento de causa — "pelo título" é bem mais confiável que "pelo texto".
+    reason:
+      fam.via === "title"
+        ? `Contrato completo; o título do documento diz ${nome}.`
+        : `Contrato completo; o texto indica ${nome}.`,
   };
 }

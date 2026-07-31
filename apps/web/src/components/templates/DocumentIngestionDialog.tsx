@@ -566,9 +566,18 @@ export function DocumentIngestionDialog({
                 key={g.id}
                 group={g}
                 entries={entries}
+                docTypes={docTypes}
                 decision={decisionFor(g)}
                 disabled={busy || phase === "done"}
                 onChange={(next) => setDecision(g, next)}
+                onChangeType={(docType, subOption) => {
+                  // O tipo vale pro GRUPO INTEIRO: os membros são o mesmo
+                  // documento variando uma cláusula, então salvá-los em
+                  // modalidades diferentes é sempre erro.
+                  for (const id of g.memberIds) {
+                    patch(id, { docType, subOption, criteria: {} });
+                  }
+                }}
               />
             ))}
 
@@ -830,19 +839,30 @@ function FileCard({
 function GroupCard({
   group,
   entries,
+  docTypes,
   decision,
   disabled,
   onChange,
+  onChangeType,
 }: {
   group: GroupView;
   entries: Entry[];
+  docTypes: IngestDocTypeDef[];
   decision: GroupDecision;
   disabled: boolean;
   onChange: (next: Partial<GroupDecision>) => void;
+  onChangeType: (docType: IngestDocType | null, subOption: string | null) => void;
 }) {
   const members = group.memberIds
     .map((id) => entries.find((e) => e.id === id))
     .filter((e): e is Entry => Boolean(e));
+  // Todos os membros compartilham tipo/sub-opção (a família é pré-requisito do
+  // agrupamento); o primeiro representa o grupo.
+  const lead = members[0];
+  const def = lead?.docType ? ingestDocTypeDef(lead.docType) : null;
+  const modalidade = lead?.docType
+    ? modalidadeForIngest(lead.docType, lead.subOption)
+    : null;
   // Quando o grupo se formou por CONTENÇÃO, o "% idêntico" (Dice) subestima a
   // parecença — é o caso "um dos arquivos tem um bloco grande a mais" (rider de
   // seguradora, por exemplo). Contar a mesma história com o número errado faria
@@ -883,6 +903,70 @@ function GroupCard({
 
       {decision.consolidate && (
         <div className="mt-3 space-y-2">
+          {/* O TIPO em destaque: o operador confirma o grupo de uma vez só, e
+              foi exatamente aqui que um palpite errado passou batido no QA — um
+              contrato de locação nasceu como modelo de PROPOSTA. Fica no topo
+              do card, com o nome da modalidade por extenso e o seletor à mão. */}
+          <div className="rounded-md border border-violet-300 bg-background p-2.5 dark:border-violet-900">
+            <Label className="text-xs font-semibold">
+              Estes {members.length} arquivos são: <span className="text-destructive">*</span>
+            </Label>
+            <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
+              <select
+                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm font-medium"
+                value={lead?.docType ?? ""}
+                disabled={disabled}
+                onChange={(e) => {
+                  const next = (e.target.value || null) as IngestDocType | null;
+                  const nextDef = next ? ingestDocTypeDef(next) : null;
+                  onChangeType(next, nextDef?.subOptions[0]?.value ?? null);
+                }}
+              >
+                <option value="">Escolha…</option>
+                {docTypes
+                  .filter((d) => d.key !== "clausulas")
+                  .map((d) => (
+                    <option key={d.key} value={d.key}>
+                      {d.label}
+                    </option>
+                  ))}
+              </select>
+              {def && def.subOptions.length > 0 && (
+                <select
+                  className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  aria-label={def.subLabel}
+                  value={lead?.subOption ?? def.subOptions[0].value}
+                  disabled={disabled}
+                  onChange={(e) => onChangeType(lead?.docType ?? null, e.target.value)}
+                >
+                  {def.subOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            {def && (
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {def.description}
+              </p>
+            )}
+            <p className="mt-1 text-[11px]">
+              {modalidade ? (
+                <>
+                  Vai virar <strong>um</strong> modelo de{" "}
+                  <strong>{modalidadeLabel(modalidade)}</strong>, com a garantia
+                  escolhida pelo formulário. Confira antes de confirmar.
+                </>
+              ) : (
+                <span className="text-destructive">
+                  Escolha o tipo — sem ele o grupo não é criado.
+                </span>
+              )}
+            </p>
+          </div>
+
           {members.map((m) => {
             const blocks = group.primary?.byDoc[m.id] ?? [];
             const preview = blocks.join(" ").slice(0, 220);
