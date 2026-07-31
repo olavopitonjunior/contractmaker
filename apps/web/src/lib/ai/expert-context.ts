@@ -16,11 +16,14 @@ import { prisma } from "@/lib/db/prisma";
 import { findSimilarContracts } from "./memory";
 import { knowledgeScopeWhere, type KnowledgeScopeOptions } from "./knowledge-scope";
 import { resolveAgentProfile } from "./agents/resolve";
+import { usageCountsForOrg } from "./knowledge-usage";
 import type { AgentKey } from "./agents/registry";
 import type { AgentContext } from "./types";
 
 const TOP_SIMILAR_CONTRACTS = 3;
 const TOP_CLAUSES = 8;
+/** Peneira antes do ranking por uso da org — ver `loadTopClauses`. */
+const CLAUSE_CANDIDATES = 40;
 const MAX_SUMMARY_CHARS = 280;
 const MAX_CLAUSE_CHARS = 220;
 
@@ -215,7 +218,7 @@ async function loadTopClauses(
         },
       };
 
-  return prisma.knowledgeItem.findMany({
+  const candidatas = await prisma.knowledgeItem.findMany({
     where: {
       ...knowledgeScopeWhere(context.orgId, scope),
       category: "clause",
@@ -228,10 +231,40 @@ async function loadTopClauses(
       groupCode: true,
       agentNotes: true,
       usageCount: true,
+      orgId: true,
     },
+    // Teto generoso, não `TOP_CLAUSES`: o corte final é por uso DA ORG, e esse
+    // número não dá pra ordenar aqui (ver abaixo). Ordenar por `usageCount`
+    // global só serve pra desempatar quem entra na peneira.
     orderBy: [{ usageCount: "desc" }, { title: "asc" }],
-    take: TOP_CLAUSES,
+    take: CLAUSE_CANDIDATES,
   });
+
+  /**
+   * Ranking por uso DA ORG, não global.
+   *
+   * O Prisma não sabe `orderBy` um agregado de relação, então o corte final
+   * acontece em memória. Vale o esforço: este bloco entra no prompt de todo
+   * turn em modo Planejar, e ordenar cláusula de PLATAFORMA por contador global
+   * deixava um tenant deslocar o preâmbulo do agente de outro.
+   *
+   * Item da própria org usa o `usageCount` da linha (que é dela e só dela);
+   * item de plataforma usa o contador daquela org, que começa em zero até a
+   * imobiliária usá-lo de fato — é o comportamento certo: cláusula universal
+   * ganha espaço no preâmbulo por mérito local, não por popularidade alheia.
+   */
+  const usoDaOrg = await usageCountsForOrg(
+    context.orgId,
+    candidatas.filter((c) => c.orgId === null).map((c) => c.id)
+  );
+
+  return candidatas
+    .map((c) => ({
+      ...c,
+      usageCount: c.orgId === null ? (usoDaOrg.get(c.id) ?? 0) : c.usageCount,
+    }))
+    .sort((a, b) => b.usageCount - a.usageCount || a.title.localeCompare(b.title))
+    .slice(0, TOP_CLAUSES);
 }
 
 async function loadActiveTemplates(context: AgentContext) {

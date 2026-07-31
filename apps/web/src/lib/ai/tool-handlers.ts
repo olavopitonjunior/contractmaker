@@ -22,6 +22,7 @@ import {
   type KnowledgeScopeOptions,
 } from "./knowledge-scope";
 import { resolveAgentProfile } from "./agents/resolve";
+import { incrementClauseUsage } from "./knowledge-usage";
 import { logError } from "@/lib/observability/log";
 
 /**
@@ -1544,11 +1545,9 @@ async function handleInsertClause(
     },
   });
 
-  // Increment usage count
-  await prisma.knowledgeItem.update({
-    where: { id: knowledgeItemId },
-    data: { usageCount: { increment: 1 } },
-  });
+  // Conta no global E no da org. Ver `knowledge-usage.ts`: o contador global
+  // sozinho deixava um tenant deslocar o preâmbulo do agente de outro.
+  await incrementClauseUsage(knowledgeItemId, context.orgId);
 
   // Render clause content with contract data
   const renderedClause = renderContratoHTML(clause.content, context.dataJson);

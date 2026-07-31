@@ -19,6 +19,7 @@ import { parseMoneyBR } from "@/lib/format/money";
 import { renderContratoHTML } from "@/lib/render/handlebars";
 import { embedOne, toPgVector, isEmbeddingsConfigured } from "./embeddings";
 import { recordAIUsage } from "./usage";
+import { incrementClauseUsage } from "./knowledge-usage";
 import { resolveModel, HAIKU_MODEL } from "./shared/models";
 
 interface PersonSnapshot {
@@ -330,17 +331,11 @@ export async function createContractMemory(contractId: string): Promise<{
       }
     }
 
-    // 7. Increment usageCount on clauses that were used in the final contract
+    // 7. Conta o uso das cláusulas que ficaram no contrato aprovado —
+    //    global + por org (ver `knowledge-usage.ts`).
     for (const cc of contract.clauses) {
       if (cc.isActive) {
-        await prisma.knowledgeItem
-          .update({
-            where: { id: cc.knowledgeItemId },
-            data: { usageCount: { increment: 1 } },
-          })
-          .catch((err) => {
-            console.error("[createContractMemory] usageCount increment failed:", err);
-          });
+        await incrementClauseUsage(cc.knowledgeItemId, orgId);
       }
     }
 

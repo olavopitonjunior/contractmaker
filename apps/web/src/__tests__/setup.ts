@@ -42,6 +42,10 @@ vi.mock("@/lib/db/prisma", () => {
       count: vi.fn().mockResolvedValue(0),
       groupBy: vi.fn().mockResolvedValue([]),
     },
+    knowledgeItemUsage: {
+      findMany: vi.fn().mockResolvedValue([]),
+      upsert: vi.fn().mockResolvedValue({}),
+    },
     contractTemplate: {
       findMany: vi.fn(),
       findFirst: vi.fn().mockResolvedValue(null),
