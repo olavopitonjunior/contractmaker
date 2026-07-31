@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { executeToolHandler } from "@/lib/ai/tool-handlers";
+import { AGENT_REGISTRY, isAgentKey } from "@/lib/ai/agents/registry";
 import type { AgentContext } from "@/lib/ai/types";
 
 /**
@@ -23,15 +24,31 @@ export async function POST(req: NextRequest) {
   const category = typeof body.category === "string" ? body.category : undefined;
   const topK = typeof body.topK === "number" ? body.topK : 5;
 
+  /**
+   * Agente cujo escopo simular. Sem ele a busca roda com escopo ABERTO — que
+   * era o comportamento até 2026-07-31 e tornava esta tela inútil justamente
+   * para o que ela existe: o usuário restringia o Jurídico em /settings,
+   * voltava aqui, e continuava vendo tudo. Só aceita agente que o runtime
+   * honra; qualquer outro seria mentira de outro tipo.
+   */
+  const rawAgent: unknown = body.agentKey;
+  const agentKey =
+    typeof rawAgent === "string" &&
+    isAgentKey(rawAgent) &&
+    AGENT_REGISTRY[rawAgent].supports.ragScope
+      ? rawAgent
+      : undefined;
+
   if (!query) {
     return NextResponse.json({ error: "query obrigatória" }, { status: 400 });
   }
 
-  // Minimal context shim — the handler only reads orgId
+  // Shim mínimo de contexto — o handler lê `orgId` e `agentKey`.
   const context: AgentContext = {
     contractId: "",
     userId: session.user.id,
     orgId: org.id,
+    agentKey,
     htmlContent: "",
     dataJson: {},
     templateSource: "",

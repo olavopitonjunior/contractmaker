@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { knowledgeScopeWhere } from "@/lib/ai/knowledge-scope";
+import { AGENT_DEFINITIONS } from "@/lib/ai/agents/registry";
 import { KnowledgeBaseClient } from "@/components/settings/KnowledgeBaseClient";
 
 export default async function KnowledgeBasePage() {
@@ -51,6 +52,12 @@ export default async function KnowledgeBasePage() {
       }))}
       initialCounts={countsMap}
       embeddingsConfigured={embeddingsConfigured}
+      // Do registry, não de um literal: a lista tem que seguir
+      // `supports.ragScope` sozinha.
+      ragAgents={AGENT_DEFINITIONS.filter((d) => d.supports.ragScope).map((d) => ({
+        key: d.key,
+        label: d.label,
+      }))}
     />
   );
 }
