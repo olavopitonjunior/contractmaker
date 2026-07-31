@@ -3,6 +3,7 @@ import {
   PERSON_CATEGORIES,
   PROPERTY_CATEGORIES,
   coerce,
+  isUncatalogedPersonDoc,
   parseEndereco,
   sanitizeCpf,
   type Assignment,
@@ -68,6 +69,15 @@ export type LocacaoPartyKind =
   | "representante_locador"
   | "representante_locatario";
 
+/** Kinds de LOCAÇÃO cujo basePath é uma pessoa (parte, fiador ou representante). */
+const PERSON_KINDS_LOCACAO = new Set<DocumentKind>([
+  "locador",
+  "locatario",
+  "fiador",
+  "representante_locador",
+  "representante_locatario",
+]);
+
 /**
  * Resolve o basePath de aplicação dos campos pelo kind do doc. Fiador vive em
  * `garantia.fiador` (sem índice); imóvel é objeto singular.
@@ -104,7 +114,14 @@ export function mapExtractedToLocacaoForm(
   const basePath = forceBasePath ?? resolveLocacaoBasePath(assignment);
   if (!basePath) return 0;
 
-  const isPerson = PERSON_CATEGORIES.has(category);
+  // Espelha a venda: categoria conhecida decide como antes; categoria fora do
+  // catálogo (ex.: carteira da OAB → "outro") só entra como pessoa quando o
+  // slot destino é de pessoa E há evidência de identidade nos campos. Imóvel
+  // segue whitelist estrita (não sujar o endereço do imóvel com o da parte).
+  const isPerson =
+    PERSON_CATEGORIES.has(category) ||
+    (PERSON_KINDS_LOCACAO.has(assignment.kind) &&
+      isUncatalogedPersonDoc(category, fields));
   const isProperty = PROPERTY_CATEGORIES.has(category);
   let filled = 0;
 
@@ -258,7 +275,12 @@ export function suggestLocacaoAssignment(
     return { kind: "imovel", index: 0 };
   }
 
-  if (!PERSON_CATEGORIES.has(category)) {
+  // Categoria de pessoa OU doc fora do catálogo com evidência de identidade
+  // (ex.: carteira da OAB classificada como "outro").
+  if (
+    !PERSON_CATEGORIES.has(category) &&
+    !isUncatalogedPersonDoc(category, fields)
+  ) {
     return { kind: "outro", index: 0 };
   }
 
@@ -282,7 +304,13 @@ export function suggestLocacaoAssignment(
   if (myKey) {
     for (const sib of siblings) {
       if (!sib.fields) continue;
-      if (!sib.category || !PERSON_CATEGORIES.has(sib.category)) continue;
+      if (!sib.category) continue;
+      if (
+        !PERSON_CATEGORIES.has(sib.category) &&
+        !isUncatalogedPersonDoc(sib.category, sib.fields)
+      ) {
+        continue;
+      }
       if (personKey(sib.fields) === myKey) return sib.assignment;
     }
   }

@@ -150,6 +150,101 @@ describe("suggestLocacaoAssignment", () => {
       suggestLocacaoAssignment("rg", { cpf_numero: "00099988877" }, snapshot)
     ).toEqual({ kind: "outro", index: 0 });
   });
+
+  it('"outro" com CPF que casa com locador sugere o locador', () => {
+    expect(
+      suggestLocacaoAssignment("outro", OAB_EXTRACTION.fields, snapshot)
+    ).toEqual({ kind: "locador", index: 0 });
+  });
+
+  it('"outro" sem evidência de identidade continua em "outro"', () => {
+    expect(
+      suggestLocacaoAssignment(
+        "outro",
+        { tipo_documento: "Boleto", valor: "R$ 10" },
+        snapshot
+      )
+    ).toEqual({ kind: "outro", index: 0 });
+  });
+});
+
+// ============================================================================
+// Doc pessoal FORA do catálogo do classificador (bug de prod: carteira da OAB
+// veio como "outro" e o "Aplicar aos campos" preenchia zero).
+// ============================================================================
+
+const OAB_EXTRACTION: ExtractedDoc = {
+  category: "outro",
+  fields: {
+    tipo_documento: "Identidade de Advogado",
+    nome_completo: "João Locador",
+    cpf_numero: "111.222.333-44",
+    rg_numero: "MG-12.345.678",
+    data_nascimento: "1985-03-12",
+    naturalidade: "Belo Horizonte",
+    filiacao_mae: "Maria Locadora",
+    numero_inscricao: "OAB/MG 123456",
+  },
+  confidence: 0.98,
+};
+
+describe("mapExtractedToLocacaoForm — categoria fora do catálogo", () => {
+  it('"outro" com identidade aplica no slot de pessoa (locador)', () => {
+    const { form, store } = makeFormStub();
+    const filled = mapExtractedToLocacaoForm(
+      OAB_EXTRACTION,
+      { kind: "locador", index: 0 },
+      form
+    );
+    expect(filled).toBeGreaterThan(0);
+    expect(store.get("locadores.0.nome")).toBe("João Locador");
+    expect(store.get("locadores.0.cpf")).toBe("11122233344");
+    expect(store.get("locadores.0.rg")).toBe("MG-12.345.678");
+    expect(store.get("locadores.0.data_nascimento")).toBe("1985-03-12");
+    // parteLocacaoSchema não tem naturalidade/nome_mae — não injeta chave órfã.
+    expect(store.get("locadores.0.naturalidade")).toBeUndefined();
+    expect(store.get("locadores.0.nome_mae")).toBeUndefined();
+  });
+
+  it('"outro" com identidade também vale pro fiador', () => {
+    const { form, store } = makeFormStub();
+    expect(
+      mapExtractedToLocacaoForm(OAB_EXTRACTION, { kind: "fiador", index: 0 }, form)
+    ).toBeGreaterThan(0);
+    expect(store.get("garantia.fiador.nome")).toBe("João Locador");
+  });
+
+  it('"outro" SEM campos de identidade continua aplicando 0 campos', () => {
+    const { form, store } = makeFormStub();
+    const filled = mapExtractedToLocacaoForm(
+      {
+        category: "outro",
+        fields: { tipo_documento: "Comprovante", valor: "R$ 1.200,00", cidade: "Campinas" },
+      },
+      { kind: "locador", index: 0 },
+      form
+    );
+    expect(filled).toBe(0);
+    expect(store.size).toBe(0);
+  });
+
+  it('"outro" com assignment de IMÓVEL continua aplicando 0 campos', () => {
+    const { form, store } = makeFormStub();
+    const filled = mapExtractedToLocacaoForm(
+      OAB_EXTRACTION,
+      { kind: "imovel", index: 0 },
+      form
+    );
+    expect(filled).toBe(0);
+    expect(store.size).toBe(0);
+  });
+
+  it("respeita skipIfDirty", () => {
+    const { form, store } = makeFormStub({ "locadores.0.nome": "Digitado À Mão" });
+    mapExtractedToLocacaoForm(OAB_EXTRACTION, { kind: "locador", index: 0 }, form);
+    expect(store.get("locadores.0.nome")).toBe("Digitado À Mão");
+    expect(store.get("locadores.0.cpf")).toBe("11122233344");
+  });
 });
 
 describe("labels do wizard de locação", () => {
