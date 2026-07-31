@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AlertCircle, Plus, Search, Sparkles, Trash2, Pencil } from "lucide-react";
+import { AlertCircle, Lock, Plus, Search, Sparkles, Trash2, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { KnowledgeItemForm } from "./KnowledgeItemForm";
 import { KnowledgeSeedButton } from "@/components/knowledge/KnowledgeSeedButton";
@@ -21,15 +21,38 @@ interface KnowledgeItem {
   chunkTotal: number;
   tags: string[];
   source: string | null;
+  /** `null` = item da base de PLATAFORMA: aparece pra todo tenant, mas só o
+   *  super_admin edita. A API já recusa a escrita; aqui a UI para de oferecer. */
+  orgId?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Item que ESTA tela não pode editar: linha de plataforma vista de dentro do
+ * tenant. No /admin (scope="platform") todo item é de plataforma — e lá é
+ * justamente onde ele DEVE ser editável, por isso o escopo entra na conta.
+ */
+function isReadOnly(item: KnowledgeItem, scope: "org" | "platform"): boolean {
+  return scope === "org" && item.orgId === null;
 }
 
 interface Props {
   initialItems: KnowledgeItem[];
   initialCounts: Record<string, number>;
   embeddingsConfigured: boolean;
+  /**
+   * `"org"` (default) opera na base do tenant via /api/knowledge; `"platform"`
+   * opera na base universal via /api/admin/knowledge (super_admin). A tela é a
+   * mesma — muda o escopo e, com ele, o conjunto de rotas.
+   */
+  scope?: "org" | "platform";
 }
+
+const API_BASE: Record<"org" | "platform", string> = {
+  org: "/api/knowledge",
+  platform: "/api/admin/knowledge",
+};
 
 const CATEGORY_LABELS: Record<string, { label: string; description: string }> = {
   legislation: {
@@ -59,7 +82,9 @@ export function KnowledgeBaseClient({
   initialItems,
   initialCounts,
   embeddingsConfigured,
+  scope = "org",
 }: Props) {
+  const apiBase = API_BASE[scope];
   const router = useRouter();
   const [items, setItems] = useState(initialItems);
   const [counts, setCounts] = useState(initialCounts);
@@ -86,7 +111,7 @@ export function KnowledgeBaseClient({
   }, [items, activeTab, search]);
 
   async function refresh() {
-    const res = await fetch("/api/knowledge");
+    const res = await fetch(apiBase);
     if (res.ok) {
       const data = await res.json();
       setItems(data.items);
@@ -96,7 +121,7 @@ export function KnowledgeBaseClient({
 
   async function handleDelete(id: string) {
     if (!confirm("Remover este item da base de conhecimento?")) return;
-    const res = await fetch(`/api/knowledge/${id}`, { method: "DELETE" });
+    const res = await fetch(`${apiBase}/${id}`, { method: "DELETE" });
     if (res.ok) {
       toast.success("Item removido");
       await refresh();
@@ -110,7 +135,7 @@ export function KnowledgeBaseClient({
     if (!searchQuery.trim()) return;
     setSearching(true);
     try {
-      const res = await fetch("/api/knowledge/search", {
+      const res = await fetch(`${apiBase}/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -203,18 +228,25 @@ export function KnowledgeBaseClient({
             <Sparkles className="h-4 w-4 mr-1" />
             Testar RAG
           </Button>
-          <KnowledgeUploadCard
-            onDone={async () => {
-              await refresh();
-              router.refresh();
-            }}
-          />
-          <KnowledgeSeedButton
-            onDone={async () => {
-              await refresh();
-              router.refresh();
-            }}
-          />
+          {/* Upload e seed escrevem via /api/knowledge/* (rotas do tenant).
+              Ingestão em lote na base de plataforma é trabalho de outro lote —
+              até lá, o /admin cria item a item. */}
+          {scope === "org" && (
+            <>
+              <KnowledgeUploadCard
+                onDone={async () => {
+                  await refresh();
+                  router.refresh();
+                }}
+              />
+              <KnowledgeSeedButton
+                onDone={async () => {
+                  await refresh();
+                  router.refresh();
+                }}
+              />
+            </>
+          )}
           <Button size="sm" onClick={() => openEditor(null)}>
             <Plus className="h-4 w-4 mr-1" />
             Novo item
@@ -317,26 +349,37 @@ export function KnowledgeBaseClient({
                               {item.source}
                             </Badge>
                           )}
+                          {isReadOnly(item, scope) && (
+                            <Badge variant="secondary" className="text-[10px] gap-1">
+                              <Lock className="h-2.5 w-2.5" />
+                              Plataforma
+                            </Badge>
+                          )}
                         </div>
                       </div>
-                      <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => openEditor(item)}
-                        >
-                          <Pencil className="h-3 w-3" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-destructive"
-                          onClick={() => handleDelete(item.id)}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </div>
+                      {/* Item da plataforma não mostra ações: a API recusaria a
+                          escrita de qualquer jeito, e botão que sempre falha é
+                          pior do que botão nenhum. */}
+                      {!isReadOnly(item, scope) && (
+                        <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => openEditor(item)}
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-destructive"
+                            onClick={() => handleDelete(item.id)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   </CardHeader>
                   <CardContent className="pt-0">
@@ -366,6 +409,7 @@ export function KnowledgeBaseClient({
 
       <KnowledgeItemForm
         open={formOpen}
+        apiBase={apiBase}
         item={editingItem}
         onClose={() => setFormOpen(false)}
         onSaved={async () => {

@@ -317,6 +317,11 @@ export type AuditAction =
   // DIMOB / fiscal
   | "FISCAL_SETTINGS_UPDATE"
   | "AGENT_CONFIG_UPDATE"
+  // Base de conhecimento da PLATAFORMA (KnowledgeItem.orgId IS NULL) — escrita
+  // que todos os tenants passam a ler, feita por super_admin fora de qualquer org.
+  | "PLATFORM_KNOWLEDGE_CREATE"
+  | "PLATFORM_KNOWLEDGE_UPDATE"
+  | "PLATFORM_KNOWLEDGE_DELETE"
   | "DIMOB_GENERATED"
   | "DIMOB_SALE_EXCLUDED"
   | "DIMOB_SALE_RECONCILED"

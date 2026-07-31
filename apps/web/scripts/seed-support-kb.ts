@@ -14,25 +14,25 @@
  * Env:
  *   DATABASE_URL    — Prisma (passe a URL inline pra mirar staging/prod)
  *   VOYAGE_API_KEY  — opcional; se presente, gera embeddings
- *   SUPPORT_KB_ORG_ID / SHARED_ORG_ID — org que hospeda a base (fallback: org mais antiga)
  *
  * Idempotente: cada item tem um `source` estável; o script apaga o item (e seus
  * chunks, via cascade) com aquele source antes de recriar — re-rodar substitui.
  */
 import { prisma } from "@/lib/db/prisma";
 import { isEmbeddingsConfigured } from "@/lib/ai/embeddings";
-import { resolveSupportOrgId } from "@/lib/support/org";
 import { collectSupportSeedItems, seedSupportKb } from "@/lib/support/seed";
 
 const APPLY = process.argv.includes("--apply");
 
 async function main() {
-  const orgId = await resolveSupportOrgId();
+  // Base de suporte = escopo de PLATAFORMA (`KnowledgeItem.orgId IS NULL`).
+  // Deixou de depender de env: antes era SUPPORT_KB_ORG_ID → SHARED_ORG_ID →
+  // "org mais antiga", e seed e runtime podiam mirar orgs diferentes.
   const items = collectSupportSeedItems();
   const willEmbed = isEmbeddingsConfigured();
 
   console.log(
-    `[seed-support-kb] orgId=${orgId} · ${items.length} itens · embeddings ${
+    `[seed-support-kb] escopo=plataforma · ${items.length} itens · embeddings ${
       willEmbed ? "ON" : "OFF (ILIKE fallback)"
     } · ${APPLY ? "APLICANDO" : "dry-run"}`
   );
@@ -42,12 +42,12 @@ async function main() {
     console.log("\nDry-run. Rode com --apply para persistir.");
     console.log(
       "Dica: em staging/prod, prefira o botão 'Semear base padrão' em /admin/support-ai\n" +
-        "(roda dentro do deploy, no banco/org corretos)."
+        "(roda dentro do deploy, no banco correto)."
     );
     return;
   }
 
-  const { created } = await seedSupportKb(orgId);
+  const { created } = await seedSupportKb(null);
   console.log(`\n[seed-support-kb] concluído: ${created} itens.`);
 }
 

@@ -1852,10 +1852,18 @@ model LegacyTemplate {
 // KNOWLEDGE BASE (RAG)
 // ============================================
 
+/// Base de conhecimento do RAG.
+///
+/// `orgId = NULL` é a base de PLATAFORMA: visível a todos os tenants, editável
+/// só por super_admin. Foi escolhido em vez de org-sentinela porque a sentinela
+/// (a) precisava de env pra ser resolvida e divergia entre ambientes, e (b) é um
+/// tenant real com `onDelete: Cascade` — apagá-lo levaria junto a base universal.
+/// Toda LEITURA passa por `lib/ai/knowledge-scope.ts`; toda ESCRITA em linha de
+/// plataforma exige super_admin.
 model KnowledgeItem {
   id             String   @id @default(cuid())
-  orgId          String
-  category       String // "legislation" | "model" | "rule" | "glossary" | "clause"
+  orgId          String?
+  category       String // "legislation" | "model" | "rule" | "glossary" | "clause" | "support"
   title          String
   content        String   @db.Text
   chunkIndex     Int      @default(0)
@@ -1874,11 +1882,14 @@ model KnowledgeItem {
   status         String   @default("approved") // approved|pending|archived
   usageCount     Int      @default(0)
   legacyClauseId String? // rastreio durante janela de rollback 30d
+  /// Agentes que enxergam este item (`AgentProfile.agentKey`). VAZIO = todos —
+  /// nenhum item perde alcance por existir a coluna.
+  visibleToAgents String[] @default([])
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   // embedding vector(1024) - added via raw migration, not visible to Prisma
 
-  org             Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  org             Organization?    @relation(fields: [orgId], references: [id], onDelete: Cascade)
   parent          KnowledgeItem?   @relation("KnowledgeChunks", fields: [parentId], references: [id], onDelete: Cascade)
   chunks          KnowledgeItem[]  @relation("KnowledgeChunks")
   contractClauses ContractClause[]
