@@ -285,6 +285,35 @@ describe("dispatchUserNotification", () => {
     expect(trigger).not.toHaveBeenCalled();
   });
 
+  /**
+   * O fan-out `:mgr` de emitNotification existe só pro SINO do gerente (a
+   * leitura dele é restrita a rows direcionadas). O canal externo dele sai
+   * pelo motor lib/notifications/deal-events.ts, público `manager` — sem este
+   * skip ele receberia tudo em duplicata, por dois trilhos cujos dedupes
+   * (UserNotificationDelivery vs DealNotificationLog) não se enxergam.
+   */
+  it("row bell-only do gerente (batchId :mgr) é pulada — o externo vem do motor", async () => {
+    notifFind.mockResolvedValue(
+      notifRow({ userId: "gerente", batchId: "form1:mgr" })
+    );
+
+    const r = await dispatchUserNotification({ notificationId: "notif1" });
+
+    expect(r).toEqual({ sent: 0, skipped: 0, deferred: 0 });
+    // Pula ANTES de resolver destinatários: nada de claim pra envio que não sai.
+    expect(membershipMany).not.toHaveBeenCalled();
+    expect(delivCreate).not.toHaveBeenCalled();
+    expect(trigger).not.toHaveBeenCalled();
+  });
+
+  it("batchId normal (sem :mgr) continua despachando", async () => {
+    notifFind.mockResolvedValue(notifRow({ batchId: "form1" }));
+
+    const r = await dispatchUserNotification({ notificationId: "notif1" });
+
+    expect(r.sent).toBe(1);
+  });
+
   it("notificação inexistente é no-op", async () => {
     notifFind.mockResolvedValue(null);
 
