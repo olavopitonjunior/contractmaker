@@ -39,9 +39,10 @@ export interface OrchestratorState {
     envelopeId: string | null;
   };
 
-  /** Markdown pré-carregado por `loadExpertContext` (top 3 contratos +
-   *  top 8 cláusulas + templates ativos). Compartilhado entre especialistas. */
-  expertContext?: string;
+  // `expertContext` saiu do state em 2026-07-31: era carregado uma vez, sem
+  // agente definido, e por isso escapava do escopo de RAG. Agora cada
+  // especialista carrega o seu (`expertContextFor`) e o preâmbulo nunca é
+  // compartilhado entre agentes com escopos diferentes.
 
   /** Texto extraído de anexos do turn, já validado pelo Sentinel.
    *  Se Sentinel quarentinou, vem `undefined`. */

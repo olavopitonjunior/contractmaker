@@ -12,6 +12,7 @@
  */
 
 import { AGENT_TOOLS } from "../tools";
+import { expertContextFor } from "../expert-context";
 import { resolveAgentProfile } from "../agents/resolve";
 import { composeSystemPrompt } from "../agents/prompt-blocks";
 import { agentDisabledOutput } from "../agents/disabled";
@@ -34,13 +35,21 @@ export async function runAnalyst(state: OrchestratorState): Promise<SpecialistOu
     throw new Error("runAnalyst: contractContext não foi carregado (chame loadContext node antes)");
   }
 
-  const userPrompt = buildAnalystPrompt(state);
+  const profile = await resolveAgentProfile("analyst", state.orgId);
+  if (!profile.enabled) return agentDisabledOutput("analyst");
+
+  // Preâmbulo carregado AQUI, já escopado pro perfil deste agente — ver
+  // `expertContextFor`. Antes vinha pronto do `loadContextNode`, sem escopo.
+  const expertContext = await expertContextFor({
+    agentKey: "analyst",
+    mode: state.mode,
+    context: state.contractContext,
+  });
+  const userPrompt = buildAnalystPrompt(state, expertContext);
 
   // Perfil resolvido: org → plataforma → hardcoded (/admin/agents e
   // /settings/ai-agents). Instruções são APÊNDICE ao prompt-base por-domínio
   // (venda×locação); o modelo, esse sim, substitui.
-  const profile = await resolveAgentProfile("analyst", state.orgId);
-  if (!profile.enabled) return agentDisabledOutput("analyst");
 
   return runSpecialist({
     agentName: "analyst",
@@ -60,8 +69,8 @@ export async function runAnalyst(state: OrchestratorState): Promise<SpecialistOu
   });
 }
 
-function buildAnalystPrompt(state: OrchestratorState): string {
-  const expert = state.expertContext ? `${state.expertContext}\n\n---\n` : "";
+function buildAnalystPrompt(state: OrchestratorState, expertContext: string): string {
+  const expert = expertContext ? `${expertContext}\n\n---\n` : "";
   const attach = state.attachmentBlock ? `${state.attachmentBlock}\n\n---\n` : "";
 
   return `${expert}${attach}MENSAGEM DO USUÁRIO (analise o contrato neste contexto e reporte findings):

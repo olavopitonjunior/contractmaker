@@ -96,7 +96,14 @@ export type AgentEvent =
       type: "started";
       mode: AgentMode;
       model: string;
-      hasExpertContext: boolean;
+      /**
+       * Opcional desde 2026-07-31. No orquestrador o preâmbulo passou a ser
+       * carregado DENTRO de cada especialista (pra respeitar o escopo de RAG
+       * daquele agente), então no `started` — que é emitido antes do router —
+       * a informação ainda não existe. O chat legado, que carrega antes, segue
+       * preenchendo. Eventos já persistidos mantêm o campo.
+       */
+      hasExpertContext?: boolean;
     }
   | {
       type: "tool_use";

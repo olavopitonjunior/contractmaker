@@ -191,7 +191,7 @@ export async function* streamContractAgent(
     let expertContext = "";
     if (mode === "plan") {
       try {
-        expertContext = await loadExpertContext(context);
+        expertContext = await loadExpertContext(context, "chat_legacy");
       } catch (err) {
         console.error("[streamContractAgent] loadExpertContext falhou (segue sem):", err);
       }
