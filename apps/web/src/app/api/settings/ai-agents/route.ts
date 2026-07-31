@@ -23,6 +23,7 @@ import {
   upsertAgentProfile,
   listAgentProfiles,
   ragScopeSchema,
+  RAG_SCOPE_CATEGORIES,
 } from "@/lib/ai/agents/store";
 import {
   AGENT_DEFINITIONS,
@@ -77,7 +78,10 @@ export async function GET() {
     })
   );
 
-  return NextResponse.json({ agents });
+  // Lista canônica junto: sem isso o cliente precisa de um literal próprio e
+  // silenciosamente para de oferecer categoria nova (ou grava uma removida, que
+  // o Zod rejeita com "Payload inválido" genérico).
+  return NextResponse.json({ agents, ragCategories: RAG_SCOPE_CATEGORIES });
 }
 
 const patchSchema = z.object({

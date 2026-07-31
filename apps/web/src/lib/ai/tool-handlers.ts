@@ -1825,10 +1825,15 @@ async function handleSuggestImprovements(
   }
 
   // Check which clause bank groups are linked via DB
+  // Escopo mesmo lendo por id: era o ÚNICO read site do runtime sem filtro de
+  // org. Os ids vêm do próprio contrato, então na prática só um vínculo
+  // cross-tenant pré-existente chegaria aqui — mas "na prática" não é garantia,
+  // e a exposição (groupCode + title) alimenta a sugestão que o usuário lê.
   const linkedClauses = await prisma.knowledgeItem.findMany({
     where: {
       id: { in: context.activeClauses.map((c) => c.clauseId) },
       category: "clause",
+      ...knowledgeScopeWhere(context.orgId),
     },
     select: { groupCode: true, title: true },
   });

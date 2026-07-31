@@ -7,8 +7,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { RagScopeEditor, type RagScope } from "@/components/settings/RagScopeEditor";
 
-/** Espelha RAG_SCOPE_CATEGORIES do servidor. */
-const RAG_CATEGORIES = ["legislation", "model", "rule", "glossary", "clause"] as const;
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -78,6 +76,9 @@ export function AgentsConsoleClient({
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentRow[]>([]);
   const [allowedModels, setAllowedModels] = useState<string[]>([]);
+  // A rota já devolvia `ragCategories` e o console usava um literal próprio —
+  // o payload certo chegava e era descartado.
+  const [ragCategories, setRagCategories] = useState<string[]>([]);
 
   const load = useCallback(async (orgId: string) => {
     setLoading(true);
@@ -88,6 +89,7 @@ export function AgentsConsoleClient({
       if (!res.ok) throw new Error(data.error || "Falha ao carregar");
       setAgents(data.agents ?? []);
       setAllowedModels(data.allowedModels ?? []);
+      setRagCategories(data.ragCategories ?? []);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha ao carregar");
     } finally {
@@ -319,7 +321,7 @@ export function AgentsConsoleClient({
                 </div>
                 <RagScopeEditor
                   value={row.own.ragScope}
-                  categories={RAG_CATEGORIES}
+                  categories={ragCategories}
                   disabled={!canEdit || !row.supports.ragScope}
                   onChange={(next) => patchLocal(row.agentKey, { ragScope: next })}
                 />

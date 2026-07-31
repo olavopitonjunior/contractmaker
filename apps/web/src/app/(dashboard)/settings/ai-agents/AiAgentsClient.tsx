@@ -8,8 +8,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { RagScopeEditor, type RagScope } from "@/components/settings/RagScopeEditor";
 
-/** Espelha RAG_SCOPE_CATEGORIES do servidor — `support` fica fora de propósito. */
-const RAG_CATEGORIES = ["legislation", "model", "rule", "glossary", "clause"] as const;
 
 interface AgentRow {
   agentKey: string;
@@ -28,6 +26,8 @@ export function AiAgentsClient({ canEdit }: { canEdit: boolean }) {
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentRow[]>([]);
+  // Vem do servidor (RAG_SCOPE_CATEGORIES) — literal aqui divergiria em silêncio.
+  const [ragCategories, setRagCategories] = useState<string[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -36,6 +36,7 @@ export function AiAgentsClient({ canEdit }: { canEdit: boolean }) {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Falha ao carregar");
         setAgents(data.agents ?? []);
+        setRagCategories(data.ragCategories ?? []);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Falha ao carregar");
       } finally {
@@ -127,7 +128,7 @@ export function AiAgentsClient({ canEdit }: { canEdit: boolean }) {
               )}
               <RagScopeEditor
                 value={row.ragScope}
-                categories={RAG_CATEGORIES}
+                categories={ragCategories}
                 disabled={!canEdit || !row.supportsRagScope}
                 onChange={(next) =>
                   setAgents((rows) =>
