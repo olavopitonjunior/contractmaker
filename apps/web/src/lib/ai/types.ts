@@ -21,6 +21,26 @@ export interface AgentContext {
   /** Session ativa do chat (necessário pra `propose_plan` persistir o ChatPlan
    *  com sessionId correto). Setado pelo streamContractAgent ao montar contexto. */
   sessionId?: string;
+  /**
+   * Confiança dos itens que a busca devolveu NESTE turn: `id → lowConfidence`.
+   *
+   * `query_knowledge_base` devolve topK sem piso, marcando os fracos. Sem este
+   * registro, o modelo recebia um id fraco e podia inseri-lo por id — pulando o
+   * fail-safe de similaridade que o caminho `clauseQuery` tem. O próprio código
+   * registrava isso como backlog.
+   *
+   * Objeto simples (JSON-safe) porque o `AgentContext` vive dentro do state do
+   * LangGraph e é persistido pelo checkpointer.
+   */
+  ragConfidence?: Record<string, boolean>;
+  /**
+   * Execução de plano APROVADO por humano (`/chat/execute-plan`).
+   *
+   * O id de um step aprovado tem endosso de quem leu o título no PlanCard —
+   * aplicar o gate de confiança aqui transformaria aprovação humana em
+   * `no_match` e regrediria o plan-and-approve.
+   */
+  humanApprovedPlan?: boolean;
   /** Agente que está executando o turn — define o escopo de RAG (`AgentProfile.ragScope`
    *  + `KnowledgeItem.visibleToAgents`). Ausente = escopo aberto, que é o
    *  comportamento do chat legado e de quem chama tool fora do orquestrador. */

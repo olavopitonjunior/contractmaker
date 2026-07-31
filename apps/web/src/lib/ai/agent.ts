@@ -192,6 +192,9 @@ export async function* streamContractAgent(
     // ROLLBACK (`ENABLE_MULTI_AGENT=false`): desligar o orquestrador não pode
     // desligar em silêncio o escopo que o tenant configurou.
     context.agentKey = "chat_legacy";
+    // Ver AgentContext.ragConfidence: um registro por turn, alimentado pela
+    // busca e lido pelo insert_clause.
+    context.ragConfidence = {};
 
     // 3.5. Expert context só em modo Plan. Fast pula pra cortar 200-500ms
     //      + 3 Prisma queries + Voyage call.

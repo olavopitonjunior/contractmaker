@@ -97,6 +97,9 @@ export async function runSpecialist(
     forceToolName,
   } = config;
 
+  /** Confiança dos ids devolvidos pela busca NESTE turn — ver AgentContext. */
+  const ragConfidence: Record<string, boolean> = {};
+
   // Budget guard antes da 1ª chamada
   try {
     await assertContractBudget(contractId);
@@ -239,6 +242,10 @@ export async function runSpecialist(
       const handlerContext = {
         ...context,
         agentKey: agentName,
+        // Mesmo objeto em todas as dispatches do turn: `query_knowledge_base`
+        // escreve a confiança de cada id, `insert_clause` lê. Referência
+        // compartilhada de propósito.
+        ragConfidence,
         ...(config.sessionId
           ? {
               sessionId: config.sessionId,

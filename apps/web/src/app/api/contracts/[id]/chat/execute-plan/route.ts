@@ -140,6 +140,10 @@ export async function POST(
     }
   }
   const context: AgentContext = {
+    // Os steps daqui saíram de um plano que o usuário LEU e aprovou no
+    // PlanCard. O piso de confiança do `insert_clause` vale pro turn direto do
+    // agente; aqui ele transformaria aprovação humana em `no_match`.
+    humanApprovedPlan: true,
     contractId: contract.id,
     userId: contract.userId,
     orgId,

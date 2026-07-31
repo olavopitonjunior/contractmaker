@@ -975,6 +975,12 @@ async function handleQueryKnowledgeBase(
       similarity: Number(r.similarity?.toFixed?.(3) ?? r.similarity),
       lowConfidence: Number(r.similarity ?? 0) < RAG_MIN_SIMILARITY,
     }));
+    // Registra a confiança de cada id no turn. É o que permite ao
+    // `insert_clause` recusar um id que ELE MESMO devolveu como fraco.
+    if (context.ragConfidence) {
+      for (const m of mapped) context.ragConfidence[m.id] = m.lowConfidence;
+    }
+
     const nothingConfident =
       mapped.length === 0 || mapped.every((m) => m.lowConfidence);
     return {
@@ -1457,6 +1463,40 @@ async function handleInsertClause(
         `IDs reais têm formato c<hash>. Em vez de inventar o ID, passe ` +
         `clauseQuery="<descrição da cláusula>" — o handler faz a busca na KB pra você.`,
       hint: "use_clauseQuery_instead",
+    };
+  }
+
+  /**
+   * Piso de confiança no caminho de ID EXPLÍCITO.
+   *
+   * O caminho `clauseQuery` já tinha fail-safe (similaridade ≥ 0.4); o de id
+   * pulava tudo. Como `query_knowledge_base` devolve topK SEM piso — marcando
+   * `lowConfidence` em vez de esconder, pra não regredir recall — o modelo
+   * recebia um id fraco e podia inseri-lo por id. Era backlog registrado no
+   * próprio arquivo.
+   *
+   * O gate é DELIBERADAMENTE estreito: recusa só quando há evidência positiva
+   * de que o id é ruim — ele foi devolvido NESTE turn como `lowConfidence`.
+   * Exigir "veio de resultado confiável" quebraria casos legítimos: o id pode
+   * vir do histórico da conversa ou de outra tool, e ausência de prova não é
+   * prova de ausência.
+   *
+   * Plano aprovado por humano não passa pelo gate: quem leu o título no
+   * PlanCard já endossou. Aplicá-lo ali transformaria aprovação em `no_match`.
+   */
+  if (
+    resolvedVia === "explicit_id" &&
+    !context.humanApprovedPlan &&
+    context.ragConfidence?.[knowledgeItemId] === true
+  ) {
+    return {
+      success: false,
+      error:
+        `A cláusula ${knowledgeItemId} veio da busca com similaridade BAIXA — ` +
+        `não é seguro inseri-la no contrato só por id. Se é mesmo ela, descreva ` +
+        `o que você quer com clauseQuery="<descrição>"; se não, refine a busca ` +
+        `ou use um placeholder [preencher].`,
+      hint: "low_confidence_explicit_id",
     };
   }
 
