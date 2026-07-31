@@ -19,9 +19,16 @@
  *     banco. Os canônicos (que resolvem garantia por `{{#if}}` embutido) seguem
  *     byte-a-byte iguais — é a garantia de não-regressão.
  *  3. Com marcador e COM cláusula no acervo → o slot recebe a cláusula do
- *     tenant, renderizada com os mesmos helpers Handlebars do contrato.
+ *     tenant, RENDERIZADA com os mesmos helpers Handlebars do contrato. O
+ *     `content` do acervo é Handlebars como o template (`{{aluguel.valor}}`,
+ *     `{{config.seguro_tomador_texto}}`, `{{moeda titulo_valor}}`) — injetar
+ *     cru deixava chave literal no contrato assinado.
  *  4. Com marcador e SEM cláusula → o slot recebe a CONDICIONAL EMBUTIDA DO
  *     CANÔNICO (o mesmo switch de `composed-blocks`). Nunca sai buraco.
+ *  5. Cláusula que não compila/não renderiza, ou que sai do render AINDA com
+ *     `{{` (chave que o template principal não reavalia — `{{{slot}}}` é raw),
+ *     é DESCARTADA: entra o fallback do item 4 e a perda é registrada em
+ *     `failures`. Contrato com a cláusula genérica > contrato com `{{chave}}`.
  *
  * Tags no `KnowledgeItem`: `slot:garantia` (qual slot) + `garantia:<tipo>` (qual
  * opção do form). Os tipos são os do `garantiaSchema` — mesma fonte do <select>
@@ -153,6 +160,22 @@ export interface ResolveClauseSlotsInput {
   db?: ClauseSlotDb;
 }
 
+/** Por que a cláusula do acervo foi descartada em favor do fallback. */
+export type ClauseSlotFailureReason =
+  /** Handlebars não compilou ou estourou durante o render. */
+  | "render_error"
+  /** Renderizou, mas sobrou `{{` — chave que ninguém mais vai resolver. */
+  | "residual_placeholder";
+
+export interface ClauseSlotFailure {
+  slot: ClauseSlotKey;
+  /** A cláusula do acervo que foi descartada (pra corrigir na origem). */
+  knowledgeItemId: string;
+  reason: ClauseSlotFailureReason;
+  /** Mensagem do erro, ou o trecho que sobrou com chave. */
+  message: string;
+}
+
 export interface ResolvedClauseSlot {
   slot: ClauseSlotKey;
   /** Opção do form lida do dataJson (null = form não informou). */
@@ -160,15 +183,72 @@ export interface ResolvedClauseSlot {
   /** De onde veio o conteúdo. */
   source: "knowledge" | "fallback";
   knowledgeItemId?: string;
+  /** Presente quando havia cláusula no acervo mas ela foi descartada. */
+  failure?: ClauseSlotFailure;
 }
 
 export interface ResolveClauseSlotsResult {
   /** `{ slot_garantia: "<conteúdo>" }` — pronto pra fundir no dataJson/no mapa. */
   values: Record<string, string>;
   resolved: ResolvedClauseSlot[];
+  /**
+   * Cláusulas do acervo descartadas (render quebrado ou chave residual). Vazio
+   * no caminho feliz; o harness de preview trata não-vazio como falha.
+   */
+  failures: ClauseSlotFailure[];
 }
 
-const EMPTY: ResolveClauseSlotsResult = { values: {}, resolved: [] };
+function emptyResult(): ResolveClauseSlotsResult {
+  return { values: {}, resolved: [], failures: [] };
+}
+
+/**
+ * Chave Handlebars que sobreviveu ao render. É a trava anti-resíduo: o template
+ * principal consome o slot como `{{{slot_garantia}}}` (triple-stash = valor
+ * bruto, SEM reavaliação), então o que sair daqui com `{{` sai assim no PDF
+ * assinado. Melhor a cláusula genérica.
+ */
+const RESIDUAL_PLACEHOLDER = /\{\{/;
+
+/**
+ * Renderiza o `content` da cláusula do acervo contra o dataJson enriquecido.
+ * Devolve o HTML, ou a falha que manda o slot pro fallback canônico.
+ */
+function renderClauseContent(
+  slot: ClauseSlotKey,
+  hit: { id: string; content: string },
+  data: Record<string, unknown>
+): { html: string } | { failure: ClauseSlotFailure } {
+  let rendered: string;
+  try {
+    rendered = renderContratoHTML(hit.content, data);
+  } catch (err) {
+    return {
+      failure: {
+        slot,
+        knowledgeItemId: hit.id,
+        reason: "render_error",
+        message: err instanceof Error ? err.message : String(err),
+      },
+    };
+  }
+
+  const residual = RESIDUAL_PLACEHOLDER.exec(rendered);
+  if (residual) {
+    return {
+      failure: {
+        slot,
+        knowledgeItemId: hit.id,
+        reason: "residual_placeholder",
+        message: `sobrou chave Handlebars após o render: ${rendered
+          .slice(residual.index, residual.index + 60)
+          .replace(/\s+/g, " ")}`,
+      },
+    };
+  }
+
+  return { html: rendered };
+}
 
 /**
  * Resolve os slots declarados por um template. Template sem slot NÃO toca o
@@ -182,11 +262,12 @@ export async function resolveClauseSlots(
   input: ResolveClauseSlotsInput
 ): Promise<ResolveClauseSlotsResult> {
   const slots = detectClauseSlots(input.templateSource);
-  if (slots.length === 0) return EMPTY;
+  if (slots.length === 0) return emptyResult();
 
   const db = input.db ?? ((await import("@/lib/db/prisma")).prisma as ClauseSlotDb);
   const values: Record<string, string> = {};
   const resolved: ResolvedClauseSlot[] = [];
+  const failures: ClauseSlotFailure[] = [];
 
   for (const slot of slots) {
     const def = CLAUSE_SLOTS[slot];
@@ -194,6 +275,7 @@ export async function resolveClauseSlots(
 
     let html: string | null = null;
     let knowledgeItemId: string | undefined;
+    let failure: ClauseSlotFailure | undefined;
 
     if (value) {
       try {
@@ -217,9 +299,19 @@ export async function resolveClauseSlots(
         if (hit?.content) {
           // A cláusula do acervo é Handlebars como qualquer outra (o agente já
           // as insere assim) — renderizar aqui é o que faz `{{aluguel.valor}}`
-          // dentro dela virar valor.
-          html = renderContratoHTML(hit.content, input.data);
-          knowledgeItemId = hit.id;
+          // dentro dela virar valor. Render quebrado ou chave sobrando não
+          // derruba a geração: vira falha registrada + fallback canônico.
+          const out = renderClauseContent(slot, hit, input.data);
+          if ("html" in out) {
+            html = out.html;
+            knowledgeItemId = hit.id;
+          } else {
+            failure = out.failure;
+            console.error(
+              `[clause-slots] cláusula ${hit.id} descartada (${out.failure.reason}):`,
+              out.failure.message
+            );
+          }
         }
       } catch (err) {
         console.error("[clause-slots] consulta ao acervo falhou:", err);
@@ -236,8 +328,10 @@ export async function resolveClauseSlots(
       value,
       source: knowledgeItemId ? "knowledge" : "fallback",
       knowledgeItemId,
+      ...(failure ? { failure } : {}),
     });
+    if (failure) failures.push(failure);
   }
 
-  return { values, resolved };
+  return { values, resolved, failures };
 }

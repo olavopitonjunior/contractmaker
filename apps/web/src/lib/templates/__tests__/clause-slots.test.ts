@@ -17,6 +17,7 @@ import {
   slotToken,
 } from "../clause-slots";
 import { CANONICAL_TEMPLATE_SOURCES } from "../canonical-sources.generated";
+import { renderContratoHTML } from "@/lib/render/handlebars";
 
 const FIADOR_DATA = {
   garantia: {
@@ -192,5 +193,121 @@ describe("resolveClauseSlots", () => {
   it("a opção lida pelo slot é a MESMA que escolhe a variante do template", () => {
     expect(CLAUSE_SLOTS.garantia.selectedValue(FIADOR_DATA)).toBe("fiador");
     expect(CLAUSE_SLOTS.garantia.valueLabel("seguro_fianca")).toBe("Seguro fiança");
+  });
+});
+
+/**
+ * O `content` da cláusula do acervo é Handlebars TAMBÉM — as cláusulas reais dos
+ * pacotes ingeridos usam `{{config.seguro_tomador_texto}}`, `{{garantia.provider}}`,
+ * `{{moeda ...}}`. Injetar cru deixava chave literal no contrato assinado (o
+ * harness de preview do pacote da Ativa achou 14 chaves em 3 de 5 previews).
+ */
+describe("render do content da cláusula (anti-chave-literal)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const SEGURO_DATA = {
+    garantia: { tipo: "seguro_fianca", provider: "Tokio Marine" },
+    aluguel: { valor: 2500, dia_vencimento: 5 },
+    config: { seguro_tomador_texto: "pela PARTE LOCATÁRIA", honorarios_advocaticios_percent: 10 },
+    titulo_valor: 30000,
+    locatarios: [{ tipo_pessoa: "fisica", nome: "Maria" }],
+  };
+
+  async function resolveWith(content: string, data: Record<string, unknown> = SEGURO_DATA) {
+    return resolveClauseSlots({
+      orgId: "org1",
+      templateSource: slotMarkerHandlebars("garantia"),
+      data,
+      format: "html",
+      db: dbWith([{ id: "ki-seguro", content }]),
+    });
+  }
+
+  it("chaves da cláusula (config/garantia) viram valor — nada de `{{` no contrato", async () => {
+    const out = await resolveWith(
+      "<p>Seguro fiança contratado {{config.seguro_tomador_texto}} junto à {{garantia.provider}}.</p>"
+    );
+    expect(out.values.slot_garantia).toBe(
+      "<p>Seguro fiança contratado pela PARTE LOCATÁRIA junto à Tokio Marine.</p>"
+    );
+    expect(out.values.slot_garantia).not.toContain("{{");
+    expect(out.resolved[0]).toMatchObject({ source: "knowledge", knowledgeItemId: "ki-seguro" });
+    expect(out.failures).toEqual([]);
+  });
+
+  it("helpers BR valem dentro da cláusula (`moeda` formata como no template)", async () => {
+    const out = await resolveWith("<p>Capital segurado de {{moeda titulo_valor}}.</p>");
+    // Intl pt-BR separa "R$" do número com espaço NÃO-quebrável (U+00A0).
+    expect(out.values.slot_garantia).toMatch(/Capital segurado de R\$\s30\.000,00\./);
+    expect(out.values.slot_garantia).not.toContain("{{");
+    expect(out.failures).toEqual([]);
+  });
+
+  it("chave INEXISTENTE some no ponto (comportamento normal do Handlebars) e a cláusula vale", async () => {
+    const out = await resolveWith("<p>Apólice nº {{garantia.apolice_numero}} vigente.</p>");
+    expect(out.values.slot_garantia).toBe("<p>Apólice nº  vigente.</p>");
+    expect(out.values.slot_garantia).not.toContain("{{");
+    expect(out.resolved[0].source).toBe("knowledge");
+    expect(out.failures).toEqual([]);
+  });
+
+  it("Handlebars INVÁLIDO na cláusula → fallback canônico + falha registrada", async () => {
+    const out = await resolveWith("<p>{{#if garantia.provider}}bloco sem fechar</p>", {
+      ...SEGURO_DATA,
+      garantia: { tipo: "caucao", caucao_meses: 3 },
+    });
+    expect(out.resolved[0]).toMatchObject({
+      source: "fallback",
+      failure: { slot: "garantia", knowledgeItemId: "ki-seguro", reason: "render_error" },
+    });
+    expect(out.resolved[0].knowledgeItemId).toBeUndefined();
+    expect(out.failures).toHaveLength(1);
+    // O contrato sai inteiro com a condicional embutida do canônico.
+    expect(out.values.slot_garantia).toContain("a título de caução");
+    expect(out.values.slot_garantia).not.toContain("{{");
+  });
+
+  it("TRAVA: chave que sobrevive ao render descarta a cláusula (o slot não é reavaliado depois)", async () => {
+    // `\{{...}}` é o escape do Handlebars: renderiza a chave LITERAL. Como o
+    // template principal consome o slot em triple-stash, ninguém mais resolve
+    // isso — sairia `{{aluguel.valor}}` no PDF assinado.
+    const out = await resolveWith("<p>Aluguel de \\{{aluguel.valor}} garantido.</p>", {
+      ...SEGURO_DATA,
+      garantia: { tipo: "caucao", caucao_meses: 3 },
+    });
+    expect(out.failures).toEqual([
+      expect.objectContaining({
+        slot: "garantia",
+        knowledgeItemId: "ki-seguro",
+        reason: "residual_placeholder",
+      }),
+    ]);
+    expect(out.failures[0].message).toContain("{{aluguel.valor}}");
+    expect(out.resolved[0].source).toBe("fallback");
+    expect(out.values.slot_garantia).toContain("a título de caução");
+    expect(out.values.slot_garantia).not.toContain("{{");
+  });
+
+  it("caminho feliz não registra falha nenhuma (nem no fallback por acervo vazio)", async () => {
+    const out = await resolveClauseSlots({
+      orgId: "org1",
+      templateSource: slotMarkerHandlebars("garantia"),
+      data: CAUCAO_DATA,
+      format: "html",
+      db: dbWith([]),
+    });
+    expect(out.failures).toEqual([]);
+    expect(out.resolved[0].failure).toBeUndefined();
+  });
+
+  it("SEM RECURSÃO: `{{{slot}}}` no template principal NÃO reavalia o valor injetado", () => {
+    // É a premissa da trava acima: se o triple-stash reavaliasse, uma chave
+    // residual ainda teria uma segunda chance — e não tem.
+    const html = renderContratoHTML(
+      `<p>CLÁUSULA OITAVA</p>${slotMarkerHandlebars("garantia")}`,
+      { slot_garantia: "<p>Valor de {{aluguel.valor}}.</p>", aluguel: { valor: 2500 } }
+    );
+    expect(html).toBe("<p>CLÁUSULA OITAVA</p><p>Valor de {{aluguel.valor}}.</p>");
+    expect(html).not.toContain("2500");
   });
 });

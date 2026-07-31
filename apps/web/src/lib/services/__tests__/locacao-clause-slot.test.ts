@@ -218,6 +218,43 @@ describe("generateLocacaoContractForDeal — slot de cláusula", () => {
     );
   });
 
+  /**
+   * P-1 — a cláusula do acervo é renderizada contra o dataJson JÁ ENRIQUECIDO,
+   * então tudo que o enrich derrama em `config` (padrão da org > padrão de
+   * fábrica) está disponível dentro dela. Honorários advocatícios é o caso que
+   * quase passou batido: o enrich propaga por loop genérico sobre
+   * `settings.config`, e uma cláusula de garantia real cita o percentual.
+   */
+  it("P-1: config.honorarios_advocaticios_percent chega ao render da cláusula do slot", async () => {
+    kiFindMany.mockResolvedValue([
+      {
+        id: "ki-honorarios",
+        content:
+          "<p>8.2. Em caso de cobrança judicial incidirão honorários advocatícios de {{config.honorarios_advocaticios_percent}}% sobre o débito.</p>",
+      },
+    ]);
+
+    await generate();
+
+    expect(createdDataJson().slot_garantia).toContain("honorários advocatícios de 10%");
+    expect(createdHtml()).toContain("honorários advocatícios de 10%");
+    // A trava anti-resíduo só passa se a chave virou valor de verdade.
+    expect(createdHtml()).not.toContain("{{");
+  });
+
+  it("cláusula com Handlebars quebrado NÃO derruba a geração — sai o fallback canônico", async () => {
+    kiFindMany.mockResolvedValue([
+      { id: "ki-quebrada", content: "<p>{{#if garantia.tipo}}bloco sem fechar</p>" },
+    ]);
+
+    await generate();
+
+    const html = createdHtml();
+    expect(html).toContain("a título de caução");
+    expect(html).not.toContain("{{");
+    expect(String(createdDataJson().slot_garantia).trim().length).toBeGreaterThan(0);
+  });
+
   it("o valor do slot fica no dataJson — re-render (export/diff) não reconsulta o acervo", async () => {
     kiFindMany.mockResolvedValue([
       { id: "ki-caucao", content: "<p>Cláusula persistida.</p>" },
