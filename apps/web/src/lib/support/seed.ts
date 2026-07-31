@@ -69,6 +69,8 @@ export async function seedSupportKb(
       await createKnowledgeItem({
         orgId,
         allowPlatformScope: true,
+        // Fora do RAG jurídico: ver knowledge-scope.ts.
+        visibleToAgents: ["support"],
         category: SUPPORT_CATEGORY,
         title: item.title,
         content: item.content,

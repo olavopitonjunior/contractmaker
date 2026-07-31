@@ -31,6 +31,15 @@ export interface CreateKnowledgeItemInput {
    * plataforma é sempre uma decisão explícita e grep-ável.
    */
   allowPlatformScope?: boolean;
+  /**
+   * Agentes que enxergam o item. Vazio/ausente = todos.
+   *
+   * A base de suporte usa isto pra não vazar pro RAG jurídico: "o que faz a
+   * tela Pipeline" não é resposta pra busca de cláusula. O filtro por categoria
+   * em `knowledge-scope.ts` já cobre a leitura; marcar na linha mantém o dado
+   * autoexplicativo pra quem for ler o banco depois.
+   */
+  visibleToAgents?: string[];
   category: KnowledgeCategory;
   title: string;
   content: string;
@@ -200,6 +209,7 @@ export async function createKnowledgeItemRows(
         tags: input.tags ?? [],
         source: input.source ?? "manual",
         createdBy: input.createdBy ?? null,
+        visibleToAgents: input.visibleToAgents ?? [],
         ...extras,
       },
     });
@@ -224,6 +234,7 @@ export async function createKnowledgeItemRows(
       tags: input.tags ?? [],
       source: input.source ?? "manual",
       createdBy: input.createdBy ?? null,
+      visibleToAgents: input.visibleToAgents ?? [],
       ...extras,
     },
   });
@@ -242,6 +253,9 @@ export async function createKnowledgeItemRows(
           tags: input.tags ?? [],
           source: input.source ?? "manual",
           createdBy: input.createdBy ?? null,
+          // Chunk herda a visibilidade do pai — senão a busca semântica, que só
+          // vê as filhas, ignoraria a restrição.
+          visibleToAgents: input.visibleToAgents ?? [],
         },
       })
     )

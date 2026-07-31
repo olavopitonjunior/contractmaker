@@ -100,6 +100,7 @@ export async function POST(req: NextRequest) {
     const { parentId, chunksCreated } = await createKnowledgeItem({
       orgId,
       allowPlatformScope: true,
+      visibleToAgents: ["support"],
       category: SUPPORT_CATEGORY,
       title: parsed.data.title,
       content: parsed.data.content,

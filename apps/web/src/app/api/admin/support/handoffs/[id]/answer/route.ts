@@ -41,11 +41,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: "Já respondida" }, { status: 409 });
   }
 
-  // (1) Retroalimenta a base de suporte.
-  // Base de suporte = escopo de PLATAFORMA (orgId nulo).
-  const orgId = null;
+  // (1) Retroalimenta a base de suporte — escopo de PLATAFORMA (orgId nulo).
   const { parentId } = await createKnowledgeItem({
-    orgId,
+    orgId: null,
+    allowPlatformScope: true,
+    visibleToAgents: ["support"],
     category: SUPPORT_CATEGORY,
     title: handoff.question.slice(0, 200),
     content: `${handoff.question}\n\n${parsed.data.answer}`,
