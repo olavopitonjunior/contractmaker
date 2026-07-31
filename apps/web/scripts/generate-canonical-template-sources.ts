@@ -44,7 +44,15 @@ function resolveTemplatePath(filename: string): string {
 
 function render(): string {
   const entries = CANONICAL_TEMPLATES.map((t) => {
-    const source = fs.readFileSync(resolveTemplatePath(t.filename), "utf-8");
+    // LF é a forma canônica do conteúdo embarcado, INDEPENDENTE do sistema que
+    // rodou o gerador. Sem esta normalização, gerar no Windows (onde o
+    // `core.autocrlf` entrega CRLF no working tree) embutia `\r\n` no valor da
+    // string; o mesmo arquivo checado out no Linux vinha com `\n`, e o teste de
+    // drift comparava CRLF contra LF. Resultado: a CI da master ficou vermelha
+    // por ~1 dia num teste que passava na máquina de quem gerou.
+    const source = fs
+      .readFileSync(resolveTemplatePath(t.filename), "utf-8")
+      .replace(/\r\n/g, "\n");
     // JSON.stringify escapa tudo (backtick, ${, \n) sem surpresa de template literal.
     return `  ${JSON.stringify(t.filename)}: ${JSON.stringify(source)},`;
   });
