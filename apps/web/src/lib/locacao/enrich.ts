@@ -97,11 +97,26 @@ export function enrichLocacaoData(
   if (settings.foro && (enriched.foro == null || enriched.foro === "")) {
     enriched.foro = settings.foro;
   }
-  if (
-    enriched.assinatura == null &&
-    (settings.assinatura.cidade || settings.assinatura.uf || settings.assinatura.data)
-  ) {
-    enriched.assinatura = { ...settings.assinatura };
+  // Local/data do fecho: merge CAMPO A CAMPO, não objeto inteiro. O wizard
+  // sempre mandou `assinatura: { cidade: "", uf: "", data: "" }` no dataJson —
+  // com a checagem antiga (`== null`) o padrão da org nunca era aplicado.
+  // Virou bloqueante em 2026-07-30, quando a etapa de Confirmação saiu do
+  // formulário e a cidade/UF passaram a vir SÓ da configuração da imobiliária.
+  {
+    const atual = (enriched.assinatura as Record<string, unknown> | undefined) ?? undefined;
+    const merged: Record<string, unknown> = { ...(atual ?? {}) };
+    let preencheu = false;
+    for (const key of ["cidade", "uf", "data"] as const) {
+      const valorAtual = merged[key];
+      const vazio =
+        valorAtual == null ||
+        (typeof valorAtual === "string" && valorAtual.trim() === "");
+      if (vazio && settings.assinatura[key]) {
+        merged[key] = settings.assinatura[key];
+        preencheu = true;
+      }
+    }
+    if (preencheu || atual != null) enriched.assinatura = merged;
   }
 
   // Administradora da locação — idempotente: dataJson já preenchido vence.

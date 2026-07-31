@@ -202,10 +202,15 @@ const parcelaTipoEnum = z.enum([
   "outros",
 ]);
 
+// `contrato_financiamento` entrou em 2026-07-30 pra fechar a assimetria do
+// prazo: só a escritura tinha um prazo configurável (titulo_definitivo.
+// prazo_dias, em outra etapa) e a parcela financiada não tinha nenhum. Aditivo
+// — parcelas antigas não mudam de momento.
 const parcelaMomentoEnum = z.enum([
   "assinatura",
   "escritura",
   "registro",
+  "contrato_financiamento",
   "dias",
   "data_exata",
 ]);

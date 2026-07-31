@@ -14,6 +14,9 @@ import { effectiveRequiredPaths, findMissingRequired } from "../party-required";
 import { requiredPathsForRoleScope } from "../required-snapshot";
 
 const TOTAL_STEPS = 7;
+// Locação tem 6 etapas desde 2026-07-30 (a Confirmação saiu; ver
+// LOCACAO_STEP_LABELS). Os presets acompanham — índice além do fim resolve [].
+const TOTAL_STEPS_LOCACAO = 6;
 
 // Índices REAIS do wizard de locação (LOCACAO_STEP_LABELS).
 const STEP_LOCADOR = 1;
@@ -22,9 +25,9 @@ const STEP_IMOVEL = 3;
 const STEP_ALUGUEL = 4;
 
 describe("presets por módulo — shape", () => {
-  it("locação tem os 3 níveis, cada um com 7 steps", () => {
+  it("locação tem os 3 níveis, cada um com 6 steps", () => {
     for (const preset of Object.values(LOCACAO_REQUIRED_PRESETS)) {
-      expect(preset).toHaveLength(TOTAL_STEPS);
+      expect(preset).toHaveLength(TOTAL_STEPS_LOCACAO);
     }
     expect(LOCACAO_REQUIRED_PRESETS).toHaveProperty("legado");
     expect(LOCACAO_REQUIRED_PRESETS).toHaveProperty("essencial");

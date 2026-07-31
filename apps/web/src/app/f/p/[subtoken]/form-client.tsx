@@ -6,6 +6,7 @@ import { LocacaoFormWizard } from "@/components/forms/LocacaoFormWizard";
 import { BrandMark } from "@/components/layout/brand-mark";
 import type { ParticipantRole } from "@/lib/forms/participant-token";
 import type { Assignment } from "@/lib/forms/extracted-to-form";
+import type { GarantiaOptionLike } from "@/lib/forms/garantia-catalog";
 
 interface SubtokenFormClientProps {
   subtoken: string;
@@ -14,6 +15,8 @@ interface SubtokenFormClientProps {
   schemaType: string;
   initialData: Record<string, unknown>;
   requiredFieldsByStep: readonly (readonly string[])[];
+  /** Catálogo de garantias da org — o link do fiador cai na etapa Garantia. */
+  garantiaOptions?: readonly GarantiaOptionLike[];
   stepIndexes: readonly number[];
   pathScope: readonly string[];
   /** SalesFormParticipant.partyIndex — slot do próprio participante. */
@@ -50,6 +53,7 @@ export function SubtokenFormClient({
   schemaType,
   initialData,
   requiredFieldsByStep,
+  garantiaOptions,
   stepIndexes,
   pathScope,
   partyIndex = 0,
@@ -113,6 +117,7 @@ export function SubtokenFormClient({
             initialData={initialData}
             schemaType={schemaType}
             requiredFieldsByStep={requiredFieldsByStep}
+            garantiaOptions={garantiaOptions}
             stepIndexes={stepIndexes}
             endpoint={participantEndpoint}
             pathScope={pathScope}

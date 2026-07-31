@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import {
   useFieldArray,
   UseFormReturn,
@@ -19,9 +20,21 @@ import {
   BANCO_FINANCIAMENTO_LABELS,
   toOptions,
 } from "@/lib/forms/payment-labels";
+import {
+  MODALIDADES,
+  MODALIDADE_LABELS,
+  canReseedSilently,
+  deriveModalidadeFromParcelas,
+  parcelaRowLabel,
+  seedParcelas,
+  type Modalidade,
+  type ParcelaLike,
+} from "@/lib/forms/payment-seed";
 
 interface PagamentoStepProps {
   form: UseFormReturn<any>;
+  /** Form travado: não semeia parcelas (escrita nenhuma em modo leitura). */
+  readOnly?: boolean;
 }
 
 function FormField({
@@ -92,8 +105,12 @@ function ParcelaCard({
 
   const showTipoOutros = tipo === "outros";
   const showPermutaDesc = tipo === "permuta_veiculo" || tipo === "permuta_imovel";
-  const showDias = momento === "dias";
+  // `dias` é reusado pelo momento novo `contrato_financiamento` — o prazo da
+  // parcela financiada, que antes não tinha campo nenhum (só a escritura tinha,
+  // e em OUTRA etapa).
+  const showDias = momento === "dias" || momento === "contrato_financiamento";
   const showDataExata = momento === "data_exata";
+  const rowLabel = parcelaRowLabel({ tipo, momento }, index);
 
   // UX 2026-05-16: card enxuto com Valor → Tipo → Quando. Meio de pagamento e
   // dados bancários do vendedor saíram pra etapa Vendedor (recebimento).
@@ -103,7 +120,12 @@ function ParcelaCard({
   return (
     <div className="rounded-md border p-4 space-y-3 bg-muted/20">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-medium">Parcela {index + 1}</p>
+        <p className="text-sm font-medium">
+          {rowLabel}
+          <span className="ml-2 text-xs font-normal text-muted-foreground">
+            Parcela {index + 1}
+          </span>
+        </p>
         <Button
           type="button"
           size="sm"
@@ -166,7 +188,14 @@ function ParcelaCard({
         )}
 
         {showDias && (
-          <FormField label="Dias após a assinatura" className="md:col-span-2">
+          <FormField
+            label={
+              momento === "contrato_financiamento"
+                ? "Prazo para assinar o financiamento (dias)"
+                : "Dias após a assinatura"
+            }
+            className="md:col-span-2"
+          >
             <Input
               type="number"
               min="0"
@@ -189,8 +218,8 @@ function ParcelaCard({
   );
 }
 
-export function PagamentoStep({ form }: PagamentoStepProps) {
-  const { fields, append, remove } = useFieldArray({
+export function PagamentoStep({ form, readOnly = false }: PagamentoStepProps) {
+  const { fields, append, remove, replace } = useFieldArray({
     control: form.control,
     name: "pagamento.parcelas",
   });
@@ -212,9 +241,59 @@ export function PagamentoStep({ form }: PagamentoStepProps) {
     | {
         valor_total?: number;
         banco_financiamento?: string;
-        parcelas?: Array<{ valor?: number; tipo?: string }>;
+        parcelas?: ParcelaLike[];
       }
     | undefined;
+
+  // `modalidade` já existia no step5Schema (default "a_vista") sem UI nenhuma.
+  // Forms antigos não têm o campo gravado — a modalidade real vive nos
+  // `parcelas[].tipo`, então derivamos dali pra o seletor abrir marcado certo.
+  const modalidadeRaw = useWatch({
+    control: form.control,
+    name: "modalidade",
+  }) as string | undefined;
+  const modalidade: Modalidade =
+    modalidadeRaw === "financiamento" || modalidadeRaw === "a_vista"
+      ? modalidadeRaw
+      : deriveModalidadeFromParcelas(
+          pagamento?.parcelas,
+          pagamento?.banco_financiamento,
+        );
+
+  // Semeadura inicial: lista vazia abre com as parcelas típicas da modalidade
+  // em vez de um botão "Adicionar Parcela" solitário. Só na montagem da etapa —
+  // remover uma parcela não faz a lista se reconstruir embaixo de quem edita.
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (readOnly || seededRef.current) return;
+    seededRef.current = true;
+    if ((form.getValues("pagamento.parcelas") as unknown[] | undefined)?.length) {
+      // Já tem parcelas: só garante que `modalidade` fique gravada coerente.
+      if (!modalidadeRaw) {
+        form.setValue("modalidade", modalidade, { shouldDirty: false });
+      }
+      return;
+    }
+    replace(seedParcelas(modalidade));
+    form.setValue("modalidade", modalidade, { shouldDirty: false });
+    // Só na montagem — as dependências são lidas por getValues de propósito.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const changeModalidade = (next: Modalidade) => {
+    if (next === modalidade) return;
+    const atuais = (form.getValues("pagamento.parcelas") ?? []) as ParcelaLike[];
+    if (!canReseedSilently(atuais, modalidade)) {
+      const ok =
+        typeof window === "undefined" ||
+        window.confirm(
+          "Trocar a modalidade vai substituir as parcelas já preenchidas. Continuar?",
+        );
+      if (!ok) return;
+    }
+    form.setValue("modalidade", next, { shouldDirty: true });
+    replace(seedParcelas(next));
+  };
 
   const valorTotal = Number(pagamento?.valor_total || 0);
   const somaParcelas = (pagamento?.parcelas ?? []).reduce(
@@ -235,6 +314,41 @@ export function PagamentoStep({ form }: PagamentoStepProps) {
 
   return (
     <div className="space-y-4">
+      {/* Modalidade — dirige a semeadura das parcelas. A seleção do template
+          continua derivando de `parcelas[].tipo` (deriveCategoryFromPayment);
+          como é o seletor que semeia os tipos, os dois nunca divergem. */}
+      <Card className="border border-border">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base font-semibold">
+            Como o imóvel será pago
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            {MODALIDADES.map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => changeModalidade(m)}
+                aria-pressed={modalidade === m}
+                className={`rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                  modalidade === m
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-input bg-transparent text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                {MODALIDADE_LABELS[m]}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {modalidade === "financiamento"
+              ? "Abre entrada/sinal e a parcela financiada. O contrato gerado é o de financiamento com alienação fiduciária."
+              : "Abre entrada/sinal e o saldo na escritura. Você pode adicionar outras parcelas (FGTS, permuta, consórcio) abaixo."}
+          </p>
+        </CardContent>
+      </Card>
+
       {/* Valor Total */}
       <Card className="border border-border">
         <CardHeader className="pb-3">
@@ -288,6 +402,12 @@ export function PagamentoStep({ form }: PagamentoStepProps) {
             <p className="text-sm text-muted-foreground">
               Nenhuma parcela adicionada. Clique abaixo para adicionar o
               cronograma de pagamento (sinal, financiamento, FGTS, etc).
+            </p>
+          )}
+          {fields.length > 0 && (
+            <p className="text-sm text-muted-foreground">
+              As parcelas abaixo foram abertas conforme a modalidade escolhida.
+              Preencha os valores — a soma precisa fechar o valor total.
             </p>
           )}
 

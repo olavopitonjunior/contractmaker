@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { UseFormReturn } from "react-hook-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,14 +14,12 @@ import {
   PessoaJuridicaLocacaoFields,
 } from "./_PartyFields";
 
-const TIPO_OPTIONS = [
-  { value: "caucao", label: "Caução (depósito)" },
-  { value: "fiador", label: "Fiador" },
-  { value: "seguro_fianca", label: "Seguro-fiança" },
-  { value: "garantia_digital", label: "Garantia locatícia (digital)" },
-  { value: "titulo_capitalizacao", label: "Título de capitalização" },
-  { value: "sem_garantia", label: "Sem garantia" },
-];
+import {
+  buildGarantiaChoices,
+  findGarantiaChoice,
+  selectedGarantiaChoiceValue,
+  type GarantiaOptionLike,
+} from "@/lib/forms/garantia-catalog";
 
 // Seguro-fiança e garantia digital: quem paga a apólice e por quanto tempo ela
 // vale. Sem opção pré-selecionada — o padrão varia por seguradora/imobiliária,
@@ -38,13 +37,48 @@ const VIGENCIA_OPTIONS = [
 /**
  * Garantia locatícia (garantiaSchema, art. 37 Lei 8.245/91). Campos condicionais
  * por tipo: caução → nº de aluguéis (≤3, art. 38 §2º); fiador → dados do fiador;
- * seguro/garantia digital → provider, tomador e vigência da apólice.
+ * seguro/garantia digital → tomador e vigência da apólice.
+ *
+ * A modalidade e o GARANTIDOR viraram uma escolha só ("Seguro-fiança — Porto
+ * Seguro") em 2026-07-30, alimentada pelo catálogo da imobiliária
+ * (`garantiaOptions`, que desce server-side pela page do form — ele é anônimo).
+ * Escolher preenche `garantia.tipo` + `garantia.provider` de uma vez; é o
+ * `provider` normalizado que casa com a cláusula da seguradora. "Outro
+ * garantidor…" mantém o texto livre como escape hatch.
  */
-export function GarantiaStep({ form }: { form: UseFormReturn<any> }) {
+export function GarantiaStep({
+  form,
+  garantiaOptions,
+}: {
+  form: UseFormReturn<any>;
+  /** Catálogo da org; ausente = defaults + modalidades sem garantidor. */
+  garantiaOptions?: readonly GarantiaOptionLike[];
+}) {
   const tipo = form.watch("garantia.tipo") || "caucao";
+  const provider = form.watch("garantia.provider") || "";
   const fiadorTipoPessoa = form.watch("garantia.fiador.tipo_pessoa");
   const tomador = form.watch("garantia.seguro_tomador");
   const vigencia = form.watch("garantia.seguro_vigencia");
+
+  const choices = useMemo(
+    () => buildGarantiaChoices(garantiaOptions),
+    [garantiaOptions],
+  );
+  const selectedValue = selectedGarantiaChoiceValue(choices, tipo, provider);
+  const selected = findGarantiaChoice(choices, selectedValue);
+  // Texto livre só no escape hatch — nas demais o garantidor vem do catálogo.
+  const showProviderInput = Boolean(selected?.isOutro);
+
+  const onChoiceChange = (value: string) => {
+    const choice = findGarantiaChoice(choices, value);
+    if (!choice) return;
+    form.setValue("garantia.tipo", choice.tipo, { shouldDirty: true });
+    // "Outro garantidor…" zera o campo pra quem preenche digitar — trocar de
+    // Porto Seguro pra "outro" não pode deixar "Porto Seguro" pendurado.
+    form.setValue("garantia.provider", choice.isOutro ? "" : choice.provider, {
+      shouldDirty: true,
+    });
+  };
 
   return (
     <Card className="border border-border">
@@ -54,11 +88,20 @@ export function GarantiaStep({ form }: { form: UseFormReturn<any> }) {
       <CardContent className="space-y-4 pt-0">
         <FormField label="Modalidade de garantia">
           <NativeSelect
-            value={tipo}
-            onChange={(v) => form.setValue("garantia.tipo", v, { shouldDirty: true })}
-            options={TIPO_OPTIONS}
+            value={selectedValue}
+            onChange={onChoiceChange}
+            options={choices.map((c) => ({ value: c.value, label: c.label }))}
           />
         </FormField>
+
+        {showProviderInput && (
+          <FormField label="Garantidor / seguradora">
+            <Input
+              {...form.register("garantia.provider")}
+              placeholder="Nome da seguradora ou garantidora"
+            />
+          </FormField>
+        )}
 
         {tipo === "caucao" && (
           <FormField label="Caução: nº de aluguéis (máx. 3)">
@@ -75,13 +118,9 @@ export function GarantiaStep({ form }: { form: UseFormReturn<any> }) {
         )}
 
         {tipo === "titulo_capitalizacao" && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <FormField label="Subscritora">
-              <Input
-                {...form.register("garantia.provider")}
-                placeholder="Ex.: Porto Seguro Capitalização S.A."
-              />
-            </FormField>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Subscritora saiu daqui: vem da escolha do catálogo (ou do campo
+                "Outro garantidor…" acima). */}
             <FormField label="Valor nominal do título (R$)">
               <MoneyField form={form} name="garantia.titulo_valor" placeholder="Ex: 15.000,00" />
             </FormField>
@@ -93,9 +132,7 @@ export function GarantiaStep({ form }: { form: UseFormReturn<any> }) {
 
         {(tipo === "seguro_fianca" || tipo === "garantia_digital") && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="Seguradora / provedor">
-              <Input {...form.register("garantia.provider")} placeholder="Ex.: Porto Seguro" />
-            </FormField>
+            {/* Seguradora saiu daqui: é a própria escolha da modalidade. */}
             <FormField label="Cobertura (meses)">
               <Input
                 {...form.register("garantia.cobertura_meses", { valueAsNumber: true })}

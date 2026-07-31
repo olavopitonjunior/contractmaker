@@ -841,7 +841,7 @@ export function SalesFormWizard({
     <CompradorStep key="step-2" form={form} />,
     <ImovelStep key="step-3" form={form} />,
     <StatusDebitosStep key="step-4" form={form} />,
-    <PagamentoStep key="step-5" form={form} />,
+    <PagamentoStep key="step-5" form={form} readOnly={readOnly} />,
     <ComissaoConfigStep
       key="step-6"
       form={form}

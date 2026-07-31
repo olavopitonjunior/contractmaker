@@ -8,6 +8,8 @@ import {
 import { filterDataJsonByPaths } from "@/lib/forms/role-paths";
 import { resolveParticipantScope } from "@/lib/forms/participant-scope";
 import { canAccessForm } from "@/lib/forms/form-gate";
+import { listGarantiaOptions } from "@/lib/forms/garantia-option-repo";
+import { isLocacaoSchemaType } from "@/lib/forms/validation-locacao";
 import { FormClosedNotice } from "@/components/forms/FormClosedNotice";
 import { SubtokenFormClient } from "./form-client";
 import { TerceiroFormClient } from "./terceiro-client";
@@ -70,6 +72,12 @@ export default async function PublicParticipantFormPage({
   // renderizados: paths fora desses steps são ignorados pelo wizard.
   const requiredFieldsByStep = await resolveFormRequiredFields(participant.form);
 
+  // Catálogo de garantias (link do fiador enxerga a etapa Garantia). Server-side
+  // pelo mesmo motivo do form principal: o link é anônimo.
+  const garantiaOptions = isLocacaoSchemaType(participant.form.schemaType)
+    ? await listGarantiaOptions(participant.form.orgId, { activeOnly: true })
+    : undefined;
+
   return (
     <SubtokenFormClient
       subtoken={params.subtoken}
@@ -77,6 +85,7 @@ export default async function PublicParticipantFormPage({
       schemaType={participant.form.schemaType}
       initialData={filtered}
       requiredFieldsByStep={requiredFieldsByStep}
+      garantiaOptions={garantiaOptions}
       stepIndexes={Array.from(scope.stepIndexes)}
       pathScope={Array.from(scope.paths)}
       partyIndex={participant.partyIndex}

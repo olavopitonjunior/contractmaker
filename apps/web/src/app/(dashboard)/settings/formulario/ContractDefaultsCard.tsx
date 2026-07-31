@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/forms/NativeSelect";
+import { UF_LIST } from "@/components/forms/UFSelect";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DEFAULT_CONTRACT_SETTINGS,
@@ -27,8 +28,11 @@ import {
  * rescisória é contada em meses de aluguel). A aba Locação só aparece pra org
  * que tem o módulo — o gating vem do server component.
  *
- * Local/data de assinatura não entram aqui de propósito — são por negócio (a
- * data é a da assinatura; a cidade sai do imóvel).
+ * Local de assinatura: em VENDA continua fora (o formulário público ainda
+ * pergunta). Em LOCAÇÃO entrou em 2026-07-30 — a etapa de Confirmação saiu do
+ * formulário do cliente, então cidade/UF passaram a ser decisão da imobiliária
+ * (a praça de fechamento é sempre a mesma). A DATA continua fora nas duas: é
+ * por negócio, e vazia o template usa a data da assinatura.
  */
 export function ContractDefaultsCard({
   initial,
@@ -338,6 +342,10 @@ function LocacaoDefaults({ initial }: { initial: LocacaoSettings }) {
     setValues((v) => ({ ...v, config: { ...v.config, ...next } }));
     setDirty(true);
   }
+  function patchAssinatura(next: Partial<LocacaoSettings["assinatura"]>) {
+    setValues((v) => ({ ...v, assinatura: { ...v.assinatura, ...next } }));
+    setDirty(true);
+  }
   const num = (raw: string, fallback: number) => {
     const n = Number(raw);
     return Number.isFinite(n) ? n : fallback;
@@ -383,6 +391,37 @@ function LocacaoDefaults({ initial }: { initial: LocacaoSettings }) {
           <p className="text-xs text-muted-foreground">
             Em branco, o contrato usa a comarca de localização do imóvel.
           </p>
+        </div>
+
+        {/* Praça de assinatura — entrou quando a etapa de Confirmação saiu do
+            formulário público de locação. Vazio mantém o comportamento
+            anterior: o contrato usa a cidade/UF do imóvel. */}
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-sm text-muted-foreground">
+            Cidade da assinatura
+          </Label>
+          <Input
+            value={values.assinatura.cidade}
+            placeholder="Ex.: São Paulo"
+            onChange={(e) => patchAssinatura({ cidade: e.target.value })}
+          />
+          <p className="text-xs text-muted-foreground">
+            Em branco, o contrato usa a cidade do imóvel.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-sm text-muted-foreground">
+            UF da assinatura
+          </Label>
+          <NativeSelect
+            value={values.assinatura.uf}
+            onChange={(v) => patchAssinatura({ uf: v })}
+            options={[
+              { value: "", label: "Usar a UF do imóvel" },
+              ...UF_LIST.map((uf) => ({ value: uf, label: uf })),
+            ]}
+          />
         </div>
 
         <div className="flex flex-col gap-1.5">

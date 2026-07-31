@@ -272,6 +272,7 @@ model Organization {
   forms               SalesForm[]
   formSettings        OrgFormSettings?
   participantCategories FormParticipantCategory[]
+  garantiaOptions     GarantiaOption[]
   notificationSettings OrgNotificationSettings?
   managerSettings     OrgManagerSettings?
   dealNotificationLogs DealNotificationLog[]
@@ -2510,6 +2511,41 @@ model FormParticipantCategory {
   org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@unique([orgId, slug])
+  @@index([orgId, active])
+}
+
+/// Catálogo de GARANTIAS locatícias da imobiliária (art. 37 Lei 8.245/91).
+///
+/// O formulário de locação pedia a modalidade num select fechado e a
+/// seguradora num texto livre — cada corretor escrevia "Porto", "Porto Seguro
+/// S/A", "porto seguro", e a cláusula da seguradora (taggeada por `provider`)
+/// nunca casava. Aqui a imobiliária cadastra os pares tipo × garantidor que ela
+/// realmente trabalha, e o form oferece cada par como UMA escolha
+/// ("Seguro-fiança — Porto Seguro").
+///
+/// Org sem nenhuma row cai nos DEFAULTS de `lib/forms/garantia-catalog.ts`
+/// (seguro-fiança × Tokio Marine / Porto Seguro / Pottencial / Too) — mesmo
+/// padrão lazy do branding. Desativar (`active=false`) tira do form sem
+/// quebrar contratos já gerados com aquele garantidor.
+model GarantiaOption {
+  id String @id @default(cuid())
+
+  orgId String
+  /// Uma das 7 modalidades de GARANTIA_TIPOS (lib/contracts/template-category.ts).
+  tipo  String
+  /// Seguradora/garantidora. "" = a modalidade sozinha (fiador, caução…).
+  provider String @default("")
+  /// Rótulo exibido no form; vazio = derivado de tipo + garantidor.
+  label    String?
+  active   Boolean @default(true)
+  position Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, tipo, provider])
   @@index([orgId, active])
 }
 

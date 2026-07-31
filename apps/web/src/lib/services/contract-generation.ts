@@ -532,6 +532,10 @@ export function enrichContractData(
         if (momento === "assinatura") out.dias = 0;
         else if (momento === "escritura") out.dias = prazoEscritura;
         else if (momento === "registro") out.dias = prazoTitulo;
+        // Parcela financiada (momento novo 2026-07-30): o form agora coleta o
+        // prazo inline em `dias`; sem valor, cai no MESMO prazo dos irmãos do
+        // título (config.prazo_titulo_dias → prazo_escritura_dias → 60).
+        else if (momento === "contrato_financiamento") out.dias = prazoTitulo;
         else if (momento === "data_exata" && typeof out.data_exata === "string") {
           const dt = new Date(out.data_exata);
           if (!Number.isNaN(dt.getTime())) {
