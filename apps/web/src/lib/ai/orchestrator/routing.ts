@@ -28,9 +28,49 @@ export type Intent = NonNullable<OrchestratorState["intent"]>;
 const EDIT_INTENT_REGEX =
   /\b(altere|mude|troque|substitua|atualize|corrija|modifique|remova|insira|adicione|coloque|ponha|apague|delete|reescreva|inclua|retire|exclua|preencha|preencher|preenche|complete|completar|completa|informe|informar|defina|definir|registre|registrar|ajuste|ajustar|conserte|consertar|escreva|escrever)\b/i;
 
-/** Pedido explícito de edição imediata sem revisão. `agent.ts:483-484`. */
+/**
+ * Pedido explícito de edição imediata sem revisão — o escape do modo Planejar.
+ *
+ * Termina em `(?!\w)` e NÃO em `\b`: as alternativas que acabam em vogal
+ * acentuada ("aplique já", "faça já") nunca casavam, porque `á` não é
+ * caractere de palavra em JS e a fronteira `\b` exigia a transição
+ * palavra→não-palavra que ali não existe. Passou despercebido enquanto o
+ * escape era só uma preferência de prompt; com o gate do modo Planejar
+ * (`specialists/editor.ts::resolveEditorToolPolicy`) ele é a única saída.
+ */
 const FORCE_DIRECT_EDIT_REGEX =
-  /\b(aplique\s+direto|aplique\s+já|faça\s+já|faça\s+agora|sem\s+revis[ãa]o|edite\s+direto|altere\s+agora|aplica\s+direto|sem\s+sugest[ãa]o)\b/i;
+  /\b(aplique\s+direto|aplique\s+já|faça\s+já|faça\s+agora|sem\s+revis[ãa]o|edite\s+direto|altere\s+agora|aplica\s+direto|sem\s+sugest[ãa]o)(?!\w)/i;
+
+/**
+ * Remove trechos CITADOS antes de procurar o escape.
+ *
+ * A regex casa em qualquer posição da mensagem, e várias das expressões são
+ * frases de contrato ("rescisão automática SEM REVISÃO judicial", "aceite SEM
+ * SUGESTÃO de alteração"). Colar uma cláusula assim entre aspas — vinda da
+ * contraparte, ou do campo de observações do formulário público, que é
+ * anônimo — ligava o escape e derrubava o gate do modo Planejar sem que
+ * ninguém tivesse pedido edição direta.
+ *
+ * O pedido real ("aplique direto: ...") é sempre texto do próprio usuário,
+ * fora de aspas; conteúdo de terceiro é o que vem citado. Daí a assimetria.
+ *
+ * Aspas simples só são removidas em trechos longos: apóstrofo em português
+ * ("d'água", "pingo d'água") não pode comer o resto da mensagem.
+ */
+export function stripQuotedSpans(message: string): string {
+  return message
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/"[^"]*"/g, " ")
+    .replace(/[“”][^“”]*[“”]/g, " ")
+    .replace(/«[^»]*»/g, " ")
+    .replace(/'[^']{20,}'/g, " ")
+    .replace(/[‘’][^‘’]{20,}[‘’]/g, " ");
+}
+
+/** O escape vale só quando pedido fora de citação — ver stripQuotedSpans. */
+export function wantsDirectEdit(message: string): boolean {
+  return FORCE_DIRECT_EDIT_REGEX.test(stripQuotedSpans(message));
+}
 
 /** Pedido explícito de análise sem edição. */
 const REVIEW_INTENT_REGEX =

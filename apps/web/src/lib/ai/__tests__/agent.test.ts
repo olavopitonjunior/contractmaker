@@ -6,6 +6,7 @@ import {
   createAnthropicTextResponse,
   createAnthropicToolUseResponse,
 } from "@/__tests__/helpers";
+import { __resetAgentProfileCacheForTests } from "../agents/resolve";
 
 const mockPrisma = vi.mocked(prisma);
 
@@ -14,6 +15,9 @@ let mockCreate: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // O resolvedor de AgentProfile cacheia por 60s em módulo — sem reset, o
+  // primeiro caso decidiria o modelo de todos os seguintes.
+  __resetAgentProfileCacheForTests();
 
   // Get the mock create function from the Anthropic constructor
   const instance = new Anthropic();
@@ -31,8 +35,9 @@ beforeEach(() => {
     userId: "user-1",
   } as any);
 
-  // Default: no agent config
-  mockPrisma.agentConfig.findUnique.mockResolvedValue(null);
+  // Default: nenhum perfil de agente (nem plataforma, nem org) → hardcoded
+  mockPrisma.agentProfile.findFirst.mockResolvedValue(null);
+  mockPrisma.agentProfile.findUnique.mockResolvedValue(null);
 
   // Default: no chat session
   mockPrisma.chatSession.findFirst.mockResolvedValue(null);
@@ -296,11 +301,19 @@ describe("runContractAgent", () => {
   });
 
   it("uses agent config from database when available", async () => {
-    mockPrisma.agentConfig.findUnique.mockResolvedValueOnce({
+    // AgentProfile substituiu AgentConfig: o override da org é a linha
+    // (orgId, "chat_legacy"); a instrução do tenant vira o system prompt do
+    // caminho legado (que nunca teve prompt por-domínio).
+    mockPrisma.agentProfile.findUnique.mockResolvedValueOnce({
+      enabled: true,
       model: "claude-opus-4-20250514",
+      fallbackModel: null,
       temperature: 0.5,
       maxTokens: 8192,
-      systemPrompt: "Custom prompt",
+      instructions: "Custom prompt",
+      ragScope: null,
+      monthlyBudgetUsd: null,
+      config: null,
     } as any);
 
     mockCreate.mockResolvedValueOnce(
@@ -314,19 +327,96 @@ describe("runContractAgent", () => {
       orgId: "org-1",
     });
 
-    // system agora é array com cache_control ephemeral (introduzido pra
-    // economizar tokens em chat multi-turn). Validamos só o text.
-    // O AgentConfig do banco carrega o Opus 4 aposentado — resolveModel
-    // migra pro sucessor antes da chamada (senão a API responde 404).
+    // system é array com cache_control ephemeral (economia em chat multi-turn).
+    // O perfil carrega o Opus 4 aposentado — resolveModel migra pro sucessor
+    // antes da chamada (senão a API responde 404).
     expect(mockCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         model: "claude-opus-4-6",
         temperature: 0.5,
         max_tokens: 8192,
-        system: expect.arrayContaining([
-          expect.objectContaining({ type: "text", text: "Custom prompt" }),
-        ]),
       })
     );
+
+    // A instrução do tenant é APÊNDICE cercado, não substituição: antes ela
+    // virava o system prompt inteiro e levava junto os guardrails do
+    // DEFAULT_SYSTEM_PROMPT — com um agente que tem todas as tools.
+    const system = (mockCreate.mock.calls[0][0] as any).system;
+    const text = system[0].text as string;
+    expect(text).toContain("Custom prompt");
+    expect(text).toContain("<instrucoes_da_imobiliaria>");
+    expect(text.indexOf("Custom prompt")).toBeGreaterThan(0);
+    expect(text.length).toBeGreaterThan("Custom prompt".length * 10);
+  });
+});
+
+/**
+ * Item 22 — paridade do gate do modo Planejar no caminho legado
+ * (ENABLE_MULTI_AGENT=false). O orquestrador tem a mesma matriz testada em
+ * specialists/__tests__/editor-mode.test.ts; aqui garantimos que o rollback
+ * não reabre a porta do write direto.
+ */
+describe("runContractAgent — gate do modo Planejar", () => {
+  const editMsg = "altere a multa para 3%";
+
+  const firstCallParams = () => mockCreate.mock.calls[0][0] as any;
+  const toolNames = () => firstCallParams().tools.map((t: any) => t.name);
+
+  beforeEach(() => {
+    mockCreate.mockResolvedValue(createAnthropicTextResponse("ok"));
+  });
+
+  it("plan (default): sem writes diretos e tool_choice fixo em propose_plan", async () => {
+    await runContractAgent({
+      message: editMsg,
+      contractId: "contract-1",
+      userId: "user-1",
+      orgId: "org-1",
+    });
+
+    expect(toolNames()).not.toContain("edit_contract_section");
+    expect(toolNames()).not.toContain("update_contract_data");
+    expect(toolNames()).toContain("propose_plan");
+    expect(firstCallParams().tool_choice).toEqual({
+      type: "tool",
+      name: "propose_plan",
+    });
+  });
+
+  it("fast: comportamento histórico — write direto e tool_choice any", async () => {
+    await runContractAgent({
+      message: editMsg,
+      mode: "fast",
+      contractId: "contract-1",
+      userId: "user-1",
+      orgId: "org-1",
+    });
+
+    expect(toolNames()).toContain("edit_contract_section");
+    expect(firstCallParams().tool_choice).toEqual({ type: "any" });
+  });
+
+  it("plan + 'aplique direto': escape libera o write direto", async () => {
+    await runContractAgent({
+      message: `aplique direto: ${editMsg}`,
+      contractId: "contract-1",
+      userId: "user-1",
+      orgId: "org-1",
+    });
+
+    expect(toolNames()).toContain("edit_contract_section");
+    expect(firstCallParams().tool_choice).toEqual({ type: "any" });
+  });
+
+  it("plan sem comando de edição: nenhuma tool forçada", async () => {
+    await runContractAgent({
+      message: "qual é a multa deste contrato?",
+      contractId: "contract-1",
+      userId: "user-1",
+      orgId: "org-1",
+    });
+
+    expect(firstCallParams().tool_choice).toBeUndefined();
+    expect(toolNames()).not.toContain("edit_contract_section");
   });
 });

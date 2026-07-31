@@ -12,11 +12,9 @@
  */
 
 import { AGENT_TOOLS } from "../tools";
-import { HAIKU_MODEL, resolveModel } from "../shared/anthropic-client";
-import {
-  getPlatformAgentDefaults,
-  buildPlatformPromptOverrideBlock,
-} from "./platform-defaults";
+import { resolveAgentProfile } from "../agents/resolve";
+import { composeSystemPrompt } from "../agents/prompt-blocks";
+import { agentDisabledOutput } from "../agents/disabled";
 import { runSpecialist, type ToolUseGuard } from "../shared/specialist-runner";
 import { applyPolicy } from "../sentinel/middleware";
 import { pickSpecialistPrompt } from "./prompts-locacao";
@@ -47,20 +45,19 @@ export async function runCurator(state: OrchestratorState): Promise<SpecialistOu
 
   const userPrompt = buildCuratorPrompt(state);
 
-  const overrides = await getPlatformAgentDefaults();
+  // Perfil resolvido: org → plataforma → hardcoded (/admin/agents e
+  // /settings/ai-agents). Instruções são APÊNDICE ao prompt-base por-domínio
+  // (venda×locação); o modelo, esse sim, substitui.
+  const profile = await resolveAgentProfile("curator", state.orgId);
+  if (!profile.enabled) return agentDisabledOutput("curator");
 
   return runSpecialist({
     agentName: "curator",
-    // Overrides de plataforma (/admin/agent-defaults) — null = hardcoded.
-    model: resolveModel(overrides.curatorModel ?? undefined, HAIKU_MODEL),
-    // Prompt override é APÊNDICE ao base por-domínio (venda×locação) — não
-    // substitui, senão a variante de locação sumiria (singleton só tem o
-    // baseline de venda). Modelo, esse sim, substitui.
-    systemPrompt:
-      pickSpecialistPrompt("curator", state.contractContext) +
-      (overrides.curatorPrompt
-        ? buildPlatformPromptOverrideBlock(overrides.curatorPrompt)
-        : ""),
+    model: profile.model,
+    systemPrompt: composeSystemPrompt(
+      pickSpecialistPrompt("curator", state.contractContext),
+      profile
+    ),
     tools: CURATOR_TOOLS,
     maxIterations: 2,
     userPrompt,
@@ -68,6 +65,7 @@ export async function runCurator(state: OrchestratorState): Promise<SpecialistOu
     contractId: state.contractId,
     orgId: state.orgId,
     userId: state.userId,
+    profile,
     toolGuard: guard,
     captureSnapshots: false,
     // Curator existe pra propor mudanças na biblioteca/templates. Sem

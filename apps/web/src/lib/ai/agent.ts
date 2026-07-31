@@ -1,7 +1,7 @@
 import type { Anthropic } from "@anthropic-ai/sdk";
 import { createHash } from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
-import { AGENT_TOOLS } from "./tools";
+import { AGENT_TOOLS, DIRECT_WRITE_TOOLS } from "./tools";
 import { executeToolHandler } from "./tool-handlers";
 import { DEFAULT_SYSTEM_PROMPT, buildContextMessage } from "./prompts";
 import { quickChecks, dedupeKeyFor, type QuickFinding } from "./quickChecks";
@@ -12,6 +12,9 @@ import {
   OrgAiBudgetExceededError,
 } from "./budget";
 import { loadExpertContext } from "./expert-context";
+import { resolveAgentProfile } from "./agents/resolve";
+import { composeSystemPrompt } from "./agents/prompt-blocks";
+import { wantsDirectEdit as routerWantsDirectEdit } from "./orchestrator/routing";
 import { getAnthropicClient, HAIKU_MODEL, SONNET_MODEL, resolveModel } from "./shared/anthropic-client";
 import { loadContext } from "./shared/context";
 import { resolveSession, loadChatHistory } from "./shared/session";
@@ -51,25 +54,38 @@ interface AgentParams {
 }
 
 async function getAgentConfig(orgId: string, mode: AgentMode) {
-  const config = await prisma.agentConfig.findUnique({ where: { orgId } });
+  // AgentProfile substituiu AgentConfig como fonte: org → plataforma →
+  // hardcoded. O agente legado é o `chat_legacy` do catálogo.
+  const profile = await resolveAgentProfile("chat_legacy", orgId);
 
   // Resolução de modelo por modo:
-  // - fast: SEMPRE Haiku (sobrepõe AgentConfig.model). Otimizado pra latência.
-  // - plan: respeita AgentConfig.model > ANTHROPIC_MODEL env > default Sonnet
+  // - fast: SEMPRE Haiku (sobrepõe o perfil). Otimizado pra latência.
+  // - plan: respeita o perfil > ANTHROPIC_MODEL env > default do catálogo
   //   (raciocínio mais profundo justifica o custo 3× maior).
   // resolveModel migra IDs aposentados que sobrevivam no banco/env (404 na API).
   let model: string;
   if (mode === "fast") {
     model = HAIKU_MODEL;
+  } else if (profile.modelSource === "default") {
+    // Ninguém configurou o agente no console → o env continua mandando, como
+    // sempre mandou. Sem o `modelSource` isto seria inalcançável (o perfil
+    // resolvido NUNCA vem com model null) e o `ANTHROPIC_MODEL` viraria código
+    // morto — trocando Haiku por Sonnet em produção sem ninguém pedir.
+    model = resolveModel(process.env.ANTHROPIC_MODEL, profile.model);
   } else {
-    model = resolveModel(config?.model || process.env.ANTHROPIC_MODEL);
+    model = profile.model;
   }
 
+  // O `AgentConfig.systemPrompt` SUBSTITUÍA o prompt default aqui. Agora é
+  // APÊNDICE, como em todo o resto: a UI do tenant promete "somadas, nunca
+  // substituem", e deixar um texto de tenant virar o system prompt inteiro de
+  // um agente com todas as tools removia os guardrails junto.
   return {
     model,
-    temperature: config?.temperature ?? 0.3,
-    maxTokens: config?.maxTokens ?? 4096,
-    systemPrompt: config?.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+    temperature: profile.temperature ?? 0.3,
+    maxTokens: profile.maxTokens ?? 4096,
+    systemPrompt: composeSystemPrompt(DEFAULT_SYSTEM_PROMPT, profile),
+    enabled: profile.enabled,
   };
 }
 
@@ -155,6 +171,17 @@ export async function* streamContractAgent(
 
     // 2. Config
     const config = await getAgentConfig(params.orgId, mode);
+
+    // Kill switch do console (/admin/agents). Sem isto o interruptor "Ativo"
+    // do agente existiria só na tela.
+    if (!config.enabled) {
+      yield {
+        type: "error",
+        message:
+          'O agente de chat está desativado nas configurações de IA. Um administrador pode reativá-lo em Configurações → Agentes de IA.',
+      };
+      return;
+    }
 
     // 3. Context
     const context = await loadContext(params.contractId, params.orgId);
@@ -249,9 +276,11 @@ export async function* streamContractAgent(
       /\b(altere|mude|troque|substitua|atualize|corrija|modifique|remova|insira|adicione|coloque|ponha|apague|delete|reescreva|inclua|retire|exclua|preencha|preencher|preenche|complete|completar|completa|informe|informar|defina|definir|registre|registrar|ajuste|ajustar|conserte|consertar|escreva|escrever)\b/i;
     const isEditCommand = EDIT_INTENT.test(params.message);
 
-    const FORCE_DIRECT_EDIT =
-      /\b(aplique\s+direto|aplique\s+já|faça\s+já|faça\s+agora|sem\s+revis[ãa]o|edite\s+direto|altere\s+agora|aplica\s+direto|sem\s+sugest[ãa]o)\b/i;
-    const wantsDirectEdit = FORCE_DIRECT_EDIT.test(params.message);
+    // Fonte única com o orquestrador (orchestrator/routing.ts): mesma regex e
+    // mesma regra de ignorar trechos citados. A cópia local que vivia aqui saiu
+    // de sincronia mais de uma vez — a última carregava um `\b` que nunca
+    // casava depois de vogal acentuada ("faça já").
+    const wantsDirectEdit = routerWantsDirectEdit(params.message);
     const isGoogleDocs = !!context.googleDocId;
 
     // Em modo Fast: sempre edição direta no GDoc (Haiku, 1 turn, sem cerimônia).
@@ -259,9 +288,27 @@ export async function* streamContractAgent(
     // o usuário disser "aplique direto".
     const preferProposeInGDocs = mode === "plan" && isGoogleDocs && !wantsDirectEdit;
 
-    const editReminderTemplate = isEditCommand
-      ? `\n\n---\nLEMBRETE DE FORMATO OBRIGATORIO: este pedido e um comando de edicao. Voce DEVE:\n1. Chamar pelo menos uma tool de edicao (${preferProposeInGDocs ? "PREFIRA propose_suggestion — o contrato esta em modo Google Docs e o usuario quer revisar antes de aplicar; só use edit_contract_section se a mensagem do usuario disser explicitamente 'aplique direto' / 'faça já' / 'sem revisao'" : "edit_contract_section, update_contract_data, insert_clause, remove_clause" + (mode === "plan" ? ", propose_suggestion" : "")}).\n2. Apos executar as tools, responder EXATAMENTE nesta estrutura em markdown (copie os 3 headings literais, sem emoji, sem alterar capitalizacao):\n\n## Alteracoes Realizadas\n(lista do que foi alterado no contrato)\n\n## Justificativa\n(razao juridica da alteracao)\n\n## Verificacao\n(como o usuario pode verificar que a alteracao foi aplicada)\n`
-      : "";
+    // Item 22 — paridade com o gate do orquestrador
+    // (specialists/editor.ts::resolveEditorToolPolicy). Em modo Planejar sem
+    // escape, os writes diretos saem do toolbox e um comando de edição é
+    // obrigado a passar por propose_plan. Antes disso o legado prometia
+    // "revisão antes de aplicar" só no texto do lembrete — e escrevia direto.
+    const planGate = mode === "plan" && !wantsDirectEdit;
+    const activeTools = planGate
+      ? AGENT_TOOLS.filter((t) => !DIRECT_WRITE_TOOLS.has(t.name))
+      : AGENT_TOOLS;
+
+    const editToolsHint = preferProposeInGDocs
+      ? "PREFIRA propose_suggestion — o contrato esta em modo Google Docs e o usuario quer revisar antes de aplicar; só use edit_contract_section se a mensagem do usuario disser explicitamente 'aplique direto' / 'faça já' / 'sem revisao'"
+      : "edit_contract_section, update_contract_data, insert_clause, remove_clause";
+
+    // Em modo Planejar o turn NAO altera nada — pedir os headings de
+    // "Alteracoes Realizadas" ali seria convidar a confabulacao.
+    const editReminderTemplate = !isEditCommand
+      ? ""
+      : planGate
+        ? `\n\n---\nLEMBRETE DE FORMATO OBRIGATORIO (MODO PLANEJAR): este pedido e um comando de edicao, mas NADA sera aplicado neste turn. As tools de escrita direta (edit_contract_section, update_contract_data, insert_clause, remove_clause) NAO estao disponiveis. Voce DEVE:\n1. Chamar propose_plan com a lista completa de steps da alteracao (o usuario aprova depois), ou propose_suggestion para um ajuste pontual de redacao.\n2. Em seguida responder EXATAMENTE nesta estrutura em markdown (copie os headings literais, sem emoji, sem alterar capitalizacao):\n\n## Plano Proposto\n(o que sera alterado, passo a passo — ainda NAO aplicado)\n\n## Justificativa\n(razao juridica da alteracao)\n\n## Proximo Passo\n(diga ao usuario que basta aprovar o plano para aplicar)\n`
+        : `\n\n---\nLEMBRETE DE FORMATO OBRIGATORIO: este pedido e um comando de edicao. Voce DEVE:\n1. Chamar pelo menos uma tool de edicao (${editToolsHint}).\n2. Apos executar as tools, responder EXATAMENTE nesta estrutura em markdown (copie os 3 headings literais, sem emoji, sem alterar capitalizacao):\n\n## Alteracoes Realizadas\n(lista do que foi alterado no contrato)\n\n## Justificativa\n(razao juridica da alteracao)\n\n## Verificacao\n(como o usuario pode verificar que a alteracao foi aplicada)\n`;
 
     const expertBlock = expertContext ? `${expertContext}\n\n---\n` : "";
     const messages: Anthropic.MessageParam[] = [
@@ -302,8 +349,13 @@ export async function* streamContractAgent(
         max_tokens: config.maxTokens,
         temperature: config.temperature,
         system: systemBlocks,
-        tools: AGENT_TOOLS,
-        ...(isEditCommand ? { tool_choice: { type: "any" as const } } : {}),
+        tools: activeTools,
+        // Modo Planejar: comando de edição cai obrigatoriamente em propose_plan.
+        ...(planGate && isEditCommand
+          ? { tool_choice: { type: "tool" as const, name: "propose_plan" } }
+          : isEditCommand
+            ? { tool_choice: { type: "any" as const } }
+            : {}),
         messages,
         stream: true,
       });
@@ -460,7 +512,9 @@ export async function* streamContractAgent(
           max_tokens: config.maxTokens,
           temperature: config.temperature,
           system: systemBlocks,
-          tools: AGENT_TOOLS,
+          // Iterações seguintes herdam o mesmo toolbox: em modo Planejar o
+          // write direto não pode voltar pela porta dos fundos na 2ª volta.
+          tools: activeTools,
           messages,
           stream: true,
         });
@@ -756,6 +810,13 @@ export async function runPassiveAnalysis(
     return { findings: [], commentsCreated: 0, modelUsed: "none" };
   }
 
+  // Kill switch do console (/admin/agents). A análise passiva roda sozinha em
+  // poll — se o interruptor não valesse aqui, desligá-la seria impossível.
+  const passiveProfile = await resolveAgentProfile("passive", params.orgId);
+  if (!passiveProfile.enabled) {
+    return { findings: [], commentsCreated: 0, modelUsed: "none" };
+  }
+
   // Locação usa prompt próprio (Lei 8.245/91). Detecta por kind do deal ou
   // modalidade do template (importado tem templateId null → cai no kind).
   const isLocacao =
@@ -885,13 +946,17 @@ export async function runPassiveAnalysis(
     // que era onde o dinheiro vazava.
     // `||` (não `??`): env setada como string VAZIA não pode engolir o
     // fallback pro ANTHROPIC_MODEL configurado.
+    // Modelo configurado no console vence os envs; sem configuração explícita
+    // (`modelSource === "default"`) a cadeia de envs continua como estava.
     const passiveModel =
-      params.trigger === "open"
-        ? resolveModel(
-            process.env.ANTHROPIC_PASSIVE_OPEN_MODEL || process.env.ANTHROPIC_MODEL,
-            SONNET_MODEL
-          )
-        : resolveModel(process.env.ANTHROPIC_PASSIVE_MODEL, HAIKU_MODEL);
+      passiveProfile.modelSource !== "default"
+        ? passiveProfile.model
+        : params.trigger === "open"
+          ? resolveModel(
+              process.env.ANTHROPIC_PASSIVE_OPEN_MODEL || process.env.ANTHROPIC_MODEL,
+              SONNET_MODEL
+            )
+          : resolveModel(process.env.ANTHROPIC_PASSIVE_MODEL, HAIKU_MODEL);
     modelUsed = passiveModel;
 
     let analysisInput: string;

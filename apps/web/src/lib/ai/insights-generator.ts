@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/db/prisma";
 import { recordAIUsage } from "@/lib/ai/usage";
+import { resolveAgentProfile } from "@/lib/ai/agents/resolve";
+import { composeSystemPrompt } from "@/lib/ai/agents/prompt-blocks";
 import {
   cacheKey,
   getCached,
@@ -223,12 +225,12 @@ export async function generateInsights(args: {
   context: InsightContext;
   contextId?: string;
 }): Promise<AIInsight[]> {
-  // F3.7 gate: org pode desabilitar global ou por contexto.
-  const ac = await prisma.agentConfig.findUnique({
-    where: { orgId: args.orgId },
-    select: { aiInsightsConfig: true },
-  });
-  const cfg = ac?.aiInsightsConfig as
+  // F3.7 gate: org pode desabilitar global ou por contexto. O toggle global
+  // agora é o `enabled` do perfil (kill switch do console); o por-contexto
+  // segue no `config`, migrado do AgentConfig.aiInsightsConfig.
+  const profile = await resolveAgentProfile("insights", args.orgId);
+  if (!profile.enabled) return [];
+  const cfg = profile.config as
     | { enabled?: boolean; contexts?: Record<string, boolean> }
     | null
     | undefined;
@@ -262,9 +264,11 @@ export async function generateInsights(args: {
   const startedAt = Date.now();
   try {
     const resp = await client.messages.create({
-      model: HAIKU,
-      max_tokens: 600,
-      system: SYSTEM_PROMPT,
+      model: profile.model || HAIKU,
+      max_tokens: profile.maxTokens ?? 600,
+      // Instruções da plataforma/tenant entram como apêndice — sem isto o
+      // campo existiria no console sem ninguém ler.
+      system: composeSystemPrompt(SYSTEM_PROMPT, profile),
       messages: [
         {
           role: "user",
@@ -278,7 +282,7 @@ export async function generateInsights(args: {
       orgId: args.orgId,
       userId: args.userId,
       provider: "anthropic",
-      model: HAIKU,
+      model: profile.model || HAIKU,
       operation: "insights",
       promptTokens: resp.usage.input_tokens,
       completionTokens: resp.usage.output_tokens,
@@ -296,7 +300,7 @@ export async function generateInsights(args: {
       orgId: args.orgId,
       userId: args.userId,
       provider: "anthropic",
-      model: HAIKU,
+      model: profile.model || HAIKU,
       operation: "insights",
       promptTokens: 0,
       latencyMs: Date.now() - startedAt,

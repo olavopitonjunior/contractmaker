@@ -463,12 +463,66 @@ const KIND_LABEL: Record<SeedActionKind, string> = {
 };
 
 const USAGE =
-  "  npx tsx scripts/seed-acervo-clausulas.ts --org <orgId|slug> --dir <pacote> [--apply]";
+  "  npx tsx scripts/seed-acervo-clausulas.ts --org <orgId|slug> --dir <pacote> [--apply]\n" +
+  "  npx tsx scripts/seed-acervo-clausulas.ts --org <orgId|slug> --embed-missing";
+
+/**
+ * `--embed-missing`: vetoriza as cláusulas deste seed que ficaram sem embedding
+ * (seed rodado sem VOYAGE_API_KEY). Existe porque o caminho normal PULA linhas
+ * `unchanged` — re-rodar o seed com a chave não re-embute nada. A linha é única
+ * (`noChunk`), então o texto do vetor é o próprio `content` da row — mesmo
+ * insumo que o caminho de criação usaria.
+ */
+async function embedMissingMode(org: string): Promise<void> {
+  if (!isEmbeddingsConfigured()) {
+    console.error(
+      "[seed-acervo-clausulas] --embed-missing exige VOYAGE_API_KEY no ambiente."
+    );
+    process.exit(1);
+  }
+  const organization = await prisma.organization.findFirst({
+    where: { OR: [{ id: org }, { slug: org }] },
+    select: { id: true, name: true },
+  });
+  if (!organization) {
+    throw new Error(`Organization não encontrada por id nem slug: "${org}"`);
+  }
+  const rows = await prisma.$queryRawUnsafe<{ id: string; content: string }[]>(
+    `SELECT id, content FROM "KnowledgeItem"
+      WHERE "orgId" = $1 AND source = $2 AND category = 'clause'
+        AND status = 'approved' AND embedding IS NULL`,
+    organization.id,
+    CURATED_CLAUSE_SOURCE
+  );
+  if (rows.length === 0) {
+    console.log(
+      `[seed-acervo-clausulas] ${organization.name}: nenhuma cláusula sem vetor. Nada a fazer.`
+    );
+    return;
+  }
+  console.log(
+    `[seed-acervo-clausulas] ${organization.name}: vetorizando ${rows.length} cláusula(s)…`
+  );
+  await embedKnowledgeItem(
+    rows.map((r) => ({ id: r.id, text: r.content })),
+    { orgId: organization.id }
+  );
+  console.log(`[seed-acervo-clausulas] embeddings: ${rows.length} linha(s) OK`);
+}
 
 async function main() {
   const DRY_RUN = !process.argv.includes("--apply");
   const org = argValue("--org");
   const dirArg = argValue("--dir");
+
+  if (org && process.argv.includes("--embed-missing")) {
+    try {
+      await embedMissingMode(org);
+    } finally {
+      await prisma.$disconnect();
+    }
+    return;
+  }
 
   if (!org || !dirArg) {
     console.error(

@@ -24,10 +24,7 @@ import {
   ContractBudgetExceededError,
   OrgAiBudgetExceededError,
 } from "../budget";
-import {
-  getTenantAgentInstructions,
-  buildTenantInstructionsBlock,
-} from "../specialists/platform-defaults";
+import type { ResolvedAgentProfile } from "../agents/resolve";
 import type { AgentContext } from "../types";
 import type {
   SpecialistName,
@@ -58,6 +55,13 @@ export interface SpecialistRunnerConfig {
   userId: string;
   /** Quando true, força o LLM a chamar pelo menos 1 tool. */
   forceToolUse?: boolean;
+  /**
+   * Força uma tool ESPECÍFICA na 1ª chamada (`tool_choice: {type:"tool"}`).
+   * Tem precedência sobre `forceToolUse`. Usado pelo modo Planejar: o Editor
+   * é obrigado a chamar `propose_plan` antes de qualquer write — enforcement
+   * determinístico, não dependente do prompt.
+   */
+  forceToolName?: string;
   /** Pre-check Sentinel (passado pelo Editor/Curator; Analyst/Legal não precisam). */
   toolGuard?: ToolUseGuard;
   /** Quando true, captura htmlBefore/htmlAfter em edits (GDocs). */
@@ -67,6 +71,12 @@ export interface SpecialistRunnerConfig {
    *  + pendingAssistantMessageId na cópia local do context antes de cada
    *  tool dispatch. */
   sessionId?: string;
+  /**
+   * Perfil já resolvido pelo especialista (org → plataforma → hardcoded).
+   * O `systemPrompt` recebido JÁ inclui as instruções — o perfil vem junto
+   * porque temperature/maxTokens também saem dele.
+   */
+  profile?: ResolvedAgentProfile;
 }
 
 export async function runSpecialist(
@@ -84,6 +94,7 @@ export async function runSpecialist(
     orgId,
     userId,
     forceToolUse,
+    forceToolName,
   } = config;
 
   // Budget guard antes da 1ª chamada
@@ -104,20 +115,15 @@ export async function runSpecialist(
     throw err;
   }
 
-  // Instruções adicionais da imobiliária (AgentConfig.systemPrompt do tenant)
-  // entram como bloco DELIMITADO no fim do system prompt. Ponto único: cobre
-  // os 4 specialists sem tocar em cada call-site. Best-effort com cache 60s
-  // (o loader nunca lança). O cache_control continua efetivo: o prompt vira
-  // por-org, mas dentro da org o texto é estável entre turns.
-  const tenantInstructions = await getTenantAgentInstructions(orgId);
-  const effectiveSystemPrompt = tenantInstructions
-    ? `${systemPrompt}${buildTenantInstructionsBlock(tenantInstructions)}`
-    : systemPrompt;
-
+  // O system prompt já chega completo do especialista (base por-domínio +
+  // instruções de plataforma + instruções do tenant, via composeSystemPrompt).
+  // Antes o runner buscava as instruções do tenant por conta própria — virou
+  // responsabilidade de quem resolve o perfil, pra não haver duas fontes.
+  // O cache_control segue efetivo: o prompt é por-org, mas estável entre turns.
   const systemBlocks = [
     {
       type: "text" as const,
-      text: effectiveSystemPrompt,
+      text: systemPrompt,
       cache_control: { type: "ephemeral" as const },
     },
   ] as unknown as Anthropic.TextBlockParam[];
@@ -140,11 +146,18 @@ export async function runSpecialist(
   // 1ª chamada
   const firstParams: Anthropic.MessageCreateParamsStreaming = {
     model,
-    max_tokens: 2048,
-    temperature: 0.3,
+    // Perfil do agente sobrescreve os defaults do runner quando definido.
+    max_tokens: config.profile?.maxTokens ?? 2048,
+    temperature: config.profile?.temperature ?? 0.3,
     system: systemBlocks,
     tools,
-    ...(forceToolUse ? { tool_choice: { type: "any" as const } } : {}),
+    // tool_choice nomeado vence o "any": em modo Planejar o Editor precisa
+    // cair em propose_plan, não em qualquer tool.
+    ...(forceToolName
+      ? { tool_choice: { type: "tool" as const, name: forceToolName } }
+      : forceToolUse
+        ? { tool_choice: { type: "any" as const } }
+        : {}),
     messages,
     stream: true,
   };
@@ -308,8 +321,8 @@ export async function runSpecialist(
 
     const nextParams: Anthropic.MessageCreateParamsStreaming = {
       model,
-      max_tokens: 2048,
-      temperature: 0.3,
+      max_tokens: config.profile?.maxTokens ?? 2048,
+      temperature: config.profile?.temperature ?? 0.3,
       system: systemBlocks,
       tools,
       messages,

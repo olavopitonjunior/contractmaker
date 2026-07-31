@@ -281,6 +281,7 @@ model Organization {
   templates           ContractTemplate[]
   clauses             Clause[]
   agentConfig         AgentConfig?
+  agentProfiles       AgentProfile[]
   knowledgeItems      KnowledgeItem[]
   contractMemories    ContractMemory[]
   clauseProposals     ClauseProposal[]
@@ -1611,6 +1612,72 @@ model SupportAgentConfig {
   updatedBy            String?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
+}
+
+// Perfil de UM agente, num escopo. Unifica as três configurações que antes não
+// se falavam — AgentConfig (por org), PlatformAgentDefaults (singleton dos 4
+// especialistas) e SupportAgentConfig (singleton do suporte) — e cobre o buraco
+// que nenhuma delas cobria: override por org E por agente.
+//
+// `orgId = NULL` é o DEFAULT DA PLATAFORMA; uma linha com orgId é o override
+// daquele tenant. Resolução em cadeia (lib/ai/agents/resolve.ts):
+//   linha da org → linha da plataforma → hardcoded no código.
+// Campo null em qualquer nível significa "herda", nunca "vazio".
+//
+// ⚠️ `@@unique([orgId, agentKey])` NÃO garante unicidade das linhas de
+// plataforma: no Postgres dois NULLs são distintos. A migration cria um índice
+// PARCIAL (`WHERE "orgId" IS NULL`) pra isso — sem ele a resolução vira
+// loteria entre linhas duplicadas.
+//
+// As 3 tabelas antigas seguem no schema por uma release como janela de
+// rollback (mesmo padrão de Clause → KnowledgeItem); nenhum leitor as usa.
+model AgentProfile {
+  id       String  @id @default(cuid())
+  /// null = default da plataforma; preenchido = override do tenant.
+  orgId    String?
+  /// analyst | legal | editor | curator | passive | support | ocr | insights |
+  /// chat_legacy | max — catálogo em lib/ai/agents/registry.ts
+  agentKey String
+  enabled  Boolean @default(true)
+
+  model         String?
+  /// Usado quando o modelo principal responde 429/529 (PR4).
+  fallbackModel String?
+  temperature   Float?
+  maxTokens     Int?
+
+  /// APÊNDICE ao prompt-base do agente: o prompt-base é escolhido por domínio
+  /// (venda × locação) e substituí-lo apagaria a variante de locação.
+  /// Instrução de tenant entra cercada por <instrucoes_da_imobiliaria>.
+  ///
+  /// DUAS EXCEÇÕES, herdadas das tabelas que este model unificou:
+  ///  - agentKey="chat_legacy": SUBSTITUI o prompt inteiro (era o
+  ///    `AgentConfig.systemPrompt`, que tinha essa semântica). Só alcança o
+  ///    caminho de rollback ENABLE_MULTI_AGENT=false.
+  ///  - agentKey="support": SUBSTITUI o prompt-base (era o
+  ///    `SupportAgentConfig.systemPrompt` — é a persona inteira do widget).
+  ///    Escopo de plataforma; tenant não escreve nesse agente.
+  instructions String? @db.Text
+
+  /// { categories: string[], tags: string[], includePlatform: boolean } — filtro
+  /// de RAG do agente (PR3). null = acesso aberto.
+  ragScope Json?
+
+  /// Teto mensal de custo do agente na org, em USD (PR4). null = sem teto.
+  monthlyBudgetUsd Decimal? @db.Decimal(12, 2)
+
+  /// Sobras específicas de um agente que não merecem coluna própria —
+  /// aiInsightsConfig (insights) e handoffMinSimilarity (support).
+  config Json?
+
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  org Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, agentKey])
+  @@index([agentKey])
 }
 
 // Pendência de suporte: pergunta que a IA não soube responder. Vira item da base

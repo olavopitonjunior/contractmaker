@@ -486,6 +486,24 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
   },
 ];
 
+/**
+ * Tools que alteram o documento DIRETAMENTE, sem passo de aprovação do
+ * usuário. Fonte única — consumida pelo gate do modo Planejar tanto no
+ * orquestrador (`specialists/editor.ts::resolveEditorToolPolicy`) quanto no
+ * agente legado (`agent.ts`, caminho ENABLE_MULTI_AGENT=false).
+ *
+ * `propose_plan` e `propose_suggestion` NÃO entram aqui de propósito: ambos
+ * criam pendências revisáveis (ChatPlan / ContractSuggestion), não escrita.
+ */
+export const DIRECT_WRITE_TOOLS: ReadonlySet<string> = new Set([
+  "edit_contract_section",
+  "update_contract_data",
+  "insert_clause",
+  "remove_clause",
+  "apply_style_preset",
+  "insert_image",
+]);
+
 export function getToolNames(): string[] {
   return AGENT_TOOLS.map((t) => t.name);
 }
