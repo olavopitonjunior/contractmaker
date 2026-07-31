@@ -30,6 +30,7 @@ import {
   ALLOWED_MODELS,
 } from "@/lib/ai/agents/store";
 import { resolveAgentProfile } from "@/lib/ai/agents/resolve";
+import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -66,6 +67,7 @@ export async function GET(req: NextRequest) {
         description: def.description,
         external: def.external ?? false,
         tenantEditable: def.tenantEditable,
+        supports: def.supports,
         defaultModel: def.defaultModel,
         /** Valores gravados NESTE escopo (null = herda). */
         own: {
@@ -97,7 +99,9 @@ export async function GET(req: NextRequest) {
 }
 
 const patchSchema = z.object({
-  orgId: z.string().nullable().optional(),
+  // min(1): string vazia não é "plataforma" (isso é `null`) nem org válida —
+  // sem isso vira FK violation P2003 e 500 opaco no console.
+  orgId: z.string().min(1).nullable().optional(),
   agentKey: z.string().refine(isAgentKey, "Agente desconhecido"),
   enabled: z.boolean().optional(),
   model: z.string().nullable().optional(),
@@ -122,6 +126,17 @@ export async function PATCH(req: NextRequest) {
     );
   }
   const { orgId, agentKey, ...patch } = parsed.data;
+
+  // Mesmo check do GET: org inexistente estouraria a FK como 500 opaco.
+  if (orgId) {
+    const org = await prisma.organization.findUnique({
+      where: { id: orgId },
+      select: { id: true },
+    });
+    if (!org) {
+      return NextResponse.json({ error: "Org não encontrada" }, { status: 404 });
+    }
+  }
 
   if (!isAllowedModel(patch.model) || !isAllowedModel(patch.fallbackModel)) {
     return NextResponse.json(
@@ -150,6 +165,30 @@ export async function PATCH(req: NextRequest) {
     },
     updatedBy: session!.user!.id,
   });
+
+  // A rota do tenant já auditava; escrita de super_admin no escopo de outro
+  // tenant merece o mesmo rastro — é justamente a que ninguém da org viu.
+  // Contexto montado à mão: `AuditContext.orgId` é nullable (evento de
+  // plataforma não pertence a tenant nenhum), mas o helper exige string.
+  await audit(
+    {
+      ...extractAuditContextFromRequest(req, orgId ?? "", session!.user!.id),
+      orgId: orgId ?? null,
+    },
+    {
+      action: "AGENT_CONFIG_UPDATE",
+      result: "SUCCESS",
+      resourceType: "AgentProfile",
+      resource: `${orgId ?? "platform"}:${agentKey}`,
+      metadata: {
+        agentKey,
+        scope: orgId ? "org" : "platform",
+        ...patch,
+        instructions: undefined,
+        instructionsLength: patch.instructions?.length ?? null,
+      },
+    }
+  ).catch(() => {});
 
   return NextResponse.json({ ok: true });
 }

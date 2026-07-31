@@ -27,8 +27,15 @@ import {
 
 export const dynamic = "force-dynamic";
 
-/** Agentes que a org pode configurar (exclui suporte, OCR e o Max externo). */
-const TENANT_AGENTS = AGENT_DEFINITIONS.filter((d) => d.tenantEditable);
+/**
+ * Agentes que a org configura. Exige `tenantEditable` E que a instrução seja
+ * de fato lida pelo runtime (`supports.instructions`) — oferecer um campo que
+ * ninguém lê é pior que não oferecer: o usuário escreve, salva e acha que
+ * mudou alguma coisa.
+ */
+const TENANT_AGENTS = AGENT_DEFINITIONS.filter(
+  (d) => d.tenantEditable && d.supports.instructions
+);
 
 export async function GET() {
   const session = await auth();
@@ -84,7 +91,8 @@ export async function PATCH(req: NextRequest) {
   }
   const agentKey = parsed.data.agentKey as AgentKey;
 
-  if (!AGENT_REGISTRY[agentKey].tenantEditable) {
+  const def = AGENT_REGISTRY[agentKey];
+  if (!def.tenantEditable || !def.supports.instructions) {
     return NextResponse.json(
       { error: "Este agente é configurado pela plataforma." },
       { status: 403 }

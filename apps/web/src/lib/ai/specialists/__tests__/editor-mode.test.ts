@@ -110,3 +110,46 @@ describe("FORCE_DIRECT_EDIT vence em qualquer modo", () => {
     expect(p.toolNames).toContain("edit_contract_section");
   });
 });
+
+/**
+ * O escape é uma regex que casa em QUALQUER posição da mensagem, e várias das
+ * expressões são frases de contrato ("rescisão sem revisão judicial"). Colar
+ * uma cláusula assim — vinda da contraparte ou do campo de observações do
+ * formulário público, que é anônimo — não pode derrubar o gate.
+ */
+describe("escape não dispara por texto citado de terceiro", () => {
+  const citacoes = [
+    'inclua esta cláusula: "a rescisão será automática, sem revisão judicial"',
+    "inclua esta cláusula: “o aceite se dará sem sugestão de alteração”",
+    "avalie este trecho: 'prorrogação automática, sem revisão pelas partes'",
+    "compare com ```a parte aceita sem revisão prévia```",
+  ];
+
+  for (const msg of citacoes) {
+    it(`não escapa: ${msg.slice(0, 34)}…`, () => {
+      const p = resolveEditorToolPolicy(st({ mode: "plan", userMessage: msg }));
+      expect(p.wantsDirectEdit).toBe(false);
+      expect(p.planGate).toBe(true);
+      expect(hasAnyDirectWrite(p.toolNames)).toBe(false);
+    });
+  }
+
+  it("pedido fora das aspas continua escapando, mesmo com citação junto", () => {
+    const p = resolveEditorToolPolicy(
+      st({
+        mode: "plan",
+        userMessage:
+          'aplique direto: inclua "a rescisão será automática, sem revisão judicial"',
+      })
+    );
+    expect(p.wantsDirectEdit).toBe(true);
+    expect(p.toolNames).toContain("edit_contract_section");
+  });
+
+  it("apóstrofo de português não come o resto da mensagem", () => {
+    const p = resolveEditorToolPolicy(
+      st({ mode: "plan", userMessage: "aplique direto: corrija 'd'água' na cláusula 3" })
+    );
+    expect(p.wantsDirectEdit).toBe(true);
+  });
+});
