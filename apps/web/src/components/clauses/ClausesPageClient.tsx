@@ -4,7 +4,9 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Plus, Pencil } from "lucide-react";
+import { Plus, Pencil, Lock, ArrowUpCircle } from "lucide-react";
+import { toast } from "sonner";
+import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/layout/page-header";
 import { ClauseEditor } from "./ClauseEditor";
 
@@ -30,13 +32,116 @@ interface Clause {
   tags: string[];
   status: string;
   source: string;
+  /** `null` = cláusula da PLATAFORMA: aparece pra todo tenant, editável só no /admin. */
+  orgId?: string | null;
+}
+
+/** Cláusula de slot da org que tem versão mais recente na plataforma. */
+interface PlatformUpdate {
+  orgClauseId: string;
+  platformClauseId: string;
+  platformTitle: string;
+  platformUpdatedAt: string;
 }
 
 interface ClausesPageClientProps {
   clauses: Clause[];
+  platformUpdates?: PlatformUpdate[];
 }
 
-export function ClausesPageClient({ clauses }: ClausesPageClientProps) {
+/** Item da plataforma: some com as ações, porque a API recusaria a escrita. */
+function isPlatform(c: Clause): boolean {
+  return c.orgId === null;
+}
+
+/**
+ * Faixa de "a plataforma publicou versão mais recente".
+ *
+ * Existe porque a GERAÇÃO nunca troca a cláusula da imobiliária pela da
+ * plataforma (ver `resolveClauseSlots`) — regra certa, porque o texto vira
+ * contrato. O efeito colateral é que uma correção publicada centralmente ficava
+ * invisível pra quem tem cláusula própria. Aqui ela aparece; adotar é decisão
+ * da casa.
+ */
+function AvisoPlataforma({
+  u,
+  ocupado,
+  onAdotar,
+}: {
+  u: PlatformUpdate;
+  ocupado: boolean;
+  onAdotar: (u: PlatformUpdate) => void;
+}) {
+  return (
+    <div className="rounded border border-amber-400/60 bg-amber-50 p-2 text-xs dark:bg-amber-950/20">
+      <div className="flex items-start gap-2">
+        <ArrowUpCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+        <div className="min-w-0 flex-1">
+          <p className="font-medium">A plataforma tem uma versão mais recente</p>
+          <p className="text-muted-foreground">
+            &quot;{u.platformTitle}&quot;, de{" "}
+            {new Date(u.platformUpdatedAt).toLocaleDateString("pt-BR")}. Seus
+            contratos continuam usando a cláusula desta imobiliária até você
+            adotar.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="mt-1.5 h-7 text-xs"
+            disabled={ocupado}
+            onClick={() => onAdotar(u)}
+          >
+            {ocupado ? "Adotando…" : "Adotar o texto da plataforma"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function ClausesPageClient({
+  clauses,
+  platformUpdates = [],
+}: ClausesPageClientProps) {
+  const router = useRouter();
+  const [adotando, setAdotando] = useState<string | null>(null);
+  const atualizacoes = new Map(platformUpdates.map((u) => [u.orgClauseId, u]));
+
+  /**
+   * Adota o texto da plataforma nesta cláusula.
+   *
+   * A GERAÇÃO nunca faz isso sozinha — cláusula de slot vira texto de contrato
+   * e congela no dataJson, então trocar o que a imobiliária escreveu é decisão
+   * dela. Este botão é o único caminho.
+   */
+  async function adotar(u: PlatformUpdate) {
+    if (
+      !confirm(
+        `Substituir o texto desta cláusula pelo da versão da plataforma ` +
+          `("${u.platformTitle}")? Os contratos JÁ GERADOS não mudam — a troca ` +
+          `vale para os próximos.`
+      )
+    ) {
+      return;
+    }
+    setAdotando(u.orgClauseId);
+    try {
+      const res = await fetch(`/api/clauses/${u.orgClauseId}/adopt-platform`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platformClauseId: u.platformClauseId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Falha ao adotar");
+      toast.success("Texto da plataforma adotado.");
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Falha ao adotar");
+    } finally {
+      setAdotando(null);
+    }
+  }
+
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingClause, setEditingClause] = useState<Clause | null>(null);
   const [editorMode, setEditorMode] = useState<"create" | "edit">("create");
@@ -109,14 +214,24 @@ export function ClausesPageClient({ clauses }: ClausesPageClientProps) {
                         <div className="flex items-center justify-between">
                           <CardTitle className="text-sm">{clause.title}</CardTitle>
                           <div className="flex gap-1 items-center">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                              onClick={() => handleEdit(clause)}
-                            >
-                              <Pencil className="h-3 w-3" />
-                            </Button>
+                            {/* Cláusula de plataforma não mostra lápis: a API
+                                filtra por orgId e devolveria 404. Botão que
+                                sempre falha é pior que botão nenhum. */}
+                            {isPlatform(clause) ? (
+                              <Badge variant="secondary" className="text-[10px] gap-1">
+                                <Lock className="h-2.5 w-2.5" />
+                                Plataforma
+                              </Badge>
+                            ) : (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                                onClick={() => handleEdit(clause)}
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                            )}
                             <Badge variant="outline" className="text-xs">
                               {clause.groupCode}
                             </Badge>
@@ -130,6 +245,14 @@ export function ClausesPageClient({ clauses }: ClausesPageClientProps) {
                         </div>
                       </CardHeader>
                       <CardContent className="space-y-2">
+                      {atualizacoes.has(clause.id) && (
+                        <AvisoPlataforma
+                          u={atualizacoes.get(clause.id)!}
+                          ocupado={adotando === clause.id}
+                          onAdotar={adotar}
+                        />
+                      )}
+
                         <div className="flex flex-wrap gap-1">
                           {clause.tags.map((tag) => (
                             <Badge key={tag} variant="secondary" className="text-xs">
@@ -174,14 +297,22 @@ export function ClausesPageClient({ clauses }: ClausesPageClientProps) {
                       <div className="flex items-center justify-between">
                         <CardTitle className="text-sm">{clause.title}</CardTitle>
                         <div className="flex gap-1 items-center">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={() => handleEdit(clause)}
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </Button>
+                          {/* Ver a nota no bloco agrupado acima. */}
+                          {isPlatform(clause) ? (
+                            <Badge variant="secondary" className="text-[10px] gap-1">
+                              <Lock className="h-2.5 w-2.5" />
+                              Plataforma
+                            </Badge>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={() => handleEdit(clause)}
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </Button>
+                          )}
                           <Badge variant="outline" className="text-xs">
                             {clause.source}
                           </Badge>
@@ -195,6 +326,14 @@ export function ClausesPageClient({ clauses }: ClausesPageClientProps) {
                       </div>
                     </CardHeader>
                     <CardContent>
+                    {atualizacoes.has(clause.id) && (
+                      <AvisoPlataforma
+                        u={atualizacoes.get(clause.id)!}
+                        ocupado={adotando === clause.id}
+                        onAdotar={adotar}
+                      />
+                    )}
+
                       <div className="flex flex-wrap gap-1">
                         {clause.tags.map((tag) => (
                           <Badge key={tag} variant="secondary" className="text-xs">

@@ -1,0 +1,35 @@
+# Normalização de fim de linha.
+#
+# Por que isto existe: sem `.gitattributes`, cada máquina commitava o que o seu
+# `core.autocrlf` produzia. Os templates em `templates/*.hbs` entraram no
+# histórico com CRLF e o arquivo gerado a partir deles
+# (`apps/web/src/lib/templates/canonical-sources.generated.ts`) entrou com LF.
+# O teste de drift `canonical-seed.test.ts` compara `readFileSync` byte a byte
+# com a string embarcada: no Windows o autocrlf converte os dois e passa; no
+# Linux da CI os blobs crus divergem e os 8 casos falham. A CI da master ficou
+# vermelha por isso desde 2026-07-30 — e uma CI que sempre falha não distingue
+# PR quebrado de PR são.
+#
+# `text=auto` deixa o Git decidir o que é texto e guardar sempre LF no blob;
+# o working tree continua seguindo o `core.autocrlf` de cada um.
+* text=auto
+
+# Explícito para os dois lados da comparação do teste de drift, para que nem um
+# `core.autocrlf` exótico nem um editor consigam reintroduzir CR no histórico.
+*.hbs text eol=lf
+*.ts  text eol=lf
+*.tsx text eol=lf
+
+# Binários: nunca converter (o `text=auto` já detectaria, mas ser explícito
+# evita corrupção silenciosa se a heurística errar).
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.docx binary
+*.xlsx binary

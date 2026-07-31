@@ -12,7 +12,6 @@
 import type { Anthropic } from "@anthropic-ai/sdk";
 import { Annotation, StateGraph, START, END } from "@langchain/langgraph";
 import { loadContext } from "../shared/context";
-import { loadExpertContext } from "../expert-context";
 import { resolveSession, loadChatHistory } from "../shared/session";
 import { getAnthropicClient, HAIKU_MODEL, SONNET_MODEL } from "../shared/anthropic-client";
 import { recordAIUsage } from "../usage";
@@ -51,7 +50,6 @@ const OrchestratorStateAnnotation = Annotation.Root({
 
   intent: Annotation<OrchestratorState["intent"]>(),
   contractContext: Annotation<AgentContext | undefined>(),
-  expertContext: Annotation<string | undefined>(),
   attachmentBlock: Annotation<string | undefined>(),
   signingState: Annotation<OrchestratorState["signingState"]>(),
 
@@ -98,14 +96,11 @@ type GraphState = typeof OrchestratorStateAnnotation.State;
 async function loadContextNode(state: GraphState): Promise<Partial<GraphState>> {
   const context = await loadContext(state.contractId, state.orgId);
 
-  let expertContext = "";
-  if (state.mode === "plan") {
-    try {
-      expertContext = await loadExpertContext(context);
-    } catch (err) {
-      console.error("[graph:loadContext] loadExpertContext falhou:", err);
-    }
-  }
+  // O preâmbulo NÃO é carregado aqui de propósito. Este nó roda antes do
+  // router: não há agente escolhido, e o roteamento pode fazer fanout
+  // (`review` → analyst+legal+curator). Carregar um preâmbulo só, sem dono,
+  // era o que fazia o escopo de RAG por agente ser ignorado em silêncio.
+  // Cada especialista carrega o seu, via `expertContextFor`.
 
   // F4 iteração 2026-05-17 — busca signing state do deal pra Editor decidir
   // entre edit-no-draft e create-aditamento. Cross-deal lookup via Contract.dealId.
@@ -162,7 +157,6 @@ async function loadContextNode(state: GraphState): Promise<Partial<GraphState>> 
 
   return {
     contractContext: context,
-    expertContext: expertContext || undefined,
     attachmentBlock,
     signingState,
     events: [
@@ -170,7 +164,6 @@ async function loadContextNode(state: GraphState): Promise<Partial<GraphState>> 
         type: "started",
         mode: state.mode,
         model: state.mode === "fast" ? HAIKU_MODEL : SONNET_MODEL,
-        hasExpertContext: !!expertContext,
       },
       ...extraEvents,
     ],

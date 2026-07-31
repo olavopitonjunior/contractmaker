@@ -20,6 +20,7 @@ import { requirePlatform } from "@/lib/admin/gate";
 import { prisma } from "@/lib/db/prisma";
 import {
   AGENT_DEFINITIONS,
+  AGENT_REGISTRY,
   isAgentKey,
   type AgentKey,
 } from "@/lib/ai/agents/registry";
@@ -143,6 +144,19 @@ export async function PATCH(req: NextRequest) {
     if (!org) {
       return NextResponse.json({ error: "Org não encontrada" }, { status: 404 });
     }
+  }
+
+  // Mesmo guard da rota do tenant: `ragScope` só é gravável para agente que o
+  // runtime honra. Sem isto o console gravaria restrição que nunca é aplicada,
+  // e a próxima pessoa a ler o banco acharia que existe uma em vigor.
+  if (
+    patch.ragScope !== undefined &&
+    !AGENT_REGISTRY[agentKey as AgentKey].supports.ragScope
+  ) {
+    return NextResponse.json(
+      { error: "Este agente não consulta a base de conhecimento." },
+      { status: 400 }
+    );
   }
 
   if (!isAllowedModel(patch.model) || !isAllowedModel(patch.fallbackModel)) {

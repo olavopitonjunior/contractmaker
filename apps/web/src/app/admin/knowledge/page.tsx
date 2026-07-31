@@ -29,7 +29,7 @@ export default async function PlatformKnowledgePage() {
     category: { not: "support" },
   } as const;
 
-  const [items, counts] = await Promise.all([
+  const [items, counts, orgCount] = await Promise.all([
     prisma.knowledgeItem.findMany({
       where,
       orderBy: { updatedAt: "desc" },
@@ -52,6 +52,7 @@ export default async function PlatformKnowledgePage() {
       where,
       _count: { _all: true },
     }),
+    prisma.organization.count(),
   ]);
 
   return (
@@ -63,9 +64,11 @@ export default async function PlatformKnowledgePage() {
         <p className="text-sm text-muted-foreground">
           O que for criado aqui aparece na base de{" "}
           <strong>todas as imobiliárias</strong>, marcado como &quot;Plataforma&quot;
-          e somente-leitura pra elas. A base do tenant tem precedência no
-          desempate do RAG — conteúdo próprio nunca é enterrado por conteúdo
-          universal de similaridade igual.
+          e somente-leitura pra elas. Na busca semântica, empate de similaridade
+          é desempatado a favor do conteúdo da própria imobiliária. Já numa
+          cláusula de <strong>slot de template</strong> a regra é mais forte: a
+          cláusula da imobiliária sempre vence, e a universal só preenche
+          lacuna — o texto do slot entra no contrato e congela.
         </p>
       </header>
 
@@ -80,6 +83,7 @@ export default async function PlatformKnowledgePage() {
           counts.map((c) => [c.category, c._count._all])
         )}
         embeddingsConfigured={!!process.env.VOYAGE_API_KEY}
+        orgCount={orgCount}
       />
     </div>
   );

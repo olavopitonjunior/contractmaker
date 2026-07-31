@@ -7,8 +7,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { RagScopeEditor, type RagScope } from "@/components/settings/RagScopeEditor";
 
-/** Espelha RAG_SCOPE_CATEGORIES do servidor. */
-const RAG_CATEGORIES = ["legislation", "model", "rule", "glossary", "clause"] as const;
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -36,7 +34,12 @@ interface AgentRow {
   description: string;
   external: boolean;
   tenantEditable: boolean;
-  supports: { enabled: boolean; model: boolean; instructions: boolean };
+  supports: {
+    enabled: boolean;
+    model: boolean;
+    instructions: boolean;
+    ragScope: boolean;
+  };
   defaultModel: string;
   own: {
     enabled: boolean;
@@ -73,6 +76,9 @@ export function AgentsConsoleClient({
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentRow[]>([]);
   const [allowedModels, setAllowedModels] = useState<string[]>([]);
+  // A rota já devolvia `ragCategories` e o console usava um literal próprio —
+  // o payload certo chegava e era descartado.
+  const [ragCategories, setRagCategories] = useState<string[]>([]);
 
   const load = useCallback(async (orgId: string) => {
     setLoading(true);
@@ -83,6 +89,7 @@ export function AgentsConsoleClient({
       if (!res.ok) throw new Error(data.error || "Falha ao carregar");
       setAgents(data.agents ?? []);
       setAllowedModels(data.allowedModels ?? []);
+      setRagCategories(data.ragCategories ?? []);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha ao carregar");
     } finally {
@@ -117,7 +124,7 @@ export function AgentsConsoleClient({
           temperature: row.own.temperature,
           maxTokens: row.own.maxTokens,
           instructions: row.own.instructions,
-          ragScope: row.own.ragScope,
+          ...(row.supports.ragScope ? { ragScope: row.own.ragScope } : {}),
           monthlyBudgetUsd: row.own.monthlyBudgetUsd,
         }),
       });
@@ -304,13 +311,18 @@ export function AgentsConsoleClient({
               </div>
 
               <div className="border-t pt-3">
-                <Label className="mb-2 block text-xs">
-                  Base de conhecimento que este agente consulta
-                </Label>
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <Label className="text-xs">
+                    Base de conhecimento que este agente consulta
+                  </Label>
+                  {!row.supports.ragScope && (
+                    <Badge variant="outline">este agente não consulta a base</Badge>
+                  )}
+                </div>
                 <RagScopeEditor
                   value={row.own.ragScope}
-                  categories={RAG_CATEGORIES}
-                  disabled={!canEdit}
+                  categories={ragCategories}
+                  disabled={!canEdit || !row.supports.ragScope}
                   onChange={(next) => patchLocal(row.agentKey, { ragScope: next })}
                 />
                 {/* Herança tem que ser visível: com o escopo vazio neste nível, o

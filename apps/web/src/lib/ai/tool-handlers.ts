@@ -22,6 +22,7 @@ import {
   type KnowledgeScopeOptions,
 } from "./knowledge-scope";
 import { resolveAgentProfile } from "./agents/resolve";
+import { incrementClauseUsage } from "./knowledge-usage";
 import { logError } from "@/lib/observability/log";
 
 /**
@@ -975,6 +976,12 @@ async function handleQueryKnowledgeBase(
       similarity: Number(r.similarity?.toFixed?.(3) ?? r.similarity),
       lowConfidence: Number(r.similarity ?? 0) < RAG_MIN_SIMILARITY,
     }));
+    // Registra a confiança de cada id no turn. É o que permite ao
+    // `insert_clause` recusar um id que ELE MESMO devolveu como fraco.
+    if (context.ragConfidence) {
+      for (const m of mapped) context.ragConfidence[m.id] = m.lowConfidence;
+    }
+
     const nothingConfident =
       mapped.length === 0 || mapped.every((m) => m.lowConfidence);
     return {
@@ -1460,6 +1467,40 @@ async function handleInsertClause(
     };
   }
 
+  /**
+   * Piso de confiança no caminho de ID EXPLÍCITO.
+   *
+   * O caminho `clauseQuery` já tinha fail-safe (similaridade ≥ 0.4); o de id
+   * pulava tudo. Como `query_knowledge_base` devolve topK SEM piso — marcando
+   * `lowConfidence` em vez de esconder, pra não regredir recall — o modelo
+   * recebia um id fraco e podia inseri-lo por id. Era backlog registrado no
+   * próprio arquivo.
+   *
+   * O gate é DELIBERADAMENTE estreito: recusa só quando há evidência positiva
+   * de que o id é ruim — ele foi devolvido NESTE turn como `lowConfidence`.
+   * Exigir "veio de resultado confiável" quebraria casos legítimos: o id pode
+   * vir do histórico da conversa ou de outra tool, e ausência de prova não é
+   * prova de ausência.
+   *
+   * Plano aprovado por humano não passa pelo gate: quem leu o título no
+   * PlanCard já endossou. Aplicá-lo ali transformaria aprovação em `no_match`.
+   */
+  if (
+    resolvedVia === "explicit_id" &&
+    !context.humanApprovedPlan &&
+    context.ragConfidence?.[knowledgeItemId] === true
+  ) {
+    return {
+      success: false,
+      error:
+        `A cláusula ${knowledgeItemId} veio da busca com similaridade BAIXA — ` +
+        `não é seguro inseri-la no contrato só por id. Se é mesmo ela, descreva ` +
+        `o que você quer com clauseQuery="<descrição>"; se não, refine a busca ` +
+        `ou use um placeholder [preencher].`,
+      hint: "low_confidence_explicit_id",
+    };
+  }
+
   // O escopo aqui NÃO é decorativo: `knowledgeItemId` vem do modelo, não da UI.
   // Sem ele a busca era por id puro, e uma cláusula de OUTRO tenant podia entrar
   // no contrato se o id vazasse. Com o helper, resolve na base da org + na de
@@ -1504,11 +1545,9 @@ async function handleInsertClause(
     },
   });
 
-  // Increment usage count
-  await prisma.knowledgeItem.update({
-    where: { id: knowledgeItemId },
-    data: { usageCount: { increment: 1 } },
-  });
+  // Conta no global E no da org. Ver `knowledge-usage.ts`: o contador global
+  // sozinho deixava um tenant deslocar o preâmbulo do agente de outro.
+  await incrementClauseUsage(knowledgeItemId, context.orgId);
 
   // Render clause content with contract data
   const renderedClause = renderContratoHTML(clause.content, context.dataJson);
@@ -1786,10 +1825,15 @@ async function handleSuggestImprovements(
   }
 
   // Check which clause bank groups are linked via DB
+  // Escopo mesmo lendo por id: era o ÚNICO read site do runtime sem filtro de
+  // org. Os ids vêm do próprio contrato, então na prática só um vínculo
+  // cross-tenant pré-existente chegaria aqui — mas "na prática" não é garantia,
+  // e a exposição (groupCode + title) alimenta a sugestão que o usuário lê.
   const linkedClauses = await prisma.knowledgeItem.findMany({
     where: {
       id: { in: context.activeClauses.map((c) => c.clauseId) },
       category: "clause",
+      ...knowledgeScopeWhere(context.orgId),
     },
     select: { groupCode: true, title: true },
   });

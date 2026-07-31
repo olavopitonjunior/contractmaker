@@ -322,6 +322,9 @@ export type AuditAction =
   | "PLATFORM_KNOWLEDGE_CREATE"
   | "PLATFORM_KNOWLEDGE_UPDATE"
   | "PLATFORM_KNOWLEDGE_DELETE"
+  // Imobiliária adotou o texto de uma cláusula de slot da plataforma na sua.
+  // Escrita org-scoped, mas o conteúdo passa a vir de fora — vale rastro.
+  | "CLAUSE_ADOPT_PLATFORM"
   | "DIMOB_GENERATED"
   | "DIMOB_SALE_EXCLUDED"
   | "DIMOB_SALE_RECONCILED"

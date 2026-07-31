@@ -39,7 +39,10 @@ export async function POST(req: NextRequest) {
     const items = await prisma.knowledgeItem.findMany({
       where: {
         orgId: null,
-        ...(category ? { category } : {}),
+        // `support` fica fora, igual à listagem e ao helper de escopo: são ~37
+        // itens de "como usar a tela X" que nenhum agente jurídico vê, e que
+        // misturados aqui fariam o super_admin achar que a base está poluída.
+        category: category ?? { not: "support" },
         OR: [
           { title: { contains: query, mode: "insensitive" } },
           { content: { contains: query, mode: "insensitive" } },
@@ -61,6 +64,9 @@ export async function POST(req: NextRequest) {
     if (category) {
       params.push(category);
       where += ` AND category = $${params.length}`;
+    } else {
+      // Ver a nota do fallback acima.
+      where += ` AND category <> 'support'`;
     }
     const rows = await prisma.$queryRawUnsafe<
       Array<{ id: string; title: string; content: string; category: string; similarity: number }>

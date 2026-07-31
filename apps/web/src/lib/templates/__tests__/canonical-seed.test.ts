@@ -238,11 +238,19 @@ describe("canonical-sources.generated (drift)", () => {
   it.each(CANONICAL_TEMPLATES.map((t) => t.filename))(
     "%s embarcado === arquivo em templates/",
     (filename) => {
+      // Normaliza os DOIS lados: o assunto deste teste é DRIFT DE CONTEÚDO, não
+      // identidade de bytes. O working tree de quem roda depende do
+      // `core.autocrlf` da máquina (CRLF no Windows, LF no Linux da CI), e sem
+      // isto o teste virava um detector de sistema operacional — foi o que
+      // deixou a CI da master vermelha por ~1 dia. O gerador já grava LF; isto
+      // é o suspensório, para que nem um checkout exótico reintroduza o falso
+      // negativo.
+      const norm = (s: string) => s.replace(/\r\n/g, "\n");
       const onDisk = readFileSync(templatePath(filename), "utf-8");
       expect(
-        CANONICAL_TEMPLATE_SOURCES[filename],
+        norm(CANONICAL_TEMPLATE_SOURCES[filename]),
         `${filename} mudou em templates/ — rode \`npm run gen:canonical-templates\``
-      ).toBe(onDisk);
+      ).toBe(norm(onDisk));
     }
   );
 

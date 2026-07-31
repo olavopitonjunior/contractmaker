@@ -37,6 +37,10 @@ interface Props {
   /** Base da API do escopo em que este form escreve — /api/knowledge (tenant)
    *  ou /api/admin/knowledge (plataforma). Ver KnowledgeBaseClient. */
   apiBase?: string;
+  /** `"platform"` libera categoria `clause` e o escopo por agente. */
+  scope?: "org" | "platform";
+  /** Quantos tenants passam a ler o que for publicado — só no escopo de plataforma. */
+  orgCount?: number;
   onClose: () => void;
   onSaved: () => void;
 }
@@ -45,6 +49,8 @@ export function KnowledgeItemForm({
   open,
   item,
   apiBase = "/api/knowledge",
+  scope = "org",
+  orgCount,
   onClose,
   onSaved,
 }: Props) {
@@ -82,6 +88,22 @@ export function KnowledgeItemForm({
     if (!title.trim() || !content.trim()) {
       toast.error("Título e conteúdo são obrigatórios");
       return;
+    }
+    // Publicar CLÁUSULA na plataforma não pode ter o mesmo peso de publicar um
+    // glossário: cláusula de slot entra no contrato gerado de quem não tem a
+    // sua, e vira texto juridicamente vinculante. O alcance precisa estar na
+    // frente de quem clica.
+    if (scope === "platform" && category === "clause" && !item) {
+      const alcance = orgCount ? `${orgCount} imobiliária(s)` : "todas as imobiliárias";
+      if (
+        !confirm(
+          `Esta cláusula fica disponível para ${alcance}. Se alguma não tiver ` +
+            `cláusula própria para o mesmo slot, ela passa a entrar nos ` +
+            `contratos GERADOS por lá. Publicar?`
+        )
+      ) {
+        return;
+      }
     }
     setSaving(true);
     try {
@@ -132,6 +154,14 @@ export function KnowledgeItemForm({
                 <SelectItem value="model">Modelo Referencial</SelectItem>
                 <SelectItem value="rule">Regra do Escritório</SelectItem>
                 <SelectItem value="glossary">Glossário</SelectItem>
+                {/* `clause` só na plataforma: no tenant a via de criação é
+                    /api/clauses, que tem os campos próprios de cláusula.
+                    Também resolve o trigger em branco ao EDITAR um item
+                    `clause` — sem o SelectItem, o Select não tinha o que
+                    renderizar. */}
+                {(scope === "platform" || item?.category === "clause") && (
+                  <SelectItem value="clause">Cláusula (Biblioteca)</SelectItem>
+                )}
               </SelectContent>
             </Select>
             {item && (

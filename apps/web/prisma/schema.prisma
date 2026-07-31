@@ -283,6 +283,7 @@ model Organization {
   agentConfig         AgentConfig?
   agentProfiles       AgentProfile[]
   knowledgeItems      KnowledgeItem[]
+  knowledgeItemUsage  KnowledgeItemUsage[]
   contractMemories    ContractMemory[]
   clauseProposals     ClauseProposal[]
   templateSuggestions TemplateSuggestion[]
@@ -1893,11 +1894,40 @@ model KnowledgeItem {
   parent          KnowledgeItem?   @relation("KnowledgeChunks", fields: [parentId], references: [id], onDelete: Cascade)
   chunks          KnowledgeItem[]  @relation("KnowledgeChunks")
   contractClauses ContractClause[]
+  usageByOrg      KnowledgeItemUsage[]
 
   @@index([orgId, category])
   @@index([orgId, parentId])
   @@index([orgId, category, groupCode])
   @@index([legacyClauseId])
+}
+
+/// Uso de um `KnowledgeItem` POR TENANT.
+///
+/// `KnowledgeItem.usageCount` continua existindo como total agregado (a UI de
+/// cláusulas e o `find_similar_contracts` leem de lá). Esta tabela existe
+/// porque, com a base de plataforma, um contador global deixou de ser inócuo:
+/// o `expert-context` ordena as top-8 cláusulas por popularidade e injeta o
+/// resultado no prompt de todo turn em modo Planejar. Sem separar por org, um
+/// tenant que insere a mesma cláusula universal muitas vezes desloca o
+/// preâmbulo do agente de OUTRO tenant.
+///
+/// O backfill atribui o `usageCount` histórico só às linhas que já têm dono
+/// (`orgId` não nulo). Uso histórico de linha de plataforma não pertence a
+/// ninguém e começa do zero — herdar o total para todas as orgs seria inventar
+/// dado.
+model KnowledgeItemUsage {
+  id              String   @id @default(cuid())
+  knowledgeItemId String
+  orgId           String
+  count           Int      @default(0)
+  updatedAt       DateTime @updatedAt
+
+  knowledgeItem KnowledgeItem @relation(fields: [knowledgeItemId], references: [id], onDelete: Cascade)
+  org           Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([knowledgeItemId, orgId])
+  @@index([orgId, count])
 }
 
 // ============================================

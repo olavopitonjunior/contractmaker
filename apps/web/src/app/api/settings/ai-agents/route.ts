@@ -23,6 +23,7 @@ import {
   upsertAgentProfile,
   listAgentProfiles,
   ragScopeSchema,
+  RAG_SCOPE_CATEGORIES,
 } from "@/lib/ai/agents/store";
 import {
   AGENT_DEFINITIONS,
@@ -66,13 +67,21 @@ export async function GET() {
         // Idem: só o escopo da própria org. O `resolved.ragScope` herdaria o da
         // plataforma e salvar o congelaria como se fosse escolha do tenant.
         ragScope: (own.get(def.key)?.ragScope as unknown) ?? null,
+        // Escopo herdado, só pra EXIBIR: sem isto a tela escreve "consulta
+        // todas" enquanto a plataforma restringe. Não vai pro editor — salvar
+        // o herdado congelaria como se fosse escolha do tenant.
+        inheritedRagScope: own.get(def.key)?.ragScope ? null : resolved.ragScope,
+        supportsRagScope: def.supports.ragScope,
         model: resolved.model,
         enabled: resolved.enabled,
       };
     })
   );
 
-  return NextResponse.json({ agents });
+  // Lista canônica junto: sem isso o cliente precisa de um literal próprio e
+  // silenciosamente para de oferecer categoria nova (ou grava uma removida, que
+  // o Zod rejeita com "Payload inválido" genérico).
+  return NextResponse.json({ agents, ragCategories: RAG_SCOPE_CATEGORIES });
 }
 
 const patchSchema = z.object({
@@ -103,6 +112,12 @@ export async function PATCH(req: NextRequest) {
   const agentKey = parsed.data.agentKey as AgentKey;
 
   const def = AGENT_REGISTRY[agentKey];
+  if (parsed.data.ragScope !== undefined && !def.supports.ragScope) {
+    return NextResponse.json(
+      { error: "Este agente não consulta a base de conhecimento." },
+      { status: 400 }
+    );
+  }
   if (!def.tenantEditable || !def.supports.instructions) {
     return NextResponse.json(
       { error: "Este agente é configurado pela plataforma." },

@@ -10,9 +10,10 @@ export const metadata = { title: "Agentes de IA" };
 /**
  * Agentes de IA na visão da imobiliária.
  *
- * Só instruções. Modelo, fallback, teto de custo e liga/desliga são da
- * plataforma (/admin/agents) — antes o tenant escolhia o modelo aqui mesmo,
- * na aba "Agente IA" de /settings, e essa escolha saiu de propósito.
+ * Instruções + escopo de base de conhecimento. Modelo, fallback, teto de custo
+ * e liga/desliga são da plataforma (/admin/agents) — antes o tenant escolhia o
+ * modelo aqui mesmo, na aba "Agente IA" de /settings, e essa escolha saiu de
+ * propósito.
  */
 export default async function AiAgentsSettingsPage() {
   const session = await auth();
@@ -38,7 +39,7 @@ export default async function AiAgentsSettingsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Agentes de IA"
-        description="Instruções adicionais para cada agente. Elas são somadas às regras da plataforma — nunca as substituem. Modelo e limites de custo são configurados pela plataforma."
+        description="Instruções adicionais e qual parte da base de conhecimento cada agente consulta. As instruções são somadas às regras da plataforma — nunca as substituem. Modelo e limites de custo são configurados pela plataforma."
       />
       {!canEdit && (
         <p className="text-sm text-muted-foreground">
