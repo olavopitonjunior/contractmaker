@@ -25,6 +25,14 @@ export const API_TOKEN_SCOPES = [
   "locacao:r",
   "locacao:rw",
   "metrics:r",
+  // Plano de controle dos agentes externos (Max). `agents:r` lê o AgentProfile
+  // resolvido; `agents:rw` também reporta uso de volta pro AIUsage.
+  //
+  // São dois scopes de propósito, não um só: `POST /api/agents/usage` escreve
+  // numa tabela de CUSTO que alimenta o teto por agente — quem só precisa ler
+  // a persona não deveria poder mover o gasto da org.
+  "agents:r",
+  "agents:rw",
   // Newton — delegação Bearer via header X-Act-As-User (Fase A RBAC
   // hardening). Token com esse scope pode operar como qualquer user da
   // mesma org. Tratado em lib/auth/context.ts atrás de DELEGATION_ENABLED.
