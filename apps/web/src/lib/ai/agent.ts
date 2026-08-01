@@ -8,6 +8,8 @@ import { quickChecks, dedupeKeyFor, type QuickFinding } from "./quickChecks";
 import { recordAIUsage } from "./usage";
 import {
   assertContractBudget,
+  assertAgentBudget,
+  AgentBudgetExceededError,
   ContractBudgetExceededError,
   OrgAiBudgetExceededError,
 } from "./budget";
@@ -144,13 +146,18 @@ export async function* streamContractAgent(
 
     // 1.5. Budget guard
     try {
+      await assertAgentBudget(params.orgId, "chat_legacy");
       await assertContractBudget(params.contractId);
     } catch (err) {
+      // AgentBudgetExceededError descende de ContractBudgetExceededError, então
+      // cai no mesmo ramo — e a mensagem dele já nomeia o agente. O hint de
+      // "aprovar o contrato" não serve aqui, por isso o teste explícito abaixo.
       if (err instanceof ContractBudgetExceededError) {
         // Org-level (USD) traz o próprio remédio na mensagem; o contract-level
         // ganha o hint de aprovar/ajustar env. Checar a subclasse antes.
         const message =
-          err instanceof OrgAiBudgetExceededError
+          err instanceof OrgAiBudgetExceededError ||
+          err instanceof AgentBudgetExceededError
             ? `⚠️ ${err.message}`
             : `⚠️ ${err.message}\n\nApós aprovar este contrato (ou ajustar a env \`CONTRACT_AI_TOKEN_BUDGET\`) o assistente volta a responder.`;
         const done: AgentEvent = {
@@ -379,6 +386,7 @@ export async function* streamContractAgent(
         provider: "anthropic",
         model: config.model,
         operation: "chat",
+        agentKey: "chat_legacy",
         promptTokens: 0,
         latencyMs: Date.now() - t0,
         success: false,
@@ -538,6 +546,7 @@ export async function* streamContractAgent(
           provider: "anthropic",
           model: config.model,
           operation: "chat",
+          agentKey: "chat_legacy",
           promptTokens: usageAgg.promptTokens,
           completionTokens: usageAgg.completionTokens,
           cacheReadTokens: usageAgg.cacheReadTokens,
@@ -567,6 +576,7 @@ export async function* streamContractAgent(
       provider: "anthropic",
       model: config.model,
       operation: "chat",
+      agentKey: "chat_legacy",
       promptTokens: usageAgg.promptTokens,
       completionTokens: usageAgg.completionTokens,
       cacheReadTokens: usageAgg.cacheReadTokens,
@@ -859,8 +869,18 @@ export async function runPassiveAnalysis(
   }
 
   try {
+    // Teto POR AGENTE antes do teto por contrato. A passiva é o motivo de o teto
+    // por agente existir: ela roda sozinha no `open` de cada contrato e em poll
+    // de 90s, e mediu 64% do custo de IA de produção. Ficar de fora tornaria o
+    // campo "Teto mensal" do console um controle inerte justamente no agente que
+    // ele existe pra conter.
+    await assertAgentBudget(params.orgId, "passive");
     await assertContractBudget(params.contractId);
   } catch (err) {
+    // Mais específico primeiro: as três descendem de ContractBudgetExceededError.
+    if (err instanceof AgentBudgetExceededError) {
+      return { findings: [], commentsCreated: 0, modelUsed: "agent-budget-exceeded" };
+    }
     if (err instanceof ContractBudgetExceededError) {
       return {
         findings: [],
@@ -994,18 +1014,18 @@ export async function runPassiveAnalysis(
         model: passiveModel,
         max_tokens: 1024,
         temperature: 0.1,
-        // cache_control no system prompt: reaberturas dentro de 5min reusam o
-        // prompt cacheado (o system é estável). JSON compacto em vez de
-        // pretty-print (`null, 2`) corta tokens do input sem perder dado.
-        // Cast: o SDK 0.30 não tipa cache_control em TextBlockParam (mesmo
-        // padrão do specialist-runner).
-        system: [
-          {
-            type: "text" as const,
-            text: passiveSystemPrompt,
-            cache_control: { type: "ephemeral" as const },
-          },
-        ] as unknown as Anthropic.TextBlockParam[],
+        // SEM cache_control, de propósito. O prompt passivo tem ~798 tokens e o
+        // mínimo cacheável da Anthropic é 1.024 (maior no Haiku, que é o modelo
+        // default daqui) — abaixo disso o marcador é ignorado em silêncio.
+        // Medido: 313 chamadas com `cacheWriteTokens` = ZERO. O marcador estava
+        // aqui com um comentário prometendo economia que nunca aconteceu.
+        //
+        // A alavanca real deste caminho não é cache e sim VOLUME: ~5.900 tokens
+        // por chamada, dos quais só ~800 são estáveis. Quem quiser baratear o
+        // passivo mexe na cadência do poll e no skip por hash, não aqui.
+        // (JSON compacto em vez de pretty-print segue valendo — corta input
+        // sem perder dado.)
+        system: passiveSystemPrompt,
         messages: [
           {
             role: "user",

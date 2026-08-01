@@ -6,8 +6,12 @@ export interface AgentContext {
   orgId: string;
   htmlContent: string;
   dataJson: Record<string, unknown>;
-  /** Null em contratos importados (sem template Handlebars). */
-  templateSource: string | null;
+  // `templateSource` FOI REMOVIDO em 2026-08-01. Ele carregava o Handlebars
+  // inteiro do template — 31 kB dos 70 kB do contexto — e era serializado pelo
+  // checkpointer do LangGraph a cada turno. Nenhum consumidor do chat lia o
+  // campo: o único que precisa dele (`createContractMemory`) relê do banco por
+  // conta própria. Se algum dia um nó precisar do template, busque ali; não
+  // volte a arrastá-lo pelo state.
   templateModalidade?: string;
   templateName?: string;
   /** "venda" | "locacao" — discrimina o domínio do agente (prompts/contexto). */

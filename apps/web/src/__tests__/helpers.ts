@@ -11,7 +11,6 @@ export function createTestContext(
     htmlContent:
       '<div class="contrato"><h1>Contrato de Compra e Venda</h1><p>Valor: R$ 500.000,00</p></div>',
     dataJson: createTestContractData(),
-    templateSource: "{{moeda pagamento.valor_total}}",
     activeClauses: [
       {
         id: "cc-1",

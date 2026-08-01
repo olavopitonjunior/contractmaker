@@ -21,6 +21,8 @@ import { capturePreSnapshot, capturePostSnapshot } from "./snapshot";
 import { recordAIUsage, type AIOperation } from "../usage";
 import {
   assertContractBudget,
+  assertAgentBudget,
+  AgentBudgetExceededError,
   ContractBudgetExceededError,
   OrgAiBudgetExceededError,
 } from "../budget";
@@ -39,6 +41,13 @@ import type {
 export type ToolUseGuard = (
   toolCall: { name: string; input: Record<string, unknown> }
 ) => Promise<{ allowed: true } | { allowed: false; reason: string; ruleId?: string }>;
+
+/** Troca de modelo por sobrecarga (429/529) — ver `anthropic-client.ts`. */
+interface FallbackInfo {
+  from: string;
+  to: string;
+  reason: string;
+}
 
 export interface SpecialistRunnerConfig {
   agentName: SpecialistName;
@@ -100,10 +109,79 @@ export async function runSpecialist(
   /** Confiança dos ids devolvidos pela busca NESTE turn — ver AgentContext. */
   const ragConfidence: Record<string, boolean> = {};
 
-  // Budget guard antes da 1ª chamada
+  // Modelo que REALMENTE rodou ESTE turn. Um run multi-turn pode atravessar
+  // modelos: o fallback vale só pro turn que pegou o 429/529, e o seguinte volta
+  // ao primário. Somar tudo num bucket só e precificar no último modelo cobra os
+  // tokens do Sonnet a preço de Haiku (ou o contrário) — e esse número alimenta
+  // os DOIS tetos e o painel.
+  let turnModel = model;
+  const perModel = new Map<
+    string,
+    {
+      promptTokens: number;
+      completionTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+      turns: number;
+    }
+  >();
+  function addTurnUsage(
+    m: string,
+    u: { input: number; output: number; cacheRead: number; cacheWrite: number }
+  ) {
+    const acc = perModel.get(m) ?? {
+      promptTokens: 0,
+      completionTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      turns: 0,
+    };
+    acc.promptTokens += u.input;
+    acc.completionTokens += u.output;
+    acc.cacheReadTokens += u.cacheRead;
+    acc.cacheWriteTokens += u.cacheWrite;
+    acc.turns += 1;
+    perModel.set(m, acc);
+  }
+
+  /**
+   * A tentativa QUE FALHOU vira linha na hora em que o fallback dispara, não no
+   * fim do run. Se o modelo de contingência também estourar, o erro sobe e
+   * qualquer registro colocado depois do loop nunca roda — sumindo justamente o
+   * caso em que mais se quer saber que a contingência foi tentada.
+   */
+  const onFallback = (info: FallbackInfo) => {
+    turnModel = info.to;
+    recordAIUsage({
+      orgId,
+      userId,
+      contractId,
+      sessionId: config.sessionId ?? null,
+      dealId: context.dealId ?? null,
+      provider: "anthropic",
+      model: info.from,
+      operation: `specialist_${agentName}` as AIOperation,
+      agentKey: agentName,
+      promptTokens: 0,
+      latencyMs: 0,
+      success: false,
+      errorMessage: `sobrecarga (${info.reason}) — turn seguiu em ${info.to}`,
+    });
+  };
+
+  // Budget guard antes da 1ª chamada. O teto POR AGENTE vem primeiro: ele é o
+  // mais específico, e a mensagem dele diz qual agente parou — "o Editor
+  // atingiu o teto" resolve, "a IA atingiu o teto" manda o usuário adivinhar.
   try {
+    await assertAgentBudget(orgId, agentName);
     await assertContractBudget(contractId);
   } catch (err) {
+    // Ordem das subclasses importa: as três descendem de
+    // ContractBudgetExceededError, então a mais específica tem que ser
+    // testada primeiro ou a mensagem certa nunca chega ao usuário.
+    if (err instanceof AgentBudgetExceededError) {
+      return { text: `⚠️ ${err.message}`, toolCalls: [] };
+    }
     // Org-level (USD): a mensagem carrega o remédio certo (Config → Uso de
     // IA) — checar a subclasse ANTES do contrato.
     if (err instanceof OrgAiBudgetExceededError) {
@@ -168,7 +246,12 @@ export async function runSpecialist(
   let turnResult;
   try {
     // Generator yields text_delta mas descartamos (especialista não fala direto).
-    const gen = streamOneTurn(firstParams);
+    // Contingência de sobrecarga: o `fallbackModel` do perfil existe desde o
+    // console de agentes e até aqui ninguém o consumia.
+    const gen = streamOneTurn(firstParams, {
+      fallbackModel: config.profile?.fallbackModel,
+      onFallback,
+    });
     let it = await gen.next();
     while (!it.done) it = await gen.next();
     turnResult = it.value;
@@ -180,8 +263,11 @@ export async function runSpecialist(
       sessionId: config.sessionId ?? null,
       dealId: context.dealId ?? null,
       provider: "anthropic",
-      model,
+      // O modelo que REALMENTE falhou. Com `model` cru, um erro no fallback
+      // apareceria atribuído ao primário.
+      model: turnModel,
       operation: `specialist_${agentName}` as AIOperation,
+      agentKey: agentName,
       promptTokens: 0,
       latencyMs: Date.now() - t0,
       success: false,
@@ -194,6 +280,7 @@ export async function runSpecialist(
   usageAgg.completionTokens += turnResult.usage.output;
   usageAgg.cacheReadTokens += turnResult.usage.cacheRead;
   usageAgg.cacheWriteTokens += turnResult.usage.cacheWrite;
+  addTurnUsage(turnModel, turnResult.usage);
 
   while (turnResult.stopReason === "tool_use" && iterations < maxIterations) {
     iterations++;
@@ -344,7 +431,11 @@ export async function runSpecialist(
     };
 
     try {
-      const gen = streamOneTurn(nextParams);
+      turnModel = model;
+      const gen = streamOneTurn(nextParams, {
+        fallbackModel: config.profile?.fallbackModel,
+        onFallback,
+      });
       let it = await gen.next();
       while (!it.done) it = await gen.next();
       turnResult = it.value;
@@ -356,8 +447,9 @@ export async function runSpecialist(
         sessionId: config.sessionId ?? null,
         dealId: context.dealId ?? null,
         provider: "anthropic",
-        model,
+        model: turnModel,
         operation: `specialist_${agentName}` as AIOperation,
+        agentKey: agentName,
         promptTokens: usageAgg.promptTokens,
         completionTokens: usageAgg.completionTokens,
         cacheReadTokens: usageAgg.cacheReadTokens,
@@ -375,26 +467,36 @@ export async function runSpecialist(
     usageAgg.completionTokens += turnResult.usage.output;
     usageAgg.cacheReadTokens += turnResult.usage.cacheRead;
     usageAgg.cacheWriteTokens += turnResult.usage.cacheWrite;
+    addTurnUsage(turnModel, turnResult.usage);
   }
 
-  recordAIUsage({
-    orgId,
-    userId,
-    contractId,
-    sessionId: config.sessionId ?? null,
-    dealId: context.dealId ?? null,
-    provider: "anthropic",
-    model,
-    operation: `specialist_${agentName}` as AIOperation,
-    promptTokens: usageAgg.promptTokens,
-    completionTokens: usageAgg.completionTokens,
-    cacheReadTokens: usageAgg.cacheReadTokens,
-    cacheWriteTokens: usageAgg.cacheWriteTokens,
-    latencyMs: Date.now() - t0,
-    toolsUsed: Array.from(toolsUsedSet),
-    iterations: iterations + 1,
-    success: true,
-  });
+  // Uma linha POR MODELO que rodou. Quase sempre é uma só; passam a ser duas
+  // quando o fallback de sobrecarga entrou no meio do run, e aí cada metade é
+  // precificada na tabela certa. `latencyMs` é do run inteiro e vai na primeira
+  // linha — reparti-lo entre modelos seria inventar medição.
+  let primeira = true;
+  for (const [m, acc] of perModel) {
+    recordAIUsage({
+      orgId,
+      userId,
+      contractId,
+      sessionId: config.sessionId ?? null,
+      dealId: context.dealId ?? null,
+      provider: "anthropic",
+      model: m,
+      operation: `specialist_${agentName}` as AIOperation,
+      agentKey: agentName,
+      promptTokens: acc.promptTokens,
+      completionTokens: acc.completionTokens,
+      cacheReadTokens: acc.cacheReadTokens,
+      cacheWriteTokens: acc.cacheWriteTokens,
+      latencyMs: primeira ? Date.now() - t0 : 0,
+      toolsUsed: primeira ? Array.from(toolsUsedSet) : [],
+      iterations: acc.turns,
+      success: true,
+    });
+    primeira = false;
+  }
 
   let text = "";
   for (const block of turnResult.contentBlocks) {

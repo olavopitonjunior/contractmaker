@@ -11,6 +11,7 @@
 
 import { prisma } from "@/lib/db/prisma";
 import { waitUntil } from "@vercel/functions";
+import { OPERATION_TO_AGENT, type AgentKey } from "./agents/registry";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Pricing table — USD per 1,000,000 tokens.
@@ -116,7 +117,14 @@ export type AIOperation =
   | "knowledge_upload_classification";
 
 export interface RecordUsageParams {
-  orgId: string;
+  /** `null` = custo de PLATAFORMA (base universal), sem tenant a quem atribuir. */
+  orgId: string | null;
+  /**
+   * Agente responsável. Omitido, é derivado de `operation` pelo registry.
+   * Passe explicitamente quando a operação for gravada por mais de um agente
+   * (ver `AMBIGUOUS_OPERATIONS`) — `null` explícito significa "sem agente".
+   */
+  agentKey?: AgentKey | null;
   userId?: string | null;
   contractId?: string | null;
   /** ChatSession do turn (chat/specialists). Null em operações sem chat. */
@@ -163,10 +171,17 @@ export function recordAIUsage(params: RecordUsageParams): void {
     ? params.errorMessage.slice(0, 500)
     : null;
 
+  // Explícito vence a derivação; `undefined` (campo ausente) cai no registry.
+  const agentKey =
+    params.agentKey !== undefined
+      ? params.agentKey
+      : OPERATION_TO_AGENT[params.operation] ?? null;
+
   const write = prisma.aIUsage
     .create({
       data: {
         orgId: params.orgId,
+        agentKey,
         userId: params.userId ?? null,
         contractId: params.contractId ?? null,
         sessionId: params.sessionId ?? null,

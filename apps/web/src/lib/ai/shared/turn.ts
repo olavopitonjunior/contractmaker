@@ -9,7 +9,7 @@
  */
 
 import type { Anthropic } from "@anthropic-ai/sdk";
-import { getAnthropicClient } from "./anthropic-client";
+import { getAnthropicClient, isOverloadedError } from "./anthropic-client";
 import type { AgentEvent } from "../types";
 
 export interface StreamedTurnResult {
@@ -24,10 +24,45 @@ export interface StreamedTurnResult {
 }
 
 export async function* streamOneTurn(
-  params: Anthropic.MessageCreateParamsStreaming
+  params: Anthropic.MessageCreateParamsStreaming,
+  opts: {
+    /**
+     * Modelo de contingência para 429/529 (`AgentProfile.fallbackModel`).
+     * UMA tentativa, não uma cadeia — ver a nota em `anthropic-client.ts`.
+     */
+    fallbackModel?: string | null;
+    /** Avisa o caller de que o turn rodou no fallback (pra registrar em AIUsage). */
+    onFallback?: (info: { from: string; to: string; reason: string }) => void;
+  } = {}
 ): AsyncGenerator<AgentEvent, StreamedTurnResult, void> {
   const anthropic = getAnthropicClient();
-  const stream = await anthropic.messages.create(params);
+
+  let stream: Awaited<ReturnType<typeof anthropic.messages.create>>;
+  try {
+    stream = await anthropic.messages.create(params);
+  } catch (err) {
+    const podeTentarDeNovo =
+      isOverloadedError(err) &&
+      !!opts.fallbackModel &&
+      opts.fallbackModel !== params.model;
+    if (!podeTentarDeNovo) throw err;
+
+    const reason = (err as { status?: number })?.status
+      ? `HTTP ${(err as { status?: number }).status}`
+      : "overloaded";
+    console.warn(
+      `[turn] ${params.model} sobrecarregado (${reason}) — tentando ${opts.fallbackModel}`
+    );
+    opts.onFallback?.({
+      from: params.model,
+      to: opts.fallbackModel!,
+      reason,
+    });
+    stream = await anthropic.messages.create({
+      ...params,
+      model: opts.fallbackModel!,
+    });
+  }
 
   const contentBlocks: Anthropic.ContentBlock[] = [];
   let currentText = "";

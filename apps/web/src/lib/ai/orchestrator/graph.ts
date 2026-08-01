@@ -353,8 +353,15 @@ async function aggregatorNode(state: GraphState): Promise<Partial<GraphState>> {
   const model = state.mode === "fast" ? HAIKU_MODEL : SONNET_MODEL;
   const t0 = Date.now();
 
-  // Cache_control ephemeral via cast — SDK 0.30 ainda não tem o tipo;
-  // mesma técnica usada em agent.ts:507-513.
+  // SEM cache_control aqui, de propósito. O prompt do agregador tem ~618
+  // tokens e o mínimo cacheável da Anthropic é 1.024 (maior ainda no Haiku):
+  // abaixo disso o marcador é ignorado em SILÊNCIO. A medição confirma — em 37
+  // chamadas no sonnet-4-6, `cacheWriteTokens` somou ZERO, enquanto o
+  // specialist-runner (prompt grande) somou 181k no mesmo modelo. O marcador
+  // esteve aqui desde o início sem nunca cachear um byte.
+  //
+  // Inflar o prompt só pra cruzar o mínimo sairia mais caro do que o cache
+  // economizaria: 618 tokens frios por turno < 1.024 tokens de padding.
   const isLocacao =
     state.contractContext?.dealKind === "locacao" ||
     (state.contractContext?.templateModalidade ?? "").startsWith("locacao");
@@ -362,7 +369,6 @@ async function aggregatorNode(state: GraphState): Promise<Partial<GraphState>> {
     {
       type: "text" as const,
       text: isLocacao ? AGGREGATOR_SYSTEM_PROMPT_LOCACAO : AGGREGATOR_SYSTEM_PROMPT,
-      cache_control: { type: "ephemeral" as const },
     },
   ] as unknown as Anthropic.TextBlockParam[];
 
@@ -389,6 +395,10 @@ async function aggregatorNode(state: GraphState): Promise<Partial<GraphState>> {
       provider: "anthropic",
       model,
       operation: "chat",
+      // Sem agente: o agregador é o passo de síntese do próprio orquestrador,
+      // não um agente configurável do registry. Atribuí-lo a `chat_legacy` (o
+      // que a derivação faria) seria inventar dado num painel de custo.
+      agentKey: null,
       promptTokens: response.usage?.input_tokens ?? 0,
       completionTokens: response.usage?.output_tokens ?? 0,
       cacheReadTokens:
@@ -562,6 +572,10 @@ async function aggregatorNode(state: GraphState): Promise<Partial<GraphState>> {
       provider: "anthropic",
       model,
       operation: "chat",
+      // Sem agente: o agregador é o passo de síntese do próprio orquestrador,
+      // não um agente configurável do registry. Atribuí-lo a `chat_legacy` (o
+      // que a derivação faria) seria inventar dado num painel de custo.
+      agentKey: null,
       promptTokens: 0,
       latencyMs: Date.now() - t0,
       success: false,

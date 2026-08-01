@@ -51,7 +51,6 @@ export async function POST(req: NextRequest) {
     agentKey,
     htmlContent: "",
     dataJson: {},
-    templateSource: "",
     templateModalidade: "",
     templateName: "",
     activeClauses: [],
