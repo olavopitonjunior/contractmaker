@@ -997,18 +997,18 @@ export async function runPassiveAnalysis(
         model: passiveModel,
         max_tokens: 1024,
         temperature: 0.1,
-        // cache_control no system prompt: reaberturas dentro de 5min reusam o
-        // prompt cacheado (o system é estável). JSON compacto em vez de
-        // pretty-print (`null, 2`) corta tokens do input sem perder dado.
-        // Cast: o SDK 0.30 não tipa cache_control em TextBlockParam (mesmo
-        // padrão do specialist-runner).
-        system: [
-          {
-            type: "text" as const,
-            text: passiveSystemPrompt,
-            cache_control: { type: "ephemeral" as const },
-          },
-        ] as unknown as Anthropic.TextBlockParam[],
+        // SEM cache_control, de propósito. O prompt passivo tem ~798 tokens e o
+        // mínimo cacheável da Anthropic é 1.024 (maior no Haiku, que é o modelo
+        // default daqui) — abaixo disso o marcador é ignorado em silêncio.
+        // Medido: 313 chamadas com `cacheWriteTokens` = ZERO. O marcador estava
+        // aqui com um comentário prometendo economia que nunca aconteceu.
+        //
+        // A alavanca real deste caminho não é cache e sim VOLUME: ~5.900 tokens
+        // por chamada, dos quais só ~800 são estáveis. Quem quiser baratear o
+        // passivo mexe na cadência do poll e no skip por hash, não aqui.
+        // (JSON compacto em vez de pretty-print segue valendo — corta input
+        // sem perder dado.)
+        system: passiveSystemPrompt,
         messages: [
           {
             role: "user",
