@@ -188,7 +188,24 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = AGENT_KEYS.map(
   (k) => AGENT_REGISTRY[k]
 );
 
-/** operation do AIUsage → agente, pra atribuir linhas históricas (PR4). */
+/**
+ * `operation` gravada por MAIS DE UM agente — a derivação não se aplica.
+ *
+ * `chat` é o caso: o agente legado (`agent.ts`) e o agregador do orquestrador
+ * (`graph.ts`) gravam a mesma operação. Derivar daria `chat_legacy` para os dois
+ * e inventaria dado num painel de CUSTO, que é onde inventar dado é pior.
+ * Quem grava `chat` informa `agentKey` explicitamente ou fica sem atribuição.
+ */
+export const AMBIGUOUS_OPERATIONS = new Set<string>(["chat"]);
+
+/**
+ * `operation` do AIUsage → agente. Usado quando o call-site não informa o
+ * agente, e pelo backfill do histórico na migration.
+ */
 export const OPERATION_TO_AGENT: Record<string, AgentKey> = Object.fromEntries(
-  AGENT_DEFINITIONS.flatMap((d) => d.operations.map((op) => [op, d.key]))
+  AGENT_DEFINITIONS.flatMap((d) =>
+    d.operations
+      .filter((op) => !AMBIGUOUS_OPERATIONS.has(op))
+      .map((op) => [op, d.key])
+  )
 );

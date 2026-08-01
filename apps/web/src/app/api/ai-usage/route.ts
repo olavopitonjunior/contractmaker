@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import { agentLabel } from "@/lib/ai/agents/store";
 
 /**
  * GET /api/ai-usage?from=YYYY-MM-DD&to=YYYY-MM-DD
@@ -39,7 +40,7 @@ export async function GET(req: NextRequest) {
   };
 
   // Fetch everything in parallel
-  const [allRows, modelStats, opStats, providerStats, errorRows] =
+  const [allRows, modelStats, opStats, providerStats, agentStats, errorRows] =
     await Promise.all([
       // 1. All rows to compute totals + per-day aggregation in memory (simpler than DATE_TRUNC in Prisma raw)
       prisma.aIUsage.findMany({
@@ -91,7 +92,15 @@ export async function GET(req: NextRequest) {
         _sum: { estimatedCostUsd: true, totalTokens: true },
         _count: { _all: true },
       }),
-      // 5. Recent errors
+      // 5. Custo por AGENTE — a pergunta que o console de agentes cria e que
+      //    o painel não sabia responder ("quanto custa o Editor?").
+      prisma.aIUsage.groupBy({
+        by: ["agentKey"],
+        where,
+        _sum: { estimatedCostUsd: true, totalTokens: true },
+        _count: { _all: true },
+      }),
+      // 6. Recent errors
       prisma.aIUsage.findMany({
         where: { ...where, success: false },
         select: {
@@ -248,6 +257,17 @@ export async function GET(req: NextRequest) {
         totalTokens: o._sum.totalTokens ?? 0,
       }))
       .sort((a, b) => b.costUsd - a.costUsd),
+    byAgent: agentStats
+      .map((a) => ({
+        agentKey: a.agentKey,
+        // `null` é honesto: o agregador do orquestrador não é um agente
+        // configurável, e linha histórica anterior à coluna não tem dono.
+        label: a.agentKey ? agentLabel(a.agentKey) : "Não atribuído",
+        costUsd: Number((Number(a._sum.estimatedCostUsd ?? 0)).toFixed(4)),
+        calls: a._count._all,
+        totalTokens: a._sum.totalTokens ?? 0,
+      }))
+      .sort((x, y) => y.costUsd - x.costUsd),
     byProvider: providerStats
       .map((p) => ({
         provider: p.provider,

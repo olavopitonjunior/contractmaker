@@ -1,3 +1,6 @@
+import { resolveAgentProfile } from "./agents/resolve";
+import { agentLabel } from "./agents/store";
+import type { AgentKey } from "./agents/registry";
 /**
  * Budget de tokens IA por contrato.
  *
@@ -206,4 +209,85 @@ export async function assertContractBudget(contractId: string): Promise<BudgetSt
   }
 
   return status;
+}
+
+/**
+ * Teto mensal POR AGENTE (`AgentProfile.monthlyBudgetUsd`).
+ *
+ * Existe porque o teto da org é bom pra impedir a conta explodir e ruim pra
+ * conter um agente específico: uma análise passiva em loop consome o orçamento
+ * inteiro e derruba o chat junto. Com teto por agente, o que estourou para —
+ * e só ele.
+ *
+ * O budget NÃO herda da plataforma (ver `resolve.ts`): teto global viraria teto
+ * por tenant, e um número pensado para "a plataforma toda" aplicado a cada
+ * imobiliária é um bloqueio que ninguém pediu.
+ */
+export class AgentBudgetExceededError extends ContractBudgetExceededError {
+  constructor(
+    readonly agentLabel: string,
+    readonly spentUsdAgent: number,
+    readonly budgetUsdAgent: number
+  ) {
+    super(0, 0);
+    this.message =
+      `O agente "${agentLabel}" atingiu o teto mensal de US$ ${budgetUsdAgent.toFixed(2)} ` +
+      `(gasto: US$ ${spentUsdAgent.toFixed(2)}). Os demais agentes seguem funcionando. ` +
+      `Ajuste o teto em Configurações → Agentes de IA ou aguarde a virada do mês.`;
+    this.name = "AgentBudgetExceededError";
+  }
+}
+
+export interface AgentBudgetStatus {
+  budgetUsd: number | null;
+  spentUsd: number;
+  pct: number;
+}
+
+export async function getAgentBudgetStatus(
+  orgId: string,
+  agentKey: AgentKey
+): Promise<AgentBudgetStatus> {
+  const profile = await resolveAgentProfile(agentKey, orgId);
+  const budgetUsd = profile.monthlyBudgetUsd;
+
+  // Sem teto, não paga o aggregate: este caminho roda antes de cada chamada
+  // ao modelo, e a maioria dos agentes não tem teto configurado.
+  if (budgetUsd == null || budgetUsd <= 0) {
+    return { budgetUsd: null, spentUsd: 0, pct: 0 };
+  }
+
+  const now = new Date();
+  const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const agg = await prisma.aIUsage.aggregate({
+    where: { orgId, agentKey, createdAt: { gte: firstOfMonth } },
+    _sum: { estimatedCostUsd: true },
+  });
+  const spentUsd = Number(agg._sum.estimatedCostUsd ?? 0);
+  return { budgetUsd, spentUsd, pct: Math.min(1, spentUsd / budgetUsd) };
+}
+
+/**
+ * Lança quando o agente estourou o próprio teto. Best-effort: falha de leitura
+ * NÃO bloqueia o turn — teto é contenção de custo, não de segurança, e negar
+ * atendimento por causa de um `aggregate` que caiu é o pior dos dois erros.
+ */
+export async function assertAgentBudget(
+  orgId: string,
+  agentKey: AgentKey
+): Promise<void> {
+  let status: AgentBudgetStatus;
+  try {
+    status = await getAgentBudgetStatus(orgId, agentKey);
+  } catch (err) {
+    console.error(`[budget] leitura do teto de ${agentKey} falhou (segue):`, err);
+    return;
+  }
+  if (status.budgetUsd && status.spentUsd >= status.budgetUsd) {
+    throw new AgentBudgetExceededError(
+      agentLabel(agentKey),
+      status.spentUsd,
+      status.budgetUsd
+    );
+  }
 }
