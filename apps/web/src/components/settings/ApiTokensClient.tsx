@@ -55,6 +55,8 @@ const SCOPES = [
   { id: "locacao:r", label: "Locação (read-only) — Max", description: "Carteira de locação: contratos, clientes, garantias, apólices, vistorias e cobranças de aluguel." },
   { id: "locacao:rw", label: "Locação (read/write) — Max", description: "Registrar análises de crédito, cotações de fiança, garantias e apólices. Inclui a leitura." },
   { id: "metrics:r", label: "Métricas (read-only)", description: "Saldos, contagens e atividade — sem dados pessoais" },
+  { id: "agents:r", label: "Agentes (read-only) — Max", description: "Ler a configuração do agente externo: modelo, instruções, escopo de RAG e se está ligado." },
+  { id: "agents:rw", label: "Agentes (read/write) — Max", description: "Além de ler, reportar o custo de cada turn pro painel de uso de IA. Inclui a leitura." },
   { id: "users:delegate", label: "Delegar como outro usuário (Newton)", description: "Permite header X-Act-As-User pra agir como qualquer user da mesma org. Use SÓ em tokens de agentes (Newton)." },
 ] as const;
 
