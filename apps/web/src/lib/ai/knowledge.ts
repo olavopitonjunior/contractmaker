@@ -102,12 +102,25 @@ export function normalizeKnowledgeContent(text: string): string {
  * Barra escrita na base de plataforma que não foi pedida explicitamente.
  * O controle de PERMISSÃO (super_admin) é da rota — `requirePlatform`; este
  * guard só garante que ninguém chegue em `orgId = null` por acidente.
+ *
+ * O caso `undefined` é o espelho do `assertScopeArg` da leitura, e o motivo é
+ * pior aqui: no Prisma, `data: { orgId: undefined }` OMITE a coluna e a linha
+ * nasce `NULL` — publicada na base que todo tenant lê, sem ninguém ter pedido —,
+ * e `where: { id, orgId: undefined }` vira "sem filtro de org", o que
+ * transformaria update/delete por id em operação cross-tenant. O tipo já barra o
+ * caso ingênuo; isto pega o que atravessa fronteira sem tipo (corpo de request,
+ * `as never`).
  */
 export function assertScopeAllowed(
   orgId: string | null,
   allowPlatformScope: boolean | undefined,
   op: string
 ): void {
+  if (orgId === undefined) {
+    throw new Error(
+      `[knowledge] ${op} com orgId undefined — use null pra base de plataforma. undefined viraria 'sem filtro' no Prisma.`
+    );
+  }
   if (orgId === null && !allowPlatformScope) {
     throw new Error(
       `[knowledge] ${op} com orgId nulo sem allowPlatformScope — escrita na base de plataforma precisa ser explícita.`
@@ -368,6 +381,11 @@ export async function updateKnowledgeItem(
 
   const contentChanged =
     typeof patch.content === "string" && patch.content !== current.content;
+  // O texto EMBUTIDO é `título + conteúdo` (ver `createKnowledgeItemRows`),
+  // então mudar só o título também invalida o vetor. Antes o gatilho era só o
+  // conteúdo, e um item renomeado seguia sendo encontrado pelo título velho.
+  const titleChanged =
+    typeof patch.title === "string" && patch.title !== current.title;
 
   // Patches específicos de clause só aplicam se a row já é category="clause"
   // OU se o caller está explicitamente migrando uma row pra clause (não acontece
@@ -394,19 +412,93 @@ export async function updateKnowledgeItem(
     },
   });
 
-  // If content changed AND this is a single-chunk (or top-level) item, re-embed.
-  if (contentChanged && isEmbeddingsConfigured() && current.chunkTotal === 1) {
-    const [vec] = await embed(
-      [`${patch.title ?? current.title}\n\n${patch.content}`],
-      "document",
-      orgId ? { orgId, operation: "embed_kb" } : undefined
-    );
+  if (!contentChanged && !titleChanged) return;
+
+  const nextTitle = patch.title ?? current.title;
+  const nextContent = patch.content ?? current.content;
+  const usage = orgId ? { orgId, operation: "embed_kb" as const } : undefined;
+
+  // Item de UMA linha: o vetor mora nela mesma.
+  if (current.chunkTotal === 1) {
+    if (!isEmbeddingsConfigured()) return;
+    const [vec] = await embed([`${nextTitle}\n\n${nextContent}`], "document", usage);
     await prisma.$executeRawUnsafe(
       `UPDATE "KnowledgeItem" SET embedding = $1::vector WHERE id = $2`,
       toPgVector(vec),
       id
     );
+    return;
   }
+
+  /**
+   * Item MULTI-CHUNK: refaz as filhas.
+   *
+   * Até aqui, editar um item longo atualizava só a linha-pai — que guarda um
+   * preview de 500 chars e **não tem embedding**. As filhas, que são as ÚNICAS
+   * linhas que a busca semântica encontra, ficavam com o texto e o vetor
+   * antigos indefinidamente. A tela dizia "Item atualizado" e o agente seguia
+   * citando a versão anterior. Com a base de plataforma isso deixou de afetar
+   * um tenant e passou a afetar todos.
+   *
+   * Transação cobre só o banco. O embedding vem DEPOIS, de propósito: segurar
+   * transação interativa do Prisma (timeout de 5s) através de uma chamada de
+   * rede à Voyage é `P2028` esperando acontecer. Filha sem vetor é estado
+   * aceitável — cai no ILIKE, exatamente como na criação.
+   */
+  if (!contentChanged) {
+    // Só o título mudou: o texto das filhas continua válido, mas o vetor delas
+    // embute o título antigo. Reembeda sem re-chunkar.
+    if (!isEmbeddingsConfigured()) return;
+    const children = await prisma.knowledgeItem.findMany({
+      where: { parentId: id },
+      select: { id: true, content: true },
+      orderBy: { chunkIndex: "asc" },
+    });
+    await embedKnowledgeItem(
+      children.map((c) => ({ id: c.id, text: `${nextTitle}\n\n${c.content}` })),
+      { orgId }
+    );
+    return;
+  }
+
+  const chunks = chunkText(nextContent);
+  if (chunks.length === 0) throw new Error("Conteúdo vazio após limpeza");
+
+  const embedTargets = await prisma.$transaction(async (tx) => {
+    await tx.knowledgeItem.deleteMany({ where: { parentId: id } });
+    // O pai volta a ser preview; `chunkTotal` acompanha o novo corte.
+    await tx.knowledgeItem.update({
+      where: { id },
+      data: { content: nextContent.slice(0, 500), chunkTotal: chunks.length },
+    });
+    const rows = await Promise.all(
+      chunks.map((chunk) =>
+        tx.knowledgeItem.create({
+          data: {
+            orgId: current.orgId,
+            category: current.category,
+            title: `${nextTitle} (parte ${chunk.index + 1}/${chunk.total})`,
+            content: chunk.text,
+            chunkIndex: chunk.index,
+            chunkTotal: chunk.total,
+            parentId: id,
+            tags: patch.tags ?? current.tags,
+            source: patch.source ?? current.source,
+            createdBy: current.createdBy,
+            // Filha herda a visibilidade do pai — a busca semântica só vê as
+            // filhas, então sem isto a restrição sumiria no re-chunk.
+            visibleToAgents: current.visibleToAgents,
+          },
+        })
+      )
+    );
+    return rows.map((row, i) => ({
+      id: row.id,
+      text: `${nextTitle}\n\n${chunks[i].text}`,
+    }));
+  });
+
+  await embedKnowledgeItem(embedTargets, { orgId });
 }
 
 /**

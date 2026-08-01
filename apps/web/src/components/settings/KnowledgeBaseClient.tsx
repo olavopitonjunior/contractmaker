@@ -47,6 +47,14 @@ interface Props {
    * mesma — muda o escopo e, com ele, o conjunto de rotas.
    */
   scope?: "org" | "platform";
+  /**
+   * Agentes cujo escopo dá pra simular no "Testar RAG". Vem do registry via
+   * server component — não é literal aqui, pra não divergir de
+   * `supports.ragScope`.
+   */
+  ragAgents?: Array<{ key: string; label: string }>;
+  /** Quantos tenants leem a base de plataforma — vira alcance na confirmação. */
+  orgCount?: number;
 }
 
 const API_BASE: Record<"org" | "platform", string> = {
@@ -83,6 +91,8 @@ export function KnowledgeBaseClient({
   initialCounts,
   embeddingsConfigured,
   scope = "org",
+  ragAgents = [],
+  orgCount,
 }: Props) {
   const apiBase = API_BASE[scope];
   const router = useRouter();
@@ -94,9 +104,21 @@ export function KnowledgeBaseClient({
   const [formOpen, setFormOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<
-    Array<{ id: string; title: string; content: string; category: string; similarity?: number }>
+    Array<{
+      id: string;
+      title: string;
+      content: string;
+      category: string;
+      similarity?: number;
+      /** "plataforma" | "imobiliaria" — o handler já devolvia e a tela descartava. */
+      scope?: string;
+      lowConfidence?: boolean;
+    }>
   >([]);
   const [searchMode, setSearchMode] = useState<string | null>(null);
+  const [searchAgent, setSearchAgent] = useState<string>(
+    () => ragAgents.find((a) => a.key === "editor")?.key ?? ragAgents[0]?.key ?? ""
+  );
   const [searching, setSearching] = useState(false);
 
   const filteredItems = useMemo(() => {
@@ -131,17 +153,19 @@ export function KnowledgeBaseClient({
     }
   }
 
-  async function handleSearch() {
-    if (!searchQuery.trim()) return;
+  async function handleSearch(queryOverride?: string) {
+    const q = (queryOverride ?? searchQuery).trim();
+    if (!q) return;
     setSearching(true);
     try {
       const res = await fetch(`${apiBase}/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          query: searchQuery,
+          query: q,
           category: activeTab === "all" ? undefined : activeTab,
           topK: 5,
+          ...(searchAgent ? { agentKey: searchAgent } : {}),
         }),
       });
       if (res.ok) {
@@ -165,13 +189,20 @@ export function KnowledgeBaseClient({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-display tracking-tight text-2xl font-semibold">Base de Conhecimento</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Legislação, modelos, regras e glossário que o agente consulta via RAG antes de
-          responder ou editar cláusulas.
-        </p>
-      </div>
+      {/* No /admin a página já tem o próprio <h1> (com o texto certo sobre
+          alcance); repetir aqui dava dois títulos empilhados e dois h1 na mesma
+          página. */}
+      {scope === "org" && (
+        <div>
+          <h1 className="font-display tracking-tight text-2xl font-semibold">
+            Base de Conhecimento
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Legislação, modelos, regras, glossário e cláusulas que o agente consulta
+            via RAG antes de responder ou editar.
+          </p>
+        </div>
+      )}
 
       {!embeddingsConfigured && (
         <Card className="border-amber-500 bg-amber-50 dark:bg-amber-950/20">
@@ -222,7 +253,12 @@ export function KnowledgeBaseClient({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setSearchQuery(search)}
+            // Antes só preparava o painel e exigia um segundo clique em
+            // "Rodar" — dois cliques para uma ação de um clique.
+            onClick={() => {
+              setSearchQuery(search);
+              void handleSearch(search);
+            }}
             disabled={!search.trim()}
           >
             <Sparkles className="h-4 w-4 mr-1" />
@@ -270,8 +306,27 @@ export function KnowledgeBaseClient({
                   </p>
                 )}
               </div>
-              <div className="flex gap-1">
-                <Button size="sm" variant="ghost" onClick={handleSearch} disabled={searching}>
+              <div className="flex items-center gap-1">
+                {ragAgents.length > 0 && (
+                  <select
+                    className="h-8 rounded border bg-background px-2 text-xs"
+                    value={searchAgent}
+                    onChange={(e) => setSearchAgent(e.target.value)}
+                    aria-label="Simular o escopo de qual agente"
+                  >
+                    {ragAgents.map((a) => (
+                      <option key={a.key} value={a.key}>
+                        como {a.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => void handleSearch()}
+                  disabled={searching}
+                >
                   {searching ? "Buscando…" : "Rodar"}
                 </Button>
                 <Button
@@ -302,6 +357,32 @@ export function KnowledgeBaseClient({
                       {CATEGORY_LABELS[r.category]?.label || r.category}
                     </Badge>
                     <span className="font-medium">{r.title}</span>
+                    {/* Origem: sem isto não dá pra distinguir política DESTA
+                        imobiliária de material universal da plataforma — e o
+                        handler já mandava o campo. */}
+                    {r.scope && (
+                      <Badge
+                        variant="secondary"
+                        className="text-[10px] gap-1"
+                        title={
+                          r.scope === "plataforma"
+                            ? "Material universal mantido pela plataforma"
+                            : "Conteúdo desta imobiliária"
+                        }
+                      >
+                        {r.scope === "plataforma" && <Lock className="h-2.5 w-2.5" />}
+                        {r.scope === "plataforma" ? "Plataforma" : "Imobiliária"}
+                      </Badge>
+                    )}
+                    {r.lowConfidence && (
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] border-amber-500 text-amber-600"
+                        title="Abaixo do piso de similaridade — avalie antes de confiar"
+                      >
+                        baixa confiança
+                      </Badge>
+                    )}
                     {typeof r.similarity === "number" && (
                       <span className="text-muted-foreground ml-auto">
                         similaridade: {r.similarity.toFixed(3)}
@@ -410,6 +491,8 @@ export function KnowledgeBaseClient({
       <KnowledgeItemForm
         open={formOpen}
         apiBase={apiBase}
+        scope={scope}
+        orgCount={orgCount}
         item={editingItem}
         onClose={() => setFormOpen(false)}
         onSaved={async () => {

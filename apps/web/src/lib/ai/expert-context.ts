@@ -14,18 +14,58 @@
 
 import { prisma } from "@/lib/db/prisma";
 import { findSimilarContracts } from "./memory";
-import { knowledgeScopeWhere } from "./knowledge-scope";
+import { knowledgeScopeWhere, type KnowledgeScopeOptions } from "./knowledge-scope";
+import { resolveAgentProfile } from "./agents/resolve";
+import { usageCountsForOrg } from "./knowledge-usage";
+import type { AgentKey } from "./agents/registry";
 import type { AgentContext } from "./types";
 
 const TOP_SIMILAR_CONTRACTS = 3;
 const TOP_CLAUSES = 8;
+/** Peneira antes do ranking por uso da org — ver `loadTopClauses`. */
+const CLAUSE_CANDIDATES = 40;
 const MAX_SUMMARY_CHARS = 280;
 const MAX_CLAUSE_CHARS = 220;
 
-export async function loadExpertContext(context: AgentContext): Promise<string> {
+/**
+ * Escopo de RAG do agente que vai RECEBER este preâmbulo.
+ *
+ * Sem `agentKey` o escopo é aberto — é o comportamento de quem chama fora do
+ * orquestrador. Com ele, o preâmbulo respeita `ragScope` e `visibleToAgents`
+ * exatamente como a busca por tool respeita.
+ */
+async function scopeFor(
+  orgId: string,
+  agentKey: AgentKey | undefined
+): Promise<KnowledgeScopeOptions> {
+  if (!agentKey) return {};
+  try {
+    const profile = await resolveAgentProfile(agentKey, orgId);
+    return { agentKey, ragScope: profile.ragScope };
+  } catch {
+    // Perfil indisponível não pode derrubar o turn nem ABRIR o escopo além do
+    // que o agente declara: fica só o filtro por agente, que é o mais restrito
+    // que dá pra garantir sem ler o perfil.
+    return { agentKey };
+  }
+}
+
+/**
+ * @param agentKey agente que vai receber o preâmbulo. **Passe sempre** quando
+ * houver um: até 2026-07-31 esta função era chamada sem ele, de dentro do
+ * `loadContextNode` — que roda ANTES do router, quando ainda não existe agente
+ * escolhido. O resultado é que o bloco de cláusulas injetado em todo turn de
+ * modo Planejar ignorava silenciosamente `ragScope` e `visibleToAgents`,
+ * enquanto a tela dizia o contrário.
+ */
+export async function loadExpertContext(
+  context: AgentContext,
+  agentKey?: AgentKey
+): Promise<string> {
+  const scope = await scopeFor(context.orgId, agentKey ?? context.agentKey);
   const [similar, clauses, templates] = await Promise.all([
     loadSimilarContracts(context),
-    loadTopClauses(context),
+    loadTopClauses(context, scope),
     loadActiveTemplates(context),
   ]);
 
@@ -110,6 +150,33 @@ export async function loadExpertContext(context: AgentContext): Promise<string> 
   return parts.join("\n");
 }
 
+/**
+ * Preâmbulo do especialista, pronto pra concatenar no prompt.
+ *
+ * Mora aqui, e não no `loadContextNode`, porque o nó de contexto roda antes do
+ * router: lá não existe agente escolhido, e o roteamento ainda pode fazer
+ * FANOUT (`review` dispara analyst+legal+curator). Carregar por especialista é
+ * o único ponto em que o agente é singular e o escopo dele é conhecido.
+ *
+ * Nunca lança: preâmbulo é otimização, não requisito — o turn segue sem ele.
+ * `resolveAgentProfile` tem cache de 60s, então N especialistas em fanout não
+ * pagam N resoluções de perfil.
+ */
+export async function expertContextFor(args: {
+  agentKey: AgentKey;
+  /** Só o modo Planejar usa preâmbulo; o Rápido é enxuto de propósito. */
+  mode: string | undefined;
+  context: AgentContext | undefined;
+}): Promise<string> {
+  if (args.mode !== "plan" || !args.context) return "";
+  try {
+    return await loadExpertContext(args.context, args.agentKey);
+  } catch (err) {
+    console.error(`[expert-context:${args.agentKey}] falhou (segue sem):`, err);
+    return "";
+  }
+}
+
 async function loadSimilarContracts(context: AgentContext) {
   try {
     return await findSimilarContracts(
@@ -126,7 +193,10 @@ async function loadSimilarContracts(context: AgentContext) {
   }
 }
 
-async function loadTopClauses(context: AgentContext) {
+async function loadTopClauses(
+  context: AgentContext,
+  scope: KnowledgeScopeOptions
+) {
   const modalidade = context.templateModalidade ?? "";
   const isLocacao =
     context.dealKind === "locacao" || modalidade.startsWith("locacao");
@@ -148,9 +218,9 @@ async function loadTopClauses(context: AgentContext) {
         },
       };
 
-  return prisma.knowledgeItem.findMany({
+  const candidatas = await prisma.knowledgeItem.findMany({
     where: {
-      ...knowledgeScopeWhere(context.orgId, { agentKey: context.agentKey }),
+      ...knowledgeScopeWhere(context.orgId, scope),
       category: "clause",
       status: "approved",
       ...clauseFilter,
@@ -161,10 +231,40 @@ async function loadTopClauses(context: AgentContext) {
       groupCode: true,
       agentNotes: true,
       usageCount: true,
+      orgId: true,
     },
+    // Teto generoso, não `TOP_CLAUSES`: o corte final é por uso DA ORG, e esse
+    // número não dá pra ordenar aqui (ver abaixo). Ordenar por `usageCount`
+    // global só serve pra desempatar quem entra na peneira.
     orderBy: [{ usageCount: "desc" }, { title: "asc" }],
-    take: TOP_CLAUSES,
+    take: CLAUSE_CANDIDATES,
   });
+
+  /**
+   * Ranking por uso DA ORG, não global.
+   *
+   * O Prisma não sabe `orderBy` um agregado de relação, então o corte final
+   * acontece em memória. Vale o esforço: este bloco entra no prompt de todo
+   * turn em modo Planejar, e ordenar cláusula de PLATAFORMA por contador global
+   * deixava um tenant deslocar o preâmbulo do agente de outro.
+   *
+   * Item da própria org usa o `usageCount` da linha (que é dela e só dela);
+   * item de plataforma usa o contador daquela org, que começa em zero até a
+   * imobiliária usá-lo de fato — é o comportamento certo: cláusula universal
+   * ganha espaço no preâmbulo por mérito local, não por popularidade alheia.
+   */
+  const usoDaOrg = await usageCountsForOrg(
+    context.orgId,
+    candidatas.filter((c) => c.orgId === null).map((c) => c.id)
+  );
+
+  return candidatas
+    .map((c) => ({
+      ...c,
+      usageCount: c.orgId === null ? (usoDaOrg.get(c.id) ?? 0) : c.usageCount,
+    }))
+    .sort((a, b) => b.usageCount - a.usageCount || a.title.localeCompare(b.title))
+    .slice(0, TOP_CLAUSES);
 }
 
 async function loadActiveTemplates(context: AgentContext) {

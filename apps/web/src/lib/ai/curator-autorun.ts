@@ -5,7 +5,7 @@
  * Fluxo:
  *   1. Cria ChatSession sistema (userId do aprovador, title distintivo)
  *   2. Carrega contractContext via loadContext
- *   3. Carrega expertContext via loadExpertContext (top contratos similares)
+ *   3. O Curator carrega seu próprio preâmbulo (expertContextFor) já escopado
  *   4. Roda runCurator com prompt sintético + forceToolUse=true já no curator.ts
  *   5. Persiste ChatMessage(s) com events completos
  *
@@ -24,7 +24,6 @@
 
 import { prisma } from "@/lib/db/prisma";
 import { loadContext } from "./shared/context";
-import { loadExpertContext } from "./expert-context";
 import { runCurator } from "./specialists/curator";
 import type { OrchestratorState, ToolCallRecord } from "./orchestrator/state";
 import type { AgentEvent } from "./types";
@@ -80,7 +79,6 @@ export async function enqueueCuratorAnalysis(contractId: string): Promise<void> 
 
     // Expert-context (top similares + top cláusulas) pra Curator ter dados de
     // entrada antes de chamar find_similar_contracts.
-    const expertContext = await loadExpertContext(ctx).catch(() => undefined);
 
     const state: OrchestratorState = {
       contractId,
@@ -91,7 +89,6 @@ export async function enqueueCuratorAnalysis(contractId: string): Promise<void> 
       mode: "plan",
       intent: "propose",
       contractContext: ctx,
-      expertContext,
       specialistOutputs: {},
       events: [],
       usage: {

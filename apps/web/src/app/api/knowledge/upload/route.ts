@@ -16,28 +16,24 @@ import {
   type UploadClassification,
 } from "@/lib/knowledge/upload-classifier";
 import { segmentClauses } from "@/lib/knowledge/clause-segmenter";
+// Detecção de tipo compartilhada com a ingestão de plataforma: duas rotas
+// checando magic-byte por conta própria é como uma delas acaba confiando no
+// Content-Type declarado.
+import {
+  sniffDocument as sniff,
+  PDF_MIME,
+  DOCX_MIME,
+  MAX_UPLOAD_BYTES,
+} from "@/lib/knowledge/upload-sniff";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const PDF_MIME = "application/pdf";
-const DOCX_MIME =
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-const MAX_BYTES = 20 * 1024 * 1024;
+const MAX_BYTES = MAX_UPLOAD_BYTES;
 const VALID_CATEGORIES = ["legislation", "model", "rule", "glossary", "clause"] as const;
 type Category = (typeof VALID_CATEGORIES)[number];
 
 const categorySchema = z.enum(VALID_CATEGORIES);
-
-/** Detecta o tipo real pelo magic-byte (não confia no mime declarado). */
-function sniff(buffer: Buffer): "pdf" | "docx" | null {
-  if (buffer.subarray(0, 7).toString("ascii").startsWith("%PDF-1.")) return "pdf";
-  // DOCX é um zip → magic PK\x03\x04
-  if (buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4b && buffer[2] === 0x03 && buffer[3] === 0x04) {
-    return "docx";
-  }
-  return null;
-}
 
 /**
  * POST /api/knowledge/upload (multipart)

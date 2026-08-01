@@ -4,6 +4,7 @@
  * efeito, o que parece bug e leva a salvar de novo.
  */
 
+import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { invalidateAgentProfileCache } from "./resolve";
 import { AGENT_REGISTRY, type AgentKey } from "./registry";
@@ -36,6 +37,39 @@ export function isAllowedModel(m: string | null | undefined): boolean {
   if (!m) return true; // null = herda, sempre válido
   return (ALLOWED_MODELS as readonly string[]).includes(resolveModel(m));
 }
+
+/**
+ * Categorias que o escopo de RAG pode nomear.
+ *
+ * `support` fica de fora de propósito: `knowledge-scope.ts` exclui essa
+ * categoria do RAG jurídico de qualquer jeito, então aceitá-la aqui deixaria o
+ * admin montar um escopo que sempre volta vazio — configuração que parece
+ * válida e não faz nada é pior que erro de validação.
+ */
+export const RAG_SCOPE_CATEGORIES = [
+  "legislation",
+  "model",
+  "rule",
+  "glossary",
+  "clause",
+] as const;
+
+/**
+ * Escopo de RAG gravável pelo console e pela tela do tenant.
+ *
+ * Os três campos são opcionais e ausência significa "sem restrição" —
+ * `includePlatform` só corta a base universal quando é explicitamente `false`
+ * (ver `knowledge-scope.ts`). `null` no objeto inteiro apaga o escopo e volta
+ * ao herdado.
+ */
+export const ragScopeSchema = z
+  .object({
+    categories: z.array(z.enum(RAG_SCOPE_CATEGORIES)).max(RAG_SCOPE_CATEGORIES.length).optional(),
+    tags: z.array(z.string().trim().min(1).max(60)).max(20).optional(),
+    includePlatform: z.boolean().optional(),
+  })
+  .strict()
+  .nullable();
 
 export async function upsertAgentProfile(args: {
   orgId: string | null;

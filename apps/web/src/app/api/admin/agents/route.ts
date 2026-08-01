@@ -20,6 +20,7 @@ import { requirePlatform } from "@/lib/admin/gate";
 import { prisma } from "@/lib/db/prisma";
 import {
   AGENT_DEFINITIONS,
+  AGENT_REGISTRY,
   isAgentKey,
   type AgentKey,
 } from "@/lib/ai/agents/registry";
@@ -28,6 +29,8 @@ import {
   upsertAgentProfile,
   isAllowedModel,
   ALLOWED_MODELS,
+  ragScopeSchema,
+  RAG_SCOPE_CATEGORIES,
 } from "@/lib/ai/agents/store";
 import { resolveAgentProfile } from "@/lib/ai/agents/resolve";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
@@ -77,6 +80,7 @@ export async function GET(req: NextRequest) {
           temperature: row?.temperature ?? null,
           maxTokens: row?.maxTokens ?? null,
           instructions: row?.instructions ?? "",
+          ragScope: (row?.ragScope as unknown) ?? null,
           monthlyBudgetUsd:
             row?.monthlyBudgetUsd === null || row?.monthlyBudgetUsd === undefined
               ? null
@@ -86,6 +90,7 @@ export async function GET(req: NextRequest) {
           model: resolved.model,
           fallbackModel: resolved.fallbackModel,
           enabled: resolved.enabled,
+          ragScope: resolved.ragScope,
         },
       };
     })
@@ -94,6 +99,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     scope: orgId ? { type: "org", orgId } : { type: "platform" },
     allowedModels: ALLOWED_MODELS,
+    ragCategories: RAG_SCOPE_CATEGORIES,
     agents,
   });
 }
@@ -110,6 +116,8 @@ const patchSchema = z.object({
   maxTokens: z.number().int().min(256).max(8192).nullable().optional(),
   instructions: z.string().max(20_000).nullable().optional(),
   monthlyBudgetUsd: z.number().min(0).max(1_000_000).nullable().optional(),
+  // Escopo de RAG do agente. Ausente = não mexe; `null` = apaga e volta a herdar.
+  ragScope: ragScopeSchema.optional(),
 });
 
 export async function PATCH(req: NextRequest) {
@@ -136,6 +144,19 @@ export async function PATCH(req: NextRequest) {
     if (!org) {
       return NextResponse.json({ error: "Org não encontrada" }, { status: 404 });
     }
+  }
+
+  // Mesmo guard da rota do tenant: `ragScope` só é gravável para agente que o
+  // runtime honra. Sem isto o console gravaria restrição que nunca é aplicada,
+  // e a próxima pessoa a ler o banco acharia que existe uma em vigor.
+  if (
+    patch.ragScope !== undefined &&
+    !AGENT_REGISTRY[agentKey as AgentKey].supports.ragScope
+  ) {
+    return NextResponse.json(
+      { error: "Este agente não consulta a base de conhecimento." },
+      { status: 400 }
+    );
   }
 
   if (!isAllowedModel(patch.model) || !isAllowedModel(patch.fallbackModel)) {

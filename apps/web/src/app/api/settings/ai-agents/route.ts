@@ -1,7 +1,9 @@
 /**
  * Agentes de IA na visão do TENANT.
  *
- * O que a imobiliária controla aqui: as instruções adicionais de cada agente.
+ * O que a imobiliária controla aqui: as instruções adicionais de cada agente e
+ * o escopo de RAG dele (quais categorias/tags da base ele enxerga, e se lê a
+ * base da plataforma).
  * Modelo, fallback, budget e o liga/desliga ficam com o super_admin em
  * /admin/agents — instrução de agente é superfície de custo e de qualidade, e
  * antes o tenant escolhia o modelo direto em /settings (rota /api/settings/agent,
@@ -17,7 +19,12 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { requireOrgAdmin } from "@/lib/security/org-scope";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { resolveAgentProfile } from "@/lib/ai/agents/resolve";
-import { upsertAgentProfile, listAgentProfiles } from "@/lib/ai/agents/store";
+import {
+  upsertAgentProfile,
+  listAgentProfiles,
+  ragScopeSchema,
+  RAG_SCOPE_CATEGORIES,
+} from "@/lib/ai/agents/store";
 import {
   AGENT_DEFINITIONS,
   isAgentKey,
@@ -57,18 +64,31 @@ export async function GET() {
         // Só o que a org escreveu — não herda a instrução da plataforma pro
         // textarea, senão salvar duplicaria o texto no prompt.
         instructions: own.get(def.key)?.instructions ?? "",
+        // Idem: só o escopo da própria org. O `resolved.ragScope` herdaria o da
+        // plataforma e salvar o congelaria como se fosse escolha do tenant.
+        ragScope: (own.get(def.key)?.ragScope as unknown) ?? null,
+        // Escopo herdado, só pra EXIBIR: sem isto a tela escreve "consulta
+        // todas" enquanto a plataforma restringe. Não vai pro editor — salvar
+        // o herdado congelaria como se fosse escolha do tenant.
+        inheritedRagScope: own.get(def.key)?.ragScope ? null : resolved.ragScope,
+        supportsRagScope: def.supports.ragScope,
         model: resolved.model,
         enabled: resolved.enabled,
       };
     })
   );
 
-  return NextResponse.json({ agents });
+  // Lista canônica junto: sem isso o cliente precisa de um literal próprio e
+  // silenciosamente para de oferecer categoria nova (ou grava uma removida, que
+  // o Zod rejeita com "Payload inválido" genérico).
+  return NextResponse.json({ agents, ragCategories: RAG_SCOPE_CATEGORIES });
 }
 
 const patchSchema = z.object({
   agentKey: z.string().refine(isAgentKey, "Agente desconhecido"),
-  instructions: z.string().max(20_000),
+  instructions: z.string().max(20_000).optional(),
+  // Ausente = não mexe; `null` = apaga o escopo e volta a herdar.
+  ragScope: ragScopeSchema.optional(),
 });
 
 export async function PATCH(req: NextRequest) {
@@ -92,6 +112,12 @@ export async function PATCH(req: NextRequest) {
   const agentKey = parsed.data.agentKey as AgentKey;
 
   const def = AGENT_REGISTRY[agentKey];
+  if (parsed.data.ragScope !== undefined && !def.supports.ragScope) {
+    return NextResponse.json(
+      { error: "Este agente não consulta a base de conhecimento." },
+      { status: 400 }
+    );
+  }
   if (!def.tenantEditable || !def.supports.instructions) {
     return NextResponse.json(
       { error: "Este agente é configurado pela plataforma." },
@@ -99,11 +125,14 @@ export async function PATCH(req: NextRequest) {
     );
   }
 
-  const instructions = parsed.data.instructions.trim();
+  const instructions = parsed.data.instructions?.trim();
   await upsertAgentProfile({
     orgId,
     agentKey,
-    patch: { instructions: instructions || null },
+    patch: {
+      ...(instructions === undefined ? {} : { instructions: instructions || null }),
+      ...(parsed.data.ragScope === undefined ? {} : { ragScope: parsed.data.ragScope }),
+    },
     updatedBy: session.user.id,
   });
 
@@ -112,7 +141,11 @@ export async function PATCH(req: NextRequest) {
     result: "SUCCESS",
     resourceType: "AgentProfile",
     resource: `org:${orgId}:${agentKey}`,
-    metadata: { agentKey, instructionsLength: instructions.length },
+    metadata: {
+      agentKey,
+      ...(instructions === undefined ? {} : { instructionsLength: instructions.length }),
+      ...(parsed.data.ragScope === undefined ? {} : { ragScope: parsed.data.ragScope }),
+    },
   }).catch(() => {});
 
   return NextResponse.json({ ok: true });
