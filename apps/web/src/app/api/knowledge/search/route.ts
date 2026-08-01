@@ -34,7 +34,6 @@ export async function POST(req: NextRequest) {
     orgId: org.id,
     htmlContent: "",
     dataJson: {},
-    templateSource: "",
     templateModalidade: "",
     templateName: "",
     activeClauses: [],
