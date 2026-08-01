@@ -322,18 +322,14 @@ export async function embedKnowledgeItem(
   ctx: { orgId: string | null; userId?: string | null }
 ): Promise<void> {
   if (!isEmbeddingsConfigured() || targets.length === 0) return;
-  // Item de plataforma não tem org a quem cobrar e `AIUsage.orgId` é NOT NULL —
-  // sem ctx, `embed` só não registra o uso. É um punhado de embeddings feitos à
-  // mão pelo super_admin, não custo de runtime; a atribuição fica pro lote que
-  // levar `agentKey` pro AIUsage.
-  const usageCtx = ctx.orgId
-    ? { orgId: ctx.orgId, userId: ctx.userId, operation: "embed_kb" as const }
-    : undefined;
-  const vectors = await embed(
-    targets.map((t) => t.text),
-    "document",
-    usageCtx
-  );
+  // Item de plataforma registra com `orgId: null` — é custo real, só que de
+  // ninguém em particular. Antes ficava sem registro nenhum, e com a ingestão
+  // em lote na plataforma isso deixaria de ser "um punhado de itens à mão".
+  const vectors = await embed(targets.map((t) => t.text), "document", {
+    orgId: ctx.orgId,
+    userId: ctx.userId,
+    operation: "embed_kb",
+  });
   for (let i = 0; i < targets.length; i++) {
     await prisma.$executeRawUnsafe(
       `UPDATE "KnowledgeItem" SET embedding = $1::vector WHERE id = $2`,
