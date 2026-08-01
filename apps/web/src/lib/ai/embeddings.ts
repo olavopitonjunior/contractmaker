@@ -19,7 +19,12 @@ export const EMBEDDING_DIMENSION = 1024;
  * the call is recorded in AIUsage with the given orgId + operation.
  */
 export interface EmbedUsageContext {
-  orgId: string;
+  /**
+   * `null` = custo de PLATAFORMA (base universal). Passou a ser aceito quando
+   * `AIUsage.orgId` virou nullable: antes, chamada sem org simplesmente não era
+   * registrada, e o painel mostrava zero onde havia gasto.
+   */
+  orgId: string | null;
   userId?: string | null;
   contractId?: string | null;
   operation: AIOperation; // "embed_kb" | "embed_memory" | "embed_query"

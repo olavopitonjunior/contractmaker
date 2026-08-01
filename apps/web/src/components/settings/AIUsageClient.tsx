@@ -19,6 +19,15 @@ import {
 // Types mirror the /api/ai-usage response
 // ────────────────────────────────────────────────────────────────────────────
 
+/** Custo por agente — `agentKey: null` é a linha "Não atribuído". */
+interface AgentStat {
+  agentKey: string | null;
+  label: string;
+  costUsd: number;
+  calls: number;
+  totalTokens: number;
+}
+
 interface Totals {
   costUsd: number;
   calls: number;
@@ -93,6 +102,7 @@ interface UsageResponse {
   byDay: DayBucket[];
   byModel: ModelStat[];
   byOperation: OperationStat[];
+  byAgent: AgentStat[];
   byProvider: ProviderStat[];
   byUser: UserStat[];
   byContract: ContractStat[];
@@ -370,6 +380,11 @@ export function AIUsageClient() {
     return data.byModel.reduce((m, x) => Math.max(m, x.costUsd), 0);
   }, [data]);
 
+  const maxAgentCost = useMemo(() => {
+    if (!data) return 0;
+    return (data.byAgent ?? []).reduce((m, x) => Math.max(m, x.costUsd), 0);
+  }, [data]);
+
   const maxOperationCost = useMemo(() => {
     if (!data) return 0;
     return data.byOperation.reduce((m, x) => Math.max(m, x.costUsd), 0);
@@ -593,6 +608,43 @@ export function AIUsageClient() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Por agente — a pergunta que o console de agentes cria: "quanto
+              custa o Editor?". Vem antes de provedor porque é a dimensão que o
+              operador controla (modelo, teto e liga/desliga são por agente). */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Por agente</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {(data.byAgent ?? []).length === 0 ? (
+                <p className="text-xs text-muted-foreground">Sem dados.</p>
+              ) : (
+                (data.byAgent ?? []).map((a) => (
+                  <BarRow
+                    key={a.agentKey ?? "sem-agente"}
+                    label={
+                      <span className="truncate">
+                        {a.label}{" "}
+                        <span className="text-[10px] text-muted-foreground">
+                          · {a.calls}
+                        </span>
+                      </span>
+                    }
+                    value={a.costUsd}
+                    max={maxAgentCost}
+                  />
+                ))
+              )}
+              {(data.byAgent ?? []).some((a) => a.agentKey === null) && (
+                <p className="text-[11px] text-muted-foreground">
+                  &quot;Não atribuído&quot; reúne o passo de síntese do
+                  orquestrador — que não é um agente configurável — e as chamadas
+                  anteriores a esta medição.
+                </p>
+              )}
+            </CardContent>
+          </Card>
 
           <div className="grid gap-4 lg:grid-cols-2">
             {/* By provider */}

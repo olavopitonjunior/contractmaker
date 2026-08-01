@@ -2036,7 +2036,14 @@ model DocumentStyle {
 
 model AIUsage {
   id               String   @id @default(cuid())
-  orgId            String
+  /// `null` = custo de PLATAFORMA (ingestão/embedding da base universal), que
+  /// não pertence a tenant nenhum. Antes era NOT NULL e essas chamadas ficavam
+  /// SEM REGISTRO — o painel mostrava zero onde havia gasto real.
+  orgId            String?
+  /// Agente responsável (`AgentProfile.agentKey`). Derivado de `operation` pelo
+  /// registry quando o call-site não informa; nullable porque linha histórica
+  /// não tem, e porque nem toda operação pertence a um agente.
+  agentKey         String?
   userId           String?
   // Coluna simples (SEM FK pra Contract). Antes era FK com onDelete:SetNull, o
   // que ZERAVA a atribuição retroativamente ao apagar o contrato — o custo já
@@ -2064,12 +2071,13 @@ model AIUsage {
   errorMessage     String?  @db.Text
   createdAt        DateTime @default(now())
 
-  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  user User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  org  Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([orgId, createdAt])
   @@index([orgId, provider, createdAt])
   @@index([orgId, operation, createdAt])
+  @@index([orgId, agentKey, createdAt])
   @@index([contractId, createdAt])
 }
 
