@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authOrBearer, hasScope } from "@/lib/auth/auth-or-bearer";
+import {
+  requireApiAuth,
+  isAuthFailure,
+  authFailureResponse,
+} from "@/lib/api/require-auth";
 import { withApi } from "@/lib/api/with-api";
-import { resolveUserOrgId } from "@/lib/security/org-scope";
 import { getAgentBudgetStatus } from "@/lib/ai/budget";
 import { resolveAgentProfile } from "@/lib/ai/agents/resolve";
 import { composeSystemPrompt } from "@/lib/ai/agents/prompt-blocks";
@@ -24,7 +27,17 @@ export const dynamic = "force-dynamic";
  * Antes disso a persona do Max só existiria fora do git: nada versionado, nada
  * auditável, e nenhuma forma de desligá-lo sem deploy.
  *
- * Auth: Bearer com escopo `agents:r` (ou session, pra depuração pela UI).
+ * Auth: `requireApiAuth` com escopo `agents:r` — Bearer, ou session pra
+ * depuração pela UI. Vale o helper canônico em vez de `authOrBearer` cru: ele
+ * traz o rate limit por token+scope e, sobretudo, a resolução de org do caminho
+ * de MÁQUINA (`subdomainHint: null` quando é bearer). Sem esse pin, o `Host` da
+ * request escolheria a org de um dono de token que é membro de várias — e a
+ * persona devolvida sairia do tenant errado.
+ *
+ * `instructions.platform` do agente externo fica legível por qualquer membro do
+ * tenant, diferente do prompt dos especialistas internos (que a allowlist
+ * abaixo bloqueia). É consequência do desenho — `composed` precisa conter o
+ * texto —, então nada de segredo operacional aqui dentro.
  *
  * `enabled: false` responde **200**, não 403. É kill switch operacional: quem
  * chama precisa distinguir "desligado de propósito" (encerra o turn com uma
@@ -34,16 +47,12 @@ export const dynamic = "force-dynamic";
 export const GET = withApi(
   "GET /api/agents/profile",
   async (req: NextRequest) => {
-    const ident = await authOrBearer(req);
-    if (!ident) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    if (!hasScope(ident, "agents:r")) {
-      return NextResponse.json(
-        { error: "Forbidden", reason: "missing scope agents:r" },
-        { status: 403 }
-      );
-    }
+    // `requireOrg` default (true): sem org não há perfil de tenant a resolver, e
+    // cair no nível de plataforma devolveria uma configuração que não é a de
+    // ninguém.
+    const authed = await requireApiAuth(req, { scope: "agents:r" });
+    if (isAuthFailure(authed)) return authFailureResponse(authed);
+    const orgId = authed.org.id;
 
     const agentKey = req.nextUrl.searchParams.get("agentKey") ?? "";
     if (!isExternalAgentKey(agentKey)) {
@@ -54,19 +63,6 @@ export const GET = withApi(
           allowed: EXTERNAL_AGENT_KEYS,
         },
         { status: 400 }
-      );
-    }
-
-    // Sem org não há perfil de tenant a resolver, e cair no nível de plataforma
-    // devolveria uma configuração que NÃO é a de ninguém. Melhor recusar.
-    const orgId = await resolveUserOrgId(ident.userId);
-    if (!orgId) {
-      return NextResponse.json(
-        {
-          error: "Forbidden",
-          reason: "usuário do token não pertence a nenhuma organização",
-        },
-        { status: 403 }
       );
     }
 

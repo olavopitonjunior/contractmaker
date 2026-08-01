@@ -388,7 +388,7 @@ a um cliente externo o prompt de plataforma dos especialistas, que nem o dono do
 tenant enxerga na UI, e deixaria um token reportar consumo como `editor`,
 queimando o teto de um agente interno a partir de fora.
 
-**`GET /api/agents/profile?agentKey=max`** (`agents:r`) — devolve o
+**`GET /api/agents/profile?agentKey=max`** (`agents:r`, 120/min) — devolve o
 `AgentProfile` **resolvido** na cadeia org → plataforma → hardcoded, para a org
 do dono do token: `enabled`, `model` + `modelSource`, `fallbackModel`,
 `temperature`, `maxTokens`, `ragScope`, `budget` e `instructions`.
@@ -406,7 +406,22 @@ consegui ler a configuração".
 Sem org no dono do token: **403**. Cair no nível de plataforma devolveria uma
 configuração que não é a de ninguém.
 
-**`POST /api/agents/usage`** (`agents:rw`, 120/min) — o agente reporta o custo
+Ambas passam por `requireApiAuth` (`lib/api/require-auth.ts`), não por
+`authOrBearer` cru: é ele que traz o rate limit por token+scope e a resolução de
+org do caminho de máquina (`subdomainHint: null` em bearer). Sem esse pin, o
+`Host` da request escolheria a org de um dono de token que é membro de vários
+tenants — a persona sairia do errado e o custo cairia no errado.
+
+`instructions.platform` do agente externo é legível por qualquer membro do
+tenant (diferente do prompt dos especialistas, que a allowlist bloqueia). É
+consequência do desenho, já que `composed` precisa conter o texto: nada de
+segredo operacional ali.
+
+**`POST /api/agents/usage`** (`agents:rw`, 60/min) — **só Bearer**. Sessão é
+recusada com 403: `hasScope` considera todo escopo presente pra session-auth, e
+esta é a única superfície em que um cliente escreve numa tabela de custo sem
+guard a jusante — com signup aberto na org compartilhada, qualquer conta nova
+inflaria `AIUsage` até estourar o teto e parar o chat de todos. O agente reporta o custo
 do próprio turn, que entra em `AIUsage` com `agentKey` e aparece em
 `/settings/ai-usage`. Sem isso o painel mente por omissão: o gasto do agente que
 roda fora do repo não existiria no total.
@@ -414,6 +429,9 @@ roda fora do repo não existiria no total.
 Corpo: `agentKey`, `model`, `promptTokens`, `latencyMs` (obrigatórios) +
 `provider`, `completionTokens`, `cacheReadTokens`, `cacheWriteTokens`,
 `toolsUsed[]`, `iterations`, `success`, `errorMessage`, `contractId`, `dealId`.
+Teto de 500k por campo de token: folgado sobre qualquer turn real (a janela dos
+modelos é ~200k) e ainda assim contém o estrago, porque uma linha inflada
+estoura sozinha o budget de 200k de um contrato.
 
 O cliente **não** decide: `operation` vem do registry (`max_chat`); `orgId` e
 `userId` vêm do token; o custo em dólar é calculado aqui pela tabela de preços —
