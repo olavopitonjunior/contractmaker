@@ -114,7 +114,11 @@ export type AIOperation =
   | "survey_summary"
   // Ingestão da base de conhecimento — desempate template/cláusulas/acervo
   // quando a heurística determinística fica incerta (lib/knowledge/upload-classifier).
-  | "knowledge_upload_classification";
+  | "knowledge_upload_classification"
+  // Agente externo (Max, LangGraph fora deste repo) reportando o próprio turn
+  // por `POST /api/agents/usage`. O custo dele roda em infra nossa e some do
+  // painel se não voltar por aqui.
+  | "max_chat";
 
 export interface RecordUsageParams {
   /** `null` = custo de PLATAFORMA (base universal), sem tenant a quem atribuir. */

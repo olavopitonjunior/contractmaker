@@ -374,3 +374,54 @@ humano), `POST inspections` e `POST expenses` (fase futura, HITL
 `list_rent_charges`, `upsert_insurer_analysis`, `create_lease_guarantee`,
 `update_lease_guarantee`, `create_insurance_policy` + os pré-existentes
 `record_insurance_quote`, `get_deal_insurance`, `record_credit_analysis`.
+
+## 9. Plano de controle dos agentes externos — 2026-07-31 (PR5)
+
+Scopes `agents:r` / `agents:rw` (`rw ⊇ r`). São dois de propósito: `POST
+/api/agents/usage` escreve numa tabela de **custo** que alimenta o teto mensal
+por agente e o teto por contrato — quem só precisa ler a persona não deveria
+poder mover o gasto da org.
+
+Ambas as rotas são limitadas a agentes com `external: true` no registry
+(`lib/ai/agents/registry.ts` — hoje só `max`). Um endpoint genérico entregaria
+a um cliente externo o prompt de plataforma dos especialistas, que nem o dono do
+tenant enxerga na UI, e deixaria um token reportar consumo como `editor`,
+queimando o teto de um agente interno a partir de fora.
+
+**`GET /api/agents/profile?agentKey=max`** (`agents:r`) — devolve o
+`AgentProfile` **resolvido** na cadeia org → plataforma → hardcoded, para a org
+do dono do token: `enabled`, `model` + `modelSource`, `fallbackModel`,
+`temperature`, `maxTokens`, `ragScope`, `budget` e `instructions`.
+
+`instructions` vem em três partes: `platform`, `tenant` e `composed`. Use
+`composed` — o texto do tenant precisa entrar dentro de
+`<instrucoes_da_imobiliaria>` (é dado de terceiro, não autoridade capaz de
+redefinir o agente), e entregar já cercado tira do runtime externo a chance de
+esquecer a cerca.
+
+`enabled: false` responde **200**, não 403 — é kill switch operacional sem
+deploy, e quem chama precisa distinguir "desligado de propósito" de "não
+consegui ler a configuração".
+
+Sem org no dono do token: **403**. Cair no nível de plataforma devolveria uma
+configuração que não é a de ninguém.
+
+**`POST /api/agents/usage`** (`agents:rw`, 120/min) — o agente reporta o custo
+do próprio turn, que entra em `AIUsage` com `agentKey` e aparece em
+`/settings/ai-usage`. Sem isso o painel mente por omissão: o gasto do agente que
+roda fora do repo não existiria no total.
+
+Corpo: `agentKey`, `model`, `promptTokens`, `latencyMs` (obrigatórios) +
+`provider`, `completionTokens`, `cacheReadTokens`, `cacheWriteTokens`,
+`toolsUsed[]`, `iterations`, `success`, `errorMessage`, `contractId`, `dealId`.
+
+O cliente **não** decide: `operation` vem do registry (`max_chat`); `orgId` e
+`userId` vêm do token; o custo em dólar é calculado aqui pela tabela de preços —
+custo informado por quem gasta não é medição. `contractId`/`dealId` de outra org
+dão **403**, não descarte silencioso: `assertContractBudget` soma por
+`contractId` sem olhar org, então aceitar id alheio deixaria um token estourar o
+budget de outro tenant.
+
+Resposta **202** (`recordAIUsage` é fire-and-forget por construção) com
+`estimatedCostUsd` e `priced` — `priced: false` significa modelo fora da tabela
+de preços, não turn de graça.
