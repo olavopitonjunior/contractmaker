@@ -178,8 +178,11 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
     defaultModel: SONNET_MODEL,
     tenantEditable: false,
     external: true,
-    operations: [],
-    // Passa a valer quando o endpoint do PR5 existir e o Max consumi-lo.
+    operations: ["max_chat"],
+    // O endpoint já existe (`/api/agents/profile`), mas o runtime do Max é de
+    // outro repo (Sessão C) e ainda não o consome. Enquanto não consumir, isto
+    // fica `false`: um interruptor que não desliga nada é pior que a ausência
+    // do interruptor. Vira `true` quando a Sessão C ler o perfil de verdade.
     supports: { enabled: false, model: false, instructions: false },
   },
 };
@@ -187,6 +190,24 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
 export const AGENT_DEFINITIONS: AgentDefinition[] = AGENT_KEYS.map(
   (k) => AGENT_REGISTRY[k]
 );
+
+/**
+ * Agentes que rodam FORA deste repo e por isso leem o perfil por API
+ * (`/api/agents/profile`) e reportam custo de volta (`/api/agents/usage`).
+ *
+ * A API de agentes é limitada a esta lista de propósito. Um token com
+ * `agents:rw` que pudesse reportar uso como `editor` moveria o gasto — e o teto
+ * mensal — de um agente interno a partir de fora; e um `agents:r` genérico
+ * entregaria a um cliente externo o prompt de plataforma dos especialistas, que
+ * nem o dono do tenant enxerga na UI. Agente novo entra aqui explicitamente.
+ */
+export const EXTERNAL_AGENT_KEYS: AgentKey[] = AGENT_DEFINITIONS.filter(
+  (d) => d.external
+).map((d) => d.key);
+
+export function isExternalAgentKey(v: string): v is AgentKey {
+  return (EXTERNAL_AGENT_KEYS as readonly string[]).includes(v);
+}
 
 /**
  * `operation` gravada por MAIS DE UM agente — a derivação não se aplica.
