@@ -149,9 +149,6 @@ export async function POST(
     orgId,
     htmlContent,
     dataJson: contract.dataJson as Record<string, unknown>,
-    templateSource: contract.template
-      ? contract.templateOverride || contract.template.handlebarsSource
-      : null,
     templateModalidade: contract.template?.modalidade || "a_vista",
     templateName: contract.template?.name ?? "Contrato importado",
     activeClauses: contract.clauses.map((cc) => ({
