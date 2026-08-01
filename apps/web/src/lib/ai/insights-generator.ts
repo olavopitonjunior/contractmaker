@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/db/prisma";
 import { recordAIUsage } from "@/lib/ai/usage";
+import { assertAgentBudget } from "./budget";
 import { resolveAgentProfile } from "@/lib/ai/agents/resolve";
 import { composeSystemPrompt } from "@/lib/ai/agents/prompt-blocks";
 import {
@@ -263,6 +264,10 @@ export async function generateInsights(args: {
   });
   const startedAt = Date.now();
   try {
+    // Teto por agente. Aqui a degradação já existe e é boa: o catch abaixo cai
+    // no `heuristicFallback`, então estourar o teto vira insight sem LLM em vez
+    // de tela vazia.
+    await assertAgentBudget(args.orgId, "insights");
     const resp = await client.messages.create({
       model: profile.model || HAIKU,
       max_tokens: profile.maxTokens ?? 600,

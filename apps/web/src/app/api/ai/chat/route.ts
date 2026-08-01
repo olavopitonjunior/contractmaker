@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { assertAgentBudget, AgentBudgetExceededError } from "@/lib/ai/budget";
+
+const SSE_HEADERS = {
+  "Content-Type": "text/event-stream; charset=utf-8",
+  "Cache-Control": "no-cache, no-transform",
+  Connection: "keep-alive",
+  "X-Accel-Buffering": "no",
+} as const;
 import { z } from "zod";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
@@ -116,30 +124,36 @@ export async function POST(req: NextRequest) {
     .filter(Boolean)
     .join("\n");
 
-  // Sem chave: devolve um stream mínimo com a mensagem de "não configurado".
-  const encoderStreamNotConfigured = () =>
+  // Stream mínimo de uma mensagem só — o widget espera SSE mesmo quando não há
+  // conversa a ter (chave ausente, teto estourado).
+  const encoderStreamComMensagem = (text: string) =>
     new ReadableStream({
       start(controller) {
-        controller.enqueue(
-          sse({
-            type: "text_delta",
-            text: "Assistente de suporte não está configurado (ANTHROPIC_API_KEY ausente). Peça ao admin pra habilitar.",
-          })
-        );
+        controller.enqueue(sse({ type: "text_delta", text }));
         controller.enqueue(sse({ type: "done", interactionId: null, handoff: false }));
         controller.close();
       },
     });
+  const encoderStreamNotConfigured = () =>
+    encoderStreamComMensagem(
+      "Assistente de suporte não está configurado (ANTHROPIC_API_KEY ausente). Peça ao admin pra habilitar."
+    );
+
+  // Teto por agente. Sem isto, o campo "Teto mensal" que o console oferece pro
+  // agente de suporte não desligaria nada — controle inerte.
+  try {
+    await assertAgentBudget(org.id, "support");
+  } catch (err) {
+    if (err instanceof AgentBudgetExceededError) {
+      return new Response(encoderStreamComMensagem(`⚠️ ${err.message}`), {
+        headers: SSE_HEADERS,
+      });
+    }
+    throw err;
+  }
 
   if (!process.env.ANTHROPIC_API_KEY) {
-    return new Response(encoderStreamNotConfigured(), {
-      headers: {
-        "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive",
-        "X-Accel-Buffering": "no",
-      },
-    });
+    return new Response(encoderStreamNotConfigured(), { headers: SSE_HEADERS });
   }
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -348,12 +362,5 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-    },
-  });
+  return new Response(stream, { headers: SSE_HEADERS });
 }
