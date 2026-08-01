@@ -150,7 +150,6 @@ async function main() {
     orgId,
     htmlContent: contract.htmlContent ?? "",
     dataJson: contract.dataJson as Record<string, unknown>,
-    templateSource: null,
     activeClauses: [],
     googleDocId: contract.googleDocId,
   };
