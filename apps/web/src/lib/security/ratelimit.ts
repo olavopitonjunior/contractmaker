@@ -204,5 +204,10 @@ export const SCOPE_LIMITS: Record<string, { limit: number; window: Window }> = {
   // Locação (Max): leitura generosa (polling de lease/análises); escrita contida.
   "locacao:r": { limit: 300, window: "1 m" },
   "locacao:rw": { limit: 60, window: "1 m" },
+  // Agente externo (Max): lê o próprio perfil no início do turn e reporta o
+  // custo no fim. Escrita mais contida — cada request vira linha em AIUsage,
+  // que alimenta teto por agente e por contrato.
+  "agents:r": { limit: 120, window: "1 m" },
+  "agents:rw": { limit: 60, window: "1 m" },
   default: { limit: 100, window: "1 m" },
 };
