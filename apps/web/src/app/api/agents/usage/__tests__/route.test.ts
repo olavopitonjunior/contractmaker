@@ -13,6 +13,12 @@ import { POST } from "../route";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 
+// `requireApiAuth` consulta impersonation no caminho de SESSÃO. Sem o mock, o
+// teste da sessão recusada cairia no leitor de cookie real, fora de request.
+vi.mock("@/lib/auth/impersonation", () => ({
+  getImpersonationFor: vi.fn().mockResolvedValue(null),
+}));
+
 const mockAuth = vi.mocked(auth);
 const mockGetUserOrg = vi.mocked(getUserOrg);
 const mockPrisma = vi.mocked(prisma);
@@ -64,6 +70,27 @@ describe("POST /api/agents/usage", () => {
     expect(mockPrisma.aIUsage.create).not.toHaveBeenCalled();
   });
 
+  it("403 com SESSÃO, mesmo logado — reportar consumo é ato de máquina", async () => {
+    // `hasScope` dá todo escopo por presente pra session-auth. Aceitar sessão
+    // aqui deixaria qualquer conta recém-registrada na org compartilhada inflar
+    // AIUsage até estourar o teto e parar o chat de todo mundo.
+    mockAuth.mockResolvedValue({ user: { id: "user-1", email: "a@b.c" } } as never);
+    const res = await POST(req(corpoValido));
+    expect(res.status).toBe(403);
+    // Prova que parou no gate de máquina, e não por falta de org ou de escopo —
+    // esses caminhos dariam 403 pelo mesmo status e o teste passaria à toa.
+    expect((await res.json()).reason).toMatch(/máquina-a-máquina/);
+    expect(mockPrisma.aIUsage.create).not.toHaveBeenCalled();
+  });
+
+  it("403 quando o dono do token não tem org", async () => {
+    tokenComEscopos(["agents:rw"]);
+    mockGetUserOrg.mockResolvedValue(null as never);
+    const res = await POST(req(corpoValido, "cmt_x"));
+    expect(res.status).toBe(403);
+    expect(mockPrisma.aIUsage.create).not.toHaveBeenCalled();
+  });
+
   it("400 pra agente interno — não dá pra queimar o teto do Editor de fora", async () => {
     tokenComEscopos(["agents:rw"]);
     const res = await POST(req({ ...corpoValido, agentKey: "editor" }, "cmt_x"));
@@ -72,11 +99,14 @@ describe("POST /api/agents/usage", () => {
   });
 
   it("400 em contagem absurda de tokens", async () => {
+    // O teto existe porque UMA linha inflada estoura o budget de um contrato
+    // (assertContractBudget soma totalTokens por contractId, limite 200k).
     tokenComEscopos(["agents:rw"]);
-    const res = await POST(
-      req({ ...corpoValido, promptTokens: 999_000_000 }, "cmt_x")
-    );
-    expect(res.status).toBe(400);
+    for (const promptTokens of [999_000_000, 500_001]) {
+      const res = await POST(req({ ...corpoValido, promptTokens }, "cmt_x"));
+      expect(res.status).toBe(400);
+    }
+    expect(mockPrisma.aIUsage.create).not.toHaveBeenCalled();
   });
 
   it("403 quando o contractId é de outra org", async () => {
@@ -91,6 +121,19 @@ describe("POST /api/agents/usage", () => {
     const res = await POST(
       req({ ...corpoValido, contractId: "ct-alheio" }, "cmt_x")
     );
+    expect(res.status).toBe(403);
+    expect(mockPrisma.aIUsage.create).not.toHaveBeenCalled();
+  });
+
+  it("403 quando o dealId é de outra org", async () => {
+    // Ramo irmão do contractId, e independente: uma regressão só nele passaria
+    // verde se o teste cobrisse apenas o contrato.
+    tokenComEscopos(["agents:rw"]);
+    mockPrisma.deal.findUnique.mockResolvedValue({
+      pipeline: { orgId: "org-DA-OUTRA" },
+    } as never);
+
+    const res = await POST(req({ ...corpoValido, dealId: "d-alheio" }, "cmt_x"));
     expect(res.status).toBe(403);
     expect(mockPrisma.aIUsage.create).not.toHaveBeenCalled();
   });

@@ -13,6 +13,10 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { __resetAgentProfileCacheForTests } from "@/lib/ai/agents/resolve";
 
+vi.mock("@/lib/auth/impersonation", () => ({
+  getImpersonationFor: vi.fn().mockResolvedValue(null),
+}));
+
 const mockAuth = vi.mocked(auth);
 const mockGetUserOrg = vi.mocked(getUserOrg);
 const mockPrisma = vi.mocked(prisma);

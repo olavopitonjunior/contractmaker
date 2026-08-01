@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { authOrBearer, hasScope } from "@/lib/auth/auth-or-bearer";
-import { withApi } from "@/lib/api/with-api";
-import { rateLimit } from "@/lib/security/ratelimit";
 import {
-  getContractOrgId,
-  getDealOrgId,
-  resolveUserOrgId,
-} from "@/lib/security/org-scope";
+  requireApiAuth,
+  isAuthFailure,
+  authFailureResponse,
+} from "@/lib/api/require-auth";
+import { withApi } from "@/lib/api/with-api";
+import { getContractOrgId, getDealOrgId } from "@/lib/security/org-scope";
 import { calcCostUsd, recordAIUsage } from "@/lib/ai/usage";
 import {
   AGENT_REGISTRY,
@@ -20,9 +19,14 @@ export const dynamic = "force-dynamic";
 /**
  * Tetos de sanidade. Não são política de custo — são o que impede um cliente
  * externo de gravar um número absurdo numa tabela que alimenta o teto mensal por
- * agente e o teto por contrato. Um turn real fica ordens de grandeza abaixo.
+ * agente e o teto por contrato.
+ *
+ * 500k é folgado sobre qualquer turn real (a janela de contexto dos modelos que
+ * usamos é ~200k) e ainda assim contém o estrago: o valor anterior, 2M por
+ * campo, deixava UMA request gravar ~US$ 73 e dez vezes o budget inteiro de um
+ * contrato.
  */
-const MAX_TOKENS_POR_TURN = 2_000_000;
+const MAX_TOKENS_POR_TURN = 500_000;
 const MAX_LATENCIA_MS = 600_000;
 
 const bodySchema = z.object({
@@ -53,7 +57,16 @@ const bodySchema = z.object({
  * caminho o painel mentiria por omissão: o gasto do agente que roda fora do
  * repo simplesmente não existiria no total.
  *
- * Auth: Bearer com escopo `agents:rw`.
+ * Auth: Bearer com escopo `agents:rw`, e **só** Bearer.
+ *
+ * Sessão é recusada de propósito. `hasScope` considera todo escopo presente pra
+ * session-auth ("UI = poder total"), o que é razoável nas rotas em que o RBAC
+ * decide depois — e perigoso aqui: esta é a única superfície em que um cliente
+ * ESCREVE numa tabela de custo sem nenhum guard a jusante. Em produção o produto
+ * é single-tenant compartilhado com signup aberto, então qualquer conta
+ * recém-criada poderia, só com o cookie, inflar `AIUsage` até estourar o teto da
+ * org e parar o chat de todo mundo. Reportar consumo é ato de máquina; quem
+ * quiser inspecionar usa `GET /api/agents/profile` ou o painel.
  *
  * O que o cliente NÃO decide:
  *  - `operation` vem do registry (do contrário um token gravaria linhas como
@@ -63,28 +76,18 @@ const bodySchema = z.object({
  *    por quem gasta não é medição.
  */
 export const POST = withApi("POST /api/agents/usage", async (req: NextRequest) => {
-  const ident = await authOrBearer(req);
-  if (!ident) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  if (!hasScope(ident, "agents:rw")) {
+  const authed = await requireApiAuth(req, { scope: "agents:rw" });
+  if (isAuthFailure(authed)) return authFailureResponse(authed);
+  if (authed.ident.via !== "bearer") {
     return NextResponse.json(
-      { error: "Forbidden", reason: "missing scope agents:rw" },
+      {
+        error: "Forbidden",
+        reason: "esta rota é máquina-a-máquina: use um token com agents:rw",
+      },
       { status: 403 }
     );
   }
-
-  const rl = await rateLimit({
-    identifier: `agents-usage:${ident.userId}`,
-    limit: 120,
-    window: "1 m",
-  });
-  if (!rl.success) {
-    return NextResponse.json(
-      { error: "Too Many Requests", reason: "limite de 120 registros/min" },
-      { status: 429 }
-    );
-  }
+  const orgId = authed.org.id;
 
   let raw: unknown;
   try {
@@ -110,17 +113,6 @@ export const POST = withApi("POST /api/agents/usage", async (req: NextRequest) =
         allowed: EXTERNAL_AGENT_KEYS,
       },
       { status: 400 }
-    );
-  }
-
-  const orgId = await resolveUserOrgId(ident.userId);
-  if (!orgId) {
-    return NextResponse.json(
-      {
-        error: "Forbidden",
-        reason: "usuário do token não pertence a nenhuma organização",
-      },
-      { status: 403 }
     );
   }
 
@@ -159,7 +151,7 @@ export const POST = withApi("POST /api/agents/usage", async (req: NextRequest) =
   recordAIUsage({
     orgId,
     agentKey: body.agentKey,
-    userId: ident.userId,
+    userId: authed.actor.effectiveUserId,
     contractId: body.contractId ?? null,
     dealId: body.dealId ?? null,
     provider: body.provider,
