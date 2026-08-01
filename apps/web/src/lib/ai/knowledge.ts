@@ -102,12 +102,25 @@ export function normalizeKnowledgeContent(text: string): string {
  * Barra escrita na base de plataforma que não foi pedida explicitamente.
  * O controle de PERMISSÃO (super_admin) é da rota — `requirePlatform`; este
  * guard só garante que ninguém chegue em `orgId = null` por acidente.
+ *
+ * O caso `undefined` é o espelho do `assertScopeArg` da leitura, e o motivo é
+ * pior aqui: no Prisma, `data: { orgId: undefined }` OMITE a coluna e a linha
+ * nasce `NULL` — publicada na base que todo tenant lê, sem ninguém ter pedido —,
+ * e `where: { id, orgId: undefined }` vira "sem filtro de org", o que
+ * transformaria update/delete por id em operação cross-tenant. O tipo já barra o
+ * caso ingênuo; isto pega o que atravessa fronteira sem tipo (corpo de request,
+ * `as never`).
  */
 export function assertScopeAllowed(
   orgId: string | null,
   allowPlatformScope: boolean | undefined,
   op: string
 ): void {
+  if (orgId === undefined) {
+    throw new Error(
+      `[knowledge] ${op} com orgId undefined — use null pra base de plataforma. undefined viraria 'sem filtro' no Prisma.`
+    );
+  }
   if (orgId === null && !allowPlatformScope) {
     throw new Error(
       `[knowledge] ${op} com orgId nulo sem allowPlatformScope — escrita na base de plataforma precisa ser explícita.`

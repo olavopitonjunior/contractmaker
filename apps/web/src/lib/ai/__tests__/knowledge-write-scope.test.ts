@@ -94,6 +94,22 @@ describe("scopeCategory tranca a escrita numa base específica", () => {
     ).resolves.toBe(true);
   });
 
+  it("orgId undefined explode em vez de virar escrita de plataforma", async () => {
+    // Espelho do assertScopeArg da LEITURA. No Prisma, `data: { orgId: undefined }`
+    // omite a coluna e a linha nasce NULL — publicada na base que todo tenant lê,
+    // sem ninguém ter pedido; e `where: { id, orgId: undefined }` vira "sem filtro
+    // de org", o que faria update/delete por id atravessar tenants. O tipo barra o
+    // caso ingênuo; isto pega o que vem de fronteira sem tipo.
+    await expect(
+      updateKnowledgeItem("k1", undefined as unknown as null, { content: "x" })
+    ).rejects.toThrow(/undefined/);
+    await expect(
+      deleteKnowledgeItem("k1", undefined as unknown as null)
+    ).rejects.toThrow(/undefined/);
+    expect(mockPrisma.knowledgeItem.update).not.toHaveBeenCalled();
+    expect(mockPrisma.knowledgeItem.deleteMany).not.toHaveBeenCalled();
+  });
+
   it("um item jurídico não é encontrado pelo escopo do suporte", async () => {
     // O findFirst filtrado por category='support' não casa com a linha jurídica:
     // é assim que a rota do suporte responde 404 em vez de reescrever a base
