@@ -43,5 +43,22 @@ export async function PATCH(req: NextRequest) {
     data: { rating: parsed.data.rating },
   });
 
+  // 👎 é sinal explícito de resposta ruim — digest, não imediato: um único
+  // negativo é dado; o padrão de vários é que merece atenção, e o digest
+  // soma. Assinatura por interação: re-votar a mesma não duplica.
+  if (parsed.data.rating === -1) {
+    import("@/lib/alerts/platform-alerts")
+      .then(({ reportPlatformAlert }) =>
+        reportPlatformAlert({
+          kind: "support_signal",
+          signature: `rating-down:${interaction.id}`,
+          severity: "info",
+          title: "Resposta do suporte avaliada com 👎",
+          notify: "digest",
+        })
+      )
+      .catch(() => {});
+  }
+
   return NextResponse.json({ ok: true });
 }
