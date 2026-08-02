@@ -4,6 +4,7 @@ import Resend from "next-auth/providers/resend";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/db/prisma";
 import bcrypt from "bcryptjs";
+import type { AuditAction } from "@/lib/security/audit";
 import { z } from "zod";
 import { sendEmail } from "@/lib/email/client";
 import { MagicLinkEmail } from "@/lib/email/templates/magic-link";
@@ -108,14 +109,36 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
+        const userId = user.id;
         // Marca o acesso no login: limpa o label "convite pendente" (derivado de
         // lastActiveAt === null) e registra o último acesso. Fire-and-forget —
         // nunca bloqueia/quebra o login. Cobre credentials e magic link.
         prisma.orgMembership
           .updateMany({
-            where: { userId: user.id },
+            where: { userId },
             data: { lastActiveAt: new Date() },
           })
+          .catch(() => {});
+        // LOGIN_SUCCESS no AuditLog — login comum não era auditado (só
+        // elevação e logout), então "quem entrou e quando" não existia.
+        // Direto no prisma (não pelo helper audit()): aqui não há request
+        // pra extrair IP/UA, e o helper exige o contexto que não temos.
+        prisma.orgMembership
+          .findFirst({ where: { userId }, select: { orgId: true } })
+          .then((m) =>
+            prisma.auditLog.create({
+              data: {
+                orgId: m?.orgId ?? null,
+                userId,
+                // `satisfies` porque a coluna é String no Prisma — sem isso um
+                // typo aqui compilaria e a ação nunca apareceria em filtro
+                // nenhum (review #233).
+                action: "LOGIN_SUCCESS" satisfies AuditAction,
+                result: "SUCCESS",
+                resourceType: "session",
+              },
+            })
+          )
           .catch(() => {});
       }
       return token;
