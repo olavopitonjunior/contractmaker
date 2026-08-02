@@ -442,13 +442,41 @@ describe("sweepUserNotifications", () => {
     expect(where.createdAt.gte).toBeInstanceOf(Date);
   });
 
-  it("fora da janela nem consulta o banco", async () => {
-    vi.setSystemTime(new Date("2026-07-24T06:00:00Z"));
+  /**
+   * O sweep varre de madrugada; quem decide a janela é o destinatário. Antes
+   * havia um corte no topo que economizava a query — e que segurava também o
+   * e-mail, contra a regra por destinatário, e o Max, que tem fila própria.
+   */
+  it("de madrugada varre, mas adia o WhatsApp do tenant do Newton sem claim", async () => {
+    vi.setSystemTime(new Date("2026-07-24T06:00:00Z")); // 03h em São Paulo
+    notifMany.mockResolvedValue([notifRow()]);
 
     const r = await sweepUserNotifications();
 
-    expect(r.scanned).toBe(0);
-    expect(notifMany).not.toHaveBeenCalled();
+    expect(notifMany).toHaveBeenCalled();
+    expect(r.scanned).toBe(1);
+    expect(r.deferred).toBe(1);
+    expect(r.sent).toBe(0);
+    // Adiado ANTES do claim: a linha não é criada, então nada fica preso.
+    expect(delivCreate).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Paridade com o motor de deal-events: o Max recebe a qualquer hora e o
+   * outbox DELE agenda a entrega. Segurar aqui só adiaria o handoff.
+   */
+  it("de madrugada o tenant do Max entrega na hora", async () => {
+    vi.setSystemTime(new Date("2026-07-24T06:00:00Z"));
+    resolveAgent.mockResolvedValue("max");
+    dispatch.mockResolvedValue({ status: "sent", detail: { via: "max" } });
+    notifMany.mockResolvedValue([notifRow()]);
+
+    const r = await sweepUserNotifications();
+
+    expect(r.sent).toBe(1);
+    expect(r.deferred).toBe(0);
+    expect(dispatch).toHaveBeenCalledWith("max", expect.anything());
   });
 
   it("erro de query não propaga", async () => {
