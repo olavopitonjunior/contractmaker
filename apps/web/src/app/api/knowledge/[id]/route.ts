@@ -7,6 +7,7 @@ import {
   KnowledgeItemNotFoundError,
 } from "@/lib/ai/knowledge";
 import { VoyageError } from "@/lib/ai/embeddings";
+import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
 export async function GET(
   _req: NextRequest,
@@ -54,6 +55,13 @@ export async function PATCH(
       tags: Array.isArray(body.tags) ? body.tags : undefined,
       source: typeof body.source === "string" ? body.source : undefined,
     });
+    audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
+      action: "KNOWLEDGE_UPDATE",
+      result: "SUCCESS",
+      resourceType: "KnowledgeItem",
+      resource: params.id,
+      metadata: { fields: Object.keys(body) },
+    }).catch(() => {});
     return NextResponse.json({ ok: true });
   } catch (err) {
     if (err instanceof KnowledgeItemNotFoundError) {
@@ -71,7 +79,7 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const session = await auth();
@@ -87,5 +95,11 @@ export async function DELETE(
   if (!removed) {
     return NextResponse.json({ error: "Item não encontrado" }, { status: 404 });
   }
+  audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
+    action: "KNOWLEDGE_DELETE",
+    result: "SUCCESS",
+    resourceType: "KnowledgeItem",
+    resource: params.id,
+  }).catch(() => {});
   return NextResponse.json({ ok: true });
 }
