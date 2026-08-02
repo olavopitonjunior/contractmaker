@@ -66,6 +66,9 @@ export async function createOrDedupeHandoff(
   // volume baixo, zero falso positivo, e cada pergunta nova é genuinamente
   // nova (o dedupe acima já engoliu as repetidas). A pergunta é input não
   // confiável: truncada no payload, escapada no e-mail pelo motor.
+  // NOTA: assinatura por id novo = o re-arm de 24h do motor é inerte aqui de
+  // propósito; o anti-spam deste caminho é o dedupe de pergunta acima + o
+  // teto horário global (review #234).
   import("@/lib/alerts/platform-alerts")
     .then(({ reportPlatformAlert }) =>
       reportPlatformAlert({

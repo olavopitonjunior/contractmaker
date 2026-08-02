@@ -2212,7 +2212,8 @@ model AuditLog {
 /// "org X quebrou e foi apagada" é exatamente o que não pode sumir junto).
 model PlatformAlertEvent {
   id          String    @id @default(cuid())
-  /// support_signal | integration_failure | ai_budget (runtime_error na fase H)
+  /// support_signal | integration_failure | ai_budget | model_fallback
+  /// (runtime_error na fase H) — catálogo em lib/alerts/platform-alerts.ts
   kind        String
   /// Chave de dedupe DENTRO do kind (ex.: "CLICKSIGN_SEND_FAILED:org123").
   signature   String
