@@ -60,7 +60,13 @@ export async function PATCH(
       result: "SUCCESS",
       resourceType: "KnowledgeItem",
       resource: params.id,
-      metadata: { fields: Object.keys(body) },
+      // Whitelist: só os campos que o update REALMENTE consome — o body cru
+      // não tem Zod aqui e chave-lixo entraria verbatim no audit (review #236).
+      metadata: {
+        fields: Object.keys(body).filter((k) =>
+          ["title", "content", "tags", "source"].includes(k)
+        ),
+      },
     }).catch(() => {});
     return NextResponse.json({ ok: true });
   } catch (err) {
