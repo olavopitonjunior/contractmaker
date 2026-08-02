@@ -40,7 +40,12 @@ export interface ApplyPolicyOptions {
  */
 export async function applyPolicy(
   proposal: ToolCallProposal,
-  state: OrchestratorState,
+  // `Pick` em vez do state inteiro: quem executa um plano aprovado
+  // (`/chat/execute-plan`) não tem `OrchestratorState` nenhum — está fora do
+  // grafo — e exigi-lo ali obrigaria a forjar um objeto falso só pra passar no
+  // tipo. A policy sempre leu só estes quatro campos. Mesmo formato do
+  // `quarantineAttachment` logo abaixo.
+  state: Pick<OrchestratorState, "contractId" | "orgId" | "userId" | "mode">,
   options: ApplyPolicyOptions = {}
 ): Promise<PolicyDecision> {
   // Carrega budget só se a policy precisar — overhead 1 query/turn.

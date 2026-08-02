@@ -33,6 +33,10 @@ const DEFAULT_STAGING_CRON_ALLOWLIST = new Set<string>([
   "/api/cron/drafts/cleanup",
   "/api/cron/agent-runs/cleanup",
   "/api/cron/api-usage/cleanup",
+  // DB-only, sem custo externo — e é o único jeito de exercitar a retenção dos
+  // checkpoints antes de prod, já que as tabelas do LangGraph não passam pelo
+  // Prisma e não têm teste de integração.
+  "/api/cron/langgraph-checkpoints",
   // Só expirar propostas é DB-only e seguro em staging. remind (manda mensagem
   // real) e reconcile (pode disparar envelope) ficam OFF por padrão.
   "/api/cron/proposals/expire",

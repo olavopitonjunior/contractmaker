@@ -66,6 +66,10 @@
       "schedule": "0 5 1 * *"
     },
     {
+      "path": "/api/cron/langgraph-checkpoints",
+      "schedule": "0 4 * * 0"
+    },
+    {
       "path": "/api/cron/charges/due-soon",
       "schedule": "0 12 * * *"
     },
