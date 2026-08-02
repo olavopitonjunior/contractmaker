@@ -89,12 +89,12 @@ describe("GET /api/admin/agents", () => {
     );
     expect(editor.own.updatedByName).toBe("Olavo");
     expect(editor.own.updatedAt).toBe(quando.toISOString());
-    // Nome resolvido num lote só, com o id certo.
-    expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: { in: ["user-olavo"] } },
-      })
-    );
+    // Nome resolvido num lote só, com o id certo — e SEM email no select:
+    // o GET é legível por `support`, e email de staff não é "nome".
+    expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["user-olavo"] } },
+      select: { id: true, name: true },
+    });
   });
 
   it("sem linha no banco: updatedAt/updatedByName nulos e nenhum lookup de user", async () => {

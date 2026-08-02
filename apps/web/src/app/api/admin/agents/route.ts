@@ -66,15 +66,16 @@ export async function GET(req: NextRequest) {
         .filter((v): v is string => Boolean(v))
     ),
   ];
+  // Só `name` no select, de propósito: o GET é legível pela role `support`,
+  // e um fallback pra `email` vazaria o e-mail do staff onde a tela promete
+  // um nome. Sem nome, degrada pro id — feio e inofensivo.
   const editors = editorIds.length
     ? await prisma.user.findMany({
         where: { id: { in: editorIds } },
-        select: { id: true, name: true, email: true },
+        select: { id: true, name: true },
       })
     : [];
-  const editorName = new Map(
-    editors.map((u) => [u.id, u.name || u.email || u.id])
-  );
+  const editorName = new Map(editors.map((u) => [u.id, u.name || u.id]));
 
   const agents = await Promise.all(
     AGENT_DEFINITIONS.map(async (def) => {
