@@ -75,6 +75,8 @@ export function AgentDetailClient({
         {showPrompt && <TabsTrigger value="prompt">Prompt</TabsTrigger>}
         <TabsTrigger value="tools">Tools</TabsTrigger>
         <TabsTrigger value="custo">Custo</TabsTrigger>
+        {/* Snapshot carrega instructions — mesmo gate da aba Prompt. */}
+        {showPrompt && <TabsTrigger value="historico">Histórico</TabsTrigger>}
       </TabsList>
 
       <TabsContent value="config" className="pt-4">
@@ -108,7 +110,186 @@ export function AgentDetailClient({
       <TabsContent value="custo" className="pt-4">
         <CostTab agentKey={agentKey} />
       </TabsContent>
+
+      {showPrompt && (
+        <TabsContent value="historico" className="pt-4">
+          <HistoryTab agentKey={agentKey} canEdit={canEdit} orgs={orgs} />
+        </TabsContent>
+      )}
     </Tabs>
+  );
+}
+
+// ── Histórico ────────────────────────────────────────────────────────────────
+
+type Snapshot = Record<string, unknown>;
+
+interface Version {
+  id: string;
+  snapshot: Snapshot;
+  updatedByName: string | null;
+  createdAt: string;
+}
+
+/** Campos que mudaram entre dois snapshots — o diff que a tela mostra. */
+function diffSnapshots(atual: Snapshot, anterior: Snapshot | null): string[] {
+  const keys = new Set([
+    ...Object.keys(atual),
+    ...Object.keys(anterior ?? {}),
+  ]);
+  const changed: string[] = [];
+  for (const k of keys) {
+    const a = JSON.stringify(atual[k] ?? null);
+    const b = JSON.stringify(anterior?.[k] ?? null);
+    if (a !== b) changed.push(k);
+  }
+  return changed;
+}
+
+function fmt(v: unknown): string {
+  if (v === null || v === undefined) return "—";
+  if (typeof v === "string") return v.length > 120 ? `${v.slice(0, 120)}…` : v;
+  return JSON.stringify(v);
+}
+
+function HistoryTab({
+  agentKey,
+  canEdit,
+  orgs,
+}: {
+  agentKey: string;
+  canEdit: boolean;
+  orgs: OrgOption[];
+}) {
+  const [scopeOrgId, setScopeOrgId] = useState<string>("");
+  const [versions, setVersions] = useState<Version[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState<string | null>(null);
+
+  const load = useCallback(async (orgId: string) => {
+    setError(null);
+    try {
+      const qs = orgId ? `?orgId=${encodeURIComponent(orgId)}` : "";
+      const res = await fetch(`/api/admin/agents/${agentKey}/versions${qs}`);
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? "Falha ao carregar");
+      setVersions(d.versions);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao carregar");
+    }
+  }, [agentKey]);
+
+  useEffect(() => {
+    void load(scopeOrgId);
+  }, [scopeOrgId, load]);
+
+  async function restore(versionId: string) {
+    setRestoring(versionId);
+    try {
+      const res = await fetch(
+        `/api/admin/agents/${agentKey}/versions/${versionId}/restore`,
+        { method: "POST" }
+      );
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? "Falha ao restaurar");
+      await load(scopeOrgId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao restaurar");
+    } finally {
+      setRestoring(null);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="w-full max-w-sm">
+          <Label className="mb-1 block text-xs">Escopo</Label>
+          <Select
+            value={scopeOrgId || "__platform"}
+            onValueChange={(v) => setScopeOrgId(v === "__platform" ? "" : v)}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__platform">Plataforma</SelectItem>
+              {orgs.map((o) => (
+                <SelectItem key={o.id} value={o.id}>
+                  {o.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Um snapshot por salvo. Restaurar cria uma versão NOVA com o estado
+          antigo — nada é apagado, e o efeito pega em ≤1 min.
+        </p>
+      </div>
+
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      {versions && versions.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          Nenhuma escrita neste escopo ainda — o histórico começa no próximo
+          salvo.
+        </p>
+      )}
+
+      <div className="space-y-3">
+        {versions?.map((v, i) => {
+          const anterior = versions[i + 1]?.snapshot ?? null;
+          const mudou = diffSnapshots(v.snapshot, anterior);
+          return (
+            <Card key={v.id}>
+              <CardHeader className="pb-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <CardTitle className="text-sm">
+                    {new Date(v.createdAt).toLocaleString("pt-BR", {
+                      dateStyle: "short",
+                      timeStyle: "short",
+                    })}
+                    {v.updatedByName && (
+                      <span className="ml-2 font-normal text-muted-foreground">
+                        por {v.updatedByName}
+                      </span>
+                    )}
+                    {i === 0 && <Badge className="ml-2">atual</Badge>}
+                  </CardTitle>
+                  {canEdit && i > 0 && (
+                    <button
+                      className="rounded border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
+                      disabled={restoring === v.id}
+                      onClick={() => restore(v.id)}
+                    >
+                      {restoring === v.id ? "Restaurando…" : "Restaurar esta versão"}
+                    </button>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-1 text-xs">
+                {mudou.length === 0 && (
+                  <p className="text-muted-foreground">
+                    Sem mudança em relação à anterior (salvo idêntico).
+                  </p>
+                )}
+                {mudou.map((k) => (
+                  <div key={k}>
+                    <code className="font-mono">{k}</code>:{" "}
+                    {anterior && (
+                      <span className="text-muted-foreground line-through">
+                        {fmt(anterior[k])}
+                      </span>
+                    )}{" "}
+                    → <span>{fmt(v.snapshot[k])}</span>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

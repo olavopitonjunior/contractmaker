@@ -124,6 +124,37 @@ export async function upsertAgentProfile(args: {
   }
 
   invalidateAgentProfileCache(orgId, agentKey);
+
+  // Histórico: um snapshot COMPLETO do estado pós-escrita, aqui dentro
+  // porque este é o único caminho de escrita — instrumentar os call-sites
+  // deixaria buraco no primeiro esquecido. Falha de histórico NÃO falha o
+  // save (a mudança de config é a operação primária; o histórico é rede de
+  // segurança), mas é aguardada e logada — não fire-and-forget, senão um
+  // save seguido de crash perderia a versão em silêncio.
+  try {
+    await prisma.agentProfileVersion.create({
+      data: {
+        orgId,
+        agentKey,
+        snapshot: {
+          enabled: row.enabled,
+          model: row.model,
+          fallbackModel: row.fallbackModel,
+          temperature: row.temperature,
+          maxTokens: row.maxTokens,
+          instructions: row.instructions,
+          ragScope: row.ragScope as object | null,
+          monthlyBudgetUsd:
+            row.monthlyBudgetUsd === null ? null : Number(row.monthlyBudgetUsd),
+          config: row.config as object | null,
+        },
+        updatedBy: updatedBy ?? null,
+      },
+    });
+  } catch (err) {
+    console.error("[agent-profile] versão não gravada (save OK):", err);
+  }
+
   return row;
 }
 

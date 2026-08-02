@@ -1681,6 +1681,29 @@ model AgentProfile {
   @@index([agentKey])
 }
 
+/// Histórico do AgentProfile — um snapshot COMPLETO por escrita, gravado
+/// dentro do próprio `upsertAgentProfile` (o único caminho de escrita).
+/// Existe porque um erro de config de agente é silencioso e caro: o efeito
+/// aparece na QUALIDADE da resposta, dias depois, sem nada na tela apontando
+/// pra mudança. Restaurar = NOVA escrita com o snapshot antigo (gera nova
+/// versão, invalida o cache de resolução, aparece no audit) — nunca rewind.
+/// Sem FK pro AgentProfile: a linha de perfil pode ser recriada (delete +
+/// create no upsert de corrida) e o histórico não pode morrer junto.
+model AgentProfileVersion {
+  id        String   @id @default(cuid())
+  /// Espelho das chaves do perfil — é por (orgId, agentKey) que a aba
+  /// Histórico busca, não por profileId.
+  orgId     String?
+  agentKey  String
+  /// O estado COMPLETO do perfil DEPOIS desta escrita (todas as colunas
+  /// editáveis). Diff é snapshot[n] × snapshot[n-1], em memória.
+  snapshot  Json
+  updatedBy String?
+  createdAt DateTime @default(now())
+
+  @@index([orgId, agentKey, createdAt])
+}
+
 // Pendência de suporte: pergunta que a IA não soube responder. Vira item da base
 // quando respondida (retroalimentação). answeredBy = userId do staff de suporte.
 model SupportHandoff {
