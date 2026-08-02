@@ -50,6 +50,8 @@ interface AgentRow {
     instructions: string;
     ragScope: RagScope | null;
     monthlyBudgetUsd: number | null;
+    updatedAt: string | null;
+    updatedByName: string | null;
   };
   resolved: {
     model: string;
@@ -194,6 +196,19 @@ export function AgentsConsoleClient({
                   )}
               </div>
               <p className="text-xs text-muted-foreground">{row.description}</p>
+              {/* Rastro de quem mexeu por último NESTE escopo. Sem linha no
+                  banco (herda tudo), não há o que atribuir. */}
+              {row.own.updatedAt && (
+                <p className="text-[11px] text-muted-foreground">
+                  Última alteração
+                  {row.own.updatedByName ? ` por ${row.own.updatedByName}` : ""}{" "}
+                  em{" "}
+                  {new Date(row.own.updatedAt).toLocaleString("pt-BR", {
+                    dateStyle: "short",
+                    timeStyle: "short",
+                  })}
+                </p>
+              )}
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

@@ -166,6 +166,7 @@ vi.mock("@/lib/db/prisma", () => {
     user: {
       findUnique: vi.fn(),
       findFirst: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
       update: vi.fn(),
       create: vi.fn(),
     },

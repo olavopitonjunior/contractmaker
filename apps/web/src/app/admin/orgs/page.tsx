@@ -52,22 +52,6 @@ export default async function AdminOrgsPage() {
           Painel super-admin · {orgs.length} tenant(s) · você é{" "}
           <span className="font-medium">{platformRole.role}</span>
         </p>
-        <nav className="mt-2 flex gap-4 text-sm">
-          <a href="/admin/platform-roles" className="text-primary hover:underline">
-            Papéis de plataforma
-          </a>
-          <a href="/admin/support-ai" className="text-primary hover:underline">
-            IA de Suporte
-          </a>
-          <a href="/admin/agents" className="text-primary hover:underline">
-            Agentes de IA
-          </a>
-          {/* A tela existia desde o lote do RAG global e não tinha link nenhum
-              no repo — só era alcançável digitando a URL. */}
-          <a href="/admin/knowledge" className="text-primary hover:underline">
-            Base de conhecimento
-          </a>
-        </nav>
       </header>
       <AdminOrgsClient orgs={orgs} canCreate={canCreate} />
     </div>

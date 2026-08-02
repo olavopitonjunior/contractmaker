@@ -57,6 +57,26 @@ export async function GET(req: NextRequest) {
 
   const rows = await listAgentProfiles(orgId);
 
+  // `updatedBy` é gravado em toda escrita desde o primeiro dia do console e
+  // nunca tinha sido lido por tela nenhuma. Resolve os nomes num lote só.
+  const editorIds = [
+    ...new Set(
+      [...rows.values()]
+        .map((r) => r.updatedBy)
+        .filter((v): v is string => Boolean(v))
+    ),
+  ];
+  // Só `name` no select, de propósito: o GET é legível pela role `support`,
+  // e um fallback pra `email` vazaria o e-mail do staff onde a tela promete
+  // um nome. Sem nome, degrada pro id — feio e inofensivo.
+  const editors = editorIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: editorIds } },
+        select: { id: true, name: true },
+      })
+    : [];
+  const editorName = new Map(editors.map((u) => [u.id, u.name || u.id]));
+
   const agents = await Promise.all(
     AGENT_DEFINITIONS.map(async (def) => {
       const row = rows.get(def.key);
@@ -85,6 +105,10 @@ export async function GET(req: NextRequest) {
             row?.monthlyBudgetUsd === null || row?.monthlyBudgetUsd === undefined
               ? null
               : Number(row.monthlyBudgetUsd),
+          updatedAt: row?.updatedAt?.toISOString() ?? null,
+          updatedByName: row?.updatedBy
+            ? editorName.get(row.updatedBy) ?? row.updatedBy
+            : null,
         },
         resolved: {
           model: resolved.model,
