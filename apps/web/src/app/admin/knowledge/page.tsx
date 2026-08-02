@@ -80,25 +80,38 @@ export default async function PlatformKnowledgePage({
         where: { parentId: null, category: { not: "support" } },
         _count: { _all: true },
       }),
-      // "Sem embedding" = FOLHA sem vetor: linha sem filhos e com embedding
-      // nulo. O predicado importa — num item multi-chunk só os FILHOS carregam
-      // vetor, então `embedding IS NULL` cru contaria toda linha-mãe como
-      // faltante e o número viraria alarme falso permanente. A coluna é
-      // invisível ao Prisma (vector via migration crua) — SQL direto.
+      // "Sem embedding" na MESMA unidade das outras colunas (item top-level):
+      // conta o item cuja folha — ele mesmo, se não tem filhos, ou qualquer
+      // chunk-filho — está sem vetor. Contar folhas cruas misturaria unidades
+      // (1 doc de 5 chunks sem embedding apareceria como "5" ao lado de um
+      // "1" na categoria — review #232); e `embedding IS NULL` sem olhar
+      // filhos marcaria toda linha-mãe como faltante, alarme falso
+      // permanente. A coluna é invisível ao Prisma (vector via migration
+      // crua) — SQL direto.
       prisma.$queryRawUnsafe<SemEmbeddingRow[]>(
         `SELECT k."orgId", count(*)::int AS n
            FROM "KnowledgeItem" k
-          WHERE k.embedding IS NULL
+          WHERE k."parentId" IS NULL
             AND k.category <> 'support'
-            AND NOT EXISTS (
-                  SELECT 1 FROM "KnowledgeItem" c WHERE c."parentId" = k.id
-                )
+            AND (
+              (k.embedding IS NULL AND NOT EXISTS (
+                 SELECT 1 FROM "KnowledgeItem" c WHERE c."parentId" = k.id
+               ))
+              OR EXISTS (
+                 SELECT 1 FROM "KnowledgeItem" c
+                  WHERE c."parentId" = k.id AND c.embedding IS NULL
+               )
+            )
           GROUP BY k."orgId"`
       ),
-      // Uso de itens (KnowledgeItemUsage é o contador POR TENANT — o global
-      // `usageCount` mistura todos e é o que aparece no badge do item).
+      // Uso de ITENS DA PLATAFORMA pelo tenant — o filtro pelo orgId nulo do
+      // item é o que faz a coluna dizer o que o rótulo promete. Sem ele, o
+      // groupBy somaria também o uso das cláusulas próprias da org (review
+      // #232) e "quanto este tenant depende do acervo universal" viraria
+      // "quanto este tenant insere cláusula", outra pergunta.
       prisma.knowledgeItemUsage.groupBy({
         by: ["orgId"],
+        where: { knowledgeItem: { orgId: null } },
         _sum: { count: true },
       }),
     ]);
@@ -238,6 +251,12 @@ export default async function PlatformKnowledgePage({
           </table>
         </div>
       </section>
+
+      {selectedOrgId && !selectedOrg && (
+        <p className="text-sm text-destructive">
+          Org não encontrada — exibindo a base da plataforma.
+        </p>
+      )}
 
       {selectedOrg ? (
         <section className="space-y-3">
