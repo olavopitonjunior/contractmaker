@@ -377,6 +377,15 @@ export interface DispatchTotals {
   sent: number;
   skipped: number;
   deferred: number;
+  /**
+   * Entregas que falharam e serão retomadas pelo sweep.
+   *
+   * Passou a importar quando o WhatsApp ganhou um transporte que devolve
+   * `failed` (o serviço do Max — o sidecar do Newton só sabia dizer
+   * sent/skipped). Sem este contador, uma rajada de falha do Max apareceria no
+   * log do cron como "nada aconteceu": todos os buckets em zero.
+   */
+  failed: number;
 }
 
 /**
@@ -388,7 +397,7 @@ export async function dispatchUserNotification(params: {
   row?: NotificationRow;
   cache?: SweepCache;
 }): Promise<DispatchTotals> {
-  const zero: DispatchTotals = { sent: 0, skipped: 0, deferred: 0 };
+  const zero: DispatchTotals = { sent: 0, skipped: 0, deferred: 0, failed: 0 };
   const cache = params.cache ?? newCache();
   try {
     const notification =
@@ -446,6 +455,7 @@ export async function dispatchUserNotification(params: {
         if (outcome === "sent") result.sent += 1;
         else if (outcome === "skipped") result.skipped += 1;
         else if (outcome === "deferred") result.deferred += 1;
+        else if (outcome === "failed") result.failed += 1;
       }
     }
     return result;
@@ -493,6 +503,7 @@ export async function sweepUserNotifications(params?: {
     sent: 0,
     skipped: 0,
     deferred: 0,
+    failed: 0,
     resumed: 0,
     truncated: false,
   };
@@ -564,6 +575,7 @@ export async function sweepUserNotifications(params?: {
       totals.sent += r.sent;
       totals.skipped += r.skipped;
       totals.deferred += r.deferred;
+      totals.failed += r.failed;
     }
 
     if (totals.truncated) {

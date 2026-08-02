@@ -181,7 +181,7 @@ describe("dispatchUserNotification", () => {
 
     const r = await dispatchUserNotification({ notificationId: "notif1" });
 
-    expect(r).toEqual({ sent: 0, skipped: 0, deferred: 0 });
+    expect(r).toEqual({ sent: 0, skipped: 0, deferred: 0, failed: 0 });
     expect(delivCreate).not.toHaveBeenCalled();
     expect(dispatch).not.toHaveBeenCalled();
   });
@@ -323,6 +323,9 @@ describe("dispatchUserNotification", () => {
 
     expect(r.sent).toBe(0);
     expect(r.skipped).toBe(0);
+    // Contado: sem este bucket, uma rajada de falha apareceria no log do cron
+    // como "nada aconteceu" — todos os totais em zero.
+    expect(r.failed).toBe(1);
     expect(delivUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -379,7 +382,7 @@ describe("dispatchUserNotification", () => {
 
     const r = await dispatchUserNotification({ notificationId: "notif1" });
 
-    expect(r).toEqual({ sent: 0, skipped: 0, deferred: 0 });
+    expect(r).toEqual({ sent: 0, skipped: 0, deferred: 0, failed: 0 });
     // Pula ANTES de resolver destinatários: nada de claim pra envio que não sai.
     expect(membershipMany).not.toHaveBeenCalled();
     expect(delivCreate).not.toHaveBeenCalled();
@@ -399,7 +402,7 @@ describe("dispatchUserNotification", () => {
 
     const r = await dispatchUserNotification({ notificationId: "sumiu" });
 
-    expect(r).toEqual({ sent: 0, skipped: 0, deferred: 0 });
+    expect(r).toEqual({ sent: 0, skipped: 0, deferred: 0, failed: 0 });
   });
 });
 

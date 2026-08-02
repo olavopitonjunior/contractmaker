@@ -17,15 +17,10 @@
  */
 
 import { normalizeBrPhone } from "@/lib/validators/phone-br";
+// A sanitização mudou de casa pra `lib/notifications/sanitize.ts` quando o Max
+// (o outro agente de WhatsApp) passou a precisar do mesmo tratamento sem
+// arrastar junto o transporte do Newton.
 import { sanitizeUntrusted } from "@/lib/notifications/sanitize";
-
-/**
- * Reexportado por compatibilidade: a função mudou de casa pra
- * `lib/notifications/sanitize.ts` quando o Max (o outro agente de WhatsApp)
- * passou a precisar do mesmo tratamento sem arrastar junto o transporte do
- * Newton. Importes existentes continuam valendo.
- */
-export { sanitizeUntrusted };
 
 const SIDECAR_URL = process.env.NEWTON_SIDECAR_URL;
 const SIDECAR_TOKEN = process.env.NEWTON_SIDECAR_TOKEN;
