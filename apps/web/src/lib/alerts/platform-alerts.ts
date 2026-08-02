@@ -22,8 +22,17 @@
 import { prisma } from "@/lib/db/prisma";
 import { sendEmail } from "@/lib/email/client";
 import { waitUntil } from "@vercel/functions";
+import type { Prisma } from "@prisma/client";
 
-export type AlertKind = "support_signal" | "integration_failure" | "ai_budget";
+export type AlertKind =
+  | "support_signal"
+  | "integration_failure"
+  /** BLOQUEIO por teto (contrato/org/agente) — o usuário foi negado. */
+  | "ai_budget"
+  /** DEGRADAÇÃO: turn atendido no modelo de contingência. Kind próprio de
+   *  propósito (review #234) — filtrar "bloqueou" junto com "degradou"
+   *  conflataria severidades bem diferentes. */
+  | "model_fallback";
 export type AlertSeverity = "info" | "warning" | "critical";
 
 export interface PlatformAlertInput {
@@ -68,7 +77,7 @@ async function doReport(input: PlatformAlertInput): Promise<void> {
       orgId: input.orgId ?? null,
       severity,
       title: input.title,
-      payload: (input.payload ?? undefined) as never,
+      payload: (input.payload ?? undefined) as Prisma.InputJsonValue | undefined,
       lastSeenAt: now,
     },
     update: {
@@ -76,13 +85,18 @@ async function doReport(input: PlatformAlertInput): Promise<void> {
       lastSeenAt: now,
       severity,
       title: input.title,
-      payload: (input.payload ?? undefined) as never,
+      payload: (input.payload ?? undefined) as Prisma.InputJsonValue | undefined,
     },
   });
 
   if (input.notify !== "immediate") return;
 
   // Re-arm: já e-mailamos esta assinatura há menos de 24h → vira digest.
+  // Risco ACEITO (review #234): duas primeiras-ocorrências simultâneas da
+  // mesma assinatura podem ambas ler notifiedAt nulo e e-mailar em dobro —
+  // o carimbo só acontece depois do envio. Janela rara, dano = 1 e-mail
+  // duplicado, e o teto horário segura o caso patológico; serializar isto
+  // numa transação não paga o que custa.
   if (row.notifiedAt && now.getTime() - row.notifiedAt.getTime() < REARM_MS) {
     return;
   }

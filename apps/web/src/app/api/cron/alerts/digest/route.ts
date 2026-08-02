@@ -37,13 +37,23 @@ export async function GET(req: NextRequest) {
 
   // O filtro notifiedAt < lastSeenAt é coluna-contra-coluna — feito em JS
   // sobre a janela de 24h (dezenas de linhas no pior caso), não em SQL.
+  // Caps deliberados: 200 no fetch / 100 no e-mail — o digest é
+  // auto-limitante por design; o que ficar de fora segue sem carimbo e
+  // volta amanhã. Ordenação por severidade REAL (não alfabética — "warning"
+  // é mais grave que "info" e vem antes; review #234).
+  const SEV_RANK: Record<string, number> = { critical: 0, warning: 1, info: 2 };
   const recentes = await prisma.platformAlertEvent.findMany({
     where: { lastSeenAt: { gte: since } },
-    orderBy: [{ severity: "asc" }, { count: "desc" }],
+    orderBy: { count: "desc" },
     take: 200,
   });
   const pendentes = recentes
     .filter((p) => !p.notifiedAt || p.notifiedAt < p.lastSeenAt)
+    .sort(
+      (a, b) =>
+        (SEV_RANK[a.severity] ?? 9) - (SEV_RANK[b.severity] ?? 9) ||
+        b.count - a.count
+    )
     .slice(0, 100);
 
   if (pendentes.length === 0) {

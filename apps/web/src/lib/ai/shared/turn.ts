@@ -65,7 +65,7 @@ export async function* streamOneTurn(
     import("@/lib/alerts/platform-alerts")
       .then(({ reportPlatformAlert }) =>
         reportPlatformAlert({
-          kind: "ai_budget",
+          kind: "model_fallback",
           signature: `fallback:${params.model}`,
           severity: "info",
           title: `Modelo ${params.model} em fallback por sobrecarga (${reason})`,
