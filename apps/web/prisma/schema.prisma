@@ -1636,8 +1636,8 @@ model AgentProfile {
   id       String  @id @default(cuid())
   /// null = default da plataforma; preenchido = override do tenant.
   orgId    String?
-  /// analyst | legal | editor | curator | passive | support | ocr | insights |
-  /// chat_legacy | max — catálogo em lib/ai/agents/registry.ts
+  /// analyst | legal | editor | curator | aggregator | passive | support |
+  /// ocr | insights | chat_legacy | max — catálogo em lib/ai/agents/registry.ts
   agentKey String
   enabled  Boolean @default(true)
 
