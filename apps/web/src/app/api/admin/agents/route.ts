@@ -33,6 +33,7 @@ import {
   RAG_SCOPE_CATEGORIES,
 } from "@/lib/ai/agents/store";
 import { resolveAgentProfile } from "@/lib/ai/agents/resolve";
+import { effectiveModels } from "@/lib/ai/agents/model-provenance";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +57,28 @@ export async function GET(req: NextRequest) {
   }
 
   const rows = await listAgentProfiles(orgId);
+
+  // Modelos que REALMENTE rodaram nos últimos 30 dias, direto do AIUsage.
+  // No escopo de plataforma a janela é o sistema inteiro — é a visão que teria
+  // denunciado em maio o modelo aposentado que só foi descoberto em julho.
+  const seenSince = new Date(Date.now() - 30 * 24 * 60 * 60_000);
+  const seenGroups = await prisma.aIUsage.groupBy({
+    by: ["agentKey", "model"],
+    where: {
+      createdAt: { gte: seenSince },
+      ...(orgId ? { orgId } : {}),
+      agentKey: { not: null },
+    },
+    _count: { _all: true },
+  });
+  const seenByAgent = new Map<string, { model: string; calls: number }[]>();
+  for (const s of seenGroups) {
+    if (!s.agentKey) continue;
+    const arr = seenByAgent.get(s.agentKey) ?? [];
+    arr.push({ model: s.model, calls: s._count._all });
+    seenByAgent.set(s.agentKey, arr);
+  }
+  for (const arr of seenByAgent.values()) arr.sort((a, b) => b.calls - a.calls);
 
   // `updatedBy` é gravado em toda escrita desde o primeiro dia do console e
   // nunca tinha sido lido por tela nenhuma. Resolve os nomes num lote só.
@@ -116,6 +139,14 @@ export async function GET(req: NextRequest) {
           enabled: resolved.enabled,
           ragScope: resolved.ragScope,
         },
+        /**
+         * Modelo EFETIVO com procedência — a MESMA função que os call-sites
+         * usam (model-provenance.ts). Inclui a camada env, invisível ao
+         * perfil resolvido acima.
+         */
+        provenance: effectiveModels(def.key, resolved),
+        /** Modelos vistos no AIUsage (30d) — a verdade a posteriori. */
+        modelsSeen: seenByAgent.get(def.key) ?? [],
       };
     })
   );

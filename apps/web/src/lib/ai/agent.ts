@@ -15,9 +15,13 @@ import {
 } from "./budget";
 import { loadExpertContext } from "./expert-context";
 import { resolveAgentProfile } from "./agents/resolve";
+import {
+  chatLegacyEffectiveModel,
+  passiveEffectiveModel,
+} from "./agents/model-provenance";
 import { composeSystemPrompt } from "./agents/prompt-blocks";
 import { wantsDirectEdit as routerWantsDirectEdit } from "./orchestrator/routing";
-import { getAnthropicClient, HAIKU_MODEL, SONNET_MODEL, resolveModel } from "./shared/anthropic-client";
+import { getAnthropicClient } from "./shared/anthropic-client";
 import { loadContext } from "./shared/context";
 import { resolveSession, loadChatHistory } from "./shared/session";
 import { streamOneTurn, type StreamedTurnResult } from "./shared/turn";
@@ -60,23 +64,10 @@ async function getAgentConfig(orgId: string, mode: AgentMode) {
   // hardcoded. O agente legado é o `chat_legacy` do catálogo.
   const profile = await resolveAgentProfile("chat_legacy", orgId);
 
-  // Resolução de modelo por modo:
-  // - fast: SEMPRE Haiku (sobrepõe o perfil). Otimizado pra latência.
-  // - plan: respeita o perfil > ANTHROPIC_MODEL env > default do catálogo
-  //   (raciocínio mais profundo justifica o custo 3× maior).
-  // resolveModel migra IDs aposentados que sobrevivam no banco/env (404 na API).
-  let model: string;
-  if (mode === "fast") {
-    model = HAIKU_MODEL;
-  } else if (profile.modelSource === "default") {
-    // Ninguém configurou o agente no console → o env continua mandando, como
-    // sempre mandou. Sem o `modelSource` isto seria inalcançável (o perfil
-    // resolvido NUNCA vem com model null) e o `ANTHROPIC_MODEL` viraria código
-    // morto — trocando Haiku por Sonnet em produção sem ninguém pedir.
-    model = resolveModel(process.env.ANTHROPIC_MODEL, profile.model);
-  } else {
-    model = profile.model;
-  }
+  // Resolução por modo (fast fixo em Haiku; plan = perfil > ANTHROPIC_MODEL >
+  // default), centralizada em model-provenance.ts — a mesma função que a tela
+  // de procedência do /admin lê. Mudança de precedência acontece lá, uma vez.
+  const model = chatLegacyEffectiveModel(profile, mode);
 
   // O `AgentConfig.systemPrompt` SUBSTITUÍA o prompt default aqui. Agora é
   // APÊNDICE, como em todo o resto: a UI do tenant promete "somadas, nunca
@@ -969,24 +960,14 @@ export async function runPassiveAnalysis(
   if (params.trigger === "approve") {
     // Nothing to do — /approve route handles validation
   } else {
-    // `open` = passe deep (default Sonnet), agora com env DEDICADO
-    // (ANTHROPIC_PASSIVE_OPEN_MODEL). Antes pegava carona no ANTHROPIC_MODEL
-    // (env do chat) — impossível ajustar o custo do passivo sem mexer no chat.
-    // O skip-por-hash acima já elimina o custo das reaberturas sem mudança —
-    // que era onde o dinheiro vazava.
-    // `||` (não `??`): env setada como string VAZIA não pode engolir o
-    // fallback pro ANTHROPIC_MODEL configurado.
-    // Modelo configurado no console vence os envs; sem configuração explícita
-    // (`modelSource === "default"`) a cadeia de envs continua como estava.
-    const passiveModel =
-      passiveProfile.modelSource !== "default"
-        ? passiveProfile.model
-        : params.trigger === "open"
-          ? resolveModel(
-              process.env.ANTHROPIC_PASSIVE_OPEN_MODEL || process.env.ANTHROPIC_MODEL,
-              SONNET_MODEL
-            )
-          : resolveModel(process.env.ANTHROPIC_PASSIVE_MODEL, HAIKU_MODEL);
+    // Cadeia console > env dedicado > default, centralizada em
+    // model-provenance.ts — a MESMA função que a tela de procedência do /admin
+    // lê. Se divergirem, a tela vira estimativa; foi estimativa que deixou um
+    // modelo aposentado rodar aqui por dois meses via env.
+    const passiveModel = passiveEffectiveModel(
+      passiveProfile,
+      params.trigger === "open" ? "open" : "edit"
+    );
     modelUsed = passiveModel;
 
     let analysisInput: string;
