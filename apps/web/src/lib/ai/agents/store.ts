@@ -23,6 +23,44 @@ export interface AgentProfilePatch {
 }
 
 /**
+ * Valor que o runtime não honra tentando entrar no perfil. O guard mora AQUI
+ * (review #235) porque a rota PATCH do admin era o único ponto de enforcement
+ * e o restore de versão já nasceu como segundo caminho de escrita que o
+ * contornava — o próximo caminho esqueceria de novo. Só valores COM EFEITO
+ * contam: gravar null/true (o estado inerte) é sempre permitido, senão um
+ * restore de snapshot todo-nulo de um agente travado falharia à toa.
+ */
+export class UnsupportedAgentFieldError extends Error {
+  constructor(readonly fields: string[]) {
+    super(
+      `Este agente ainda não honra: ${fields.join(", ")}. Gravar criaria configuração sem efeito.`
+    );
+    this.name = "UnsupportedAgentFieldError";
+  }
+}
+
+function assertPatchSupported(agentKey: AgentKey, patch: AgentProfilePatch): void {
+  const supports = AGENT_REGISTRY[agentKey].supports;
+  const bad = [
+    (patch.model != null ||
+      patch.fallbackModel != null ||
+      patch.temperature != null ||
+      patch.maxTokens != null) &&
+    !supports.model
+      ? "modelo"
+      : null,
+    patch.enabled === false && !supports.enabled ? "liga/desliga" : null,
+    patch.instructions != null && patch.instructions.trim() !== "" && !supports.instructions
+      ? "instruções"
+      : null,
+    patch.ragScope != null && !supports.ragScope
+      ? "escopo de base de conhecimento"
+      : null,
+  ].filter((v): v is string => v !== null);
+  if (bad.length > 0) throw new UnsupportedAgentFieldError(bad);
+}
+
+/**
  * Modelos que o console aceita. Allowlist server-side é obrigatória: um ID
  * inválido (ou um modelo novo demais, que rejeita `temperature` com 400)
  * quebraria o chat em produção só por alguém ter digitado errado.
@@ -78,6 +116,10 @@ export async function upsertAgentProfile(args: {
   updatedBy?: string | null;
 }) {
   const { orgId, agentKey, patch, updatedBy } = args;
+
+  // Defense-in-depth de `supports` pra TODO escritor (a rota PATCH mantém o
+  // check dela pra mensagem de 400 amigável; aqui é a invariante).
+  assertPatchSupported(agentKey, patch);
 
   // `findFirst` + create/update em vez de `upsert`: o upsert do Prisma precisa
   // de um where único, e `orgId_agentKey` não casa com orgId NULL (dois NULLs

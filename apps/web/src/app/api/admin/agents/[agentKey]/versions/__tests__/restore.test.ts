@@ -96,6 +96,32 @@ describe("POST restore", () => {
     expect((await call("editor", "v1")).status).toBe(404);
   });
 
+  it("org da versão foi excluída: 404 explicado, não P2003/500 (review #235)", async () => {
+    mockPrisma.agentProfileVersion.findUnique.mockResolvedValue(
+      versao({ orgId: "org-apagada" }) as never
+    );
+    mockPrisma.organization.findUnique.mockResolvedValue(null as never);
+    const res = await call("editor", "v1");
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toContain("excluída");
+    expect(mockPrisma.agentProfile.create).not.toHaveBeenCalled();
+  });
+
+  it("snapshot pré-guard com campo que o runtime não honra: 409 via store (review #235)", async () => {
+    // aggregator não honra modelo — o guard agora mora no upsertAgentProfile,
+    // então TODO escritor herda, inclusive o restore.
+    mockPrisma.agentProfileVersion.findUnique.mockResolvedValue(
+      versao({
+        agentKey: "aggregator",
+        snapshot: { ...versao().snapshot, model: "claude-sonnet-4-6" },
+      }) as never
+    );
+    const res = await call("aggregator", "v1");
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("modelo");
+    expect(mockPrisma.agentProfile.create).not.toHaveBeenCalled();
+  });
+
   it("snapshot com modelo não-permitido é 409, não aplicação cega", async () => {
     mockPrisma.agentProfileVersion.findUnique.mockResolvedValue(
       versao({
