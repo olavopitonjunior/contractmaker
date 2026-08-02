@@ -2,7 +2,7 @@
 
 > Estado: **lado plataforma entregue** (features, gate, roteador, trigger, RAG M2M,
 > forms de locação por Bearer). O **serviço do Max ainda não existe** — nada é
-> entregue por ele até a Fase 0 (WABA + templates + deploy) concluir.
+> entregue por ele até a Fase 0 (instância Z-API + número + deploy) concluir.
 > Documento irmão: [`newton-integration.md`](newton-integration.md).
 
 ## 1. Por que existe
@@ -27,11 +27,28 @@ próprio; (c) a plataforma já investiu nessa direção — `/api/agents/profile
 `/api/agents/usage` (#225), o registry com `max: { external: true }`, e o
 orquestrador do chat já roda LangGraph TS.
 
-**Limitação assumida: a Cloud API oficial não manda mensagem em GRUPO.** Os
-recursos de grupo do Newton (`WhatsappGroup`, `DealGroupLink`) dependem do
-gateway QR não-oficial e ficam **fora do escopo do Max**. Toda notificação do Max
-é DM individual, o que cobre 100% do objetivo nº 1. Se algum RE/MAX pedir grupo,
-a decisão de transporte precisa ser reaberta.
+**Transporte: Z-API**, o mesmo provider que o Newton usa desde 2026-05-11 (a
+Cloud API oficial ficou *parked* como rollback, atrás de `WHATSAPP_PROVIDER=meta|zapi`
+no bridge). Escolha do dono, para não depender da verificação de negócio da Meta.
+
+O que isso implica, e é bem diferente da Cloud API:
+
+- **Sem janela de 24h e sem template.** Toda notificação proativa sai como texto
+  livre, a qualquer hora. Some a complexidade de submeter/aprovar template e de
+  encaixar o texto em `{{1}}`/`{{2}}`.
+- **Grupo é possível.** Os JIDs `<dígitos>-group` de `WhatsappGroup`/`DealGroupLink`
+  são justamente do Z-API — é assim que o Newton manda relatório em grupo hoje.
+  Fica fora do MVP por escopo, não por impedimento técnico.
+- **Áudio e imagem** trafegam pelos endpoints de mídia do Z-API, sem aprovação
+  prévia.
+- **O custo é por número/instância**, não por conversa.
+- **Em troca: risco de ban.** O número é conectado por QR (WhatsApp Web), não é
+  oficial. Uso atípico pode derrubá-lo — é o trade-off já registrado na persona
+  do Newton. Um número dedicado ao Max isola esse risco do Newton.
+
+**O lado plataforma não sabe disso.** `lib/max/notify-trigger.ts` entrega os
+fatos ao serviço e ignora qual gateway está atrás; trocar Z-API por outro não
+toca em nada deste repo.
 
 ## 2. Os dois interruptores (não confundir)
 
@@ -51,11 +68,14 @@ expressar exclusão mútua, então `resolveWhatsappAgent` desempata com
 
 ## 3. Contrato do `/notify` (o que o serviço precisa implementar)
 
-Estruturado com HMAC, **não** um turn de texto. Por quê: fora da janela de 24h a
-Cloud API só aceita template com variáveis posicionais (prosa não mapeia pra
-`{{1}}`/`{{2}}`); some a superfície de prompt-injection que obrigava a cerca
-`<conteudo>`; e 202+id é aceite de verdade, enquanto no Newton um `AbortError`
-contava como envio.
+Estruturado com HMAC, **não** um turn de texto. Por quê: notificação não é
+trabalho de LLM — o turn do Newton gasta um modelo para retransmitir um texto
+que já está pronto, e pode decidir não mandar, reescrever o fato ou errar o
+destinatário (foi o #189). Além disso some a superfície de prompt-injection que
+obrigava a cerca `<conteudo>`, e 202+id vira aceite de verdade, enquanto no
+Newton um `AbortError` contava como envio.
+
+Título e corpo viajam separados porque quem decide a forma final é o serviço.
 
 ```http
 POST https://max.<dominio>/notify
@@ -68,11 +88,11 @@ Content-Type: application/json
   "audience":      "platform_user" | "deal_broker" | "deal_party",
   "phone":         "+5511987654321",      // já normalizado E.164 COM "+"
   "recipientName": "Marcia Gerente",
-  "title":         "Contrato pronto",     // → {{2}} no template
-  "body":          "O contrato foi gerado.", // → {{3}}
+  "title":         "Contrato pronto",     // o serviço decide a forma final
+  "body":          "O contrato foi gerado.",
   "linkUrl":       "https://.../deals/1" | null,
   "dealId":        "cm..." | null,
-  "orgName":       "RE/MAX Trio",         // → {{1}}; um número atende os 3 tenants
+  "orgName":       "RE/MAX Trio",         // um número atende os 3 tenants
   "dedupeKey":     "<id da linha de log>" // idempotência ponta a ponta
 }
 ```
@@ -88,9 +108,10 @@ Obrigações do serviço:
 - **Adiar, nunca descartar.** A janela de cortesia 7h–22h `America/Sao_Paulo`
   passou a ser responsabilidade do outbox do Max: aceite a qualquer hora e
   agende a entrega pra próxima abertura. Ver §4.
-- **Redirector de link.** O botão de URL dinâmica da Meta só varia o *sufixo*
-  sobre uma base fixa, e os tenants usam subdomínios distintos. Guarde o link
-  real e sirva `GET /r/{id}` → 302.
+- **Redirector de link (opcional).** Com texto livre o link vai inteiro na
+  mensagem, então não há a restrição de sufixo que a Meta impunha. Um
+  `GET /r/{id}` → 302 continua valendo só pela métrica de clique por
+  notificação — decidir depois, não bloqueia o MVP.
 - **Semear o thread.** Registrar a notificação como mensagem do assistente no
   checkpoint, para que "o que é isso?" tenha contexto no turno seguinte.
 
@@ -100,12 +121,18 @@ Antes: os dois trilhos seguravam o envio fora da janela. O trilho de deal-events
 **não tem cron de reconciliação**, então tudo que nascia de madrugada era
 perdido em silêncio.
 
-Agora, quando o agente resolvido é o Max, os call-sites **não** checam a janela —
-entregam, e o outbox do Max agenda. No Newton nada muda: sem fila, descartar
-continua sendo o certo, e o `skipped` fica visível no histórico do negócio.
+Agora, **nos dois trilhos**, quando o agente resolvido é o Max os call-sites não
+checam a janela: entregam, e o outbox do Max agenda. No Newton nada muda — sem
+fila, descartar (deal-events) ou adiar até o próximo sweep (user-channels)
+continua sendo o certo.
 
-O trilho `user-channels` mantém a lógica de janela como estava (ele já adia e
-retoma pelo sweep `*/5min`, sem perda) — só o transporte mudou.
+Isso exigiu tirar um corte que existia no topo de `sweepUserNotifications`
+(`if (!isWithinWhatsappWindow()) return totals`). Ele era uma economia de query,
+mas cobria mais do que devia: aquele sweep serve os DOIS canais, então a
+madrugada segurava também o **e-mail** — o oposto do que a regra por
+destinatário no mesmo arquivo diz querer ("e-mail não acorda ninguém às 23h, e
+adiá-lo até as 7h atrasaria por nada"). Efeito colateral a confirmar com o
+produto: **notificação de sistema por e-mail passa a sair de madrugada**.
 
 ## 5. Superfície que o Max consome
 
@@ -146,10 +173,10 @@ nunca dados de negócio.
 
 ## 7. Rollout e runbook
 
-1. **Fase 0 (humana, é o gargalo):** verificação de negócio na Meta, número +
-   WABA, templates UTILITY submetidos (aprovação leva dias — submeter também um
-   conjunto por evento, porque template genérico às vezes é recusado), database
-   Neon do Max, subdomínio no VPS, service-users e tokens.
+1. **Fase 0 (humana):** instância Z-API + número dedicado ao Max (pareado por
+   QR), database Neon do Max, subdomínio no VPS, service-users e tokens. Muito
+   mais curta do que seria com a Meta — sem verificação de negócio e sem
+   aprovação de template, dá pra fazer no mesmo dia.
 2. **Ligar org a org.** As features nascem `default: false`, então rollout é um
    flip em `/admin` — sem deploy. Sugestão: Trio primeiro, 1–2 semanas, depois
    Ace e Ativa.
@@ -164,9 +191,9 @@ nunca dados de negócio.
 
 ## 8. Lacunas conhecidas
 
-- **Entrega pós-202 é ponto cego.** Falha real (template recusado, número sem
-  WhatsApp, bloqueio) só aparece nos callbacks da Meta, hoje visíveis apenas
-  dentro do Max. A reconciliação de volta (`POST /api/webhooks/max` atualizando
+- **Entrega pós-202 é ponto cego.** Falha real (número sem WhatsApp, bloqueio,
+  instância desconectada) só aparece nos callbacks do Z-API, hoje visíveis
+  apenas dentro do Max. A reconciliação de volta (`POST /api/webhooks/max` atualizando
   as tabelas de log) é Fase 4.
 - **`supports` do `max` segue `false`** no registry: o serviço ainda não lê o
   perfil, e a tela não deve prometer controle que o runtime não honra. Virar
@@ -176,3 +203,53 @@ nunca dados de negócio.
 - **Corretor não-`User` não tem lookup por telefone.** Só `User.phone` resolve
   via `/api/users/by-phone`. Estender pra `SplitRecipient` é Fase 4, se a demanda
   aparecer.
+
+## 9. O que reaproveitar do `.openclaw` (auditado em 2026-08-01)
+
+**Correção de premissa:** o agente `max` que existe em `~/.openclaw/agents/max/`
+**não é** o agente das RE/MAX. É o *Max analista de crédito e seguro fiança da
+NewCore* (recipe `credit-fianca`), com `state.json.setupCompletedAt: null`,
+container parado desde 2026-06-29. O agente das RE/MAX **nunca existiu** — está
+registrado só como decisão no `changelog.md:223` do `.openclaw`: *"o Newton é que
+é só do Contractmaker; as RE/MAX terão outro agente… `NEWTON_SIDECAR_URL`/
+`NEWTON_AGENT_ID` são env globais, então o segundo agente vai exigir roteamento
+por org."* É exatamente esse roteamento que `lib/agents/whatsapp-router.ts` +
+`MAX_NOTIFY_URL` resolvem.
+
+### Ativos aproveitáveis
+
+| Item | Onde | Nota |
+|---|---|---|
+| **Cliente Z-API completo** | `whatsapp-newton-bridge/src/lib/z-api.ts` (~364 ln) | Já batido contra a API real: `send-text`, `send-audio` (voice note com `waveform:true`), `group-metadata`, parse de webhook com os defeitos do provedor. **Ler antes de escrever qualquer linha de Z-API.** |
+| **Debounce de rajada** | `whatsapp-newton-bridge/src/lib/inbox-buffer.ts` | 12s idle / 60s teto / 20 msgs. Problema real já resolvido; a bridge do Max nunca teve |
+| **Modelo de sessão** | sidecar: `session_key = dm:<phone>` \| `group:<groupId>`, 20 turns | Mapeia direto no `thread_id` do checkpointer |
+| **Estrutura de persona** | `~/.openclaw/agents/max/persona/*.md` | Reaproveitar a ESTRUTURA e o tom; o domínio (fiança/crédito) não serve ao agente das RE/MAX |
+| **Telefone do owner** | `5511999063228` (LID `105231060877341`) | Seed de admin em qualquer RBAC novo |
+
+### Números
+
+- **Candidato ao Max: `+55 11 94717-4266`** — chip que rodava com Baileys. Sessão
+  `loggedOut` desde 2026-06-26 e container parado desde 29/06: trate como
+  *candidato*, não como ativo. Confirmar se o chip segue ativo na operadora; ir
+  pra Z-API exige re-parear por QR de qualquer forma.
+- **Newton: `+55 11 93623-4694`**, na instância Z-API `3F2F70D1…`. Uma instância
+  Z-API atende **um** número — o Max precisa de **instância própria** (~R$99/mês),
+  não dá pra dividir sem desemparelhar o Newton.
+
+### Três armadilhas de produção já pagas
+
+1. **Z-API desemparelhada responde HTTP 200 com `messageId` válido e não
+   entrega.** Status code não é prova de entrega — monitorar o estado da
+   instância, e é mais um motivo pra reconciliação de entrega (§8) sair da
+   Fase 4 se o volume crescer.
+2. **Menção em grupo chega como LID, não como telefone.** Um gate de acionamento
+   que compare com E.164 nunca dispara. Guardar o LID do bot junto do número.
+3. **`docker restart` não relê `env_file`** — só `up -d` recria o container.
+
+### Não reaproveitar
+
+A bridge Baileys (`~/.openclaw/bin/wa-bridge/`) morre com a mudança pra Z-API
+(webhook stateless no lugar de websocket persistente). O heartbeat embutido do
+gateway OpenClaw também não: 48 execuções ociosas por dia com sessão sem poda
+queimaram US$ 150 de OpenRouter num agente fora de produção. Em LangGraph, cron
+externo e contexto podado.

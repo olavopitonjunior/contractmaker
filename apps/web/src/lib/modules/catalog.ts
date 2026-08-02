@@ -160,7 +160,7 @@ export function newtonFeatureForDealKind(kind: string): FeatureKey {
  *
  * Mesma forma do Newton (uma chave por módulo, default OFF), porque a escolha é
  * por TENANT e não por instalação: o Newton roda em OpenClaw com número pareado
- * por QR, o Max em serviço próprio sobre a WhatsApp Cloud API oficial. Um tenant
+ * por QR, o Max em serviço próprio com gateway e número próprios. Um tenant
  * tem um ou outro; ligar os dois no mesmo módulo é configuração inválida, e quem
  * resolve o empate é `resolveWhatsappAgent` (lib/agents/whatsapp-router.ts), que
  * dá precedência ao Max.

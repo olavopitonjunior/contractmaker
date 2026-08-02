@@ -1,26 +1,34 @@
 /**
  * Envio de notificação do sistema pelo Max — o agente de WhatsApp dos tenants
- * RE/MAX, que roda fora deste repo (serviço LangGraph sobre a WhatsApp Cloud
- * API oficial).
+ * RE/MAX, que roda fora deste repo (serviço LangGraph com gateway e número
+ * próprios).
+ *
+ * Este módulo é AGNÓSTICO de gateway de propósito: ele entrega os fatos ao
+ * serviço e não sabe se do outro lado há Z-API, Cloud API ou outro. Trocar o
+ * gateway não deve tocar em nada aqui.
  *
  * Contraste deliberado com `lib/newton/notify-trigger.ts`: lá o transporte é um
  * TURN EM LINGUAGEM NATURAL que instrui um agente a chamar `whatsapp_send`;
  * aqui é um POST estruturado, campo a campo, sem prompt no meio. Três razões:
  *
- *  1. **Template da Meta.** Fora da janela de 24h a Cloud API só aceita template
- *     com variáveis posicionais — e é esse o caso da esmagadora maioria das
- *     notificações proativas, porque a janela só abre se o destinatário falou
- *     com o Max nas últimas 24h. Um turn em prosa não mapeia pra `{{1}}`/`{{2}}`.
+ *  1. **Notificação não é trabalho de LLM.** O turn do Newton gasta um modelo
+ *     para retransmitir um texto que já está pronto, e pode decidir não mandar,
+ *     reescrever o fato ou errar o destinatário — falha medida em produção
+ *     (#189). Aqui o caminho é determinístico: sem modelo, sem custo, sem
+ *     criatividade.
  *  2. **Sem superfície de injeção.** O texto do negócio deixa de ser costurado
- *     dentro de um prompt, então não há cerca `<conteudo>` a arrombar. Continua
- *     sanitizado — a Meta recusa quebra de linha em parâmetro de template.
+ *     dentro de um prompt, então não há cerca `<conteudo>` a arrombar.
  *  3. **Aceite de verdade.** 202 + id é resposta; o `AbortError` do Newton, que
  *     este módulo NÃO imita, era contado como envio.
  *
+ * Título e corpo viajam SEPARADOS (e não como uma frase pronta) porque quem
+ * decide a forma final é o serviço: ele conhece o transporte, o idioma do
+ * destinatário e se cabe um botão. A plataforma entrega os fatos.
+ *
  * O que 202 significa: "o Max assumiu a entrega", não "o destinatário recebeu".
- * A entrega real (incluindo adiamento pra dentro da janela de cortesia 7h–22h,
- * que passa a ser responsabilidade do outbox do Max) só é conhecida pelos
- * callbacks de status da Meta, hoje visíveis apenas do lado do Max.
+ * A entrega real (incluindo o adiamento pra dentro da janela de cortesia
+ * 7h–22h, que passa a ser responsabilidade do outbox do Max) só é conhecida
+ * pelos callbacks de status do gateway, hoje visíveis apenas do lado do Max.
  *
  * Gates, na ordem: `MAX_DISABLED` global → feature por org (default OFF) → envs
  * presentes → telefone normalizável. Qualquer um fechado → "skipped".
@@ -49,11 +57,11 @@ export interface MaxNotifyArgs {
   /** Telefone em formato livre (cadastro do corretor ou User.phone) — normalizado aqui. */
   phone: string;
   recipientName: string;
-  /** Título curto do evento. Vira `{{2}}` no template. */
+  /** Título curto do evento. O serviço decide como renderizar. */
   title: string;
-  /** Corpo da atualização. Vira `{{3}}` no template. */
+  /** Corpo da atualização. */
   body: string;
-  /** Link do recurso; o Max encurta via redirector próprio (o host varia por tenant). */
+  /** Link do recurso, já absoluto (o host varia por tenant — subdomínio por org). */
   linkUrl?: string | null;
   dealId?: string | null;
   /**

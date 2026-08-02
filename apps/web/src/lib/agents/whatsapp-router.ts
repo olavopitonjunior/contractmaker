@@ -1,9 +1,9 @@
 /**
  * Qual agente de WhatsApp atende este tenant — e o despacho unificado.
  *
- * A plataforma tem dois: o **Newton** (OpenClaw, número pareado por QR, turn em
- * linguagem natural) e o **Max** (serviço LangGraph próprio sobre a WhatsApp
- * Cloud API oficial, dos tenants RE/MAX). A escolha é de CONFIGURAÇÃO, por org,
+ * A plataforma tem dois: o **Newton** (OpenClaw, turn em linguagem natural) e o
+ * **Max** (serviço LangGraph próprio, com gateway e número próprios, dos
+ * tenants RE/MAX). A escolha é de CONFIGURAÇÃO, por org,
  * via as features `vendas.max`/`locacao.max` e `vendas.newton`/`locacao.newton`
  * — todas default OFF.
  *
@@ -68,10 +68,10 @@ export interface WhatsappNotifyArgs {
    * Sufixo que o Newton concatena ao corpo — hoje "Acompanhe em <url>".
    *
    * Existe porque os dois transportes renderizam os MESMOS fatos de formas
-   * diferentes: o Newton recebe uma frase única pra transmitir, enquanto o Max
-   * manda título, corpo e link em campos separados (viram `{{1}}`/`{{2}}` e
-   * botão no template da Meta). Sem isso, unificar mudaria o texto que os
-   * tenants do Newton já recebem hoje.
+   * diferentes: o Newton recebe uma frase única pra transmitir num turn, e o
+   * Max recebe título, corpo e link em campos separados — quem monta a
+   * mensagem final lá é o serviço, que conhece o transporte. Sem este campo,
+   * unificar mudaria o texto que os tenants do Newton já recebem hoje.
    */
   newtonTrailer?: string | null;
   linkUrl?: string | null;
@@ -79,9 +79,9 @@ export interface WhatsappNotifyArgs {
   /**
    * Nome fantasia da imobiliária. `null` é significativo no Newton: o turn OMITE
    * a menção à org quando não há marca cadastrada, e forçar um genérico ali
-   * produziria "operador da imobiliária imobiliária". O Max precisa de um valor
-   * (vira variável de template — um número único atende os três tenants
-   * RE/MAX), então o fallback é aplicado só no ramo dele.
+   * produziria "operador da imobiliária imobiliária". O Max precisa de um
+   * valor, porque um número único atende os três tenants RE/MAX e a mensagem
+   * tem que dizer de qual veio — então o fallback é aplicado só no ramo dele.
    */
   orgName: string | null;
   /** Idempotência ponta a ponta — id da linha de log/entrega que originou o envio. */

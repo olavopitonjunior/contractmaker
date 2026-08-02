@@ -12,10 +12,9 @@
  * (sem prompt no meio, então sem cerca a montar). O tratamento do texto é o
  * mesmo nos dois — o que muda é o transporte.
  *
- * Nota sobre as aspas: elas caem por causa do turn do Newton, onde uma aspa solta
- * fecharia o bloco. No Max seriam inofensivas, mas manter uma única função evita
- * que "sanitizado" signifique coisas diferentes em dois lugares — e a Meta também
- * recusa quebra de linha em parâmetro de template.
+ * Nota sobre as aspas: elas caem por causa do turn do Newton, onde uma aspa
+ * solta fecharia o bloco. No Max seriam inofensivas, mas manter uma única
+ * função evita que "sanitizado" signifique coisas diferentes em dois lugares.
  */
 export function sanitizeUntrusted(raw: string, max: number): string {
   return (
