@@ -1,4 +1,5 @@
 import { Anthropic } from "@anthropic-ai/sdk";
+import { ocrModelFromEnv } from "./agents/model-provenance";
 import { GoogleGenAI } from "@google/genai";
 import type { ExtractionResult } from "./types";
 import { recordAIUsage } from "./usage";
@@ -420,7 +421,7 @@ export async function extractPlainText(
   const prevalidationError = prevalidateForOcr(buffer, mimeType);
   if (prevalidationError) throw new Error(prevalidationError);
 
-  const model = process.env.GEMINI_OCR_MODEL || "gemini-2.5-flash";
+  const model = ocrModelFromEnv();
   const ai = getGenAI();
   const t0 = Date.now();
   try {
@@ -623,7 +624,7 @@ export async function classifyAndExtract(
     }
   }
 
-  const primaryModel = process.env.GEMINI_OCR_MODEL || "gemini-2.5-flash";
+  const primaryModel = ocrModelFromEnv();
   const fallbackModel = options.fallbackModel ?? "gemini-2.5-flash-lite";
   const t0 = Date.now();
 
@@ -833,7 +834,7 @@ export async function classifyAndExtractBatch(
     );
   }
 
-  const model = process.env.GEMINI_OCR_MODEL || "gemini-2.5-flash";
+  const model = ocrModelFromEnv();
   const ai = getGenAI();
   const t0 = Date.now();
 

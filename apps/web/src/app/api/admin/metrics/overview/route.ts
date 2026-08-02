@@ -6,7 +6,7 @@ import {
   PlatformRoleRequiredError,
 } from "@/lib/security/rbac/platform";
 import { parseRangeFromSearch, InvalidRangeError } from "@/lib/admin/metrics/range";
-import { countByOrg, sumByOrg } from "@/lib/admin/metrics/aggregate";
+import { countByOrg, sumByOrg, PLATFORM_BUCKET } from "@/lib/admin/metrics/aggregate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -199,9 +199,19 @@ export async function GET(req: NextRequest) {
     apiCalls: sum(perTenant, (t) => t.apiCalls),
   };
 
+  // Custo SEM tenant (orgId IS NULL — embedding da base universal etc.). Não
+  // entra em perTenant nem em totals: plataforma não é tenant, e somá-la a um
+  // total "dos tenants" esconderia de novo o que a linha existe pra mostrar.
+  const platform = {
+    aiCostUsd: round4(aiCost.get(PLATFORM_BUCKET) ?? 0),
+    aiCalls: aiCalls.get(PLATFORM_BUCKET) ?? 0,
+    aiTokens: aiTokens.get(PLATFORM_BUCKET) ?? 0,
+  };
+
   return NextResponse.json({
     range: { from: range.from.toISOString(), to: range.to.toISOString() },
     totals,
+    platform,
     perTenant,
   });
 }
