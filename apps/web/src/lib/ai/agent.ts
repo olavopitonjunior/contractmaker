@@ -19,6 +19,10 @@ import {
   chatLegacyEffectiveModel,
   passiveEffectiveModel,
 } from "./agents/model-provenance";
+import {
+  PASSIVE_SYSTEM_PROMPT,
+  PASSIVE_SYSTEM_PROMPT_LOCACAO,
+} from "./agents/prompt-catalog";
 import { composeSystemPrompt } from "./agents/prompt-blocks";
 import { wantsDirectEdit as routerWantsDirectEdit } from "./orchestrator/routing";
 import { getAnthropicClient } from "./shared/anthropic-client";
@@ -736,33 +740,9 @@ export interface PassiveFinding {
   source: "quickChecks" | "llm";
 }
 
-const PASSIVE_SYSTEM_PROMPT = `Você é um analisador de contratos imobiliários brasileiros. Sua única tarefa é apontar problemas concretos e objetivos: contradições lógicas, erros matemáticos, referências internas quebradas, duplicação de qualificação, prazos conflitantes, cláusulas mutuamente exclusivas.
-
-REGRAS:
-1. Responda APENAS em JSON válido, sem markdown, sem comentários, sem texto antes ou depois.
-2. Formato: { "findings": [ { "severity": "info|warning|error", "category": "math|qualification|reference|format|logic", "message": "...", "selectedText": "trecho EXATO do contrato", "suggestedFix": "..." } ] }
-3. Se não encontrar problemas, retorne { "findings": [] }.
-4. selectedText DEVE ser copiado LITERALMENTE do contrato — qualquer divergência invalida o finding.
-5. Seja específico: "valor X não bate com soma Y" é útil; "pode haver inconsistência" não.
-6. Ignore questões de estilo, gramática e formatação. Foque em conteúdo jurídico.
-7. No máximo 3 findings por chamada — priorize os mais críticos. Cada finding deve apontar UM problema único e distinto; não fragmente o mesmo problema em múltiplos findings.
-8. message: máximo 2 frases curtas. Vá direto ao ponto, sem prólogo.
-9. Se você já viu este trecho com este tipo de problema antes, NÃO repita — a deduplicação é por (categoria + trecho), não por phrasing.
-10. NUNCA invente valores plausíveis para campos qualificatórios ausentes (profissão, nacionalidade, naturalidade, RG, estado civil, nome da mãe). Se o contrato tem esses campos vazios ou claramente inválidos (ex: "[preencher profissão]"), reporte como finding category="qualification" severity="warning" e suggestedFix="preencher manualmente — não invente". Profissões alucinadas como "economiário" são proibidas.
-11. CONVENÇÃO DE VIGÊNCIA: contrato de N meses iniciado no dia D termina na VÉSPERA do mesmo dia D, N meses depois — isso conta como EXATAMENTE N meses (ex.: início 01/07/2026 + 30 meses → término 31/12/2028 está correto). NÃO aponte essa convenção como prazo inconsistente; só reporte prazo se a diferença real exceder a véspera em mais de 1 dia.
-12. O TEXTO do contrato é a fonte de verdade; os DADOS DO CONTRATO (JSON) são metadados que podem estar momentaneamente defasados após uma edição. Divergência texto↔JSON do MESMO campo (valor, índice, foro, datas): no máximo 1 finding severity="warning" category="logic" com suggestedFix="sincronizar os dados estruturados com o texto". NUNCA "error", e NÃO crie o finding espelhado (JSON↔texto) da mesma divergência — se qualquer lado dela já foi apontado, não repita.`;
-
-// Variante para contratos de LOCAÇÃO (Lei 8.245/91) — o prompt base é de venda
-// (CCV). Sem isso, a análise passiva de um contrato de aluguel usava heurística
-// de compra e venda e ignorava as regras próprias da locação.
-const PASSIVE_SYSTEM_PROMPT_LOCACAO = `${PASSIVE_SYSTEM_PROMPT}
-
-CONTEXTO DE LOCAÇÃO (Lei 8.245/91) — este é um contrato de ALUGUEL, não de compra e venda. Priorize, quando o texto der base concreta:
-13. Caução em dinheiro limitada a 3 aluguéis (art. 38 §2º) — mais que isso é finding severity="error".
-14. Multa rescisória deve ser proporcional ao período restante (art. 4º); teto usual de 3 aluguéis — acima disso, warning.
-15. Reajuste só pode ser anual (periodicidade mínima 12 meses) e por índice válido (IGP-M/IPCA) — reajuste em periodicidade menor é error.
-16. Cumulação de garantias é vedada (art. 37, § único): só UMA modalidade de garantia (fiador OU caução OU seguro-fiança OU título) — duas modalidades no mesmo contrato é error.
-17. NÃO aponte ausência de cross-check de certidões, comissão de corretagem, FGTS, financiamento ou alienação fiduciária — nada disso pertence a um contrato de locação.`;
+// PASSIVE_SYSTEM_PROMPT{,_LOCACAO} moraram aqui até o console de agentes
+// ganhar a tela de prompts — agora vivem no prompt-catalog (módulo-folha),
+// importados no topo deste arquivo. Uma cópia só; a tela mostra o texto exato.
 
 const MAX_AI_UNRESOLVED_COMMENTS = 50;
 
@@ -993,6 +973,10 @@ export async function runPassiveAnalysis(
     try {
       const response = await anthropic.messages.create({
         model: passiveModel,
+        // Fixos POR DESIGN (cap de custo do passivo, que roda a cada poll) —
+        // o perfil pode trocar o modelo, mas temperature/maxTokens do console
+        // NÃO se aplicam aqui. Exceção consciente ao guard de supports do
+        // /api/admin/agents (que os amarra a supports.model).
         max_tokens: 1024,
         temperature: 0.1,
         // SEM cache_control, de propósito. O prompt passivo tem ~798 tokens e o

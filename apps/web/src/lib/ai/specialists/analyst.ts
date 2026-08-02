@@ -18,15 +18,12 @@ import { composeSystemPrompt } from "../agents/prompt-blocks";
 import { agentDisabledOutput } from "../agents/disabled";
 import { runSpecialist } from "../shared/specialist-runner";
 import { pickSpecialistPrompt } from "./prompts-locacao";
+import { toolboxFor } from "../agents/toolboxes";
 import type { OrchestratorState, SpecialistOutput } from "../orchestrator/state";
 
-const ANALYST_TOOL_NAMES = new Set([
-  "validate_contract",
-  "analyze_contradictions",
-  "extract_document_data",
-  "add_comment",
-  "cross_check_certidoes",
-]);
+// Toolbox no mapa canônico (agents/toolboxes.ts) — a tela do /admin lê o
+// MESMO registro, então o que ela mostra é o que roda aqui.
+const ANALYST_TOOL_NAMES = toolboxFor("analyst");
 
 const ANALYST_TOOLS = AGENT_TOOLS.filter((t) => ANALYST_TOOL_NAMES.has(t.name));
 

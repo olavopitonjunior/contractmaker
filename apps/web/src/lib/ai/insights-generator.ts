@@ -209,7 +209,7 @@ async function buildSnapshot(
   return {};
 }
 
-const SYSTEM_PROMPT = `Você é assistente de gestor imobiliário no app imobpro.ai. Gere de 1 a 3 observações ACIONÁVEIS sobre o snapshot do contexto.
+export const INSIGHTS_SYSTEM_PROMPT = `Você é assistente de gestor imobiliário no app imobpro.ai. Gere de 1 a 3 observações ACIONÁVEIS sobre o snapshot do contexto.
 
 Regras:
 - 1 linha cada (max 120 chars).
@@ -273,7 +273,7 @@ export async function generateInsights(args: {
       max_tokens: profile.maxTokens ?? 600,
       // Instruções da plataforma/tenant entram como apêndice — sem isto o
       // campo existiria no console sem ninguém ler.
-      system: composeSystemPrompt(SYSTEM_PROMPT, profile),
+      system: composeSystemPrompt(INSIGHTS_SYSTEM_PROMPT, profile),
       messages: [
         {
           role: "user",

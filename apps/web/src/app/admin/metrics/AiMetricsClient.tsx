@@ -35,7 +35,7 @@ const SYNTHETIC_COLORS: Record<string, string> = {
   __platform__: "hsl(260 50% 60%)",
 };
 
-function RowsCard({ title, rows, hint }: { title: string; rows: Row[]; hint?: string }) {
+export function RowsCard({ title, rows, hint }: { title: string; rows: Row[]; hint?: string }) {
   const max = rows.length ? rows[0].costUsd : 0;
   return (
     <Card>
