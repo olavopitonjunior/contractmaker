@@ -211,7 +211,15 @@ export async function PATCH(req: NextRequest) {
     patch.ragScope !== undefined && !supports.ragScope
       ? "escopo de base de conhecimento"
       : null,
-    (patch.model !== undefined || patch.fallbackModel !== undefined) &&
+    // temperature/maxTokens viajam com o modelo: são sampling params DELE.
+    // Agente que não honra modelo tampouco os lê (aggregator/ocr/max têm os
+    // dois hardcoded ou fora deste runtime). Exceção documentada: o passive
+    // honra modelo mas trava temp/max_tokens por design (cap de custo) — como
+    // supports.model dele é true, segue aceitando, e o call-site anota isso.
+    (patch.model !== undefined ||
+      patch.fallbackModel !== undefined ||
+      patch.temperature !== undefined ||
+      patch.maxTokens !== undefined) &&
     !supports.model
       ? "modelo"
       : null,

@@ -973,6 +973,10 @@ export async function runPassiveAnalysis(
     try {
       const response = await anthropic.messages.create({
         model: passiveModel,
+        // Fixos POR DESIGN (cap de custo do passivo, que roda a cada poll) —
+        // o perfil pode trocar o modelo, mas temperature/maxTokens do console
+        // NÃO se aplicam aqui. Exceção consciente ao guard de supports do
+        // /api/admin/agents (que os amarra a supports.model).
         max_tokens: 1024,
         temperature: 0.1,
         // SEM cache_control, de propósito. O prompt passivo tem ~798 tokens e o
