@@ -412,8 +412,10 @@ export async function updateKnowledgeItem(
 
   const nextTitle = patch.title ?? current.title;
   const nextContent = patch.content ?? current.content;
-  // `orgId` nulo agora é registrável: é custo de PLATAFORMA, não
-  // ausência de custo. Antes essa chamada ficava sem linha no AIUsage.
+  // `orgId` nulo é REGISTRÁVEL: é custo de PLATAFORMA, não ausência de custo.
+  // Com `orgId ? ... : undefined`, a edição de um item da base universal passava
+  // pelo Voyage e não deixava linha nenhuma no AIUsage — o painel mostrava zero
+  // exatamente onde a ingestão em lote da plataforma gasta.
   const usage = { orgId, operation: "embed_kb" as const };
 
   // Item de UMA linha: o vetor mora nela mesma.
