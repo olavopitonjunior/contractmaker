@@ -59,7 +59,23 @@ interface AgentRow {
     enabled: boolean;
     ragScope: RagScope | null;
   };
+  /** Modelo efetivo com procedência — inclui a camada env, que o resolved não vê. */
+  provenance: Array<{
+    context: string | null;
+    model: string;
+    source: "org" | "platform" | "env" | "fixed" | "default";
+    envVar: string | null;
+  }>;
+  /** Modelos que rodaram de fato nos últimos 30d (AIUsage). */
+  modelsSeen: Array<{ model: string; calls: number }>;
 }
+
+const SOURCE_LABELS: Record<string, string> = {
+  org: "perfil do tenant",
+  platform: "perfil da plataforma",
+  fixed: "fixo por modo",
+  default: "padrão do código",
+};
 
 interface OrgOption {
   id: string;
@@ -303,6 +319,42 @@ export function AgentsConsoleClient({
                     Ativo
                   </Label>
                 </div>
+              </div>
+
+              {/* O que REALMENTE roda, com procedência — incluindo a camada
+                  env que o select acima não enxerga. Foi um env com modelo
+                  aposentado que rodou a análise passiva por dois meses sem
+                  nenhuma tela acusar. */}
+              <div className="rounded-md border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+                <span className="font-medium text-foreground">Em uso:</span>{" "}
+                {row.provenance.map((p, i) => (
+                  <span key={i}>
+                    {i > 0 && " · "}
+                    {p.context && <span className="font-mono">{p.context}: </span>}
+                    {MODEL_LABELS[p.model] ?? p.model}{" "}
+                    <span
+                      className={
+                        p.source === "env" ? "text-amber-600" : undefined
+                      }
+                    >
+                      ({p.source === "env" ? `env ${p.envVar}` : SOURCE_LABELS[p.source]})
+                    </span>
+                  </span>
+                ))}
+                {row.modelsSeen.length > 0 && (
+                  <>
+                    {" — "}
+                    <span className="font-medium text-foreground">
+                      vistos (30d):
+                    </span>{" "}
+                    {row.modelsSeen.map((s, i) => (
+                      <span key={s.model}>
+                        {i > 0 && ", "}
+                        {MODEL_LABELS[s.model] ?? s.model} ({s.calls})
+                      </span>
+                    ))}
+                  </>
+                )}
               </div>
 
               <div>

@@ -13,12 +13,12 @@ interface NavItem {
 
 /**
  * Itens em ordem de uso, não alfabética: orgs é a porta de entrada, agentes e
- * base são o dia a dia, staff é raro. "Métricas" entra quando /admin/metrics
- * existir — link morto no nav é pior que link nenhum.
+ * base são o dia a dia, staff é raro.
  */
 const ITEMS: NavItem[] = [
   { href: "/admin/orgs", label: "Organizações" },
   { href: "/admin/agents", label: "Agentes de IA" },
+  { href: "/admin/metrics", label: "Métricas" },
   { href: "/admin/knowledge", label: "Base de conhecimento" },
   { href: "/admin/support-ai", label: "IA de Suporte" },
   { href: "/admin/platform-roles", label: "Staff", superAdminOnly: true },

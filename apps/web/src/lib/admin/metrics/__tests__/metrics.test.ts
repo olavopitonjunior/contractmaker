@@ -6,6 +6,7 @@ import {
   countRowsByOrg,
   bucketByDay,
   sumField,
+  PLATFORM_BUCKET,
   countByKey,
 } from "../aggregate";
 
@@ -30,15 +31,18 @@ describe("parseRange", () => {
 });
 
 describe("countByOrg", () => {
-  it("sums _count._all per orgId, skipping null orgId", () => {
+  it("sums _count._all per orgId; null vira o bucket de plataforma", () => {
     const m = countByOrg([
       { orgId: "a", _count: { _all: 3 } },
       { orgId: "a", _count: { _all: 2 } },
       { orgId: "b", _count: { _all: 5 } },
+      // Custo sem tenant (ex.: embedding da base universal). Antes era
+      // DESCARTADO — o total exibido não era o total.
       { orgId: null, _count: { _all: 9 } },
     ]);
     expect(m.get("a")).toBe(5);
     expect(m.get("b")).toBe(5);
+    expect(m.get(PLATFORM_BUCKET)).toBe(9);
     expect(m.has("")).toBe(false);
   });
 
@@ -55,11 +59,13 @@ describe("sumByOrg", () => {
         { orgId: "a", _sum: { costCents: 100 } },
         { orgId: "a", _sum: { costCents: 250 } },
         { orgId: "b", _sum: { costCents: null } },
+        { orgId: null, _sum: { costCents: 40 } },
       ],
       "costCents"
     );
     expect(m.get("a")).toBe(350);
     expect(m.get("b")).toBe(0);
+    expect(m.get(PLATFORM_BUCKET)).toBe(40);
   });
 
   it("coerces Decimal-like (toString) values", () => {

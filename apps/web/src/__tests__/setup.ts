@@ -391,6 +391,7 @@ vi.mock("@/lib/db/prisma", () => {
       }),
       create: vi.fn().mockResolvedValue({}),
       findMany: vi.fn().mockResolvedValue([]),
+      groupBy: vi.fn().mockResolvedValue([]),
     },
     envelope: {
       findFirst: vi.fn().mockResolvedValue(null),
