@@ -184,6 +184,14 @@ async function maybeNotifyOrgAiBudget(
 export async function assertContractBudget(contractId: string): Promise<BudgetStatus> {
   const status = await getContractBudgetStatus(contractId);
   if (!status.ok) {
+    // O usuário vê "não consegui" na tela; sem isto o dono da plataforma só
+    // descobre se for olhar o painel. Assinatura por contrato: cada contrato
+    // bloqueado é UM alerta, re-armado em 24h.
+    reportBudgetAlert(`contract:${contractId}`, null, {
+      title: `Chat bloqueado por teto de contrato (${contractId.slice(0, 8)}…)`,
+      spent: status.spent,
+      budget: status.budget,
+    });
     throw new ContractBudgetExceededError(status.spent, status.budget);
   }
 
@@ -200,6 +208,11 @@ export async function assertContractBudget(contractId: string): Promise<BudgetSt
       const orgStatus = await getOrgAiBudgetStatus(orgId, { skipSpendWhenNoCap: true });
       await maybeNotifyOrgAiBudget(orgId, orgStatus);
       if (orgStatus.budgetUsd && orgStatus.pct >= 1) {
+        reportBudgetAlert(`org:${orgId}`, orgId, {
+          title: "IA bloqueada por teto mensal da org",
+          spentUsd: orgStatus.spentUsd,
+          budgetUsd: orgStatus.budgetUsd,
+        });
         throw new OrgAiBudgetExceededError(orgStatus.spentUsd, orgStatus.budgetUsd);
       }
     }
@@ -284,10 +297,42 @@ export async function assertAgentBudget(
     return;
   }
   if (status.budgetUsd && status.spentUsd >= status.budgetUsd) {
+    reportBudgetAlert(`agent:${agentKey}:${orgId}`, orgId, {
+      title: `Agente "${agentLabel(agentKey)}" bloqueado por teto mensal`,
+      agentKey,
+      spentUsd: status.spentUsd,
+      budgetUsd: status.budgetUsd,
+    });
     throw new AgentBudgetExceededError(
       agentLabel(agentKey),
       status.spentUsd,
       status.budgetUsd
     );
   }
+}
+
+/**
+ * Alerta de bloqueio por teto — nos PONTOS DE THROW, não nos catches: os
+ * catches são N (chat legado, orquestrador, insights, passive) e o primeiro
+ * esquecido viraria bloqueio silencioso de novo. Import dinâmico +
+ * fire-and-forget: o motor de alerta não pode atrasar nem quebrar o guard.
+ */
+function reportBudgetAlert(
+  signature: string,
+  orgId: string | null,
+  detail: { title: string } & Record<string, unknown>
+): void {
+  import("@/lib/alerts/platform-alerts")
+    .then(({ reportPlatformAlert }) =>
+      reportPlatformAlert({
+        kind: "ai_budget",
+        signature,
+        orgId,
+        severity: "critical",
+        title: detail.title,
+        payload: detail,
+        notify: "immediate",
+      })
+    )
+    .catch(() => {});
 }

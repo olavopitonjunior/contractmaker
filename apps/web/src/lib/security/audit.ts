@@ -357,6 +357,26 @@ export interface AuditEntry {
 }
 
 /**
+ * Prefixos de ação que significam "uma integração externa falhou pro
+ * usuário" — o recorte que vira alerta imediato pro dono da plataforma.
+ * DENIED fica fora de propósito: negação de authz é o sistema funcionando.
+ */
+const INTEGRATION_ALERT_PREFIXES = [
+  "CLICKSIGN_",
+  "ENVELOPE_",
+  "KYC_",
+  "CHARGE_",
+  "TRANSFER_",
+  "CERTIDAO_",
+  "SERASA_",
+  "ACCOUNT_",
+] as const;
+
+export function isIntegrationAction(action: string): boolean {
+  return INTEGRATION_ALERT_PREFIXES.some((p) => action.startsWith(p));
+}
+
+/**
  * Audit log imutável. Fire-and-forget — nunca lança para o caller.
  * Usar await se precisar confirmação, senão chamar sem await em rotas hot path.
  */
@@ -398,6 +418,28 @@ export async function audit(
         userAgent: ctx.userAgent ? ctx.userAgent.slice(0, 1000) : null,
       },
     });
+
+    // Gatilho do motor de alerta: FAILURE de integração vira alerta pro dono
+    // da plataforma. AQUI porque o audit() é o único chokepoint por onde toda
+    // falha de integração já passa — instrumentar os N call-sites um a um
+    // deixaria buraco no primeiro esquecido. Import dinâmico + fire-and-forget:
+    // alerta quebrado não pode quebrar o audit, e o módulo de alerta puxa o
+    // client de e-mail que nem todo caller do audit precisa carregar.
+    if (entry.result === "FAILURE" && isIntegrationAction(entry.action)) {
+      import("@/lib/alerts/platform-alerts")
+        .then(({ reportPlatformAlert }) =>
+          reportPlatformAlert({
+            kind: "integration_failure",
+            signature: `${entry.action}:${ctx.orgId ?? "platform"}`,
+            orgId: ctx.orgId ?? null,
+            severity: "warning",
+            title: `Integração falhando: ${entry.action}`,
+            payload: { resource: entry.resource ?? null },
+            notify: "immediate",
+          })
+        )
+        .catch(() => {});
+    }
   } catch (err) {
     // Nunca propagar — audit log é best-effort
     console.error("[audit] failed to persist", {

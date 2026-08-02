@@ -61,5 +61,27 @@ export async function createOrDedupeHandoff(
     },
     select: { id: true },
   });
+
+  // Sinal EXPLÍCITO de usuário travado — o alerta mais limpo que existe:
+  // volume baixo, zero falso positivo, e cada pergunta nova é genuinamente
+  // nova (o dedupe acima já engoliu as repetidas). A pergunta é input não
+  // confiável: truncada no payload, escapada no e-mail pelo motor.
+  import("@/lib/alerts/platform-alerts")
+    .then(({ reportPlatformAlert }) =>
+      reportPlatformAlert({
+        kind: "support_signal",
+        signature: `handoff:${created.id}`,
+        orgId: input.orgId ?? null,
+        severity: "warning",
+        title: "Usuário travado no suporte (handoff novo)",
+        payload: {
+          question: input.question.slice(0, 300),
+          screenPath: input.screenPath ?? null,
+        },
+        notify: "immediate",
+      })
+    )
+    .catch(() => {});
+
   return { id: created.id, deduped: false };
 }
