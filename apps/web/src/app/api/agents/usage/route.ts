@@ -13,6 +13,7 @@ import {
   EXTERNAL_AGENT_KEYS,
   isExternalAgentKey,
 } from "@/lib/ai/agents/registry";
+import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -175,6 +176,21 @@ export const POST = withApi("POST /api/agents/usage", async (req: NextRequest) =
     body.cacheReadTokens ?? 0,
     body.cacheWriteTokens ?? 0
   );
+
+  // Era a única rota M2M de ESCRITA sem rastro no AuditLog — e é escrita numa
+  // tabela de CUSTO que alimenta teto por agente. O rastro diz quem (token →
+  // usuário efetivo) reportou quanto, quando.
+  audit(extractAuditContextFromRequest(req, orgId, authed.actor.effectiveUserId), {
+    action: "AGENT_USAGE_REPORTED",
+    result: "SUCCESS",
+    resourceType: "AIUsage",
+    resource: body.agentKey,
+    metadata: {
+      model: body.model,
+      totalTokens: body.promptTokens + (body.completionTokens ?? 0),
+      estimatedCostUsd,
+    },
+  }).catch(() => {});
 
   // 202: `recordAIUsage` é fire-and-forget por construção (observabilidade não
   // pode derrubar o fluxo de IA), então prometer "gravado" seria mentira.

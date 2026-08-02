@@ -269,8 +269,26 @@ export function KnowledgeBaseClient({
             Testar RAG
           </Button>
           {/* Upload e seed escrevem via /api/knowledge/* (rotas do tenant).
-              Ingestão em lote na base de plataforma é trabalho de outro lote —
-              até lá, o /admin cria item a item. */}
+              A ingestão de plataforma chegou no lote da fase 3: mesma UI,
+              rota própria (gate super_admin, categoria obrigatória). O seed
+              segue org-only — é o kit inicial do TENANT, não conteúdo
+              universal. */}
+          {scope === "platform" && (
+            <div className="space-y-1">
+              <KnowledgeUploadCard
+                uploadUrl="/api/admin/knowledge/upload"
+                platform
+                onDone={async () => {
+                  await refresh();
+                  router.refresh();
+                }}
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Teto real por arquivo: ~4,5MB (limite de corpo da Vercel) — o
+                fix é upload direto do navegador, fora deste lote.
+              </p>
+            </div>
+          )}
           {scope === "org" && (
             <>
               <KnowledgeUploadCard
