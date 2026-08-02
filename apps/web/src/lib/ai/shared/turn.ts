@@ -58,6 +58,22 @@ export async function* streamOneTurn(
       to: opts.fallbackModel!,
       reason,
     });
+    // Motor de alerta, SÓ digest: fallback é degradação, não bloqueio — o
+    // usuário foi atendido. Vale saber que aconteceu (e quantas vezes), não
+    // vale um e-mail por ocorrência. Aqui porque este é o único ponto por
+    // onde todo fallback passa.
+    import("@/lib/alerts/platform-alerts")
+      .then(({ reportPlatformAlert }) =>
+        reportPlatformAlert({
+          kind: "model_fallback",
+          signature: `fallback:${params.model}`,
+          severity: "info",
+          title: `Modelo ${params.model} em fallback por sobrecarga (${reason})`,
+          payload: { to: opts.fallbackModel, reason },
+          notify: "digest",
+        })
+      )
+      .catch(() => {});
     stream = await anthropic.messages.create({
       ...params,
       model: opts.fallbackModel!,

@@ -48,6 +48,8 @@ interface TenantMetric {
   modules: string[];
   members: number;
   deals: number;
+  /** Quantos dos deals são de pipeline de locação (o resto é venda). */
+  dealsLocacao: number;
   dealsValueBRL: number;
   activeLeases: number;
   aiCostUsd: number;
@@ -72,6 +74,8 @@ interface OverviewResponse {
     envelopes: number;
     apiCalls: number;
   };
+  /** Custo sem tenant (orgId IS NULL) — embedding da base universal etc. */
+  platform: { aiCostUsd: number; aiCalls: number; aiTokens: number };
   perTenant: TenantMetric[];
 }
 
@@ -427,7 +431,18 @@ function SystemOverview() {
             <KpiCard label="Membros" value={formatInt(t.members)} icon={<Users className="h-3.5 w-3.5" />} />
             <KpiCard label="Negócios" value={formatInt(t.deals)} sub={`${formatInt(t.activeLeases)} locações ativas`} icon={<ScrollText className="h-3.5 w-3.5" />} />
             <KpiCard label="Volume Asaas" value={formatBRL(t.asaasVolumeBRL)} icon={<DollarSign className="h-3.5 w-3.5" />} />
-            <KpiCard label="Custo IA" value={formatUsd(t.aiCostUsd)} icon={<DollarSign className="h-3.5 w-3.5" />} />
+            <KpiCard
+              label="Custo IA"
+              value={formatUsd(t.aiCostUsd)}
+              // O custo de plataforma (orgId IS NULL) era buscado e descartado
+              // — o total exibido não era o total.
+              sub={
+                data?.platform && data.platform.aiCostUsd > 0
+                  ? `+ ${formatUsd(data.platform.aiCostUsd)} plataforma`
+                  : undefined
+              }
+              icon={<DollarSign className="h-3.5 w-3.5" />}
+            />
             <KpiCard label="Custo ClickSign" value={formatBRL(t.clicksignCostBRL)} sub={`${formatInt(t.envelopes)} envelopes`} icon={<FileSignature className="h-3.5 w-3.5" />} />
             <KpiCard label="Custo Certidões" value={formatBRL(t.certidoesCostBRL)} sub={`${formatInt(t.certidoes)} consultas`} icon={<DollarSign className="h-3.5 w-3.5" />} />
             <KpiCard label="Chamadas de API" value={formatInt(t.apiCalls)} icon={<Building2 className="h-3.5 w-3.5" />} />
@@ -462,7 +477,15 @@ function SystemOverview() {
                       <div className="text-[10px] text-muted-foreground">{r.modules.join(" · ") || "sem módulos"}</div>
                     </td>
                     <td className="p-3 tabular-nums">{formatInt(r.members)}</td>
-                    <td className="p-3 tabular-nums">{formatInt(r.deals)}</td>
+                    <td className="p-3 tabular-nums">
+                      {formatInt(r.deals)}
+                      {r.dealsLocacao > 0 && (
+                        <span className="text-[10px] text-muted-foreground">
+                          {" "}
+                          ({r.deals - r.dealsLocacao}v · {r.dealsLocacao}l)
+                        </span>
+                      )}
+                    </td>
                     <td className="p-3 tabular-nums">{formatBRL(r.dealsValueBRL)}</td>
                     <td className="p-3 tabular-nums">{formatBRL(r.asaasVolumeBRL)}</td>
                     <td className="p-3 tabular-nums">{formatUsd(r.aiCostUsd)}</td>

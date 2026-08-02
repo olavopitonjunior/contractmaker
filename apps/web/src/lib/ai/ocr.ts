@@ -1,4 +1,5 @@
 import { Anthropic } from "@anthropic-ai/sdk";
+import { ocrModelFromEnv } from "./agents/model-provenance";
 import { GoogleGenAI } from "@google/genai";
 import type { ExtractionResult } from "./types";
 import { recordAIUsage } from "./usage";
@@ -322,7 +323,7 @@ const FICHA_RESUMO_INSTRUCTIONS = `- ficha_resumo: documento mestre/dossie/ficha
     ]
   }`;
 
-const COMBINED_PROMPT = `Voce e um especialista em documentos brasileiros. Analise o documento anexo e retorne APENAS um JSON valido no formato:
+export const COMBINED_PROMPT = `Voce e um especialista em documentos brasileiros. Analise o documento anexo e retorne APENAS um JSON valido no formato:
 {"tipo": "<categoria>", "campos": { ... }, "confidence": <0-1>}
 
 Categorias validas: "rg", "cpf", "cnh", "matricula", "iptu", "escritura", "procuracao", "comprovante_residencia", "certidao_casamento", "ficha_resumo", "outro".
@@ -401,7 +402,7 @@ export function prevalidateForOcr(
   return null;
 }
 
-const PLAIN_TEXT_PROMPT = `Transcreva o texto deste documento na íntegra, verbatim, preservando a ordem e a estrutura (parágrafos, títulos, cláusulas numeradas). NÃO resuma, NÃO comente, NÃO traduza e NÃO adicione formatação markdown. Retorne apenas o texto extraído.`;
+export const PLAIN_TEXT_PROMPT = `Transcreva o texto deste documento na íntegra, verbatim, preservando a ordem e a estrutura (parágrafos, títulos, cláusulas numeradas). NÃO resuma, NÃO comente, NÃO traduza e NÃO adicione formatação markdown. Retorne apenas o texto extraído.`;
 
 /**
  * Extrai o TEXTO CORRIDO de um PDF ou imagem via Gemini (verbatim, sem resumir).
@@ -420,7 +421,7 @@ export async function extractPlainText(
   const prevalidationError = prevalidateForOcr(buffer, mimeType);
   if (prevalidationError) throw new Error(prevalidationError);
 
-  const model = process.env.GEMINI_OCR_MODEL || "gemini-2.5-flash";
+  const model = ocrModelFromEnv();
   const ai = getGenAI();
   const t0 = Date.now();
   try {
@@ -623,7 +624,7 @@ export async function classifyAndExtract(
     }
   }
 
-  const primaryModel = process.env.GEMINI_OCR_MODEL || "gemini-2.5-flash";
+  const primaryModel = ocrModelFromEnv();
   const fallbackModel = options.fallbackModel ?? "gemini-2.5-flash-lite";
   const t0 = Date.now();
 
@@ -833,7 +834,7 @@ export async function classifyAndExtractBatch(
     );
   }
 
-  const model = process.env.GEMINI_OCR_MODEL || "gemini-2.5-flash";
+  const model = ocrModelFromEnv();
   const ai = getGenAI();
   const t0 = Date.now();
 

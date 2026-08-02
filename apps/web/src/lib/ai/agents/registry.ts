@@ -21,6 +21,10 @@ export const AGENT_KEYS = [
   "legal",
   "editor",
   "curator",
+  // O 11º agente que a lista escondia: é o agregador quem escreve o texto
+  // final que o usuário lê no chat multi-agente. Sem ele aqui, "todos os
+  // agentes" no console era uma lista de 10 num sistema de 11.
+  "aggregator",
   "passive",
   "support",
   "ocr",
@@ -124,8 +128,24 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
     description: "Propõe cláusulas e melhorias de modelo pro acervo.",
     defaultModel: HAIKU_MODEL,
     tenantEditable: true,
-    operations: ["specialist_curator"],
+    // `clause_generate` é o botão "gerar com IA" de /clauses — mesma função do
+    // curador (alimentar o acervo), só que disparada pela UI em vez do chat.
+    operations: ["specialist_curator", "clause_generate"],
     supports: ALL,
+  },
+  aggregator: {
+    key: "aggregator",
+    label: "Agregador",
+    description:
+      "Sintetiza as respostas dos especialistas no texto final do chat. Roda dentro do orquestrador — ainda não lê este perfil.",
+    defaultModel: SONNET_MODEL,
+    tenantEditable: false,
+    // Grava `operation: "chat"` — a MESMA que o agente legado. Por isso a
+    // operação segue em AMBIGUOUS_OPERATIONS e os dois call-sites carimbam
+    // `agentKey` explícito; listá-la aqui atribuiria o histórico inteiro do
+    // legado ao agregador.
+    operations: [],
+    supports: { enabled: false, model: false, instructions: false, ragScope: false },
   },
   passive: {
     key: "passive",
@@ -163,6 +183,10 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
       "extract_ccv_doc",
       "extract_locacao_doc",
       "voice_extract",
+      // Ingestão DOCX→template: o pass de IA que mapeia trechos do Doc-modelo
+      // pra {{placeholders}}. É leitura de documento como as demais — roda em
+      // Anthropic, não Gemini, mas a atribuição aqui é de custo, não de motor.
+      "template_placeholder_insertion",
     ],
     supports: { enabled: false, model: false, instructions: false, ragScope: false },
   },
@@ -172,7 +196,15 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
     description: "Resumos e alertas nas telas de gestão.",
     defaultModel: HAIKU_MODEL,
     tenantEditable: true,
-    operations: ["insights"],
+    // DIMOB (copiloto fiscal) e o resumo de pesquisas são a mesma família:
+    // IA one-shot resumindo/alertando numa tela de gestão.
+    operations: [
+      "insights",
+      "dimob_review",
+      "dimob_diagnose",
+      "dimob_explain",
+      "survey_summary",
+    ],
     supports: SEM_RAG,
   },
   chat_legacy: {
@@ -235,6 +267,28 @@ export function isExternalAgentKey(v: string): v is AgentKey {
  * Quem grava `chat` informa `agentKey` explicitamente ou fica sem atribuição.
  */
 export const AMBIGUOUS_OPERATIONS = new Set<string>(["chat"]);
+
+/**
+ * Operações que NÃO são trabalho de agente nenhum — encanamento da plataforma:
+ * embeddings de ingestão e consulta, memória de contratos, classificadores de
+ * intenção/policy/upload. Forçá-las num agente inventaria dado no painel de
+ * custo; escondê-las deixaria 26% do gasto como "não atribuído" genérico.
+ * Consumidor: o painel de métricas as exibirá como grupo "Infraestrutura"
+ * rotulado (tela no PR de métricas cross-tenant) — até lá, este Set é a
+ * definição canônica esperando o primeiro leitor.
+ *
+ * (`doc_analysis` ficou de fora de propósito: não tem mais escritor no código —
+ * só linhas históricas. Aparece como "não atribuído", que é o que ela é.)
+ */
+export const INFRA_OPERATIONS = new Set<string>([
+  "embed_kb",
+  "embed_memory",
+  "embed_query",
+  "summarize_memory",
+  "intent_classify",
+  "sentinel_classify",
+  "knowledge_upload_classification",
+]);
 
 /**
  * `operation` do AIUsage → agente. Usado quando o call-site não informa o

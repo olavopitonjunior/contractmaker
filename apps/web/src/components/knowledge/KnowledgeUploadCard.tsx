@@ -39,12 +39,27 @@ type TemplateWarning = {
  * volta 409 LOOKS_LIKE_TEMPLATE (tratado aqui com o diálogo abaixo) e coleção
  * de cláusulas vira N itens, um por cláusula.
  */
-export function KnowledgeUploadCard({ onDone }: { onDone?: () => void }) {
+export function KnowledgeUploadCard({
+  onDone,
+  uploadUrl = "/api/knowledge/upload",
+  platform = false,
+}: {
+  onDone?: () => void;
+  /** Plataforma usa /api/admin/knowledge/upload (gate super_admin). */
+  uploadUrl?: string;
+  /** Na plataforma a categoria é OBRIGATÓRIA (a rota rejeita "auto"):
+   *  quem cura a base universal sabe o que publica — adivinhar com LLM
+   *  introduziria incerteza em conteúdo que não pode ter. */
+  platform?: boolean;
+}) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
-  const [category, setCategory] = useState("");
+  const [category, setCategory] = useState(platform ? "legislation" : "");
   const [warning, setWarning] = useState<TemplateWarning | null>(null);
+  const options = platform
+    ? CATEGORY_OPTIONS.filter((o) => o.value !== "")
+    : CATEGORY_OPTIONS;
 
   /** Um request. `force` ignora o 409 de "parece um modelo de contrato". */
   async function upload(file: File, force: boolean) {
@@ -54,7 +69,7 @@ export function KnowledgeUploadCard({ onDone }: { onDone?: () => void }) {
       fd.append("file", file);
       if (category) fd.append("category", category);
       if (force) fd.append("force", "true");
-      const res = await fetch("/api/knowledge/upload", { method: "POST", body: fd });
+      const res = await fetch(uploadUrl, { method: "POST", body: fd });
       const data = await res.json().catch(() => ({}));
 
       if (res.status === 409 && data?.code === "LOOKS_LIKE_TEMPLATE") {
@@ -114,7 +129,7 @@ export function KnowledgeUploadCard({ onDone }: { onDone?: () => void }) {
         onChange={(e) => setCategory(e.target.value)}
         disabled={loading}
       >
-        {CATEGORY_OPTIONS.map((opt) => (
+        {options.map((opt) => (
           <option key={opt.value || "auto"} value={opt.value}>
             {opt.label}
           </option>

@@ -121,6 +121,11 @@ vi.mock("@/lib/db/prisma", () => {
       create: vi.fn().mockResolvedValue({}),
       update: vi.fn().mockResolvedValue({}),
     },
+    agentProfileVersion: {
+      create: vi.fn().mockResolvedValue({}),
+      findMany: vi.fn().mockResolvedValue([]),
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
     formAttachment: {
       findUnique: vi.fn(),
       findFirst: vi.fn().mockResolvedValue(null),
@@ -166,6 +171,7 @@ vi.mock("@/lib/db/prisma", () => {
     user: {
       findUnique: vi.fn(),
       findFirst: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
       update: vi.fn(),
       create: vi.fn(),
     },
@@ -197,9 +203,29 @@ vi.mock("@/lib/db/prisma", () => {
     auditLog: {
       create: vi.fn().mockResolvedValue({}),
       findMany: vi.fn().mockResolvedValue([]),
+      groupBy: vi.fn().mockResolvedValue([]),
+    },
+    platformAlertEvent: {
+      upsert: vi.fn().mockResolvedValue({
+        id: "alert-1",
+        kind: "integration_failure",
+        signature: "x",
+        orgId: null,
+        severity: "warning",
+        title: "t",
+        count: 1,
+        firstSeenAt: new Date(0),
+        lastSeenAt: new Date(0),
+        notifiedAt: null,
+      }),
+      count: vi.fn().mockResolvedValue(0),
+      update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      findMany: vi.fn().mockResolvedValue([]),
     },
     platformRole: {
       findUnique: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
       upsert: vi.fn(),
       delete: vi.fn(),
     },
@@ -390,6 +416,7 @@ vi.mock("@/lib/db/prisma", () => {
       }),
       create: vi.fn().mockResolvedValue({}),
       findMany: vi.fn().mockResolvedValue([]),
+      groupBy: vi.fn().mockResolvedValue([]),
     },
     envelope: {
       findFirst: vi.fn().mockResolvedValue(null),

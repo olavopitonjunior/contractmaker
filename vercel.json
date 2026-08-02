@@ -70,6 +70,10 @@
       "schedule": "0 4 * * 0"
     },
     {
+      "path": "/api/cron/alerts/digest",
+      "schedule": "0 10 * * *"
+    },
+    {
       "path": "/api/cron/charges/due-soon",
       "schedule": "0 12 * * *"
     },

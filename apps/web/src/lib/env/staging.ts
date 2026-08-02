@@ -40,6 +40,10 @@ const DEFAULT_STAGING_CRON_ALLOWLIST = new Set<string>([
   // Só expirar propostas é DB-only e seguro em staging. remind (manda mensagem
   // real) e reconcile (pode disparar envelope) ficam OFF por padrão.
   "/api/cron/proposals/expire",
+  // DB + e-mail — e o gate de staging do sendEmail redireciona qualquer
+  // destinatário pro owner, então exercitar o digest aqui é seguro e é a
+  // única verificação integrada antes de prod.
+  "/api/cron/alerts/digest",
   // `/api/cron/blob-gc` saiu daqui e do vercel.json: virou endpoint manual de
   // relatório, travado em dry-run. O sistema não apaga nada automaticamente.
 ]);
