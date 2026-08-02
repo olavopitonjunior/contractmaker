@@ -121,6 +121,11 @@ vi.mock("@/lib/db/prisma", () => {
       create: vi.fn().mockResolvedValue({}),
       update: vi.fn().mockResolvedValue({}),
     },
+    agentProfileVersion: {
+      create: vi.fn().mockResolvedValue({}),
+      findMany: vi.fn().mockResolvedValue([]),
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
     formAttachment: {
       findUnique: vi.fn(),
       findFirst: vi.fn().mockResolvedValue(null),
