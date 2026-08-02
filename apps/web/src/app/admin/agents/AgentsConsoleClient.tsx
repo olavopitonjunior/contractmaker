@@ -143,11 +143,16 @@ export function AgentsConsoleClient({
           orgId: scopeOrgId || null,
           agentKey: row.agentKey,
           ...(row.supports.enabled ? { enabled: row.own.enabled } : {}),
+          // temperature/maxTokens acompanham o modelo (sampling params dele) —
+          // mesmo gate no PATCH.
           ...(row.supports.model
-            ? { model: row.own.model, fallbackModel: row.own.fallbackModel }
+            ? {
+                model: row.own.model,
+                fallbackModel: row.own.fallbackModel,
+                temperature: row.own.temperature,
+                maxTokens: row.own.maxTokens,
+              }
             : {}),
-          temperature: row.own.temperature,
-          maxTokens: row.own.maxTokens,
           ...(row.supports.instructions
             ? { instructions: row.own.instructions }
             : {}),

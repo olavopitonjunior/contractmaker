@@ -175,6 +175,14 @@ describe("PATCH /api/admin/agents — guard de supports (review #229)", () => {
     );
     expect(res2.status).toBe(400);
     expect((await res2.json()).error).toContain("instruções");
+
+    // temperature/maxTokens viajam com o modelo — rejeitados junto (achado
+    // do review #231: fechavam config fantasma pro aggregator via curl).
+    const res3 = await PATCH(
+      patchReq({ orgId: null, agentKey: "aggregator", temperature: 0.5 })
+    );
+    expect(res3.status).toBe(400);
+    expect((await res3.json()).error).toContain("modelo");
   });
 
   it("aceita campo que o runtime honra (passive.model) e grava com updatedBy", async () => {
