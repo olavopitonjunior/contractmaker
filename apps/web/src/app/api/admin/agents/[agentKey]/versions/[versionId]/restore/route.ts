@@ -4,7 +4,12 @@ import { auth } from "@/lib/auth/auth";
 import { requirePlatform } from "@/lib/admin/gate";
 import { prisma } from "@/lib/db/prisma";
 import { isAgentKey, type AgentKey } from "@/lib/ai/agents/registry";
-import { upsertAgentProfile, isAllowedModel, ragScopeSchema } from "@/lib/ai/agents/store";
+import {
+  upsertAgentProfile,
+  isAllowedModel,
+  ragScopeSchema,
+  UnsupportedAgentFieldError,
+} from "@/lib/ai/agents/store";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
 export const runtime = "nodejs";
@@ -56,6 +61,22 @@ export async function POST(
     return NextResponse.json({ error: "Versão não encontrada" }, { status: 404 });
   }
 
+  // O histórico sobrevive à exclusão da org DE PROPÓSITO (sem FK) — mas
+  // restaurar numa org que não existe mais estouraria a FK do AgentProfile
+  // como 500 opaco (review #235). 404 com explicação é o que o caso é.
+  if (version.orgId) {
+    const org = await prisma.organization.findUnique({
+      where: { id: version.orgId },
+      select: { id: true },
+    });
+    if (!org) {
+      return NextResponse.json(
+        { error: "A org desta versão foi excluída — o histórico fica, o restore não." },
+        { status: 404 }
+      );
+    }
+  }
+
   const parsed = snapshotSchema.safeParse(version.snapshot);
   if (!parsed.success) {
     return NextResponse.json(
@@ -75,22 +96,31 @@ export async function POST(
     );
   }
 
-  await upsertAgentProfile({
-    orgId: version.orgId,
-    agentKey,
-    patch: {
-      enabled: snap.enabled ?? undefined,
-      model: snap.model ?? null,
-      fallbackModel: snap.fallbackModel ?? null,
-      temperature: snap.temperature ?? null,
-      maxTokens: snap.maxTokens ?? null,
-      instructions: snap.instructions ?? null,
-      ragScope: snap.ragScope ?? null,
-      monthlyBudgetUsd: snap.monthlyBudgetUsd ?? null,
-      config: snap.config ?? null,
-    },
-    updatedBy: session!.user!.id,
-  });
+  try {
+    await upsertAgentProfile({
+      orgId: version.orgId,
+      agentKey,
+      patch: {
+        enabled: snap.enabled ?? undefined,
+        model: snap.model ?? null,
+        fallbackModel: snap.fallbackModel ?? null,
+        temperature: snap.temperature ?? null,
+        maxTokens: snap.maxTokens ?? null,
+        instructions: snap.instructions ?? null,
+        ragScope: snap.ragScope ?? null,
+        monthlyBudgetUsd: snap.monthlyBudgetUsd ?? null,
+        config: snap.config ?? null,
+      },
+      updatedBy: session!.user!.id,
+    });
+  } catch (err) {
+    // Snapshot pré-guard com valor que o runtime não honra (o guard mora no
+    // store desde o review #235 — todo escritor herda, inclusive este).
+    if (err instanceof UnsupportedAgentFieldError) {
+      return NextResponse.json({ error: err.message }, { status: 409 });
+    }
+    throw err;
+  }
 
   await audit(
     {
