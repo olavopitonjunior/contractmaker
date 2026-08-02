@@ -19,13 +19,12 @@ import { agentDisabledOutput } from "../agents/disabled";
 import { runSpecialist, type ToolUseGuard } from "../shared/specialist-runner";
 import { applyPolicy } from "../sentinel/middleware";
 import { pickSpecialistPrompt } from "./prompts-locacao";
+import { toolboxFor } from "../agents/toolboxes";
 import type { OrchestratorState, SpecialistOutput } from "../orchestrator/state";
 
-const CURATOR_TOOL_NAMES = new Set([
-  "find_similar_contracts",
-  "propose_new_clause",
-  "propose_template_change",
-]);
+// Toolbox no mapa canônico (agents/toolboxes.ts) — a tela do /admin lê o
+// MESMO registro, então o que ela mostra é o que roda aqui.
+const CURATOR_TOOL_NAMES = toolboxFor("curator");
 
 const CURATOR_TOOLS = AGENT_TOOLS.filter((t) => CURATOR_TOOL_NAMES.has(t.name));
 

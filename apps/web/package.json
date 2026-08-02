@@ -21,6 +21,7 @@
     "test:isolation": "vitest run --config vitest.isolation.config.ts",
     "gen:openapi": "tsx scripts/generate-openapi.ts",
     "gen:canonical-templates": "tsx scripts/generate-canonical-template-sources.ts",
+    "gen:mcp-catalog": "node scripts/gen-mcp-catalog.mjs",
     "e2e:cy:open": "cypress open",
     "e2e:cy": "cypress run",
     "e2e:cy:record": "cypress run --record"

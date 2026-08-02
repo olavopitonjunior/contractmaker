@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
-import { GET } from "../route";
+import { GET, PATCH } from "../route";
 import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { __resetAgentProfileCacheForTests } from "@/lib/ai/agents/resolve";
@@ -109,6 +109,17 @@ describe("GET /api/admin/agents", () => {
     expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
   });
 
+  it("aba de custo/procedência: provenance e modelsSeen presentes por agente", async () => {
+    staffLogado();
+    const res = await GET(req());
+    const body = await res.json();
+    for (const a of body.agents) {
+      expect(Array.isArray(a.provenance)).toBe(true);
+      expect(a.provenance.length).toBeGreaterThan(0);
+      expect(Array.isArray(a.modelsSeen)).toBe(true);
+    }
+  });
+
   it("updatedBy de usuário apagado degrada pro id cru, não pra erro", async () => {
     staffLogado();
     mockPrisma.agentProfile.findMany.mockResolvedValue([
@@ -136,5 +147,58 @@ describe("GET /api/admin/agents", () => {
       (a: { agentKey: string }) => a.agentKey === "editor"
     );
     expect(editor.own.updatedByName).toBe("user-fantasma");
+  });
+});
+
+function patchReq(body: Record<string, unknown>) {
+  return new NextRequest("http://localhost/api/admin/agents", {
+    method: "PATCH",
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json" },
+  });
+}
+
+describe("PATCH /api/admin/agents — guard de supports (review #229)", () => {
+  it("rejeita configuração que o runtime não honra, nomeando o campo", async () => {
+    staffLogado("super_admin");
+    // aggregator: supports todo false — modelo via curl gravaria config
+    // fantasma que a próxima pessoa a ler o banco acharia em vigor.
+    const res = await PATCH(
+      patchReq({ orgId: null, agentKey: "aggregator", model: "claude-sonnet-4-6" })
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("modelo");
+
+    // passive: honra modelo mas não instruções.
+    const res2 = await PATCH(
+      patchReq({ orgId: null, agentKey: "passive", instructions: "x" })
+    );
+    expect(res2.status).toBe(400);
+    expect((await res2.json()).error).toContain("instruções");
+  });
+
+  it("aceita campo que o runtime honra (passive.model) e grava com updatedBy", async () => {
+    staffLogado("super_admin");
+    const res = await PATCH(
+      patchReq({ orgId: null, agentKey: "passive", model: "claude-sonnet-4-6" })
+    );
+    expect(res.status).toBe(200);
+    expect(mockPrisma.agentProfile.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          agentKey: "passive",
+          model: "claude-sonnet-4-6",
+          updatedBy: "staff-1",
+        }),
+      })
+    );
+  });
+
+  it("support (leitura) não escreve: 403", async () => {
+    staffLogado("support");
+    const res = await PATCH(
+      patchReq({ orgId: null, agentKey: "editor", model: "claude-sonnet-4-6" })
+    );
+    expect(res.status).toBe(403);
   });
 });

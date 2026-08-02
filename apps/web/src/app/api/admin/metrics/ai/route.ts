@@ -79,12 +79,22 @@ export async function GET(req: NextRequest) {
     throw err;
   }
 
+  // Filtro opcional pra aba Custo da página por agente — mesma resposta,
+  // recortada. Chave inválida é 404, não filtro silencioso que devolve tudo.
+  const agentKeyParam = new URL(req.url).searchParams.get("agentKey");
+  if (agentKeyParam && !isAgentKey(agentKeyParam)) {
+    return NextResponse.json({ error: "Agente desconhecido" }, { status: 404 });
+  }
+
   const [groups, orgs] = await Promise.all([
     // A granularidade mais fina que as quatro visões precisam — dobrar em
     // memória evita 4 idas ao banco.
     prisma.aIUsage.groupBy({
       by: ["orgId", "agentKey", "provider", "model", "operation"],
-      where: { createdAt: { gte: range.from, lte: range.to } },
+      where: {
+        createdAt: { gte: range.from, lte: range.to },
+        ...(agentKeyParam ? { agentKey: agentKeyParam } : {}),
+      },
       _sum: { estimatedCostUsd: true, totalTokens: true },
       _count: { _all: true },
     }),
