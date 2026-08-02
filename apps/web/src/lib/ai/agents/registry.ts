@@ -273,7 +273,9 @@ export const AMBIGUOUS_OPERATIONS = new Set<string>(["chat"]);
  * embeddings de ingestão e consulta, memória de contratos, classificadores de
  * intenção/policy/upload. Forçá-las num agente inventaria dado no painel de
  * custo; escondê-las deixaria 26% do gasto como "não atribuído" genérico.
- * O painel as exibe como grupo "Infraestrutura", rotulado e separado.
+ * Consumidor: o painel de métricas as exibirá como grupo "Infraestrutura"
+ * rotulado (tela no PR de métricas cross-tenant) — até lá, este Set é a
+ * definição canônica esperando o primeiro leitor.
  *
  * (`doc_analysis` ficou de fora de propósito: não tem mais escritor no código —
  * só linhas históricas. Aparece como "não atribuído", que é o que ela é.)
