@@ -4,7 +4,11 @@ import { prisma } from "@/lib/db/prisma";
 import { DEAL_SOURCE_CHANNEL } from "@/lib/pipeline/source-channel";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
-import { ensureLocacaoAccess, isRouteError, parseJsonBody } from "@/lib/locacao/route-helpers";
+import {
+  ensureLocacaoApiAccess,
+  isRouteError,
+  parseJsonBody,
+} from "@/lib/locacao/route-helpers";
 import { withIdempotency } from "@/lib/api/idempotency";
 import { resolveManagerForCreate } from "@/lib/deals/manager";
 import { formPublicPath } from "@/lib/forms/form-url";
@@ -54,7 +58,15 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  const ctx = await ensureLocacaoAccess(PERMISSION.LEASE_CREATE);
+  // `ensureLocacaoApiAccess` (e não `ensureLocacaoAccess`) porque esta rota
+  // entra na allowlist M2M: o Max cria formulário de locação por conversa no
+  // WhatsApp, como o de vendas já permitia via `POST /api/forms`. Mantém o RBAC
+  // e o gate de módulo; muda só quem consegue chegar aqui — Bearer com escopo
+  // `locacao:rw`, além da sessão. O caminho de máquina usa sempre o dono do
+  // token (`X-Act-As-User` é ignorado neste helper).
+  const ctx = await ensureLocacaoApiAccess(req, PERMISSION.LEASE_CREATE, {
+    scope: "locacao:rw",
+  });
   if (isRouteError(ctx)) return ctx;
 
   const parsed = await parseJsonBody(req, bodySchema);
