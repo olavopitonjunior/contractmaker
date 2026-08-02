@@ -260,8 +260,10 @@ export async function GET(req: NextRequest) {
     byAgent: agentStats
       .map((a) => ({
         agentKey: a.agentKey,
-        // `null` é honesto: o agregador do orquestrador não é um agente
-        // configurável, e linha histórica anterior à coluna não tem dono.
+        // `null` hoje = operações de infraestrutura (INFRA_OPERATIONS no
+        // registry: embeddings, classificadores, memória) + linhas históricas
+        // anteriores à coluna. O agregador deixou de cair aqui — grava
+        // `agentKey: "aggregator"` desde que entrou no registry.
         label: a.agentKey ? agentLabel(a.agentKey) : "Não atribuído",
         costUsd: Number((Number(a._sum.estimatedCostUsd ?? 0)).toFixed(4)),
         calls: a._count._all,

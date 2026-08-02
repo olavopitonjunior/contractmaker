@@ -395,10 +395,10 @@ async function aggregatorNode(state: GraphState): Promise<Partial<GraphState>> {
       provider: "anthropic",
       model,
       operation: "chat",
-      // Sem agente: o agregador é o passo de síntese do próprio orquestrador,
-      // não um agente configurável do registry. Atribuí-lo a `chat_legacy` (o
-      // que a derivação faria) seria inventar dado num painel de custo.
-      agentKey: null,
+      // Explícito porque `chat` é ambígua (o legado grava a mesma operação):
+      // a derivação pelo registry não se aplica, e desde que o agregador
+      // entrou no registry ele tem nome próprio no painel de custo.
+      agentKey: "aggregator",
       promptTokens: response.usage?.input_tokens ?? 0,
       completionTokens: response.usage?.output_tokens ?? 0,
       cacheReadTokens:
@@ -572,10 +572,10 @@ async function aggregatorNode(state: GraphState): Promise<Partial<GraphState>> {
       provider: "anthropic",
       model,
       operation: "chat",
-      // Sem agente: o agregador é o passo de síntese do próprio orquestrador,
-      // não um agente configurável do registry. Atribuí-lo a `chat_legacy` (o
-      // que a derivação faria) seria inventar dado num painel de custo.
-      agentKey: null,
+      // Explícito porque `chat` é ambígua (o legado grava a mesma operação):
+      // a derivação pelo registry não se aplica, e desde que o agregador
+      // entrou no registry ele tem nome próprio no painel de custo.
+      agentKey: "aggregator",
       promptTokens: 0,
       latencyMs: Date.now() - t0,
       success: false,
