@@ -10,6 +10,7 @@ import {
   type EmbedTarget,
 } from "@/lib/ai/knowledge";
 import { extractPlainText } from "@/lib/ai/ocr";
+import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { extractDocx } from "@/lib/extraction/docx";
 import {
   classifyKnowledgeUpload,
@@ -290,6 +291,16 @@ export async function POST(req: NextRequest) {
 
   // Embedding best-effort em background — não segura a resposta no Voyage.
   waitUntil(embedKnowledgeItem(embedTargets, { orgId: org.id, userId: effUserId }));
+
+  // Mesma auditoria do POST manual — upload também é criação de conteúdo
+  // que a IA do tenant vai responder e inserir.
+  audit(extractAuditContextFromRequest(req, org.id, effUserId), {
+    action: "KNOWLEDGE_CREATE",
+    result: "SUCCESS",
+    resourceType: "KnowledgeItem",
+    resource: parentId,
+    metadata: { category, title: title.slice(0, 200), source: "upload" },
+  }).catch(() => {});
 
   return NextResponse.json(
     {

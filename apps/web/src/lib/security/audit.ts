@@ -323,11 +323,21 @@ export type AuditAction =
   // DIMOB / fiscal
   | "FISCAL_SETTINGS_UPDATE"
   | "AGENT_CONFIG_UPDATE"
+  // Agente externo (Max) reportou custo via POST /api/agents/usage — era a
+  // única rota M2M de escrita sem rastro, e escreve numa tabela que alimenta
+  // teto por agente.
+  | "AGENT_USAGE_REPORTED"
   // Base de conhecimento da PLATAFORMA (KnowledgeItem.orgId IS NULL) — escrita
   // que todos os tenants passam a ler, feita por super_admin fora de qualquer org.
   | "PLATFORM_KNOWLEDGE_CREATE"
   | "PLATFORM_KNOWLEDGE_UPDATE"
   | "PLATFORM_KNOWLEDGE_DELETE"
+  // Base de conhecimento do TENANT — não era auditada (só a de plataforma
+  // tinha ação). O conteúdo daqui alimenta o que a IA responde e insere em
+  // contrato; quem mudou o quê importa tanto quanto na plataforma.
+  | "KNOWLEDGE_CREATE"
+  | "KNOWLEDGE_UPDATE"
+  | "KNOWLEDGE_DELETE"
   // Imobiliária adotou o texto de uma cláusula de slot da plataforma na sua.
   // Escrita org-scoped, mas o conteúdo passa a vir de fora — vale rastro.
   | "CLAUSE_ADOPT_PLATFORM"
