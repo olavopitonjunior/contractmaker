@@ -72,6 +72,14 @@ export async function GET(req: NextRequest) {
     const ids = stale.map((r) => r.thread_id);
     threads += ids.length;
 
+    // Por que SELECT primeiro e só depois DELETE, em vez do subquery embutido
+    // que o `/api/cron/retention` usa: aqui são TRÊS deletes que precisam mirar
+    // exatamente o mesmo conjunto. Um subquery repetido em cada statement leria
+    // `checkpoints` de novo — e depois que a terceira apagasse a mãe, as duas
+    // primeiras já teriam visto conjuntos possivelmente diferentes (o LIMIT sem
+    // ORDER BY não promete a mesma página duas vezes). Fixar os ids uma vez é o
+    // que garante que blob e write apagados pertencem ao checkpoint apagado.
+
     // Placeholders explícitos ($1,$2,…) em vez de `= ANY($1::text[])`: o
     // segundo depende de como o driver serializa array JS, e este é um DELETE —
     // não é onde se descobre isso. Os ids saem do próprio banco, nunca de input
