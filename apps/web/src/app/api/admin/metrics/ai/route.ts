@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth/auth";
 import { requirePlatform } from "@/lib/admin/gate";
 import { prisma } from "@/lib/db/prisma";
 import { parseRangeFromSearch, InvalidRangeError } from "@/lib/admin/metrics/range";
+import { PLATFORM_BUCKET } from "@/lib/admin/metrics/aggregate";
 import {
   AGENT_REGISTRY,
   INFRA_OPERATIONS,
@@ -116,7 +117,7 @@ export async function GET(req: NextRequest) {
     add(byAgent, agentBucket, row);
     add(byModel, `${gRow.provider}:${gRow.model}`, row);
     add(byOperation, gRow.operation, row);
-    add(byOrg, gRow.orgId ?? "__platform__", row);
+    add(byOrg, gRow.orgId ?? PLATFORM_BUCKET, row);
   }
 
   return NextResponse.json({
@@ -138,7 +139,7 @@ export async function GET(req: NextRequest) {
     byModel: toRows(byModel, (k) => k.split(":").slice(1).join(":")),
     byOperation: toRows(byOperation, (k) => k),
     byOrg: toRows(byOrg, (k) =>
-      k === "__platform__" ? "Plataforma" : orgName.get(k) ?? k
+      k === PLATFORM_BUCKET ? "Plataforma" : orgName.get(k) ?? k
     ),
   });
 }

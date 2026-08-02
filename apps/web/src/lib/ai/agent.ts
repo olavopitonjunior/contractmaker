@@ -21,7 +21,7 @@ import {
 } from "./agents/model-provenance";
 import { composeSystemPrompt } from "./agents/prompt-blocks";
 import { wantsDirectEdit as routerWantsDirectEdit } from "./orchestrator/routing";
-import { getAnthropicClient, HAIKU_MODEL, SONNET_MODEL, resolveModel } from "./shared/anthropic-client";
+import { getAnthropicClient } from "./shared/anthropic-client";
 import { loadContext } from "./shared/context";
 import { resolveSession, loadChatHistory } from "./shared/session";
 import { streamOneTurn, type StreamedTurnResult } from "./shared/turn";
