@@ -85,9 +85,12 @@ interface OrgOption {
 export function AgentsConsoleClient({
   canEdit,
   orgs,
+  onlyAgentKey,
 }: {
   canEdit: boolean;
   orgs: OrgOption[];
+  /** Página de detalhe: renderiza só o card deste agente (aba Config). */
+  onlyAgentKey?: string;
 }) {
   const [scopeOrgId, setScopeOrgId] = useState<string>("");
   const [loading, setLoading] = useState(true);
@@ -133,15 +136,21 @@ export function AgentsConsoleClient({
       const res = await fetch("/api/admin/agents", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
+        // Campo que o runtime não honra fica FORA do body — o PATCH rejeita
+        // configuração sem efeito (guard de `supports`), e mandar o campo
+        // desabilitado derrubaria o save dos demais.
         body: JSON.stringify({
           orgId: scopeOrgId || null,
           agentKey: row.agentKey,
-          enabled: row.own.enabled,
-          model: row.own.model,
-          fallbackModel: row.own.fallbackModel,
+          ...(row.supports.enabled ? { enabled: row.own.enabled } : {}),
+          ...(row.supports.model
+            ? { model: row.own.model, fallbackModel: row.own.fallbackModel }
+            : {}),
           temperature: row.own.temperature,
           maxTokens: row.own.maxTokens,
-          instructions: row.own.instructions,
+          ...(row.supports.instructions
+            ? { instructions: row.own.instructions }
+            : {}),
           ...(row.supports.ragScope ? { ragScope: row.own.ragScope } : {}),
           monthlyBudgetUsd: row.own.monthlyBudgetUsd,
         }),
@@ -193,11 +202,27 @@ export function AgentsConsoleClient({
       {loading ? (
         <p className="text-sm text-muted-foreground">Carregando…</p>
       ) : (
-        agents.map((row) => (
+        agents
+          .filter((row) => !onlyAgentKey || row.agentKey === onlyAgentKey)
+          .map((row) => (
           <Card key={row.agentKey}>
             <CardHeader className="pb-2">
               <div className="flex flex-wrap items-center gap-2">
-                <CardTitle className="text-sm">{row.label}</CardTitle>
+                <CardTitle className="text-sm">
+                  {/* Na lista, o título leva à visão separada do agente
+                      (Config/Prompt/Tools/Custo); na própria página de
+                      detalhe (onlyAgentKey) o link seria circular. */}
+                  {onlyAgentKey ? (
+                    row.label
+                  ) : (
+                    <a
+                      href={`/admin/agents/${row.agentKey}`}
+                      className="hover:underline"
+                    >
+                      {row.label}
+                    </a>
+                  )}
+                </CardTitle>
                 <Badge variant="outline" className="font-mono text-[10px]">
                   {row.agentKey}
                 </Badge>

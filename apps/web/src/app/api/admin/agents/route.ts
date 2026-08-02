@@ -201,15 +201,30 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
-  // Mesmo guard da rota do tenant: `ragScope` só é gravável para agente que o
-  // runtime honra. Sem isto o console gravaria restrição que nunca é aplicada,
-  // e a próxima pessoa a ler o banco acharia que existe uma em vigor.
-  if (
-    patch.ragScope !== undefined &&
-    !AGENT_REGISTRY[agentKey as AgentKey].supports.ragScope
-  ) {
+  // Guard de `supports` em TODOS os campos que o runtime pode não honrar —
+  // não só ragScope. A UI já desabilita os inputs, mas um super_admin via
+  // curl gravava model/enabled/instructions pra ocr/max/aggregator, e a
+  // próxima pessoa a ler o banco acharia que a config estava em vigor.
+  // (Achado do review do #229 — fecha os três agentes de uma vez.)
+  const supports = AGENT_REGISTRY[agentKey as AgentKey].supports;
+  const naoHonrado = [
+    patch.ragScope !== undefined && !supports.ragScope
+      ? "escopo de base de conhecimento"
+      : null,
+    (patch.model !== undefined || patch.fallbackModel !== undefined) &&
+    !supports.model
+      ? "modelo"
+      : null,
+    patch.enabled !== undefined && !supports.enabled ? "liga/desliga" : null,
+    patch.instructions !== undefined && !supports.instructions
+      ? "instruções"
+      : null,
+  ].filter(Boolean);
+  if (naoHonrado.length > 0) {
     return NextResponse.json(
-      { error: "Este agente não consulta a base de conhecimento." },
+      {
+        error: `Este agente ainda não honra: ${naoHonrado.join(", ")}. Gravar criaria configuração sem efeito.`,
+      },
       { status: 400 }
     );
   }

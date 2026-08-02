@@ -19,14 +19,12 @@ import { composeSystemPrompt } from "../agents/prompt-blocks";
 import { agentDisabledOutput } from "../agents/disabled";
 import { runSpecialist } from "../shared/specialist-runner";
 import { pickSpecialistPrompt } from "./prompts-locacao";
+import { toolboxFor } from "../agents/toolboxes";
 import type { OrchestratorState, SpecialistOutput } from "../orchestrator/state";
 
-const LEGAL_TOOL_NAMES = new Set([
-  "query_templates",
-  "explain_clause",
-  "query_knowledge_base",
-  "find_similar_contracts",
-]);
+// Toolbox no mapa canônico (agents/toolboxes.ts) — a tela do /admin lê o
+// MESMO registro, então o que ela mostra é o que roda aqui.
+const LEGAL_TOOL_NAMES = toolboxFor("legal");
 
 const LEGAL_TOOLS = AGENT_TOOLS.filter((t) => LEGAL_TOOL_NAMES.has(t.name));
 

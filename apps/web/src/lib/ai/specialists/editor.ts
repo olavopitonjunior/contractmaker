@@ -22,25 +22,14 @@ import { runSpecialist, type ToolUseGuard } from "../shared/specialist-runner";
 import { applyPolicy } from "../sentinel/middleware";
 import { pickSpecialistPrompt } from "./prompts-locacao";
 import { wantsDirectEdit as routerWantsDirectEdit } from "../orchestrator/routing";
+import { toolboxFor } from "../agents/toolboxes";
 import type { OrchestratorState, SpecialistOutput } from "../orchestrator/state";
 
-const EDITOR_TOOL_NAMES = new Set([
-  "edit_contract_section",
-  "update_contract_data",
-  "propose_suggestion",
-  "insert_clause",
-  "remove_clause",
-  "apply_style_preset",
-  "insert_image",
-  "add_comment",
-  // F4: Editor consulta crosscheck antes de propor aditamento — passa por
-  // Sentinel (read-only, sem write contra contrato).
-  "cross_check_certidoes",
-  // F5: propose_plan permite Editor responder a intents edit_multi sem
-  // cair no streamContractAgent legacy. ChatPlan é criado com a session
-  // do graph (sessionId + pendingAssistantMessageId injetados pelo runner).
-  "propose_plan",
-]);
+// Toolbox no mapa canônico (agents/toolboxes.ts) — a tela do /admin lê o
+// MESMO registro, então o que ela mostra é o que roda aqui. ChatPlan do
+// propose_plan é criado com a session do graph (sessionId +
+// pendingAssistantMessageId injetados pelo runner).
+const EDITOR_TOOL_NAMES = toolboxFor("editor");
 
 const EDITOR_TOOLS = AGENT_TOOLS.filter((t) => EDITOR_TOOL_NAMES.has(t.name));
 
