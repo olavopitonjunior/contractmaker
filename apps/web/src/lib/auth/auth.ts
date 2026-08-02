@@ -4,6 +4,7 @@ import Resend from "next-auth/providers/resend";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/db/prisma";
 import bcrypt from "bcryptjs";
+import type { AuditAction } from "@/lib/security/audit";
 import { z } from "zod";
 import { sendEmail } from "@/lib/email/client";
 import { MagicLinkEmail } from "@/lib/email/templates/magic-link";
@@ -129,7 +130,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               data: {
                 orgId: m?.orgId ?? null,
                 userId,
-                action: "LOGIN_SUCCESS",
+                // `satisfies` porque a coluna é String no Prisma — sem isso um
+                // typo aqui compilaria e a ação nunca apareceria em filtro
+                // nenhum (review #233).
+                action: "LOGIN_SUCCESS" satisfies AuditAction,
                 result: "SUCCESS",
                 resourceType: "session",
               },
