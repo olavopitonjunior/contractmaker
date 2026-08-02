@@ -2202,6 +2202,36 @@ model AuditLog {
   @@index([userId, createdAt])
 }
 
+/// Motor de alerta da plataforma — o registro deduplicado do que precisa
+/// chegar ao dono por e-mail (destinatários = PlatformRole super_admin, do
+/// banco, não env). Ocorrência repetida da mesma assinatura INCREMENTA
+/// `count` em vez de criar linha — é o que impede o alerta de virar spam e
+/// treinar o dono a ignorá-lo. `notifiedAt` nulo = pendente pro digest;
+/// preenchido = e-mail imediato já saiu (re-arma após 24h).
+/// SEM orgId FK de propósito: alerta sobrevive à exclusão da org (o evento
+/// "org X quebrou e foi apagada" é exatamente o que não pode sumir junto).
+model PlatformAlertEvent {
+  id          String    @id @default(cuid())
+  /// support_signal | integration_failure | ai_budget | model_fallback
+  /// (runtime_error na fase H) — catálogo em lib/alerts/platform-alerts.ts
+  kind        String
+  /// Chave de dedupe DENTRO do kind (ex.: "CLICKSIGN_SEND_FAILED:org123").
+  signature   String
+  orgId       String?
+  /// info | warning | critical — decide tom do e-mail, não roteamento.
+  severity    String    @default("warning")
+  title       String
+  payload     Json?
+  count       Int       @default(1)
+  firstSeenAt DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now())
+  notifiedAt  DateTime?
+
+  @@unique([kind, signature])
+  @@index([lastSeenAt])
+  @@index([notifiedAt])
+}
+
 // Dispositivos confiáveis — fingerprint + cookie assinado.
 model TrustedDevice {
   id            String    @id @default(cuid())
