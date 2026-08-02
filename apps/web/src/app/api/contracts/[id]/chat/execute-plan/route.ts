@@ -7,6 +7,7 @@ import {
   authFailureResponse,
 } from "@/lib/api/require-auth";
 import { executeToolHandler } from "@/lib/ai/tool-handlers";
+import { applyPolicy } from "@/lib/ai/sentinel/middleware";
 import { assertContractBudget, ContractBudgetExceededError } from "@/lib/ai/budget";
 import type { AgentContext, AgentEvent, PlanStep } from "@/lib/ai/types";
 import { unmetDependencies } from "@/lib/ai/plan-deps";
@@ -252,6 +253,50 @@ export async function POST(
             input: step.input,
             iteration,
           });
+
+          // Sentinel — o mesmo pre-check que o Editor/Curator fazem no grafo.
+          //
+          // A aprovação humana no PlanCard NÃO substitui a policy, por dois
+          // motivos concretos: (1) o `stepInputOverrides` acima pode ter trocado
+          // o input DEPOIS que o plano foi lido, então o que executa não é
+          // necessariamente o que foi revisado; (2) as regras existem justamente
+          // pra o que passa despercebido numa leitura — URL externa em
+          // `insert_image` é exfiltração disfarçada de ilustração, e ninguém
+          // confere host de imagem numa lista de 8 passos.
+          //
+          // Fica DEPOIS do override de propósito: avalia o input real.
+          const decision = await applyPolicy(
+            { tool: step.tool, input: step.input },
+            {
+              contractId: params.id,
+              orgId,
+              userId: actorUserId,
+              // O plano nasce em modo Planejar; regras que discriminam por modo
+              // precisam ver isso, não o default do tipo.
+              mode: "plan",
+            }
+          );
+          if (decision.decision === "reject") {
+            const reason = `Bloqueado por policy (${decision.ruleId}): ${decision.reason}`;
+            step.status = "failed";
+            step.result = { success: false, summary: reason };
+            failedCount++;
+            send({
+              type: "tool_result",
+              name: step.tool,
+              iteration,
+              success: false,
+              summary: reason,
+            });
+            send({
+              type: "plan_step_result",
+              planId,
+              stepId: step.id,
+              status: "failed",
+              summary: reason,
+            });
+            continue;
+          }
 
           // Snapshot ANTES — so vale a pena pra writes contra GDoc.
           let htmlBefore: string | undefined;
