@@ -6,8 +6,11 @@ import { notifyDealEvent, stageChangeDedupeKey } from "../deal-events";
 vi.mock("@/lib/email/client", () => ({
   sendEmail: vi.fn().mockResolvedValue({ id: "email-1", ok: true }),
 }));
-vi.mock("@/lib/newton/deal-notify-trigger", () => ({
-  triggerNewtonDealNotify: vi.fn().mockResolvedValue("skipped"),
+vi.mock("@/lib/agents/whatsapp-router", () => ({
+  resolveWhatsappAgent: vi.fn().mockResolvedValue(null),
+  dispatchWhatsappNotify: vi
+    .fn()
+    .mockResolvedValue({ status: "sent", detail: { via: "newton_sidecar" } }),
 }));
 
 import { sendEmail } from "@/lib/email/client";

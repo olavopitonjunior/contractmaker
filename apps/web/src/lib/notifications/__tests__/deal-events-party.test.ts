@@ -5,14 +5,15 @@ import { notifyDealEvent } from "../deal-events";
 vi.mock("@/lib/email/client", () => ({
   sendEmail: vi.fn().mockResolvedValue({ id: "email-1", ok: true }),
 }));
-vi.mock("@/lib/newton/deal-notify-trigger", () => ({
-  triggerNewtonDealNotify: vi.fn().mockResolvedValue("skipped"),
-}));
 vi.mock("@/lib/newton/trigger", () => ({
   triggerNewtonForRequest: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@/lib/newton/gate", () => ({
-  isNewtonEnabledForDeal: vi.fn().mockResolvedValue(false),
+// Default `null` = tenant sem agente nenhum, que é o estado de fábrica.
+vi.mock("@/lib/agents/whatsapp-router", () => ({
+  resolveWhatsappAgent: vi.fn().mockResolvedValue(null),
+  dispatchWhatsappNotify: vi
+    .fn()
+    .mockResolvedValue({ status: "sent", detail: { via: "max", maxNotifyId: "mx1" } }),
 }));
 vi.mock("@/lib/newton/whatsapp-window", () => ({
   isWithinWhatsappWindow: vi.fn().mockReturnValue(true),
@@ -20,7 +21,10 @@ vi.mock("@/lib/newton/whatsapp-window", () => ({
 
 import { sendEmail } from "@/lib/email/client";
 import { triggerNewtonForRequest } from "@/lib/newton/trigger";
-import { isNewtonEnabledForDeal } from "@/lib/newton/gate";
+import {
+  resolveWhatsappAgent,
+  dispatchWhatsappNotify,
+} from "@/lib/agents/whatsapp-router";
 import { isWithinWhatsappWindow } from "@/lib/newton/whatsapp-window";
 
 const dealFind = prisma.deal.findUnique as unknown as ReturnType<typeof vi.fn>;
@@ -112,8 +116,10 @@ describe("notifyDealEvent — público party (v2)", () => {
     logCreate.mockResolvedValue({ id: "log1" });
     logUpdate.mockResolvedValue({});
     newtonCreate.mockResolvedValue({ id: "req1" });
-    (isNewtonEnabledForDeal as unknown as ReturnType<typeof vi.fn>)
-      .mockResolvedValue(false);
+    (resolveWhatsappAgent as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValue(null);
+    (dispatchWhatsappNotify as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ status: "sent", detail: { via: "max", maxNotifyId: "mx1" } });
     (isWithinWhatsappWindow as unknown as ReturnType<typeof vi.fn>)
       .mockReturnValue(true);
   });
@@ -225,7 +231,7 @@ describe("notifyDealEvent — público party (v2)", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           status: "skipped",
-          detail: { reason: "newton_off_para_a_org" },
+          detail: { reason: "sem_agente_de_whatsapp_para_a_org" },
         }),
       })
     );
@@ -234,15 +240,15 @@ describe("notifyDealEvent — público party (v2)", () => {
   it("WhatsApp à parte: tenant COM Newton cria NewtonRequest one-shot E dispara o trigger", async () => {
     dealFind.mockResolvedValue(dealRow());
     orgSettingsFind.mockResolvedValue(partyOnly({ whatsapp: true }));
-    (isNewtonEnabledForDeal as unknown as ReturnType<typeof vi.fn>)
-      .mockResolvedValue(true);
+    (resolveWhatsappAgent as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValue("newton");
     await notifyDealEvent({
       dealId: "deal1",
       orgId: "org1",
       event: "contract_signed",
       dedupeKey: "env1",
     });
-    expect(isNewtonEnabledForDeal).toHaveBeenCalledWith("org1", "venda");
+    expect(resolveWhatsappAgent).toHaveBeenCalledWith("org1", "venda");
     const req = newtonCreate.mock.calls[0][0].data;
     expect(req).toMatchObject({
       orgId: "org1",
@@ -265,11 +271,53 @@ describe("notifyDealEvent — público party (v2)", () => {
     );
   });
 
+  /**
+   * O caminho da parte no Newton é um NewtonRequest com cobrança e inbox. No
+   * Max é aviso direto: os dois eventos liberados pra parte são informativos, a
+   * Cloud API não tem inbox de pedido pra alimentar, e o outbox do Max cobre a
+   * janela — por isso nem `newtonRequest.create` nem o gate de horário aparecem.
+   */
+  it("WhatsApp à parte no tenant do Max: aviso direto, sem NewtonRequest", async () => {
+    dealFind.mockResolvedValue(dealRow());
+    orgSettingsFind.mockResolvedValue(partyOnly({ whatsapp: true }));
+    (resolveWhatsappAgent as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValue("max");
+    (isWithinWhatsappWindow as unknown as ReturnType<typeof vi.fn>)
+      .mockReturnValue(false);
+
+    await notifyDealEvent({
+      dealId: "deal1",
+      orgId: "org1",
+      event: "contract_signed",
+      dedupeKey: "env1",
+    });
+
+    expect(newtonCreate).not.toHaveBeenCalled();
+    expect(triggerNewtonForRequest).not.toHaveBeenCalled();
+    expect(dispatchWhatsappNotify).toHaveBeenCalledWith(
+      "max",
+      expect.objectContaining({
+        audience: "deal_party",
+        // A linha de log é o chokepoint atômico de idempotência do motor —
+        // reusá-la como dedupeKey estende a garantia até dentro do Max.
+        dedupeKey: "log1",
+      })
+    );
+    expect(logUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "sent",
+          detail: { via: "max", maxNotifyId: "mx1" },
+        }),
+      })
+    );
+  });
+
   it("fora da janela 7h–22h o WhatsApp da parte vira skipped registrado", async () => {
     dealFind.mockResolvedValue(dealRow());
     orgSettingsFind.mockResolvedValue(partyOnly({ whatsapp: true }));
-    (isNewtonEnabledForDeal as unknown as ReturnType<typeof vi.fn>)
-      .mockResolvedValue(true);
+    (resolveWhatsappAgent as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValue("newton");
     (isWithinWhatsappWindow as unknown as ReturnType<typeof vi.fn>)
       .mockReturnValue(false);
     await notifyDealEvent({

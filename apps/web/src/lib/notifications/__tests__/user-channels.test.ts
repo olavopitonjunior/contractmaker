@@ -3,13 +3,23 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { dispatchUserNotification, sweepUserNotifications } from "../user-channels";
 
-vi.mock("@/lib/newton/notify-trigger", () => ({
-  triggerNewtonNotify: vi.fn().mockResolvedValue("sent"),
+// O seam é o ROTEADOR, não um agente: este canal não sabe (nem deve saber) se
+// quem entrega é o Newton ou o Max.
+vi.mock("@/lib/agents/whatsapp-router", () => ({
+  resolveWhatsappAgent: vi.fn().mockResolvedValue("newton"),
+  dispatchWhatsappNotify: vi
+    .fn()
+    .mockResolvedValue({ status: "sent", detail: { via: "newton_sidecar" } }),
 }));
 
-import { triggerNewtonNotify } from "@/lib/newton/notify-trigger";
+import {
+  resolveWhatsappAgent,
+  dispatchWhatsappNotify,
+} from "@/lib/agents/whatsapp-router";
 
-const trigger = triggerNewtonNotify as unknown as ReturnType<typeof vi.fn>;
+const dispatch = dispatchWhatsappNotify as unknown as ReturnType<typeof vi.fn>;
+const resolveAgent = resolveWhatsappAgent as unknown as ReturnType<typeof vi.fn>;
+const SENT = { status: "sent", detail: { via: "newton_sidecar" } } as const;
 const notifFind = prisma.notification.findUnique as unknown as ReturnType<typeof vi.fn>;
 const notifMany = prisma.notification.findMany as unknown as ReturnType<typeof vi.fn>;
 const membershipMany = prisma.orgMembership.findMany as unknown as ReturnType<typeof vi.fn>;
@@ -76,7 +86,8 @@ describe("dispatchUserNotification", () => {
     delivMany.mockResolvedValue([]);
     delivUpdateMany.mockResolvedValue({ count: 0 });
     delivFindUnique.mockResolvedValue(null);
-    trigger.mockResolvedValue("sent");
+    resolveAgent.mockResolvedValue("newton");
+    dispatch.mockResolvedValue(SENT);
   });
 
   afterEach(() => {
@@ -87,13 +98,18 @@ describe("dispatchUserNotification", () => {
     const r = await dispatchUserNotification({ notificationId: "notif1" });
 
     expect(r.sent).toBe(1);
-    expect(trigger).toHaveBeenCalledTimes(1);
-    expect(trigger).toHaveBeenCalledWith(
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenCalledWith(
+      "newton",
       expect.objectContaining({
         audience: "platform_user",
         orgId: "org1",
         phone: "+5511987654321",
         orgName: "Imobiliária Teste",
+        // Título e corpo viajam SEPARADOS — o Max precisa deles como variáveis
+        // distintas de template; quem compõe a frase única é o roteador.
+        title: "Formulário concluído",
+        dedupeKey: "d1",
       })
     );
     // Claim nasce "pending" e é assentado depois — nunca cria já como "sent".
@@ -113,7 +129,7 @@ describe("dispatchUserNotification", () => {
     const r = await dispatchUserNotification({ notificationId: "notif1" });
 
     expect(r.sent).toBe(0);
-    expect(trigger).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
     expect(delivCreate).not.toHaveBeenCalled();
   });
 
@@ -123,7 +139,7 @@ describe("dispatchUserNotification", () => {
     const r = await dispatchUserNotification({ notificationId: "notif1" });
 
     expect(r.sent).toBe(0);
-    expect(trigger).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it("respeita o kill switch global da org mesmo com opt-in", async () => {
@@ -132,7 +148,7 @@ describe("dispatchUserNotification", () => {
     const r = await dispatchUserNotification({ notificationId: "notif1" });
 
     expect(r.sent).toBe(0);
-    expect(trigger).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it("respeita o kill switch por categoria", async () => {
@@ -143,7 +159,7 @@ describe("dispatchUserNotification", () => {
     const r = await dispatchUserNotification({ notificationId: "notif1" });
 
     expect(r.sent).toBe(0);
-    expect(trigger).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it("não dispara duas vezes: P2002 no claim é dedupe", async () => {
@@ -157,7 +173,7 @@ describe("dispatchUserNotification", () => {
     const r = await dispatchUserNotification({ notificationId: "notif1" });
 
     expect(r.sent).toBe(0);
-    expect(trigger).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it("tipo fora da allowlist é no-op total", async () => {
@@ -167,7 +183,7 @@ describe("dispatchUserNotification", () => {
 
     expect(r).toEqual({ sent: 0, skipped: 0, deferred: 0 });
     expect(delivCreate).not.toHaveBeenCalled();
-    expect(trigger).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it("fora da janela 7h-22h fica deferred, sem claim", async () => {
@@ -179,7 +195,7 @@ describe("dispatchUserNotification", () => {
     expect(r.deferred).toBe(1);
     expect(r.sent).toBe(0);
     expect(delivCreate).not.toHaveBeenCalled();
-    expect(trigger).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it("rate cap adia (deferred), não descarta — a capacidade da hora se renova", async () => {
@@ -189,7 +205,7 @@ describe("dispatchUserNotification", () => {
 
     expect(r.deferred).toBe(1);
     expect(r.skipped).toBe(0);
-    expect(trigger).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
     expect(delivUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -214,7 +230,7 @@ describe("dispatchUserNotification", () => {
     const r = await dispatchUserNotification({ notificationId: "notif1" });
 
     expect(r.sent).toBe(1);
-    expect(trigger).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenCalledTimes(1);
     // O CAS põe o status no where — duas execuções não reivindicam a mesma.
     const where = delivUpdateMany.mock.calls[0][0].where;
     expect(where.id).toBe("d-old");
@@ -239,7 +255,7 @@ describe("dispatchUserNotification", () => {
     const r = await dispatchUserNotification({ notificationId: "notif1" });
 
     expect(r.sent).toBe(0);
-    expect(trigger).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it("perde a corrida do CAS não envia (outra execução reivindicou)", async () => {
@@ -254,12 +270,15 @@ describe("dispatchUserNotification", () => {
 
     const r = await dispatchUserNotification({ notificationId: "notif1" });
 
-    expect(trigger).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
     expect(r.sent).toBe(0);
   });
 
-  it("gate do Newton fechado assenta skipped, não sent", async () => {
-    trigger.mockResolvedValue("skipped");
+  it("agente indisponível assenta skipped, não sent", async () => {
+    dispatch.mockResolvedValue({
+      status: "skipped",
+      reason: "newton_gate_off_ou_sidecar_ausente",
+    });
 
     const r = await dispatchUserNotification({ notificationId: "notif1" });
 
@@ -274,6 +293,67 @@ describe("dispatchUserNotification", () => {
     );
   });
 
+  it("tenant sem NENHUM agente nem chega a despachar", async () => {
+    resolveAgent.mockResolvedValue(null);
+
+    const r = await dispatchUserNotification({ notificationId: "notif1" });
+
+    expect(r.skipped).toBe(1);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(delivUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "skipped",
+          detail: { reason: "sem_agente_de_whatsapp_para_a_org" },
+        }),
+      })
+    );
+  });
+
+  /**
+   * Falha de rede pro serviço do agente é RE-TENTÁVEL: o sweep retoma `failed`.
+   * Assentar como `skipped` (terminal) perderia a notificação em silêncio — foi
+   * exatamente esse o bug crítico do canal quando todo claim era tratado como
+   * terminal.
+   */
+  it("falha de transporte assenta failed (re-tentável), não skipped", async () => {
+    dispatch.mockResolvedValue({ status: "failed", error: "timeout após 3000ms" });
+
+    const r = await dispatchUserNotification({ notificationId: "notif1" });
+
+    expect(r.sent).toBe(0);
+    expect(r.skipped).toBe(0);
+    expect(delivUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "failed",
+          detail: { error: "timeout após 3000ms" },
+        }),
+      })
+    );
+  });
+
+  it("no tenant do Max o despacho vai pro Max, sem tocar no Newton", async () => {
+    resolveAgent.mockResolvedValue("max");
+    dispatch.mockResolvedValue({
+      status: "sent",
+      detail: { via: "max", maxNotifyId: "mx1" },
+    });
+
+    const r = await dispatchUserNotification({ notificationId: "notif1" });
+
+    expect(r.sent).toBe(1);
+    expect(dispatch).toHaveBeenCalledWith("max", expect.anything());
+    expect(delivUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "sent",
+          detail: { via: "max", maxNotifyId: "mx1" },
+        }),
+      })
+    );
+  });
+
   it("usuário sem telefone não recebe", async () => {
     membershipMany.mockResolvedValue([
       member("user1", { user: { name: "X", phone: null, deletedAt: null } }),
@@ -282,7 +362,7 @@ describe("dispatchUserNotification", () => {
     const r = await dispatchUserNotification({ notificationId: "notif1" });
 
     expect(r.sent).toBe(0);
-    expect(trigger).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   /**
@@ -303,7 +383,7 @@ describe("dispatchUserNotification", () => {
     // Pula ANTES de resolver destinatários: nada de claim pra envio que não sai.
     expect(membershipMany).not.toHaveBeenCalled();
     expect(delivCreate).not.toHaveBeenCalled();
-    expect(trigger).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it("batchId normal (sem :mgr) continua despachando", async () => {
@@ -338,7 +418,8 @@ describe("sweepUserNotifications", () => {
     delivMany.mockResolvedValue([]);
     delivUpdateMany.mockResolvedValue({ count: 0 });
     delivFindUnique.mockResolvedValue(null);
-    trigger.mockResolvedValue("sent");
+    resolveAgent.mockResolvedValue("newton");
+    dispatch.mockResolvedValue(SENT);
   });
 
   afterEach(() => {
@@ -430,6 +511,6 @@ describe("sweepUserNotifications", () => {
     const r = await sweepUserNotifications();
 
     expect(r.scanned).toBe(1);
-    expect(trigger).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenCalledTimes(1);
   });
 });

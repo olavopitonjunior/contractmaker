@@ -3,16 +3,23 @@
  * GERENTE. Espelha o fan-out de lib/financeiro/notifications.ts::notifyChargeEvent.
  *
  * Três públicos, textos e transportes diferentes:
- *  - `broker` (v1): quem trabalha o negócio. Email brandado + WhatsApp direto
- *    pelo sidecar Newton (`triggerNewtonDealNotify`). Default: email ligado.
+ *  - `broker` (v1): quem trabalha o negócio. Email brandado + WhatsApp direto.
+ *    Default: email ligado.
  *  - `party` (v2): o cliente final (comprador/vendedor, locador/locatário).
- *    Email com template próprio + WhatsApp SÓ via NewtonRequest one-shot e SÓ
- *    em tenant com Newton. Default: tudo DESLIGADO, e só nos eventos da
- *    allowlist `PARTY_CAPABLE_EVENTS`.
+ *    Email com template próprio + WhatsApp só em tenant com agente. Default:
+ *    tudo DESLIGADO, e só nos eventos da allowlist `PARTY_CAPABLE_EVENTS`.
  *  - `manager` (v3): o gerente atribuído (`Deal.managerUserId`), usuário
  *    INTERNO da plataforma. Mesmos textos do corretor (é operador da esteira,
- *    entende o vocabulário) + WhatsApp pelo sidecar na audiência
- *    `platform_user`. Default: TUDO ligado, sem allowlist de eventos.
+ *    entende o vocabulário) + WhatsApp na audiência `platform_user`. Default:
+ *    TUDO ligado, sem allowlist de eventos.
+ *
+ * QUEM leva o WhatsApp depende do tenant: Newton (OpenClaw) ou Max (RE/MAX),
+ * resolvido por `lib/agents/whatsapp-router.ts`. A diferença que vaza pra cá é
+ * a janela de cortesia 7h–22h: o Newton não tem fila, então fora da janela a
+ * mensagem é DESCARTADA (`skipped` visível — este motor não tem cron de
+ * reconciliação); o Max tem outbox e aceita a qualquer hora, agendando a
+ * entrega pra próxima abertura. Por isso a janela só é checada no caminho do
+ * Newton.
  *
  * Idempotência por canal×destinatário via unique do
  * DealNotificationLog (insert-first; P2002 = já enviado). Sino (Notification)
@@ -34,9 +41,11 @@ import { emitNotification } from "@/lib/notifications/emit";
 import { sendEmail } from "@/lib/email/client";
 import { DealUpdateEmail } from "@/lib/email/templates/deal-update";
 import { DealPartyUpdateEmail } from "@/lib/email/templates/deal-party-update";
-import { triggerNewtonDealNotify } from "@/lib/newton/deal-notify-trigger";
-import { triggerNewtonNotify } from "@/lib/newton/notify-trigger";
-import { isNewtonEnabledForDeal } from "@/lib/newton/gate";
+import {
+  resolveWhatsappAgent,
+  dispatchWhatsappNotify,
+  type WhatsappAgent,
+} from "@/lib/agents/whatsapp-router";
 import { isWithinWhatsappWindow } from "@/lib/newton/whatsapp-window";
 import { appendEvent } from "@/lib/newton/requests";
 import { triggerNewtonForRequest } from "@/lib/newton/trigger";
@@ -261,16 +270,20 @@ async function resolvePartyPublicUrl(params: {
  * Fan-out para as PARTES. Difere do de corretores em dois pontos que não são
  * cosméticos:
  *
- *  - **WhatsApp só via NewtonRequest one-shot** (padrão de
- *    `lib/surveys/channels.ts`), com `triggerNewtonForRequest` — os executores
- *    de locação criam pedido SEM trigger (#193) e o pedido morre no inbox;
- *    escrever pro cliente final não pode depender disso.
- *  - **Gate por tenant**: só imobiliária com Newton habilitado manda WhatsApp
- *    pra parte. Quem usa outro agente fica em e-mail até ele suportar one-shot.
+ *  - **O transporte do WhatsApp muda com o agente do tenant.** No Newton é um
+ *    NewtonRequest one-shot (padrão de `lib/surveys/channels.ts`) com
+ *    `triggerNewtonForRequest` — os executores de locação criam pedido SEM
+ *    trigger (#193) e o pedido morre no inbox; escrever pro cliente final não
+ *    pode depender disso. No Max é mensagem informativa direta: os dois eventos
+ *    liberados pra parte (`contract_signed`, `charge_created`) são avisos, não
+ *    cobranças, então não há o que perseguir — e a Cloud API não tem inbox de
+ *    pedido pra alimentar.
+ *  - **Gate por tenant**: sem agente habilitado, a parte fica só no e-mail.
  *
- * Fora da janela 7h–22h o envio vira `skipped` registrado (não existe cron de
- * reconciliação neste motor — melhor um "pulado" visível no histórico do
- * negócio do que uma mensagem de madrugada).
+ * Janela 7h–22h: no Newton, fora dela o envio vira `skipped` registrado (não
+ * existe cron de reconciliação neste motor — melhor um "pulado" visível no
+ * histórico do que uma mensagem de madrugada). No Max a janela é do outbox
+ * dele, que adia em vez de descartar.
  */
 async function notifyParties(params: {
   orgId: string;
@@ -315,10 +328,11 @@ async function notifyParties(params: {
     hasLink: Boolean(publicUrl),
   });
 
-  const whatsappAllowed =
-    channels.whatsapp &&
-    (await isNewtonEnabledForDeal(orgId, dealKind).catch(() => false));
-  const withinWindow = isWithinWhatsappWindow();
+  const agent = channels.whatsapp
+    ? await resolveWhatsappAgent(orgId, dealKind)
+    : null;
+  // Só o Newton depende da janela aqui: o Max recebe a qualquer hora e agenda.
+  const windowOk = agent !== "newton" || isWithinWhatsappWindow();
 
   for (const party of parties) {
     if (channels.email && party.email) {
@@ -378,20 +392,45 @@ async function notifyParties(params: {
     });
     if (!logId) continue;
 
-    if (!whatsappAllowed) {
+    if (!agent) {
       await settleLogRow(
         logId,
         "skipped",
-        withDropped({ reason: "newton_off_para_a_org" })
+        withDropped({ reason: "sem_agente_de_whatsapp_para_a_org" })
       );
       continue;
     }
-    if (!withinWindow) {
+    if (!windowOk) {
       await settleLogRow(
         logId,
         "skipped",
         withDropped({ reason: "fora_da_janela_7h_22h" })
       );
+      continue;
+    }
+
+    if (agent === "max") {
+      const r = await dispatchWhatsappNotify("max", {
+        orgId,
+        audience: "deal_party",
+        phone: party.phone,
+        recipientName: party.label,
+        title: texts.title,
+        body: texts.body,
+        linkUrl: publicUrl,
+        dealId,
+        orgName,
+        // A linha de log é o chokepoint atômico de idempotência deste motor —
+        // reusá-la como dedupeKey estende a garantia até dentro do Max.
+        dedupeKey: logId,
+      });
+      if (r.status === "sent") {
+        await settleLogRow(logId, "sent", withDropped(r.detail));
+      } else if (r.status === "skipped") {
+        await settleLogRow(logId, "skipped", withDropped({ reason: r.reason }));
+      } else {
+        await settleLogRow(logId, "failed", withDropped({ error: r.error }));
+      }
       continue;
     }
 
@@ -582,38 +621,41 @@ async function notifyManager(params: {
   if (!logId) return;
 
   try {
-    // Mesmos gates do público party: tenant sem Newton e madrugada viram
-    // `skipped` VISÍVEL no histórico do negócio — não existe cron de
+    // Mesmos gates do público party: tenant sem agente e (no Newton) madrugada
+    // viram `skipped` VISÍVEL no histórico do negócio — não existe cron de
     // reconciliação neste motor, então silêncio aqui seria indistinguível de
     // falha.
-    const newtonOn = await isNewtonEnabledForDeal(orgId, dealKind).catch(
-      () => false
-    );
-    if (!newtonOn) {
-      await settleLogRow(logId, "skipped", { reason: "newton_off_para_a_org" });
+    const agent = await resolveWhatsappAgent(orgId, dealKind);
+    if (!agent) {
+      await settleLogRow(logId, "skipped", {
+        reason: "sem_agente_de_whatsapp_para_a_org",
+      });
       return;
     }
-    if (!isWithinWhatsappWindow()) {
+    if (agent === "newton" && !isWithinWhatsappWindow()) {
       await settleLogRow(logId, "skipped", { reason: "fora_da_janela_7h_22h" });
       return;
     }
 
-    const outcome = await triggerNewtonNotify({
+    const r = await dispatchWhatsappNotify(agent, {
       orgId,
       audience: "platform_user",
       phone: manager.phone,
       recipientName: manager.label,
-      message: `${texts.title}: ${texts.body} Acompanhe em ${baseUrl}${dealPath}`,
+      title: texts.title,
+      body: texts.body,
+      newtonTrailer: `Acompanhe em ${baseUrl}${dealPath}`,
+      linkUrl: `${baseUrl}${dealPath}`,
       dealId,
       orgName,
-      linkUrl: `${baseUrl}${dealPath}`,
+      dedupeKey: logId,
     });
-    if (outcome === "skipped") {
-      await settleLogRow(logId, "skipped", {
-        reason: "newton_gate_off_ou_sidecar_ausente",
-      });
+    if (r.status === "sent") {
+      await settleLogRow(logId, "sent", r.detail);
+    } else if (r.status === "skipped") {
+      await settleLogRow(logId, "skipped", { reason: r.reason });
     } else {
-      await settleLogRow(logId, "sent", { via: "platform_user" });
+      await settleLogRow(logId, "failed", { error: r.error });
     }
   } catch (err) {
     await settleLogRow(logId, "failed", {
@@ -757,6 +799,9 @@ export async function notifyDealEvent(
     });
     if (brokers.length === 0) return;
 
+    // Uma leitura de módulos serve todos os corretores do mesmo negócio.
+    let brokerAgent: WhatsappAgent | null | undefined;
+
     for (const broker of brokers) {
       // Email
       if (eventCfg.broker.email && broker.notifyByEmail && broker.email) {
@@ -802,7 +847,7 @@ export async function notifyDealEvent(
         }
       }
 
-      // WhatsApp (Newton sidecar — best-effort)
+      // WhatsApp (agente do tenant — best-effort)
       if (eventCfg.broker.whatsapp && broker.notifyByWhatsapp && broker.phone) {
         const logId = await claimLogRow({
           orgId,
@@ -815,19 +860,42 @@ export async function notifyDealEvent(
           dedupeKey,
         });
         if (logId) {
-          const outcome = await triggerNewtonDealNotify({
+          // Resolvido dentro do `if` do log: fora dele, um evento só de e-mail
+          // pagaria uma leitura de módulos por corretor sem precisar.
+          // `=== undefined`, não `??=`: "nenhum agente" é `null` e também é
+          // resposta cacheável — com `??=` cada corretor refaria a leitura.
+          if (brokerAgent === undefined) {
+            brokerAgent = await resolveWhatsappAgent(orgId, deal.pipeline.kind);
+          }
+          if (!brokerAgent) {
+            await settleLogRow(logId, "skipped", {
+              reason: "sem_agente_de_whatsapp_para_a_org",
+            });
+            continue;
+          }
+          // Sem checagem de janela aqui, de propósito: o corretor é operador do
+          // negócio e sempre recebeu a qualquer hora por este caminho. Mudar
+          // isso é decisão de produto, não efeito colateral de trocar o agente.
+          const brand = await orgBrandOnce();
+          const r = await dispatchWhatsappNotify(brokerAgent, {
             orgId,
-            dealId,
+            audience: "deal_broker",
             phone: broker.phone,
             recipientName: broker.label,
-            message: `${texts.title}: ${texts.body} Acompanhe em ${baseUrl}${dealPath}`,
+            title: texts.title,
+            body: texts.body,
+            newtonTrailer: `Acompanhe em ${baseUrl}${dealPath}`,
+            linkUrl: `${baseUrl}${dealPath}`,
+            dealId,
+            orgName: brand?.displayName ?? "imobiliária",
+            dedupeKey: logId,
           });
-          if (outcome === "skipped") {
-            await settleLogRow(logId, "skipped", {
-              reason: "newton_gate_off_ou_sidecar_ausente",
-            });
+          if (r.status === "sent") {
+            await settleLogRow(logId, "sent", r.detail);
+          } else if (r.status === "skipped") {
+            await settleLogRow(logId, "skipped", { reason: r.reason });
           } else {
-            await settleLogRow(logId, "sent", { via: "newton_sidecar" });
+            await settleLogRow(logId, "failed", { error: r.error });
           }
         }
       }

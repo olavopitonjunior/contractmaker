@@ -32,13 +32,12 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import { triggerNewtonNotify } from "@/lib/newton/notify-trigger";
-import { isWithinWhatsappWindow } from "@/lib/newton/whatsapp-window";
 import {
-  buildUserNotifyMessage,
-  policyForType,
-  USER_CHANNEL_TYPES,
-} from "./user-channels-registry";
+  resolveWhatsappAgent,
+  dispatchWhatsappNotify,
+} from "@/lib/agents/whatsapp-router";
+import { isWithinWhatsappWindow } from "@/lib/newton/whatsapp-window";
+import { policyForType, USER_CHANNEL_TYPES } from "./user-channels-registry";
 import { filterUsersOptedIn, type OrgChannelCache } from "./user-prefs";
 import {
   USER_NOTIF_CHANNELS,
@@ -335,26 +334,42 @@ async function deliverToUser(params: {
     return "sent";
   }
 
-  const outcome = await triggerNewtonNotify({
-    orgId: notification.orgId,
-    audience: "platform_user",
-    phone: user.phone!,
-    recipientName: user.name ?? "",
-    message: buildUserNotifyMessage(notification),
-    orgName,
-    linkUrl: notification.linkUrl,
-  });
-
-  if (outcome === "skipped") {
-    // Terminal: gate do tenant fechado ou sidecar ausente não muda em
-    // minutos, e insistir a cada 5 min só encheria a tabela.
+  // Qual agente atende este tenant (Newton ou Max) — sem `dealKind`, porque
+  // notificação de sistema não é de um negócio.
+  const agent = await resolveWhatsappAgent(notification.orgId);
+  if (!agent) {
+    // Terminal: gate do tenant fechado não muda em minutos, e insistir a cada
+    // 5 min só encheria a tabela.
     await settleDelivery(deliveryId, "skipped", {
-      reason: "newton_gate_off_ou_sidecar_ausente",
+      reason: "sem_agente_de_whatsapp_para_a_org",
     });
     return "skipped";
   }
 
-  await settleDelivery(deliveryId, "sent", { via: "newton_sidecar" });
+  const r = await dispatchWhatsappNotify(agent, {
+    orgId: notification.orgId,
+    audience: "platform_user",
+    phone: user.phone!,
+    recipientName: user.name ?? "",
+    title: notification.title,
+    body: notification.body,
+    linkUrl: notification.linkUrl,
+    orgName,
+    dedupeKey: deliveryId,
+  });
+
+  if (r.status === "skipped") {
+    await settleDelivery(deliveryId, "skipped", { reason: r.reason });
+    return "skipped";
+  }
+  if (r.status === "failed") {
+    // Re-tentável: o sweep retoma `failed`, e uma falha de rede pro serviço do
+    // Max é exatamente o caso que merece nova tentativa.
+    await settleDelivery(deliveryId, "failed", { error: r.error });
+    return "failed";
+  }
+
+  await settleDelivery(deliveryId, "sent", r.detail);
   return "sent";
 }
 

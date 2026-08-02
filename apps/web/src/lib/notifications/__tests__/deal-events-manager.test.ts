@@ -7,22 +7,23 @@ import { DEAL_NOTIF_EVENTS } from "../deal-events-shared";
 vi.mock("@/lib/email/client", () => ({
   sendEmail: vi.fn().mockResolvedValue({ id: "email-1", ok: true }),
 }));
-vi.mock("@/lib/newton/deal-notify-trigger", () => ({
-  triggerNewtonDealNotify: vi.fn().mockResolvedValue("skipped"),
-}));
-vi.mock("@/lib/newton/notify-trigger", () => ({
-  triggerNewtonNotify: vi.fn().mockResolvedValue("sent"),
-}));
-vi.mock("@/lib/newton/gate", () => ({
-  isNewtonEnabledForDeal: vi.fn().mockResolvedValue(true),
+// O motor fala com o ROTEADOR, não com um agente: qual deles entrega (Newton
+// ou Max) é configuração do tenant.
+vi.mock("@/lib/agents/whatsapp-router", () => ({
+  resolveWhatsappAgent: vi.fn().mockResolvedValue("newton"),
+  dispatchWhatsappNotify: vi
+    .fn()
+    .mockResolvedValue({ status: "sent", detail: { via: "platform_user" } }),
 }));
 vi.mock("@/lib/newton/whatsapp-window", () => ({
   isWithinWhatsappWindow: vi.fn().mockReturnValue(true),
 }));
 
 import { sendEmail } from "@/lib/email/client";
-import { triggerNewtonNotify } from "@/lib/newton/notify-trigger";
-import { isNewtonEnabledForDeal } from "@/lib/newton/gate";
+import {
+  resolveWhatsappAgent,
+  dispatchWhatsappNotify,
+} from "@/lib/agents/whatsapp-router";
 import { isWithinWhatsappWindow } from "@/lib/newton/whatsapp-window";
 
 const dealFind = prisma.deal.findUnique as unknown as ReturnType<typeof vi.fn>;
@@ -43,8 +44,9 @@ const logUpdate = prisma.dealNotificationLog.update as unknown as ReturnType<
 const notifCreate = prisma.notification.create as unknown as ReturnType<
   typeof vi.fn
 >;
-const trigger = triggerNewtonNotify as unknown as ReturnType<typeof vi.fn>;
-const newtonGate = isNewtonEnabledForDeal as unknown as ReturnType<typeof vi.fn>;
+const dispatch = dispatchWhatsappNotify as unknown as ReturnType<typeof vi.fn>;
+const resolveAgent = resolveWhatsappAgent as unknown as ReturnType<typeof vi.fn>;
+const SENT = { status: "sent", detail: { via: "platform_user" } } as const;
 const window7a22 = isWithinWhatsappWindow as unknown as ReturnType<typeof vi.fn>;
 
 function dealRow(over: Record<string, unknown> = {}) {
@@ -90,8 +92,8 @@ describe("notifyDealEvent — público manager (v3)", () => {
     logCreate.mockResolvedValue({ id: "log1" });
     logUpdate.mockResolvedValue({});
     notifCreate.mockResolvedValue({});
-    trigger.mockResolvedValue("sent");
-    newtonGate.mockResolvedValue(true);
+    resolveAgent.mockResolvedValue("newton");
+    dispatch.mockResolvedValue(SENT);
     window7a22.mockReturnValue(true);
   });
 
@@ -115,13 +117,14 @@ describe("notifyDealEvent — público manager (v3)", () => {
       value: "deal-notify-manager",
     });
 
-    expect(trigger).toHaveBeenCalledTimes(1);
-    expect(trigger).toHaveBeenCalledWith(
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenCalledWith(
+      "newton",
       expect.objectContaining({
         audience: "platform_user",
         orgId: "org1",
         dealId: "deal1",
-        // E.164 COM "+" — a normalização pro sidecar é do trigger.
+        // E.164 COM "+" — normalizar pro transporte é do trigger do agente.
         phone: "+5511987654321",
         recipientName: "Marcia Gerente",
       })
@@ -181,7 +184,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
     });
 
     expect(sendEmail).toHaveBeenCalledTimes(1);
-    expect(trigger).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
     expect(logRowsFor("whatsapp")).toHaveLength(0);
   });
 
@@ -208,9 +211,9 @@ describe("notifyDealEvent — público manager (v3)", () => {
     expect(logRowsFor("email")[0].recipientLabel).toBe("marcia@imob.com");
   });
 
-  it("tenant SEM Newton: WhatsApp vira skipped registrado (e-mail segue)", async () => {
+  it("tenant SEM agente: WhatsApp vira skipped registrado (e-mail segue)", async () => {
     dealFind.mockResolvedValue(dealRow());
-    newtonGate.mockResolvedValue(false);
+    resolveAgent.mockResolvedValue(null);
 
     await notifyDealEvent({
       dealId: "deal1",
@@ -220,12 +223,66 @@ describe("notifyDealEvent — público manager (v3)", () => {
     });
 
     expect(sendEmail).toHaveBeenCalledTimes(1);
-    expect(trigger).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
     expect(logUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           status: "skipped",
-          detail: { reason: "newton_off_para_a_org" },
+          detail: { reason: "sem_agente_de_whatsapp_para_a_org" },
+        }),
+      })
+    );
+  });
+
+  /**
+   * A janela de cortesia mudou de dono, não sumiu. O Newton não tem fila, então
+   * fora dela a mensagem é descartada (este motor não tem cron de
+   * reconciliação); o Max tem outbox e agenda a entrega pra próxima abertura.
+   * Segurar aqui também no Max reintroduziria a perda silenciosa da madrugada.
+   */
+  it("no tenant do Max a janela NÃO segura — quem adia é o outbox dele", async () => {
+    dealFind.mockResolvedValue(dealRow());
+    resolveAgent.mockResolvedValue("max");
+    dispatch.mockResolvedValue({
+      status: "sent",
+      detail: { via: "max", maxNotifyId: "mx1" },
+    });
+    window7a22.mockReturnValue(false);
+
+    await notifyDealEvent({
+      dealId: "deal1",
+      orgId: "org1",
+      event: "contract_ready",
+      dedupeKey: "c1",
+    });
+
+    expect(dispatch).toHaveBeenCalledWith("max", expect.anything());
+    expect(logUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "sent",
+          detail: { via: "max", maxNotifyId: "mx1" },
+        }),
+      })
+    );
+  });
+
+  it("falha de transporte assenta failed, não sent", async () => {
+    dealFind.mockResolvedValue(dealRow());
+    dispatch.mockResolvedValue({ status: "failed", error: "HTTP 500" });
+
+    await notifyDealEvent({
+      dealId: "deal1",
+      orgId: "org1",
+      event: "contract_ready",
+      dedupeKey: "c1",
+    });
+
+    expect(logUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "failed",
+          detail: { error: "HTTP 500" },
         }),
       })
     );
@@ -242,7 +299,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
       dedupeKey: "c1",
     });
 
-    expect(trigger).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
     expect(logUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -253,9 +310,12 @@ describe("notifyDealEvent — público manager (v3)", () => {
     );
   });
 
-  it("sidecar ausente (trigger devolve skipped) assenta skipped, não sent", async () => {
+  it("sidecar ausente (dispatch devolve skipped) assenta skipped, não sent", async () => {
     dealFind.mockResolvedValue(dealRow());
-    trigger.mockResolvedValue("skipped");
+    dispatch.mockResolvedValue({
+      status: "skipped",
+      reason: "newton_gate_off_ou_sidecar_ausente",
+    });
 
     await notifyDealEvent({
       dealId: "deal1",
@@ -292,7 +352,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
     });
 
     expect(sendEmail).not.toHaveBeenCalled();
-    expect(trigger).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
     expect(logCreate).not.toHaveBeenCalled();
   });
 
@@ -312,7 +372,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
     });
 
     expect(sendEmail).toHaveBeenCalledTimes(1);
-    expect(trigger).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it("muted silencia também o gerente, mas o sino do evento continua", async () => {
@@ -333,7 +393,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
     });
     expect(String(notifCreate.mock.calls[1][0].data.batchId)).toMatch(/:mgr$/);
     expect(sendEmail).not.toHaveBeenCalled();
-    expect(trigger).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
     expect(logCreate).not.toHaveBeenCalled();
   });
 
@@ -354,7 +414,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
     });
 
     expect(sendEmail).not.toHaveBeenCalled();
-    expect(trigger).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
     expect(logUpdate).not.toHaveBeenCalled();
   });
 
@@ -453,7 +513,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
       logCreate.mockResolvedValue({ id: "log1" });
       logUpdate.mockResolvedValue({});
       notifCreate.mockResolvedValue({});
-      trigger.mockResolvedValue("sent");
+      dispatch.mockResolvedValue(SENT);
 
       await notifyDealEvent({
         dealId: "deal1",
@@ -463,7 +523,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
       });
 
       expect(sendEmail, `evento ${ev}`).toHaveBeenCalledTimes(1);
-      expect(trigger, `evento ${ev}`).toHaveBeenCalledTimes(1);
+      expect(dispatch, `evento ${ev}`).toHaveBeenCalledTimes(1);
     }
   });
 });
