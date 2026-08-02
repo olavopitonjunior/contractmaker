@@ -4,6 +4,12 @@ export type AuditResult = "SUCCESS" | "FAILURE" | "DENIED";
 
 export type AuditAction =
   // Auth / identidade
+  //
+  // LOGIN_SUCCESS entrou tarde (2026-08): até então só elevação e logout
+  // eram auditados — "quem entrou e quando" não existia em lugar nenhum.
+  // Gravado no callback jwt do NextAuth (momento do login, credentials e
+  // magic link), fire-and-forget.
+  | "LOGIN_SUCCESS"
   | "LOGIN_ELEVATED"
   | "LOGIN_ELEVATION_FAILED"
   | "USER_LOGOUT"

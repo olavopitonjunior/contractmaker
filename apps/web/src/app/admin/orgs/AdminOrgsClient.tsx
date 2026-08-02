@@ -48,6 +48,8 @@ interface TenantMetric {
   modules: string[];
   members: number;
   deals: number;
+  /** Quantos dos deals são de pipeline de locação (o resto é venda). */
+  dealsLocacao: number;
   dealsValueBRL: number;
   activeLeases: number;
   aiCostUsd: number;
@@ -475,7 +477,15 @@ function SystemOverview() {
                       <div className="text-[10px] text-muted-foreground">{r.modules.join(" · ") || "sem módulos"}</div>
                     </td>
                     <td className="p-3 tabular-nums">{formatInt(r.members)}</td>
-                    <td className="p-3 tabular-nums">{formatInt(r.deals)}</td>
+                    <td className="p-3 tabular-nums">
+                      {formatInt(r.deals)}
+                      {r.dealsLocacao > 0 && (
+                        <span className="text-[10px] text-muted-foreground">
+                          {" "}
+                          ({r.deals - r.dealsLocacao}v · {r.dealsLocacao}l)
+                        </span>
+                      )}
+                    </td>
                     <td className="p-3 tabular-nums">{formatBRL(r.dealsValueBRL)}</td>
                     <td className="p-3 tabular-nums">{formatBRL(r.asaasVolumeBRL)}</td>
                     <td className="p-3 tabular-nums">{formatUsd(r.aiCostUsd)}</td>

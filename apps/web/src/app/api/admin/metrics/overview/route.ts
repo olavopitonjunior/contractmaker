@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
       },
     }),
     prisma.orgModule.findMany({ select: { orgId: true, module: true, enabled: true } }),
-    prisma.pipeline.findMany({ select: { id: true, orgId: true } }),
+    prisma.pipeline.findMany({ select: { id: true, orgId: true, kind: true } }),
     prisma.aIUsage.groupBy({
       by: ["orgId"],
       where: createdInRange,
@@ -115,8 +115,10 @@ export async function GET(req: NextRequest) {
     }),
   ]);
 
-  // Deal precisa de join via pipeline.orgId — resolve o mapa uma vez.
+  // Deal precisa de join via pipeline.orgId — resolve o mapa uma vez. O
+  // `kind` do pipeline vem junto pra separar venda × locação sem query extra.
   const pipelineOrg = new Map(pipelines.map((p) => [p.id, p.orgId]));
+  const pipelineKind = new Map(pipelines.map((p) => [p.id, p.kind]));
   const dealGroups = await prisma.deal.groupBy({
     by: ["pipelineId"],
     where: createdInRange,
@@ -124,11 +126,18 @@ export async function GET(req: NextRequest) {
     _sum: { value: true },
   });
   const dealsByOrg = new Map<string, number>();
+  const dealsLocacaoByOrg = new Map<string, number>();
   const dealValueByOrg = new Map<string, number>();
   for (const d of dealGroups) {
     const orgId = pipelineOrg.get(d.pipelineId);
     if (!orgId) continue;
     dealsByOrg.set(orgId, (dealsByOrg.get(orgId) ?? 0) + d._count._all);
+    if (pipelineKind.get(d.pipelineId) === "locacao") {
+      dealsLocacaoByOrg.set(
+        orgId,
+        (dealsLocacaoByOrg.get(orgId) ?? 0) + d._count._all
+      );
+    }
     dealValueByOrg.set(
       orgId,
       (dealValueByOrg.get(orgId) ?? 0) + Number(d._sum.value ?? 0)
@@ -166,6 +175,7 @@ export async function GET(req: NextRequest) {
     modules: modulesByOrg.get(o.id) ?? [],
     members: o._count.members,
     deals: dealsByOrg.get(o.id) ?? 0,
+    dealsLocacao: dealsLocacaoByOrg.get(o.id) ?? 0,
     dealsValueBRL: round2(dealValueByOrg.get(o.id) ?? 0),
     activeLeases: activeLeases.get(o.id) ?? 0,
     asaasAccounts: asaasAccounts.get(o.id) ?? 0,
