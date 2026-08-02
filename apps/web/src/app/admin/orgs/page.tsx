@@ -67,6 +67,9 @@ export default async function AdminOrgsPage() {
           <a href="/admin/knowledge" className="text-primary hover:underline">
             Base de conhecimento
           </a>
+          <a href="/admin/max" className="text-primary hover:underline">
+            Max (WhatsApp)
+          </a>
         </nav>
       </header>
       <AdminOrgsClient orgs={orgs} canCreate={canCreate} />

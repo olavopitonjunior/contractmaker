@@ -55,7 +55,15 @@ toca em nada deste repo.
 | | Onde | O que controla |
 |---|---|---|
 | **Features `vendas.max` / `locacao.max`** | `OrgModule.featureFlags`, painel super-admin | **Roteamento do canal**: se as notificações do tenant saem pelo Max. É o que `resolveWhatsappAgent` lê. Default OFF. |
-| **`AgentProfile.enabled` (agentKey `max`)** | console `/admin/agents` | **Comportamento de IA** do Max: hoje recusa consulta ao RAG (`/api/agents/knowledge/search` → 403 `AGENT_DISABLED`) e, quando o serviço passar a ler o perfil, encerra turnos de conversa. |
+| **`AgentProfile.enabled` (agentKey `max`)** | console `/admin/agents` | **Comportamento de IA** do Max: recusa consulta ao RAG (`/api/agents/knowledge/search` → 403 `AGENT_DISABLED`) e encerra turnos de conversa (o nó `gate` do grafo lê o perfil). |
+
+**Mission Control em `/admin/max`.** O Newton tem painel próprio porque o
+OpenClaw traz um; o Max não traz, e um segundo painel com login e deploy
+próprios, para três tenants, seria mais superfície pra manter e mais um lugar
+pra esquecer de olhar. A tela é de leitura — conexão da instância Z-API, estado
+da janela, fila e últimas entregas — e lê `GET /api/admin/status` do serviço,
+assinado com o MESMO HMAC do `/notify`. O que se CONFIGURA continua em
+`/admin/agents` (persona, modelo, teto) e nas features por org (roteamento).
 
 Desligar o primeiro cala o canal (as notificações viram `skipped` registrado);
 desligar o segundo cala a IA mas não o canal. São propósitos diferentes de
