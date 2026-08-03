@@ -74,7 +74,16 @@ export function channelToAuth(
 }
 
 export type SendResult =
-  | { ok: true; instrument: "envelope" | "aceite"; envelopeId?: string }
+  | {
+      ok: true;
+      instrument: "envelope" | "aceite";
+      envelopeId?: string;
+      /** Avisos do roteamento (ex.: "foi por Aceite, não assinatura"). A UI
+       *  MOSTRA — antes eram computados em routing.ts e descartados aqui. */
+      warnings?: string[];
+      /** Roteou sem medir a capacidade da conta ClickSign. */
+      capabilitiesUnverified?: boolean;
+    }
   | { ok: false; block: PrepareResult };
 
 /** Mapeia o bloqueio do prepareSend pra HTTP + corpo acionável na UI. */
@@ -136,8 +145,15 @@ export async function executeProposalSend(proposalId: string): Promise<SendResul
     // falha_envio (reenviável).
     if (!result.ok) {
       await releaseClaim(proposalId);
+      return result;
     }
-    return result;
+    // Repassa os avisos da DECISÃO pro caller. Sem isto o corretor envia uma
+    // proposta por Aceite achando que foi pra assinatura — foi o que aconteceu.
+    return {
+      ...result,
+      ...(decision.warnings.length > 0 ? { warnings: decision.warnings } : {}),
+      ...(decision.capabilitiesUnverified ? { capabilitiesUnverified: true } : {}),
+    };
   } catch (err) {
     await releaseClaim(proposalId);
     throw err;

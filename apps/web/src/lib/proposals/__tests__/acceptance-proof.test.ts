@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { prisma } from "@/lib/db/prisma";
-import { buildAcceptanceProofHtml, buildAcceptanceProof } from "../acceptance-proof";
+import {
+  buildAcceptanceProofHtml,
+  buildAcceptanceProof,
+  compareAcceptedText,
+} from "../acceptance-proof";
 
 const pFindUnique = prisma.proposal.findUnique as unknown as ReturnType<typeof vi.fn>;
 
@@ -38,6 +42,72 @@ describe("buildAcceptanceProofHtml — a prova (parte pura)", () => {
     });
     expect(html).not.toContain("<script>x</script>");
     expect(html).toContain("&lt;script&gt;");
+  });
+});
+
+describe("compareAcceptedText — lastro probatório", () => {
+  it("sem base de comparação → unknown (API não respondeu, não é divergência)", () => {
+    expect(compareAcceptedText("qualquer", null)).toBe("unknown");
+    expect(compareAcceptedText("qualquer", undefined)).toBe("unknown");
+  });
+
+  it("ignora diferença só de espaço em branco", () => {
+    expect(compareAcceptedText("Declaro   que li.\n", " Declaro que li. ")).toBe("match");
+  });
+
+  it("texto diferente → diverged", () => {
+    expect(compareAcceptedText("Declaro que li.", "Declaro que NÃO li.")).toBe("diverged");
+  });
+});
+
+describe("buildAcceptanceProofHtml — dados oficiais da ClickSign", () => {
+  const OFFICIAL = {
+    status: "completed",
+    statusFlow: "enqueued_sent_completed",
+    signerName: "Marcia Souza",
+    signerPhone: "5511987654321",
+    sentAt: "2026-07-15T09:59:00Z",
+    message: FACTS.acceptedText,
+  };
+
+  it("sem `official` a capa não muda (proposta antiga / API fora do ar)", () => {
+    const html = buildAcceptanceProofHtml({ proposalHtml: "", facts: FACTS });
+    expect(html).not.toContain("Registro na ClickSign");
+    expect(html).not.toContain("divergência");
+  });
+
+  it("com `official` carimba o bloco oficial e confirma o texto", () => {
+    const html = buildAcceptanceProofHtml({
+      proposalHtml: "",
+      facts: { ...FACTS, official: OFFICIAL },
+    });
+    expect(html).toContain("Registro na ClickSign");
+    expect(html).toContain("enqueued_sent_completed");
+    expect(html).toContain("2026-07-15T09:59:00Z");
+    expect(html).toContain("Texto conferido com o registro da ClickSign");
+    expect(html).not.toContain("divergência");
+  });
+
+  it("texto divergente vira ALERTA com a transcrição oficial — não pode ficar escondido", () => {
+    const html = buildAcceptanceProofHtml({
+      proposalHtml: "",
+      facts: {
+        ...FACTS,
+        official: { ...OFFICIAL, message: "Outro texto totalmente diferente." },
+      },
+    });
+    expect(html).toContain("divergência de texto");
+    expect(html).toContain("Outro texto totalmente diferente.");
+    expect(html).not.toContain("Texto conferido com o registro");
+  });
+
+  it("escapa a mensagem oficial (não injeta HTML vindo de terceiro)", () => {
+    const html = buildAcceptanceProofHtml({
+      proposalHtml: "",
+      facts: { ...FACTS, official: { ...OFFICIAL, message: "<img src=x onerror=1>" } },
+    });
+    expect(html).not.toContain("<img src=x");
+    expect(html).toContain("&lt;img");
   });
 });
 

@@ -478,6 +478,7 @@ vi.mock("@/lib/db/prisma", () => {
     proposalAttachment: {
       create: vi.fn(),
       createMany: vi.fn(),
+      findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
     },
   };
