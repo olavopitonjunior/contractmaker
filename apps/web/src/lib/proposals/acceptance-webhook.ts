@@ -3,6 +3,10 @@ import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
 import { advanceProposalStatus } from "./status";
 import { buildAcceptanceProof, buildAcceptanceMessage } from "./acceptance-proof";
+import {
+  syncAcceptanceRecord,
+  type AcceptanceRecordSyncResult,
+} from "./acceptance-record-sync";
 import { notifyProposalMilestone } from "./notify-proposal";
 
 /**
@@ -230,17 +234,37 @@ export async function processProposalAcceptanceEvent(
         title: proposal.title,
         link,
       });
+      // ENCADEADO, não paralelo: o sync busca na ClickSign os dados OFICIAIS do
+      // aceite (e tenta trazer o Registro do Aceite), e o comprovante precisa
+      // deles pra carimbar a capa. Se o sync falhar, `facts` volta vazio e o
+      // comprovante cai no comportamento antigo — nunca deixa de ser gerado.
       waitUntil(
-        buildAcceptanceProof(proposal.id, {
-          signerName: facts.signerName ?? "—",
-          signerPhone: facts.signerPhone ?? "—",
+        syncAcceptanceRecord({
+          proposalId: proposal.id,
+          orgId: proposal.orgId,
           acceptanceId: input.acceptanceId,
-          sentAt: facts.sentAt ?? null,
-          completedAt: facts.completedAt ?? new Date().toISOString(),
-          acceptedText,
-        }).catch((err) => {
-          console.error("[proposals] buildAcceptanceProof falhou:", err);
         })
+          // syncAcceptanceRecord é best-effort e não deveria lançar, mas se
+          // lançasse a cadeia pularia o comprovante — e ele é o ÚNICO artefato
+          // do Aceite do nosso lado. Degrada pra "sem dados oficiais".
+          .catch((err): AcceptanceRecordSyncResult => {
+            console.error("[proposals] syncAcceptanceRecord falhou:", err);
+            return { facts: {}, recordUrl: null, raw: null };
+          })
+          .then((sync) =>
+            buildAcceptanceProof(proposal.id, {
+              signerName: facts.signerName ?? sync.facts.signerName ?? "—",
+              signerPhone: facts.signerPhone ?? sync.facts.signerPhone ?? "—",
+              acceptanceId: input.acceptanceId,
+              sentAt: facts.sentAt ?? sync.facts.sentAt ?? null,
+              completedAt: facts.completedAt ?? new Date().toISOString(),
+              acceptedText,
+              official: sync.facts,
+            })
+          )
+          .catch((err) => {
+            console.error("[proposals] buildAcceptanceProof falhou:", err);
+          })
       );
       break;
     }

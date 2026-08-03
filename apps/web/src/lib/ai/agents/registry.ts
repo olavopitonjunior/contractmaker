@@ -228,10 +228,18 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
     tenantEditable: false,
     external: true,
     operations: ["max_chat"],
-    // O endpoint já existe (`/api/agents/profile`), mas o runtime do Max é de
-    // outro repo (Sessão C) e ainda não o consome. Enquanto não consumir, isto
-    // fica `false`: um interruptor que não desliga nada é pior que a ausência
-    // do interruptor. Vira `true` quando a Sessão C ler o perfil de verdade.
+    // Os endpoints já existem (`/api/agents/{profile,usage}` e, desde a Sessão
+    // C, `/api/agents/knowledge/search` — esta ÚLTIMA já honra `enabled` e o
+    // teto mensal, recusando consulta de agente desligado). Mesmo assim isto
+    // segue `false`: o runtime do Max é de outro repo e ainda não lê o perfil,
+    // então modelo e instruções não valeriam nada, e um interruptor que não
+    // desliga nada é pior que a ausência do interruptor. Vira `true` campo a
+    // campo, conforme o serviço passar a honrar cada um.
+    //
+    // Não confundir com o gate de ROTEAMENTO: quem decide se as notificações do
+    // tenant vão pro Max são as features `vendas.max`/`locacao.max`
+    // (`lib/max/gate.ts`), não este `enabled`. São dois interruptores com
+    // propósitos diferentes — canal vs. comportamento de IA. Ver `docs/max.md`.
     supports: { enabled: false, model: false, instructions: false, ragScope: false },
   },
 };

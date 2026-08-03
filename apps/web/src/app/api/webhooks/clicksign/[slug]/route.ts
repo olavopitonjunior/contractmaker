@@ -8,6 +8,9 @@ import { decryptWebhookSecret } from "@/lib/clicksign/account";
 import type { WebhookPayload } from "@/lib/clicksign/types";
 
 export const runtime = "nodejs";
+// Ver a rota legada: o `waitUntil` (PDF assinado / consulta do Aceite +
+// Puppeteer do comprovante) conta pro tempo da invocação.
+export const maxDuration = 60;
 
 /**
  * Webhook ClickSign PER-ORG. A URL carrega o `slug` público da conta do tenant

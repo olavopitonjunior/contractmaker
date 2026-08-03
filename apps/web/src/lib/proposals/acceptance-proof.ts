@@ -5,6 +5,7 @@ import { loadOrgDocumentStyleExport } from "@/lib/render/org-document-style";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { renderProposalVia } from "./render";
 import { selectPropostaTemplate } from "./template-select";
+import type { AcceptanceOfficialFacts } from "./acceptance-record";
 
 /**
  * Comprovante DURÁVEL do Aceite via WhatsApp.
@@ -42,12 +43,37 @@ export interface AcceptanceFacts {
   sentAt?: string | null;
   completedAt?: string | null;
   acceptedText: string; // o texto exato que a pessoa aceitou
+  /**
+   * Atributos lidos da ClickSign no momento do aceite (GET do acceptance_term).
+   * Opcional: proposta antiga, API fora do ar ou conta sem credencial caem no
+   * comportamento anterior — a capa simplesmente omite o bloco oficial.
+   */
+  official?: AcceptanceOfficialFacts;
 }
 
 function esc(s: string | number | null | undefined): string {
   return String(s ?? "").replace(/[&<>"]/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] as string
   );
+}
+
+/**
+ * O texto que reconstruímos bate com o que a ClickSign registrou?
+ *
+ * Divergência aqui NÃO é cosmética: o comprovante afirma "foi isto que a pessoa
+ * aceitou". Se o que a ClickSign guardou for outro texto, a afirmação é falsa e
+ * o documento precisa dizer isso em vez de esconder. Compara normalizando só
+ * espaço em branco (quebra de linha/indentação não muda a manifestação).
+ *
+ * `null` = sem base de comparação (API não respondeu) — não é divergência.
+ */
+export function compareAcceptedText(
+  acceptedText: string,
+  officialMessage: string | null | undefined
+): "match" | "diverged" | "unknown" {
+  if (!officialMessage) return "unknown";
+  const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+  return norm(acceptedText) === norm(officialMessage) ? "match" : "diverged";
 }
 
 /**
@@ -59,6 +85,42 @@ export function buildAcceptanceProofHtml(input: {
   facts: AcceptanceFacts;
 }): string {
   const f = input.facts;
+  const o = f.official;
+  const textCheck = compareAcceptedText(f.acceptedText, o?.message);
+
+  // Bloco só existe quando a ClickSign respondeu. Repete os campos pela FONTE
+  // dela (não pela nossa) — é o que dá lastro ao comprovante.
+  const officialBlock = o
+    ? `
+  <h2 style="font-size: 12pt; margin: 24px 0 8px;">Registro na ClickSign</h2>
+  <table style="width: 100%; font-size: 10pt; border-collapse: collapse;">
+    <tr><td style="padding:6px 0;width:38%;color:#555;">Situação</td><td style="padding:6px 0;font-weight:600;">${esc(o.status) || "—"}</td></tr>
+    <tr><td style="padding:6px 0;color:#555;">Fluxo</td><td style="padding:6px 0;font-weight:600;">${esc(o.statusFlow) || "—"}</td></tr>
+    <tr><td style="padding:6px 0;color:#555;">Aceitante (ClickSign)</td><td style="padding:6px 0;font-weight:600;">${esc(o.signerName) || "—"}</td></tr>
+    <tr><td style="padding:6px 0;color:#555;">WhatsApp (ClickSign)</td><td style="padding:6px 0;font-weight:600;">${esc(o.signerPhone) || "—"}</td></tr>
+    <tr><td style="padding:6px 0;color:#555;">Enviado em (ClickSign)</td><td style="padding:6px 0;font-weight:600;">${esc(o.sentAt) || "—"}</td></tr>
+  </table>`
+    : "";
+
+  // Divergência é ALERTA, não nota de rodapé: muda o que o documento prova.
+  const divergenceBlock =
+    textCheck === "diverged"
+      ? `
+  <div style="margin: 16px 0; border: 1px solid #b91c1c; background: #fef2f2; padding: 10px 12px;">
+    <p style="margin: 0 0 6px; font-size: 10pt; font-weight: 700; color: #b91c1c;">Atenção — divergência de texto</p>
+    <p style="margin: 0 0 8px; font-size: 9pt; color: #333;">
+      O texto registrado na ClickSign difere do reproduzido acima. Prevalece o
+      registrado na ClickSign, transcrito a seguir:
+    </p>
+    <p style="margin: 0; font-size: 10pt; border-left: 3px solid #b91c1c; padding-left: 12px; color: #333;">${esc(o?.message)}</p>
+  </div>`
+      : "";
+
+  const textNote =
+    textCheck === "match"
+      ? `<p style="margin: 6px 0 0; font-size: 9pt; color: #0f766e;">Texto conferido com o registro da ClickSign.</p>`
+      : "";
+
   const cover = `
 <div style="font-family: 'EB Garamond', Georgia, serif; color: #111; max-width: 720px; margin: 0 auto; line-height: 1.5;">
   <h1 style="text-align: center; font-size: 18pt; margin: 0 0 4px;">COMPROVANTE DE ACEITE</h1>
@@ -74,10 +136,16 @@ export function buildAcceptanceProofHtml(input: {
 
   <h2 style="font-size: 12pt; margin: 24px 0 8px;">Texto aceito</h2>
   <p style="font-size: 10pt; border-left: 3px solid #0f766e; padding-left: 12px; color: #333;">${esc(f.acceptedText)}</p>
+  ${textNote}
+  ${divergenceBlock}
+  ${officialBlock}
 
   <p style="margin-top: 24px; font-size: 9pt; color: #555;">
     Este comprovante consolida a manifestação de vontade registrada via Aceite por
     WhatsApp da ClickSign e o inteiro teor da proposta, reproduzido a seguir.
+    O Aceite via WhatsApp não é assinatura eletrônica em documento: o registro
+    completo, com as provas de identidade e as mensagens trocadas, é emitido pela
+    ClickSign (Aceites → Via WhatsApp).
   </p>
 </div>
 <div style="page-break-before: always;"></div>

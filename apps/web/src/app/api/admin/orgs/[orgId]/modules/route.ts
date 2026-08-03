@@ -17,6 +17,7 @@ import {
   type FeatureKey,
 } from "@/lib/modules/catalog";
 import { seedPipeline } from "@/lib/pipelines/seed";
+import { syncMaxForOrg } from "@/lib/max/provisioning";
 import { seedCanonicalTemplatesForOrg } from "@/lib/templates/canonical-seed";
 import { canonicalModalidadesForModules } from "@/lib/templates/canonical-templates";
 
@@ -160,14 +161,37 @@ export async function PATCH(
     }
   }
 
+  /**
+   * Ligar/desligar o Max provisiona (ou revoga) o acesso dele àquele tenant:
+   * usuário de serviço, membership, token e entrega ao serviço. É o que faz
+   * "ativar o Max num tenant novo" ser um clique em vez de um ritual manual.
+   *
+   * Roda DEPOIS do upsert acima de propósito — `getOrgModules` é cacheado por
+   * request, e ler antes envenenaria o cache com o estado antigo.
+   *
+   * É AGUARDADO, e não `waitUntil`, apesar de custar até ~8s ao painel: o
+   * operador precisa saber na hora se o provisionamento funcionou. Em segundo
+   * plano, ele veria "ok" e só descobriria a falha quando alguém reclamasse que
+   * o Max não responde — e o pior estado possível é justamente esse, feature
+   * verde com agente mudo e `/admin/max` mostrando a org como roteada. O
+   * resultado vai no corpo da resposta E no audit.
+   */
+  let maxSync: Awaited<ReturnType<typeof syncMaxForOrg>> | { action: "erro"; detail: string } | null = null;
+  if (module === MODULE.VENDAS || module === MODULE.LOCACAO) {
+    maxSync = await syncMaxForOrg(params.orgId).catch((err) => ({
+      action: "erro" as const,
+      detail: err instanceof Error ? err.message : String(err),
+    }));
+  }
+
   await audit(extractAuditContextFromRequest(req, params.orgId, session.user.id), {
     action: "ORG_MODULES_UPDATED",
     result: "SUCCESS",
     resourceType: "Organization",
     resource: params.orgId,
-    metadata: { module, enabled, featureFlags: sanitizedFlags },
+    metadata: { module, enabled, featureFlags: sanitizedFlags, maxSync },
   });
 
   const current = await getOrgModules(params.orgId);
-  return NextResponse.json({ ok: true, current });
+  return NextResponse.json({ ok: true, current, maxSync });
 }

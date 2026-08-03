@@ -32,13 +32,13 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import { triggerNewtonNotify } from "@/lib/newton/notify-trigger";
-import { isWithinWhatsappWindow } from "@/lib/newton/whatsapp-window";
 import {
-  buildUserNotifyMessage,
-  policyForType,
-  USER_CHANNEL_TYPES,
-} from "./user-channels-registry";
+  resolveWhatsappAgent,
+  dispatchWhatsappNotify,
+  type WhatsappAgent,
+} from "@/lib/agents/whatsapp-router";
+import { isWithinWhatsappWindow } from "@/lib/newton/whatsapp-window";
+import { policyForType, USER_CHANNEL_TYPES } from "./user-channels-registry";
 import { filterUsersOptedIn, type OrgChannelCache } from "./user-prefs";
 import {
   USER_NOTIF_CHANNELS,
@@ -123,10 +123,28 @@ const MANAGER_BELL_SUFFIX = ":mgr";
 interface SweepCache {
   orgChannels: OrgChannelCache;
   orgName: Map<string, string | null>;
+  agent: Map<string, WhatsappAgent | null>;
 }
 
 function newCache(): SweepCache {
-  return { orgChannels: new Map(), orgName: new Map() };
+  return { orgChannels: new Map(), orgName: new Map(), agent: new Map() };
+}
+
+/**
+ * Agente de WhatsApp da org, resolvido no máximo uma vez por execução.
+ *
+ * Chamado só no canal `whatsapp` — resolver pra uma notificação que sai apenas
+ * por e-mail seria uma leitura de módulos jogada fora.
+ */
+async function agentOf(
+  orgId: string,
+  cache: SweepCache
+): Promise<WhatsappAgent | null> {
+  const hit = cache.agent.get(orgId);
+  if (hit !== undefined) return hit;
+  const agent = await resolveWhatsappAgent(orgId);
+  cache.agent.set(orgId, agent);
+  return agent;
 }
 
 async function orgNameOf(
@@ -302,8 +320,10 @@ async function deliverToUser(params: {
   category: string;
   channel: UserNotifChannel;
   orgName: string | null;
+  /** Já resolvido pelo chamador (que precisou dele pra decidir a janela). */
+  agent: WhatsappAgent | null;
 }): Promise<DeliveryStatus | "duplicate"> {
-  const { notification, user, category, channel, orgName } = params;
+  const { notification, user, category, channel, orgName, agent } = params;
 
   const deliveryId = await claimDelivery({
     orgId: notification.orgId,
@@ -335,26 +355,39 @@ async function deliverToUser(params: {
     return "sent";
   }
 
-  const outcome = await triggerNewtonNotify({
-    orgId: notification.orgId,
-    audience: "platform_user",
-    phone: user.phone!,
-    recipientName: user.name ?? "",
-    message: buildUserNotifyMessage(notification),
-    orgName,
-    linkUrl: notification.linkUrl,
-  });
-
-  if (outcome === "skipped") {
-    // Terminal: gate do tenant fechado ou sidecar ausente não muda em
-    // minutos, e insistir a cada 5 min só encheria a tabela.
+  if (!agent) {
+    // Terminal: gate do tenant fechado não muda em minutos, e insistir a cada
+    // 5 min só encheria a tabela.
     await settleDelivery(deliveryId, "skipped", {
-      reason: "newton_gate_off_ou_sidecar_ausente",
+      reason: "sem_agente_de_whatsapp_para_a_org",
     });
     return "skipped";
   }
 
-  await settleDelivery(deliveryId, "sent", { via: "newton_sidecar" });
+  const r = await dispatchWhatsappNotify(agent, {
+    orgId: notification.orgId,
+    audience: "platform_user",
+    phone: user.phone!,
+    recipientName: user.name ?? "",
+    title: notification.title,
+    body: notification.body,
+    linkUrl: notification.linkUrl,
+    orgName,
+    dedupeKey: deliveryId,
+  });
+
+  if (r.status === "skipped") {
+    await settleDelivery(deliveryId, "skipped", { reason: r.reason });
+    return "skipped";
+  }
+  if (r.status === "failed") {
+    // Re-tentável: o sweep retoma `failed`, e uma falha de rede pro serviço do
+    // Max é exatamente o caso que merece nova tentativa.
+    await settleDelivery(deliveryId, "failed", { error: r.error });
+    return "failed";
+  }
+
+  await settleDelivery(deliveryId, "sent", r.detail);
   return "sent";
 }
 
@@ -362,6 +395,15 @@ export interface DispatchTotals {
   sent: number;
   skipped: number;
   deferred: number;
+  /**
+   * Entregas que falharam e serão retomadas pelo sweep.
+   *
+   * Passou a importar quando o WhatsApp ganhou um transporte que devolve
+   * `failed` (o serviço do Max — o sidecar do Newton só sabia dizer
+   * sent/skipped). Sem este contador, uma rajada de falha do Max apareceria no
+   * log do cron como "nada aconteceu": todos os buckets em zero.
+   */
+  failed: number;
 }
 
 /**
@@ -373,7 +415,7 @@ export async function dispatchUserNotification(params: {
   row?: NotificationRow;
   cache?: SweepCache;
 }): Promise<DispatchTotals> {
-  const zero: DispatchTotals = { sent: 0, skipped: 0, deferred: 0 };
+  const zero: DispatchTotals = { sent: 0, skipped: 0, deferred: 0, failed: 0 };
   const cache = params.cache ?? newCache();
   try {
     const notification =
@@ -413,11 +455,25 @@ export async function dispatchUserNotification(params: {
       const targets = users.filter((u) => allowed.has(u.userId));
       if (targets.length === 0) continue;
 
+      // Resolvido uma vez por canal (e cacheado por org na execução): o
+      // agente decide tanto o transporte quanto se a janela ainda segura.
+      const agent =
+        channel === "whatsapp" ? await agentOf(notification.orgId, cache) : null;
+
       for (const user of targets) {
         // A janela vale só pro WhatsApp: e-mail não acorda ninguém às 23h, e
         // adiá-lo até as 7h atrasaria por nada. Checado por destinatário
         // porque a janela pode fechar no meio de um lote longo.
-        if (channel === "whatsapp" && !isWithinWhatsappWindow()) {
+        //
+        // E não vale pro Max: ele tem outbox e agenda a entrega pra próxima
+        // abertura. Segurar aqui só adiaria o handoff, não a mensagem — e
+        // deixaria este trilho fora de paridade com o motor de deal-events,
+        // que já entrega direto ao Max a qualquer hora.
+        if (
+          channel === "whatsapp" &&
+          agent !== "max" &&
+          !isWithinWhatsappWindow()
+        ) {
           result.deferred += 1;
           continue;
         }
@@ -427,10 +483,12 @@ export async function dispatchUserNotification(params: {
           category: policy.category,
           channel,
           orgName,
+          agent,
         });
         if (outcome === "sent") result.sent += 1;
         else if (outcome === "skipped") result.skipped += 1;
         else if (outcome === "deferred") result.deferred += 1;
+        else if (outcome === "failed") result.failed += 1;
       }
     }
     return result;
@@ -478,13 +536,26 @@ export async function sweepUserNotifications(params?: {
     sent: 0,
     skipped: 0,
     deferred: 0,
+    failed: 0,
     resumed: 0,
     truncated: false,
   };
 
-  // Fora da janela nem varre — economiza a query inteira.
-  if (!isWithinWhatsappWindow()) return totals;
-
+  /**
+   * O sweep varre a QUALQUER hora — a janela 7h–22h é decidida por
+   * destinatário, lá em `dispatchUserNotification`.
+   *
+   * Havia aqui um `if (!isWithinWhatsappWindow()) return totals`, como
+   * economia de query. Ele cobria mais do que devia: este sweep serve os DOIS
+   * canais, então a madrugada também segurava o e-mail — o oposto do que a
+   * regra por destinatário diz ("e-mail não acorda ninguém às 23h, e adiá-lo
+   * até as 7h atrasaria por nada"). E, com o Max, passou a segurar também um
+   * transporte que tem fila própria e aceita a qualquer hora.
+   *
+   * O custo de varrer de madrugada é baixo e limitado: duas queries com
+   * `take: limit` a cada 5 min, e quem não pode ser entregue é adiado ANTES de
+   * qualquer claim.
+   */
   const startedAt = Date.now();
   const sinceMs = params?.sinceMs ?? lookbackMs();
 
@@ -549,6 +620,7 @@ export async function sweepUserNotifications(params?: {
       totals.sent += r.sent;
       totals.skipped += r.skipped;
       totals.deferred += r.deferred;
+      totals.failed += r.failed;
     }
 
     if (totals.truncated) {

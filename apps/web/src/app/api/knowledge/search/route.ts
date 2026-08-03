@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
-import { executeToolHandler } from "@/lib/ai/tool-handlers";
+import { searchKnowledgeBase } from "@/lib/ai/knowledge-search";
 import { AGENT_REGISTRY, isAgentKey } from "@/lib/ai/agents/registry";
-import type { AgentContext } from "@/lib/ai/types";
 
 /**
  * Debug endpoint — lets the user test the knowledge base search from /settings/knowledge-base
@@ -43,24 +42,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "query obrigatória" }, { status: 400 });
   }
 
-  // Shim mínimo de contexto — o handler lê `orgId` e `agentKey`.
-  const context: AgentContext = {
-    contractId: "",
-    userId: session.user.id,
+  const result = await searchKnowledgeBase({
     orgId: org.id,
+    userId: session.user.id,
     agentKey,
-    htmlContent: "",
-    dataJson: {},
-    templateModalidade: "",
-    templateName: "",
-    activeClauses: [],
-  };
-
-  const result = await executeToolHandler(
-    "query_knowledge_base",
-    { query, category, topK },
-    context
-  );
+    query,
+    category,
+    topK,
+  });
 
   return NextResponse.json(result);
 }

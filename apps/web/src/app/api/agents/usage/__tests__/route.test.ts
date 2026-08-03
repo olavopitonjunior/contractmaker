@@ -51,6 +51,11 @@ const corpoValido = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Tenant com o Max contratado. Sem isto o gate de entitlement
+  // (`maxAgentRouteGate`) recusa com 403 — a feature nasce OFF no catálogo.
+  mockPrisma.orgModule.findMany.mockResolvedValue([
+    { module: "vendas", enabled: true, featureFlags: { "vendas.max": true } },
+  ] as never);
   mockAuth.mockResolvedValue(null as never);
   mockGetUserOrg.mockResolvedValue({ id: "org-1" } as never);
   mockPrisma.userApiToken.update.mockResolvedValue({} as never);

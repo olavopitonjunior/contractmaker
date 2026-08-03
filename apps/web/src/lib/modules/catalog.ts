@@ -32,6 +32,7 @@ export const FEATURE = {
   VENDAS_CERTIDOES: "vendas.certidoes",
   VENDAS_PAGADORIA: "vendas.pagadoria",
   VENDAS_NEWTON: "vendas.newton",
+  VENDAS_MAX: "vendas.max",
   VENDAS_PROPOSTAS: "vendas.propostas",
   VENDAS_PESQUISAS: "vendas.pesquisas",
 
@@ -46,6 +47,7 @@ export const FEATURE = {
   LOCACAO_SEGUROS: "locacao.seguros",
   LOCACAO_PESSOAS: "locacao.pessoas",
   LOCACAO_NEWTON: "locacao.newton",
+  LOCACAO_MAX: "locacao.max",
   LOCACAO_PROPOSTAS: "locacao.propostas",
   LOCACAO_PESQUISAS: "locacao.pesquisas",
 } as const;
@@ -75,6 +77,7 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
       { key: FEATURE.VENDAS_CERTIDOES, label: "Certidões", default: true },
       { key: FEATURE.VENDAS_PAGADORIA, label: "Pagadoria / comissão", default: true },
       { key: FEATURE.VENDAS_NEWTON, label: "Newton (agente WhatsApp) — vendas", default: false },
+      { key: FEATURE.VENDAS_MAX, label: "Max (agente WhatsApp) — vendas", default: false },
       { key: FEATURE.VENDAS_PROPOSTAS, label: "Propostas — vendas", default: true },
       { key: FEATURE.VENDAS_PESQUISAS, label: "Pesquisas de satisfação — vendas", default: true },
     ],
@@ -93,6 +96,7 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
       { key: FEATURE.LOCACAO_SEGUROS, label: "Seguros", default: false },
       { key: FEATURE.LOCACAO_PESSOAS, label: "Pessoas", default: true },
       { key: FEATURE.LOCACAO_NEWTON, label: "Newton (agente WhatsApp) — locação", default: false },
+      { key: FEATURE.LOCACAO_MAX, label: "Max (agente WhatsApp) — locação", default: false },
       { key: FEATURE.LOCACAO_PROPOSTAS, label: "Propostas — locação", default: true },
       { key: FEATURE.LOCACAO_PESQUISAS, label: "Pesquisas de satisfação — locação", default: true },
     ],
@@ -149,6 +153,20 @@ export function featureDefault(feature: FeatureKey): boolean {
  */
 export function newtonFeatureForDealKind(kind: string): FeatureKey {
   return kind === "locacao" ? FEATURE.LOCACAO_NEWTON : FEATURE.VENDAS_NEWTON;
+}
+
+/**
+ * Feature do Max — o outro agente de WhatsApp, dos tenants RE/MAX.
+ *
+ * Mesma forma do Newton (uma chave por módulo, default OFF), porque a escolha é
+ * por TENANT e não por instalação: o Newton roda em OpenClaw com número pareado
+ * por QR, o Max em serviço próprio com gateway e número próprios. Um tenant
+ * tem um ou outro; ligar os dois no mesmo módulo é configuração inválida, e quem
+ * resolve o empate é `resolveWhatsappAgent` (lib/agents/whatsapp-router.ts), que
+ * dá precedência ao Max.
+ */
+export function maxFeatureForDealKind(kind: string): FeatureKey {
+  return kind === "locacao" ? FEATURE.LOCACAO_MAX : FEATURE.VENDAS_MAX;
 }
 
 /** Feature de Propostas por kind. Default ON nos dois desde 2026-07-24 (graduou do
