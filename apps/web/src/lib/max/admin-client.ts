@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { maxServiceUrl } from "@/lib/max/endpoint";
 
 /**
  * Leitura do estado do serviço do Max, para o Mission Control do admin.
@@ -58,7 +59,7 @@ export async function fetchMaxStatus(orgId?: string): Promise<MaxStatusResult> {
     .update(`${timestamp}.`)
     .digest("hex");
 
-  const url = new URL("/api/admin/status", NOTIFY_URL.replace(/\/+$/, ""));
+  const url = maxServiceUrl(NOTIFY_URL, "/api/admin/status");
   if (orgId) url.searchParams.set("orgId", orgId);
 
   const controller = new AbortController();

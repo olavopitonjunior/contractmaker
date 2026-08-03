@@ -37,6 +37,7 @@
 import { normalizeBrPhone } from "@/lib/validators/phone-br";
 import { sanitizeUntrusted } from "@/lib/notifications/sanitize";
 import { signMaxRequest } from "@/lib/max/hmac";
+import { maxServiceUrl } from "@/lib/max/endpoint";
 
 const NOTIFY_URL = process.env.MAX_NOTIFY_URL;
 const NOTIFY_SECRET = process.env.MAX_NOTIFY_SECRET;
@@ -124,7 +125,7 @@ export async function triggerMaxNotify(
   const timer = setTimeout(() => controller.abort(), NOTIFY_TIMEOUT_MS);
 
   try {
-    const res = await fetch(`${NOTIFY_URL.replace(/\/+$/, "")}/notify`, {
+    const res = await fetch(maxServiceUrl(NOTIFY_URL, "/api/notify"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

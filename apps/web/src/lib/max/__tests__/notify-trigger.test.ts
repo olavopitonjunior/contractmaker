@@ -157,8 +157,12 @@ describe("triggerMaxNotify — requisição", () => {
     expect(out).toEqual({ status: "sent", id: "mx1" });
 
     const [url, init] = fetchMock.mock.calls[0];
-    // A barra final da env não pode virar "//notify".
-    expect(url).toBe("https://max.test/notify");
+    // Todas as rotas do serviço vivem sob `/api/`. Esta asserção já existiu
+    // afirmando "https://max.test/notify" — e como ela codificava a MESMA
+    // suposição errada do código, o 404 em produção passou por ela sem
+    // reclamar. A garantia de que os dois formatos de `MAX_NOTIFY_URL`
+    // convergem está em `endpoint.test.ts`.
+    expect(String(url)).toBe("https://max.test/api/notify");
 
     const ts = init.headers["X-Max-Timestamp"];
     const expected = createHmac("sha256", SECRET)
