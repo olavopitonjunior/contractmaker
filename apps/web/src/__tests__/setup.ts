@@ -15,6 +15,7 @@ vi.mock("@/lib/db/prisma", () => {
     contract: {
       findUnique: vi.fn(),
       findUniqueOrThrow: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
       update: vi.fn(),
       groupBy: vi.fn().mockResolvedValue([]),
     },
