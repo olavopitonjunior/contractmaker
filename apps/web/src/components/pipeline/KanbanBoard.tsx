@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   DndContext,
   DragOverlay,
@@ -12,6 +12,22 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
+import { Archive, Hourglass, Search, X } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useDebounce } from "@/hooks/useDebounce";
+import {
+  AGING_WARN_DAYS,
+  isTerminalStageName,
+} from "@/lib/pipeline/stage-config";
 import { KanbanColumn } from "./KanbanColumn";
 import {
   KanbanCard,
@@ -20,6 +36,13 @@ import {
   DEFAULT_CARD_CONFIG,
 } from "./KanbanCard";
 import { MilestoneDateDialog } from "./MilestoneDateDialog";
+
+/** Busca insensível a acento — "joão" acha "Joao" e vice-versa. */
+function normalizeSearch(s: string): string {
+  return s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+}
+
+const ALL_MANAGERS = "__all__";
 
 /**
  * Stages que fixam uma data-marco. `cardKey` = campo da derivada no card (pra
@@ -82,33 +105,109 @@ interface Stage {
 interface KanbanBoardProps {
   stages: Stage[];
   config?: KanbanBoardConfig;
+  /**
+   * Instante do render do server (epoch ms). Rótulos relativos ("2d", aging)
+   * derivam DESTE valor serializado — Date.now() no render do client divergiria
+   * do HTML do server e quebraria a hidratação (React #418).
+   */
+  nowMs?: number;
 }
 
 export function KanbanBoard({
   stages: initialStages,
   config = DEFAULT_BOARD_CONFIG,
+  nowMs = Date.now(),
 }: KanbanBoardProps) {
   const [stages, setStages] = useState(initialStages);
   const [activeCard, setActiveCard] = useState<DealCard | null>(null);
   const [pendingMove, setPendingMove] = useState<PendingMilestoneMove | null>(null);
+  const [search, setSearch] = useState("");
+  const [managerFilter, setManagerFilter] = useState(ALL_MANAGERS);
+  const [onlyStale, setOnlyStale] = useState(false);
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const highlightId = searchParams.get("highlight");
+  const showArchived = searchParams.get("arquivados") === "1";
+
+  const debouncedSearch = useDebounce(search, 300);
+  const query = normalizeSearch(debouncedSearch.trim());
+  const hasClientFilter =
+    query !== "" || managerFilter !== ALL_MANAGERS || onlyStale;
+
+  const managers = useMemo(() => {
+    const names = new Set<string>();
+    for (const stage of stages) {
+      for (const deal of stage.deals) {
+        if (deal.managerName) names.add(deal.managerName);
+      }
+    }
+    return [...names].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  }, [stages]);
+
+  const filteredStages = useMemo(() => {
+    if (!hasClientFilter) return stages;
+    return stages.map((stage) => ({
+      ...stage,
+      deals: stage.deals.filter((deal) => {
+        if (query) {
+          const haystack = normalizeSearch(
+            `${deal.title} ${deal.clientName ?? ""} ${deal.managerName ?? ""}`
+          );
+          if (!haystack.includes(query)) return false;
+        }
+        if (managerFilter !== ALL_MANAGERS && deal.managerName !== managerFilter)
+          return false;
+        if (onlyStale) {
+          if (deal.lostAt || isTerminalStageName(stage.name)) return false;
+          const enteredMs = new Date(
+            deal.stageEnteredAt ?? deal.createdAt
+          ).getTime();
+          const daysInStage = Math.floor((nowMs - enteredMs) / 86400000);
+          if (daysInStage < AGING_WARN_DAYS) return false;
+        }
+        return true;
+      }),
+    }));
+  }, [stages, hasClientFilter, query, managerFilter, onlyStale, nowMs]);
+
+  const totalDeals = useMemo(
+    () => stages.reduce((sum, s) => sum + s.deals.length, 0),
+    [stages]
+  );
+  const filteredDeals = filteredStages.reduce(
+    (sum, s) => sum + s.deals.length,
+    0
+  );
+
+  function toggleArchived() {
+    const params = new URLSearchParams(searchParams.toString());
+    if (showArchived) params.delete("arquivados");
+    else params.set("arquivados", "1");
+    const qs = params.toString();
+    router.push(qs ? `${pathname}?${qs}` : pathname);
+  }
 
   // Sincroniza com novos dados do servidor (após router.refresh) sem descartar
   // moves otimistas pendentes.
   useEffect(() => setStages(initialStages), [initialStages]);
 
+  /** Retorna se o PATCH persistiu — quem chama reverte o move otimista se não. */
   async function persistStageChange(
     dealId: string,
     targetStageId: string,
     extra?: Record<string, string>
-  ) {
-    await fetch(`/api/pipeline/deals/${dealId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stageId: targetStageId, ...extra }),
-    });
+  ): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/pipeline/deals/${dealId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stageId: targetStageId, ...extra }),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
   }
 
   const sensors = useSensors(
@@ -205,16 +304,25 @@ export function KanbanBoard({
       return;
     }
 
-    await persistStageChange(dealId, targetStageId);
+    const ok = await persistStageChange(dealId, targetStageId);
+    if (!ok) {
+      setStages(snapshot);
+      toast.error("Não foi possível mover o negócio. Tente novamente.");
+    }
   }
 
   async function handleMilestoneConfirm(isoDate: string) {
     const move = pendingMove;
     setPendingMove(null);
     if (!move) return;
-    await persistStageChange(move.dealId, move.targetStageId, {
+    const ok = await persistStageChange(move.dealId, move.targetStageId, {
       [move.apiField]: isoDate,
     });
+    if (!ok) {
+      setStages(move.snapshot);
+      toast.error("Não foi possível mover o negócio. Tente novamente.");
+      return;
+    }
     // Atualiza os marcos derivados (dots da timeline) no próximo render server.
     router.refresh();
   }
@@ -231,46 +339,119 @@ export function KanbanBoard({
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
-      <div className="flex gap-4 overflow-x-auto pb-4">
-        {stages
-          .filter((s) => s.name !== config.lostStageName)
-          .map((stage) => (
-            <KanbanColumn
-              key={stage.id}
-              id={stage.id}
-              name={stage.name}
-              color={stage.color}
-              deals={stage.deals}
-              config={config}
+      <div className="space-y-3">
+        {/* Toolbar: busca + filtros client-side + toggle de arquivados (server) */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar negócio..."
+              className="h-9 w-64 max-w-full pl-8 pr-8"
             />
-          ))}
-        {config.lostStageName &&
-          stages.find((s) => s.name === config.lostStageName) && (
-            <>
-              <div
-                aria-hidden
-                className="self-stretch border-l border-muted mx-1"
-              />
-              {(() => {
-                const lost = stages.find((s) => s.name === config.lostStageName)!;
-                return (
-                  <KanbanColumn
-                    key={lost.id}
-                    id={lost.id}
-                    name={lost.name}
-                    color={lost.color}
-                    deals={lost.deals}
-                    isLost
-                    config={config}
-                  />
-                );
-              })()}
-            </>
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+                aria-label="Limpar busca"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          {managers.length > 0 && (
+            <Select value={managerFilter} onValueChange={setManagerFilter}>
+              <SelectTrigger className="h-9 w-48">
+                <SelectValue placeholder="Gerente" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_MANAGERS}>Todos os gerentes</SelectItem>
+                {managers.map((name) => (
+                  <SelectItem key={name} value={name}>
+                    {name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           )}
+          <Button
+            variant={onlyStale ? "secondary" : "outline"}
+            size="sm"
+            className="h-9"
+            aria-pressed={onlyStale}
+            onClick={() => setOnlyStale((v) => !v)}
+            title={`Só negócios sem mudança de estágio há ${AGING_WARN_DAYS}+ dias`}
+          >
+            <Hourglass className="mr-1.5 h-3.5 w-3.5" />
+            Só parados
+          </Button>
+          <Button
+            variant={showArchived ? "secondary" : "outline"}
+            size="sm"
+            className="h-9"
+            aria-pressed={showArchived}
+            onClick={toggleArchived}
+          >
+            <Archive className="mr-1.5 h-3.5 w-3.5" />
+            {showArchived ? "Ocultar arquivados" : "Mostrar arquivados"}
+          </Button>
+          {hasClientFilter && (
+            <span className="text-xs text-muted-foreground tabular-nums">
+              {filteredDeals} de {totalDeals}{" "}
+              {totalDeals === 1 ? "negócio" : "negócios"}
+            </span>
+          )}
+        </div>
+
+        <div className="flex gap-4 overflow-x-auto pb-4">
+          {filteredStages
+            .filter((s) => s.name !== config.lostStageName)
+            .map((stage) => (
+              <KanbanColumn
+                key={stage.id}
+                id={stage.id}
+                name={stage.name}
+                color={stage.color}
+                deals={stage.deals}
+                config={config}
+                nowMs={nowMs}
+                isFiltering={hasClientFilter}
+              />
+            ))}
+          {config.lostStageName &&
+            filteredStages.find((s) => s.name === config.lostStageName) && (
+              <>
+                <div
+                  aria-hidden
+                  className="self-stretch border-l border-muted mx-1"
+                />
+                {(() => {
+                  const lost = filteredStages.find(
+                    (s) => s.name === config.lostStageName
+                  )!;
+                  return (
+                    <KanbanColumn
+                      key={lost.id}
+                      id={lost.id}
+                      name={lost.name}
+                      color={lost.color}
+                      deals={lost.deals}
+                      isLost
+                      config={config}
+                      nowMs={nowMs}
+                      isFiltering={hasClientFilter}
+                    />
+                  );
+                })()}
+              </>
+            )}
+        </div>
       </div>
       <DragOverlay>
         {activeCard ? (
-          <KanbanCard deal={activeCard} isOverlay config={config} />
+          <KanbanCard deal={activeCard} isOverlay config={config} nowMs={nowMs} />
         ) : null}
       </DragOverlay>
       <MilestoneDateDialog

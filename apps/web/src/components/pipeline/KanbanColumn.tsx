@@ -7,7 +7,8 @@ import {
   type KanbanCardConfig,
 } from "./KanbanCard";
 import { cn } from "@/lib/utils";
-import { Plus, XOctagon } from "lucide-react";
+import { formatMoneyBR } from "@/lib/format/money";
+import { Plus, Search, XOctagon } from "lucide-react";
 
 interface KanbanColumnProps {
   id: string;
@@ -16,9 +17,22 @@ interface KanbanColumnProps {
   deals: DealCard[];
   isLost?: boolean;
   config?: KanbanCardConfig;
+  /** Instante do render do server — ver KanbanBoard.nowMs. */
+  nowMs?: number;
+  /** Há busca/filtro client ativo — muda o empty state pra "Nenhum resultado". */
+  isFiltering?: boolean;
 }
 
-export function KanbanColumn({ id, name, color, deals, isLost, config }: KanbanColumnProps) {
+export function KanbanColumn({
+  id,
+  name,
+  color,
+  deals,
+  isLost,
+  config,
+  nowMs,
+  isFiltering,
+}: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
 
   const totalValue = deals.reduce((sum, d) => sum + (d.value || 0), 0);
@@ -52,7 +66,7 @@ export function KanbanColumn({ id, name, color, deals, isLost, config }: KanbanC
         </div>
         {totalValue > 0 && (
           <p className="text-[11px] text-muted-foreground mt-0.5">
-            R$ {totalValue.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}
+            {formatMoneyBR(totalValue, { decimals: 0 })}
           </p>
         )}
       </div>
@@ -65,16 +79,25 @@ export function KanbanColumn({ id, name, color, deals, isLost, config }: KanbanC
             deal={deal}
             currentStageName={name}
             config={config}
+            nowMs={nowMs}
           />
         ))}
 
         {deals.length === 0 && (
           <div className="flex flex-col items-center justify-center py-8 text-center">
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted mb-2">
-              <Plus className="h-4 w-4 text-muted-foreground" />
+              {isFiltering ? (
+                <Search className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <Plus className="h-4 w-4 text-muted-foreground" />
+              )}
             </div>
             <p className="text-xs text-muted-foreground">
-              {isLost ? "Sem negócios perdidos" : "Arraste negocios aqui"}
+              {isFiltering
+                ? "Nenhum resultado"
+                : isLost
+                  ? "Sem negócios perdidos"
+                  : "Arraste negócios aqui"}
             </p>
           </div>
         )}

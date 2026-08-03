@@ -15,6 +15,8 @@ import {
 import { toast } from "sonner";
 import Link from "next/link";
 import { formPublicPath } from "@/lib/forms/form-url";
+import { formatMoneyBR } from "@/lib/format/money";
+import { formatDayMonthBR } from "@/lib/format/datetime";
 import {
   DealProgressTimeline,
   type PipelineKind,
@@ -70,12 +72,11 @@ interface KanbanCardProps {
   /** Nome do stage da coluna — destaca o nó atual da timeline. */
   currentStageName?: string | null;
   config?: KanbanCardConfig;
-}
-
-function formatShort(iso: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  /**
+   * Instante do render do server (epoch ms) — rótulos relativos derivam dele
+   * pra server e client renderizarem o mesmo texto (hidratação, React #418).
+   */
+  nowMs?: number;
 }
 
 export function KanbanCard({
@@ -83,12 +84,13 @@ export function KanbanCard({
   isOverlay,
   currentStageName = null,
   config = DEFAULT_CARD_CONFIG,
+  nowMs = Date.now(),
 }: KanbanCardProps) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: deal.id,
   });
 
-  const msAgo = Date.now() - new Date(deal.createdAt).getTime();
+  const msAgo = nowMs - new Date(deal.createdAt).getTime();
   const hoursAgo = Math.floor(msAgo / 3600000);
   const daysAgo = Math.floor(msAgo / 86400000);
   const timeLabel = daysAgo > 0 ? `${daysAgo}d` : hoursAgo > 0 ? `${hoursAgo}h` : "agora";
@@ -96,7 +98,7 @@ export function KanbanCard({
   // Aging por stage — badge só quando acionável (≥ warn), pra não poluir
   // cards saudáveis. Terminais (Comissão paga/ADM/perdido) não envelhecem.
   const stageEnteredMs = new Date(deal.stageEnteredAt ?? deal.createdAt).getTime();
-  const daysInStage = Math.floor((Date.now() - stageEnteredMs) / 86400000);
+  const daysInStage = Math.floor((nowMs - stageEnteredMs) / 86400000);
   const showAging =
     !deal.lostAt &&
     !isTerminalStageName(currentStageName) &&
@@ -203,7 +205,7 @@ export function KanbanCard({
                 <XOctagon className="h-3.5 w-3.5 mt-0.5 shrink-0 text-red-600" />
                 <div className="text-[10px] leading-tight">
                   <div className="font-medium text-red-700 dark:text-red-400">
-                    Perdido em {formatShort(deal.lostAt)}
+                    Perdido em {formatDayMonthBR(deal.lostAt)}
                   </div>
                   {deal.lostReason && (
                     <div
@@ -233,10 +235,7 @@ export function KanbanCard({
             <div className="flex items-center justify-between">
               {deal.value != null && deal.value > 0 ? (
                 <span className="text-sm font-semibold text-primary tabular-nums">
-                  R${" "}
-                  {deal.value.toLocaleString("pt-BR", {
-                    minimumFractionDigits: 0,
-                  })}
+                  {formatMoneyBR(deal.value, { decimals: 0 })}
                 </span>
               ) : (
                 <span className="text-xs text-muted-foreground">Sem valor</span>
