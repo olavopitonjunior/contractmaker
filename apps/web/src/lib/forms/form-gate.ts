@@ -23,8 +23,7 @@ import { isFormFinished } from "@/lib/forms/form-status";
  * upload/import/proposta nasce `vinculado` e NUNCA transiciona pra "completo" —
  * gatear pela string deixaria 100% desses forms públicos pra sempre. O campo de
  * data é o discriminador canônico de "esse form fechou" e não quebra quando
- * aparecer um terceiro status. (`send-summary` já usava o par completo/vinculado;
- * aqui unificamos no campo que os dois setam.)
+ * aparecer um terceiro status.
  *
  * ## Escopo honesto
  *
