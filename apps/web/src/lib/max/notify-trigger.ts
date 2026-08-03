@@ -34,9 +34,9 @@
  * presentes → telefone normalizável. Qualquer um fechado → "skipped".
  */
 
-import { createHmac } from "node:crypto";
 import { normalizeBrPhone } from "@/lib/validators/phone-br";
 import { sanitizeUntrusted } from "@/lib/notifications/sanitize";
+import { signMaxRequest } from "@/lib/max/hmac";
 
 const NOTIFY_URL = process.env.MAX_NOTIFY_URL;
 const NOTIFY_SECRET = process.env.MAX_NOTIFY_SECRET;
@@ -82,11 +82,6 @@ export type MaxNotifyResult =
   | { status: "skipped"; reason: string }
   | { status: "failed"; error: string };
 
-function sign(timestamp: string, rawBody: string, secret: string): string {
-  return createHmac("sha256", secret)
-    .update(`${timestamp}.${rawBody}`)
-    .digest("hex");
-}
 
 export async function triggerMaxNotify(
   a: MaxNotifyArgs
@@ -134,7 +129,7 @@ export async function triggerMaxNotify(
       headers: {
         "Content-Type": "application/json",
         "X-Max-Timestamp": timestamp,
-        "X-Max-Signature": sign(timestamp, rawBody, NOTIFY_SECRET),
+        "X-Max-Signature": signMaxRequest(timestamp, rawBody, NOTIFY_SECRET),
       },
       body: rawBody,
       signal: controller.signal,

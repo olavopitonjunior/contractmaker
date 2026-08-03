@@ -3,11 +3,17 @@ import { prisma } from "@/lib/db/prisma";
 import {
   provisionMaxForOrg,
   deprovisionMaxForOrg,
+  syncMaxForOrg,
   serviceUserEmail,
   MAX_SCOPES_FASE2,
 } from "../provisioning";
+import { pushOrgToMax, deactivateOrgInMax } from "@/lib/max/push-org";
 import { createApiToken, revokeApiToken } from "@/lib/auth/api-token";
 
+vi.mock("@/lib/max/push-org", () => ({
+  pushOrgToMax: vi.fn(),
+  deactivateOrgInMax: vi.fn(),
+}));
 vi.mock("@/lib/auth/api-token", async (orig) => ({
   ...(await orig<typeof import("@/lib/auth/api-token")>()),
   createApiToken: vi.fn(),
@@ -17,6 +23,8 @@ vi.mock("@/lib/auth/api-token", async (orig) => ({
 const mockPrisma = vi.mocked(prisma);
 const create = vi.mocked(createApiToken);
 const revoke = vi.mocked(revokeApiToken);
+const push = vi.mocked(pushOrgToMax);
+const deactivate = vi.mocked(deactivateOrgInMax);
 
 const ORG = "org-1";
 
@@ -153,5 +161,86 @@ describe("deprovisionMaxForOrg", () => {
 
     expect(await deprovisionMaxForOrg(ORG)).toEqual({ revoked: 0 });
     expect(mockPrisma.userApiToken.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A transição do flag é o que torna "ativar o Max num tenant" um clique. O que
+ * este bloco protege é o par de decisões que não são óbvias: quando revogar, e
+ * o que fazer quando a entrega ao serviço falha.
+ */
+describe("syncMaxForOrg", () => {
+  beforeEach(() => {
+    mockPrisma.userApiToken.updateMany.mockResolvedValue({ count: 0 } as never);
+    mockPrisma.user.findUnique.mockResolvedValue({ id: "svc-1" } as never);
+    push.mockResolvedValue({ ok: true });
+    deactivate.mockResolvedValue({ ok: true });
+  });
+
+  function modulos(flags: Record<string, boolean>) {
+    mockPrisma.orgModule.findMany.mockResolvedValue([
+      { module: "vendas", enabled: true, featureFlags: flags },
+      { module: "locacao", enabled: true, featureFlags: flags },
+    ] as never);
+  }
+
+  it("flag ligada provisiona e entrega o token ao serviço", async () => {
+    modulos({ "vendas.max": true });
+
+    const r = await syncMaxForOrg(ORG);
+
+    expect(r).toEqual({ action: "provisioned", delivered: true });
+    expect(push).toHaveBeenCalledWith(
+      expect.objectContaining({ orgId: ORG, apiToken: "cmt_novo" })
+    );
+  });
+
+  /**
+   * O token cobre os DOIS módulos. Desligar vendas mantendo locação não pode
+   * derrubar o agente do tenant.
+   */
+  it("desligar UM módulo mantendo o outro NÃO revoga", async () => {
+    modulos({ "vendas.max": false, "locacao.max": true });
+
+    const r = await syncMaxForOrg(ORG);
+
+    expect(r).toEqual({ action: "provisioned", delivered: true });
+    expect(mockPrisma.userApiToken.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("desligar os DOIS revoga e desativa no serviço", async () => {
+    modulos({ "vendas.max": false, "locacao.max": false });
+    mockPrisma.userApiToken.updateMany.mockResolvedValue({ count: 1 } as never);
+
+    const r = await syncMaxForOrg(ORG);
+
+    expect(r).toEqual({ action: "deprovisioned", revoked: 1 });
+    expect(deactivate).toHaveBeenCalledWith(ORG);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  /**
+   * O token existe e é válido; o que faltou foi a entrega. Revogar aqui deixaria
+   * o tenant sem credencial NENHUMA — pior que ficar com uma que só precisa ser
+   * reenviada.
+   */
+  it("falha na entrega NÃO revoga o token recém-emitido", async () => {
+    modulos({ "vendas.max": true });
+    push.mockResolvedValue({ ok: false, reason: "unreachable", detail: "timeout" });
+
+    const r = await syncMaxForOrg(ORG);
+
+    expect(r).toMatchObject({ action: "provisioned", delivered: false });
+    expect(mockPrisma.userApiToken.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("invariante violado não chega a tentar a entrega", async () => {
+    modulos({ "vendas.max": true });
+    mockPrisma.orgMembership.count.mockResolvedValue(2 as never);
+
+    const r = await syncMaxForOrg(ORG);
+
+    expect(r).toMatchObject({ action: "provisioned", delivered: false });
+    expect(push).not.toHaveBeenCalled();
   });
 });

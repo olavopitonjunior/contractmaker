@@ -4,6 +4,9 @@ import {
   revokeApiToken,
   type ApiTokenScope,
 } from "@/lib/auth/api-token";
+import { pushOrgToMax, deactivateOrgInMax } from "@/lib/max/push-org";
+import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
+import { FEATURE } from "@/lib/modules/catalog";
 
 /**
  * Provisionamento do acesso do Max a um tenant.
@@ -175,4 +178,61 @@ export async function deprovisionMaxForOrg(orgId: string): Promise<{
     data: { revokedAt: new Date() },
   });
   return { revoked: result.count };
+}
+
+/**
+ * Reage à transição do flag no painel: ligou → provisiona e entrega ao Max;
+ * desligou nos DOIS módulos → revoga e desativa lá.
+ *
+ * Chamado de `PATCH /api/admin/orgs/[orgId]/modules` em `waitUntil`, para não
+ * segurar a resposta do painel — mas o resultado é devolvido para quem quiser
+ * registrar, porque falha silenciosa aqui é o pior estado possível: a feature
+ * fica verde e o agente, mudo.
+ *
+ * A leitura de módulos acontece DEPOIS do upsert do PATCH de propósito.
+ * `getOrgModules` é cacheado por request (`React.cache`); uma leitura antes do
+ * upsert envenenaria o cache com o estado antigo e este código decidiria pelo
+ * valor errado.
+ */
+export async function syncMaxForOrg(orgId: string): Promise<
+  | { action: "provisioned"; delivered: boolean; detail?: string }
+  | { action: "deprovisioned"; revoked: number }
+  | { action: "noop" }
+> {
+  const view = await getOrgModules(orgId);
+  const ligado =
+    isFeatureEnabled(view, FEATURE.VENDAS_MAX) ||
+    isFeatureEnabled(view, FEATURE.LOCACAO_MAX);
+
+  if (!ligado) {
+    // Só revoga quando NENHUM dos dois módulos usa o Max — o token cobre os
+    // dois, então desligar vendas mantendo locação não pode derrubar o agente.
+    const { revoked } = await deprovisionMaxForOrg(orgId);
+    if (revoked > 0) await deactivateOrgInMax(orgId);
+    return { action: "deprovisioned", revoked };
+  }
+
+  const r = await provisionMaxForOrg({ orgId });
+  if (r.status === "failed") {
+    return { action: "provisioned", delivered: false, detail: r.reason };
+  }
+
+  const push = await pushOrgToMax({
+    orgId: r.orgId,
+    orgName: r.orgName,
+    apiToken: r.rawToken!,
+  });
+
+  if (!push.ok) {
+    // O token existe e é válido; o que faltou foi a entrega. Não revogamos:
+    // reprovisionar depois entrega o mesmo estado, e revogar aqui só criaria
+    // um tenant sem credencial nenhuma.
+    return {
+      action: "provisioned",
+      delivered: false,
+      detail: `${push.reason}${push.detail ? `: ${push.detail}` : ""}`,
+    };
+  }
+
+  return { action: "provisioned", delivered: true };
 }
