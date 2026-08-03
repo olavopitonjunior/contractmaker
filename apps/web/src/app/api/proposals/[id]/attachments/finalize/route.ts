@@ -65,8 +65,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: "URL inválida" }, { status: 400 });
   }
   const isBlobHost = parsedUrl.hostname.endsWith(".blob.vercel-storage.com");
-  const belongsToProposal = parsedUrl.pathname.includes(
-    `proposal-attachments/${params.id}/`
+  // Ancorado no início (o handshake grava em `proposal-attachments/<id>/…`, que
+  // vira o pathname da URL). `includes` aceitaria o segmento em qualquer
+  // posição, o que é mais frouxo do que parece.
+  const belongsToProposal = parsedUrl.pathname.startsWith(
+    `/proposal-attachments/${params.id}/`
   );
   if (parsedUrl.protocol !== "https:" || !isBlobHost || !belongsToProposal) {
     return NextResponse.json(

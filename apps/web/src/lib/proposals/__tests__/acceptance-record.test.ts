@@ -88,6 +88,16 @@ describe("extractAcceptanceRecordUrl", () => {
     expect(extractAcceptanceRecordUrl(resp)).toBe("https://a.clicksign.com/raso.pdf");
   });
 
+  it("termina em payload muito largo (teto de nós), sem varrer para sempre", () => {
+    // 5000 chaves rasas + o link no fim: o orçamento corta antes. Só precisa
+    // TERMINAR — a garantia é de custo limitado, não de achar tudo.
+    const wide: Record<string, unknown> = {};
+    for (let i = 0; i < 5000; i++) wide[`k${i}`] = { nested: { v: i } };
+    const t0 = Date.now();
+    expect(() => extractAcceptanceRecordUrl({ data: wide })).not.toThrow();
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+
   it("não estoura em null/primitivo/ciclo", () => {
     expect(extractAcceptanceRecordUrl(null)).toBeNull();
     expect(extractAcceptanceRecordUrl("texto")).toBeNull();

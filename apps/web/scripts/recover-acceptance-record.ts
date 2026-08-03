@@ -165,31 +165,53 @@ async function main(): Promise<void> {
 
     // Limpa o guard pra permitir a reconstrução. A key do storage é estável, o
     // PDF é sobrescrito no lugar.
+    //
+    // A restauração é `finally`, NÃO só o ramo de erro: `buildAcceptanceProof`
+    // pode LANÇAR (puppeteer estoura, upload falha, transação quebra), e nesse
+    // caso um catch só no retorno deixaria a proposta permanentemente sem
+    // `dossierUrl` — estado que trava a conversão em negócio (convert.ts o
+    // exige) e sem registro do valor antigo depois que o processo morre.
+    const previousDossierUrl = proposal.dossierUrl;
+    let rebuilt = false;
     await prisma.proposal.update({
       where: { id: proposal.id },
       data: { dossierUrl: null },
     });
-
-    const res = await buildAcceptanceProof(proposal.id, {
-      signerName: sync.facts.signerName ?? proponente?.name ?? "—",
-      signerPhone: sync.facts.signerPhone ?? proponente?.phone ?? "—",
-      acceptanceId,
-      sentAt: sync.facts.sentAt ?? null,
-      completedAt: null,
-      acceptedText,
-      official: sync.facts,
-    });
-
-    if ("url" in res) {
-      console.log(`\n✔ Comprovante refeito: ${res.url}`);
-    } else {
-      // Não conseguiu reconstruir e o guard foi limpo — restaura pra não deixar
-      // a proposta sem "documento final" (convert.ts o exige).
-      await prisma.proposal.update({
-        where: { id: proposal.id },
-        data: { dossierUrl: proposal.dossierUrl },
+    try {
+      const res = await buildAcceptanceProof(proposal.id, {
+        signerName: sync.facts.signerName ?? proponente?.name ?? "—",
+        signerPhone: sync.facts.signerPhone ?? proponente?.phone ?? "—",
+        acceptanceId,
+        sentAt: sync.facts.sentAt ?? null,
+        completedAt: null,
+        acceptedText,
+        official: sync.facts,
       });
-      console.error(`\n✖ Falha ao refazer o comprovante (${res.skipped}). dossierUrl restaurado.`);
+      if ("url" in res) {
+        rebuilt = true;
+        console.log(`\n✔ Comprovante refeito: ${res.url}`);
+      } else {
+        console.error(`\n✖ Falha ao refazer o comprovante (${res.skipped}).`);
+      }
+    } catch (err) {
+      console.error("\n✖ Erro ao refazer o comprovante:", err);
+    } finally {
+      if (!rebuilt) {
+        // Best-effort com log alto: se ATÉ a restauração falhar, o operador
+        // precisa ver a URL antiga pra recolocá-la à mão.
+        await prisma.proposal
+          .update({
+            where: { id: proposal.id },
+            data: { dossierUrl: previousDossierUrl },
+          })
+          .then(() => console.error("  dossierUrl restaurado."))
+          .catch((e) => {
+            console.error(
+              `  !! FALHA AO RESTAURAR dossierUrl. Recoloque à mão:\n     ${previousDossierUrl}`,
+              e
+            );
+          });
+      }
     }
   }
 

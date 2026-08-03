@@ -44,8 +44,12 @@ export function extractAcceptanceRecordUrl(resp: unknown): string | null {
   const queue: Array<{ node: unknown; keyPath: string; depth: number }> = [
     { node: resp, keyPath: "", depth: 0 },
   ];
+  // Teto de nós além do de profundidade: a profundidade sozinha não limita a
+  // LARGURA, e um payload inesperadamente grande viraria varredura cara. O
+  // input é de terceiro; nenhum limite pode depender do formato esperado.
+  let budget = 2000;
 
-  while (queue.length > 0) {
+  while (queue.length > 0 && budget-- > 0) {
     const { node, keyPath, depth } = queue.shift() as (typeof queue)[number];
     if (depth > 6 || node == null || typeof node !== "object") continue;
 

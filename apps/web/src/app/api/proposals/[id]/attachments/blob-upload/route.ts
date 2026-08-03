@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { auth, getUserOrg } from "@/lib/auth/auth";
-import { prisma } from "@/lib/db/prisma";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { guardProposalScope } from "@/lib/proposals/route-helpers";
 
 export const runtime = "nodejs";
 
@@ -36,12 +37,18 @@ export async function POST(
         const org = await getUserOrg(session.user.id);
         if (!org) throw new Error("No organization");
 
-        const proposal = await prisma.proposal.findUnique({
-          where: { id: params.id },
-          select: { id: true, orgId: true },
+        // Escopo (dono/responsável/gerente) + PROPOSAL_SEND — a MESMA decisão
+        // que o /finalize aplica. Sem isto, qualquer membro da org emitiria
+        // token de upload pra qualquer proposta dela, mesmo sem permissão:
+        // o /finalize barraria o registro do anexo, mas o blob já teria sido
+        // gravado. Aqui o handshake só sabe lançar — vira 403 no catch abaixo.
+        const denied = await guardProposalScope({
+          proposalId: params.id,
+          userId: session.user.id,
+          orgId: org.id,
+          permission: PERMISSION.PROPOSAL_SEND,
         });
-        if (!proposal) throw new Error("Proposal not found");
-        if (proposal.orgId !== org.id) throw new Error("Forbidden");
+        if (denied) throw new Error(denied);
 
         // O cliente escolhe o pathname; trava no prefixo desta proposta pra
         // impedir gravar no espaço de outra.

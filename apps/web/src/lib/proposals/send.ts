@@ -19,6 +19,9 @@ import {
  *   execução real (criar envelope/Aceite, mandar link) fica no route/executor.
  */
 
+/** Intervalo mínimo entre re-tentativas do probe quando o veredito não conclui. */
+const PROBE_RETRY_MS = 6 * 60 * 60 * 1000;
+
 export type PrepareBlock =
   | { blocked: "not_configured" }
   | { blocked: "no_signers" }
@@ -111,16 +114,24 @@ export async function prepareSend(
     hasPhone: Boolean(s.phone),
   }));
 
-  // Conta nunca verificada + alguém quer WhatsApp: MEDE antes de decidir, em vez
-  // de assumir `false` e rebaixar pra Aceite em silêncio. O probe cria um
+  // Capacidade ainda NÃO MEDIDA + alguém quer WhatsApp: mede antes de decidir,
+  // em vez de assumir `false` e rebaixar pra Aceite em silêncio. O probe cria um
   // envelope rascunho, testa um signer WhatsApp e deleta o rascunho — nunca
-  // ativa, nunca envia, custo zero. Roda uma vez por org (cacheia em
-  // OrgSignatureSettings); as chamadas seguintes leem o cache.
-  if (settings.capabilitiesCheckedAt == null && routingSigners.some((s) => s.channel === "whatsapp")) {
+  // ativa, nunca envia, custo zero.
+  //
+  // O gatilho é `whatsappSignatureAvailable == null` (não `capabilitiesCheckedAt
+  // == null`): `detectAndCacheCapabilities` carimba a data MESMO quando o
+  // veredito é inconclusivo (rede/5xx), e só deixa o flag intacto. Gatear pela
+  // data daria UMA tentativa por org — e logo na primeira conexão, quando falha
+  // transitória é mais provável — desligando a auto-verificação pra sempre.
+  //
+  // O cooldown evita o extremo oposto: sem ele, uma conta genuinamente
+  // inconclusiva pagaria 4 chamadas ClickSign a cada envio.
+  const measured = settings.whatsappSignatureAvailable != null;
+  const lastCheck = settings.capabilitiesCheckedAt?.getTime() ?? 0;
+  const cooldownOver = Date.now() - lastCheck > PROBE_RETRY_MS;
+  if (!measured && cooldownOver && routingSigners.some((s) => s.channel === "whatsapp")) {
     const probed = await probeCaps(proposal.orgId).catch(() => null);
-    // Veredito inconclusivo (rede, etc.) NÃO é cacheado como indisponível — o
-    // reread devolve `capabilitiesCheckedAt` preenchido mas o flag ainda null,
-    // e o roteamento segue no default marcado como não-verificado.
     if (probed && !("error" in probed)) settings = await getSignatureSettings(proposal.orgId);
   }
 
