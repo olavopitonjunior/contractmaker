@@ -50,3 +50,38 @@ export async function maxDisabledResponse(
     : await isMaxEnabledForOrg(orgId);
   return enabled ? null : NextResponse.json(DISABLED_BODY, { status: 403 });
 }
+
+/**
+ * Gate das rotas do plano de agente (`/api/agents/*`) quando quem chama é o Max.
+ *
+ * Sem isto o entitlement é meia-verdade: as features `vendas.max`/`locacao.max`
+ * controlam o ImobPro **falar** com o Max (`lib/max/notify-trigger.ts`), mas não
+ * o Max **ler** o tenant. Um token válido continuava lendo persona, base de
+ * conhecimento e gravando custo numa org que nunca ligou o agente — ou que
+ * desligou.
+ *
+ * Duas restrições que não são detalhe:
+ *
+ * - **Só `via === "bearer"`.** As mesmas rotas servem a UI (`/settings/ai-agents`,
+ *   `/admin/agents`), e o operador precisa conseguir ver e editar a configuração
+ *   do Max justamente para decidir se liga a feature. Gatear a sessão criaria um
+ *   ovo-e-galinha na própria tela que resolve o problema.
+ * - **Só `agentKey === "max"`.** A rota é compartilhada com qualquer agente
+ *   externo do registry; um agente futuro teria o próprio entitlement, e herdar
+ *   o do Max o desligaria em silêncio.
+ *
+ * **403 aqui, e não 200 como o `enabled: false` do perfil.** São coisas
+ * diferentes: `enabled` é kill switch operacional dentro de um tenant que USA o
+ * Max (por isso responde 200, para o agente distinguir "desligado de propósito"
+ * de "não consegui ler"); isto é "esta imobiliária não contratou o agente" — não
+ * há configuração a devolver, e o código `MODULE_DISABLED` no corpo diz
+ * exatamente qual das duas é.
+ */
+export async function maxAgentRouteGate(params: {
+  orgId: string;
+  via: "session" | "bearer";
+  agentKey: string;
+}): Promise<NextResponse | null> {
+  if (params.via !== "bearer" || params.agentKey !== "max") return null;
+  return maxDisabledResponse(params.orgId);
+}

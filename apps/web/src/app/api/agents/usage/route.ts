@@ -8,6 +8,7 @@ import {
 import { withApi } from "@/lib/api/with-api";
 import { getContractOrgId, getDealOrgId } from "@/lib/security/org-scope";
 import { calcCostUsd, recordAIUsage } from "@/lib/ai/usage";
+import { maxAgentRouteGate } from "@/lib/max/gate";
 import {
   AGENT_REGISTRY,
   EXTERNAL_AGENT_KEYS,
@@ -117,6 +118,14 @@ export const POST = withApi("POST /api/agents/usage", async (req: NextRequest) =
       { status: 400 }
     );
   }
+
+  // Entitlement do tenant: org que não contratou o Max não move o custo dela.
+  const denied = await maxAgentRouteGate({
+    orgId,
+    via: authed.ident.via,
+    agentKey: body.agentKey,
+  });
+  if (denied) return denied;
 
   // Id de outra org é recusado, não silenciosamente descartado: quem reporta
   // precisa saber que a atribuição não aconteceu.

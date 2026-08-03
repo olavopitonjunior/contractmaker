@@ -9,6 +9,7 @@ import { withApi } from "@/lib/api/with-api";
 import { searchKnowledgeBase } from "@/lib/ai/knowledge-search";
 import { resolveAgentProfile } from "@/lib/ai/agents/resolve";
 import { assertAgentBudget, AgentBudgetExceededError } from "@/lib/ai/budget";
+import { maxAgentRouteGate } from "@/lib/max/gate";
 import {
   AGENT_REGISTRY,
   EXTERNAL_AGENT_KEYS,
@@ -84,6 +85,15 @@ export const POST = withApi(
         { status: 400 }
       );
     }
+
+    // Entitlement do tenant, antes do kill switch: são perguntas diferentes —
+    // "esta imobiliária contratou o Max?" e "o Max está ligado nela?".
+    const notEntitled = await maxAgentRouteGate({
+      orgId,
+      via: authed.ident.via,
+      agentKey,
+    });
+    if (notEntitled) return notEntitled;
 
     /**
      * Kill switch: agente desligado no console não consulta. Aqui um 403 é

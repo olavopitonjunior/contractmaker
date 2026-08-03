@@ -54,6 +54,11 @@ const OK = { agentKey: "max", query: "como funciona a esteira de locação?" };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Tenant com o Max contratado. Sem isto o gate de entitlement
+  // (`maxAgentRouteGate`) recusa com 403 — a feature nasce OFF no catálogo.
+  mockPrisma.orgModule.findMany.mockResolvedValue([
+    { module: "vendas", enabled: true, featureFlags: { "vendas.max": true } },
+  ] as never);
   __resetAgentProfileCacheForTests();
   mockAuth.mockResolvedValue(null as never);
   mockGetUserOrg.mockResolvedValue({ id: "org-1" } as never);
@@ -152,5 +157,53 @@ describe("POST /api/agents/knowledge/search", () => {
     expect(res.status).toBe(402);
     expect(await res.json()).toMatchObject({ error: "AGENT_BUDGET_EXCEEDED" });
     expect(search).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * O entitlement (`vendas.max`/`locacao.max`) e o kill switch
+ * (`AgentProfile.enabled`) respondem perguntas DIFERENTES: "esta imobiliária
+ * contratou o Max?" e "o Max está ligado nela?". Até este lote, só a segunda era
+ * verificada aqui — o flag do catálogo controlava o ImobPro FALAR com o Max, mas
+ * não o Max LER o tenant. Um token válido continuava lendo a base de uma org que
+ * nunca ligou o agente, ou que desligou.
+ */
+describe("entitlement do tenant", () => {
+  it("403 MODULE_DISABLED quando a org não contratou o Max", async () => {
+    tokenComEscopos(["agents:r"]);
+    // Nenhuma feature do Max ligada (o default do catálogo é false).
+    mockPrisma.orgModule.findMany.mockResolvedValue([
+      { module: "vendas", enabled: true, featureFlags: {} },
+    ] as never);
+
+    const res = await POST(req(OK, "cmt_x"));
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: "MODULE_DISABLED" });
+    expect(search).not.toHaveBeenCalled();
+  });
+
+  it("locacao.max sozinha já habilita — o token cobre os dois módulos", async () => {
+    tokenComEscopos(["agents:r"]);
+    mockPrisma.orgModule.findMany.mockResolvedValue([
+      { module: "locacao", enabled: true, featureFlags: { "locacao.max": true } },
+    ] as never);
+
+    expect((await POST(req(OK, "cmt_x"))).status).toBe(200);
+  });
+
+  /**
+   * A UI (`/admin/agents`, `/settings/ai-agents`) usa as mesmas rotas, e o
+   * operador precisa ver a configuração do Max justamente pra decidir se liga a
+   * feature. Gatear a sessão criaria um ovo-e-galinha na tela que resolve o
+   * problema.
+   */
+  it("sessão NÃO é gateada pelo entitlement", async () => {
+    mockAuth.mockResolvedValue({ user: { id: "user-1" } } as never);
+    mockPrisma.orgModule.findMany.mockResolvedValue([
+      { module: "vendas", enabled: true, featureFlags: {} },
+    ] as never);
+
+    expect((await POST(req(OK))).status).toBe(200);
   });
 });

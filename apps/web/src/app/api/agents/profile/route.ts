@@ -8,6 +8,7 @@ import { withApi } from "@/lib/api/with-api";
 import { getAgentBudgetStatus } from "@/lib/ai/budget";
 import { resolveAgentProfile } from "@/lib/ai/agents/resolve";
 import { composeSystemPrompt } from "@/lib/ai/agents/prompt-blocks";
+import { maxAgentRouteGate } from "@/lib/max/gate";
 import {
   AGENT_REGISTRY,
   EXTERNAL_AGENT_KEYS,
@@ -65,6 +66,15 @@ export const GET = withApi(
         { status: 400 }
       );
     }
+
+    // Entitlement do tenant. Ver `maxAgentRouteGate` para por que 403 aqui e 200
+    // no `enabled: false` logo abaixo — são perguntas diferentes.
+    const denied = await maxAgentRouteGate({
+      orgId,
+      via: authed.ident.via,
+      agentKey,
+    });
+    if (denied) return denied;
 
     const [profile, budget] = await Promise.all([
       resolveAgentProfile(agentKey, orgId),
