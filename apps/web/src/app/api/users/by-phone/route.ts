@@ -1,16 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authOrBearer, hasScope } from "@/lib/auth/auth-or-bearer";
+import { hasScope } from "@/lib/auth/auth-or-bearer";
+import {
+  requireApiAuth,
+  isAuthFailure,
+  authFailureResponse,
+} from "@/lib/api/require-auth";
 import { prisma } from "@/lib/db/prisma";
 import { phoneE164Schema } from "@/lib/validation/schemas";
 
 /**
  * GET /api/users/by-phone?phone=+5511987654321
  *
- * Lookup de usuário por telefone E.164. Usado pelo Newton para identificar
- * qual usuário do contractmaker corresponde a um número de WhatsApp inbound.
+ * Lookup de usuário por telefone E.164. Usado pelos agentes de WhatsApp para
+ * identificar qual usuário da plataforma corresponde a um número inbound.
  *
- * Auth: aceita Bearer (Newton) ou session (UI admin). Para Bearer, exige
- * escopo `metrics:r` (operação de leitura).
+ * **A resposta é confinada à org de quem pergunta.** Telefone de usuário de
+ * outro tenant devolve 404 — o mesmo 404 de telefone inexistente, de propósito:
+ * distinguir os dois casos já entregaria a informação de que aquele número
+ * pertence a alguém na plataforma.
+ *
+ * Isso corrige um vazamento real: a rota usava `authOrBearer` cru, checava só o
+ * escopo e fazia `findUnique({ where: { phone } })` sem filtro nenhum de org.
+ * Como `User.phone` é `@unique` GLOBAL, qualquer token com `metrics:r` — de
+ * qualquer tenant — resolvia qualquer telefone da plataforma inteira para
+ * `{ userId, orgId, role, name }`, e com `withScope` levava junto os ids de
+ * deals e contratos. Não era superfície futura: os tokens dos agentes já têm
+ * esse escopo.
+ *
+ * O helper canônico (`requireApiAuth`) é o que traz a org do caller — e no
+ * caminho de máquina ele pina `subdomainHint: null`, então a org vem do dono do
+ * token e não de um `Host` que o cliente controla.
  *
  * Response: { userId, orgId, role, name } | { error: "not_found" }
  *
@@ -21,20 +40,13 @@ import { phoneE164Schema } from "@/lib/validation/schemas";
  *   de lista enumerada).
  *
  * Privacy guard: telefone é PII. Endpoint não deve ser exposto publicamente.
- * Bearer scope é a primeira linha de defesa; UI admin é a segunda. Resposta
- * NÃO retorna `email` para minimizar superficie.
+ * Resposta NÃO retorna `email` para minimizar superfície.
  */
 export async function GET(req: NextRequest) {
-  const ident = await authOrBearer(req);
-  if (!ident) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  if (!hasScope(ident, "metrics:r")) {
-    return NextResponse.json(
-      { error: "Forbidden", reason: "missing scope metrics:r" },
-      { status: 403 }
-    );
-  }
+  const authed = await requireApiAuth(req, { scope: "metrics:r" });
+  if (isAuthFailure(authed)) return authFailureResponse(authed);
+  const { ident } = authed;
+  const callerOrgId = authed.org.id;
 
   const phoneRaw = req.nextUrl.searchParams.get("phone");
   if (!phoneRaw) {
@@ -58,21 +70,23 @@ export async function GET(req: NextRequest) {
       id: true,
       name: true,
       deletedAt: true,
+      // Só a membership NA ORG DE QUEM PERGUNTA. Um usuário pode ser membro de
+      // várias imobiliárias (o corretor que atende duas casas), e antes daqui
+      // saía `take: 1` sem `orderBy` — a org devolvida era a ordem do Postgres,
+      // não-determinística entre chamadas. O mesmo defeito já tinha sido
+      // corrigido em `getUserOrg` (user-org.ts:114-124) e nunca chegou aqui.
       orgMemberships: {
+        where: { orgId: callerOrgId },
         select: { orgId: true, role: true },
         take: 1,
       },
     },
   });
 
-  if (!user || user.deletedAt) {
+  // Um 404 só, para os três casos (não existe / apagado / é de outro tenant):
+  // separá-los revelaria que o número pertence a alguém na plataforma.
+  if (!user || user.deletedAt || user.orgMemberships.length === 0) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
-  }
-  if (user.orgMemberships.length === 0) {
-    return NextResponse.json(
-      { error: "not_found", reason: "user has no active org" },
-      { status: 404 }
-    );
   }
 
   const membership = user.orgMemberships[0];
@@ -97,17 +111,21 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // `userId` é globalmente único entre orgs, então não filtramos por orgId
-  // explicitamente aqui — só os deals/contracts que pertencem ao user.
+  // Filtrado pela org do caller, não só pelo `userId`. Um usuário multi-org tem
+  // deals nas duas casas, e devolver a lista inteira entregaria ids de negócio
+  // de um tenant a quem perguntou por outro.
+  //
+  // Deal escopa por `pipeline.orgId` — não existe `Deal.orgId` (ver
+  // lib/security/org-scope.ts).
   const SCOPE_CAP = 500;
   const [deals, contracts] = await Promise.all([
     prisma.deal.findMany({
-      where: { userId: user.id },
+      where: { userId: user.id, pipeline: { orgId: callerOrgId } },
       select: { id: true },
       take: SCOPE_CAP,
     }),
     prisma.contract.findMany({
-      where: { userId: user.id },
+      where: { userId: user.id, deal: { pipeline: { orgId: callerOrgId } } },
       select: { id: true },
       take: SCOPE_CAP,
     }),
