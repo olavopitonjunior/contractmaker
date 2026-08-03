@@ -16,7 +16,9 @@ const bodySchema = z.object({
 
 /**
  * Envia o resumo consolidado do formulário do deal por e-mail (com o PDF e,
- * opcionalmente, os documentos anexados). Autenticado — `to` é livre. Só venda.
+ * opcionalmente, os documentos anexados). Autenticado — `to` restrito a
+ * membros da org: o resumo é dossiê interno e não pode chegar às partes
+ * (comprador/vendedor). Só venda.
  */
 export async function POST(
   req: NextRequest,
@@ -69,6 +71,22 @@ export async function POST(
   }
   if (!deal.formId) {
     return NextResponse.json({ error: "Negócio sem formulário vinculado" }, { status: 400 });
+  }
+
+  // O destino precisa ser usuário do sistema (membro da org) — o resumo carrega
+  // dados de todas as partes e não pode ser entregue a comprador/vendedor.
+  const memberRecipient = await prisma.orgMembership.findFirst({
+    where: {
+      orgId: org.id,
+      user: { email: { equals: parsed.data.to, mode: "insensitive" } },
+    },
+    select: { id: true },
+  });
+  if (!memberRecipient) {
+    return NextResponse.json(
+      { error: "O resumo só pode ser enviado para usuários do sistema" },
+      { status: 403 }
+    );
   }
 
   const result = await sendFormSummary({
