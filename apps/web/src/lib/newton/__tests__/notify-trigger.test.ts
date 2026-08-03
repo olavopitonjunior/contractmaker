@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { normalizeBrPhone } from "@/lib/validators/phone-br";
-import { sanitizeUntrusted } from "../notify-trigger";
+import { buildText, sanitizeUntrusted } from "../notify-trigger";
+import type { NewtonNotifyArgs } from "../notify-trigger";
 
 /**
  * Regressão do #189 estendida à audiência platform_user: o agente NÃO
@@ -24,6 +25,40 @@ describe("normalização do telefone antes do whatsapp_send", () => {
 
   it("telefone inválido não vira envio para número quebrado", () => {
     expect(paraWhatsapp("123")).toBeNull();
+  });
+});
+
+/**
+ * O teste acima reimplementava o pipeline num helper local, então provava o
+ * normalizador e não o texto que chega ao agente — e o ramo `deal_broker` ficou
+ * meses interpolando `a.phone` cru enquanto o `platform_user` usava o valor
+ * normalizado. É o texto do prompt que vira o argumento do `whatsapp_send`, e é
+ * ele que precisa ser afirmado, nas DUAS audiências.
+ */
+describe("buildText interpola o telefone normalizado, não o cadastro", () => {
+  const CADASTRO = "(11) 99906-3228";
+  const E164_SEM_MAIS = "5511999063228";
+
+  const args = (audience: NewtonNotifyArgs["audience"]): NewtonNotifyArgs => ({
+    orgId: "org_1",
+    audience,
+    phone: CADASTRO,
+    recipientName: "Fulano",
+    message: "Negócio mudou de estágio.",
+    dealId: "deal_1",
+    orgName: "Imobiliária Teste",
+  });
+
+  it("deal_broker manda o E.164, não o formato de cadastro", () => {
+    const texto = buildText(args("deal_broker"), E164_SEM_MAIS);
+    expect(texto).toContain(`pro telefone ${E164_SEM_MAIS}`);
+    expect(texto).not.toContain(CADASTRO);
+  });
+
+  it("platform_user manda o E.164, não o formato de cadastro", () => {
+    const texto = buildText(args("platform_user"), E164_SEM_MAIS);
+    expect(texto).toContain(`pro telefone ${E164_SEM_MAIS}`);
+    expect(texto).not.toContain(CADASTRO);
   });
 });
 
