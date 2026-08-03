@@ -8,6 +8,8 @@ import { resolveNewtonActor, isRejection, type NewtonActorContext } from "@/lib/
 import { prisma } from "@/lib/db/prisma";
 import { RateLimits } from "@/lib/security/ratelimit";
 import { audit } from "@/lib/security/audit";
+import { getEffectivePermissions } from "@/lib/security/rbac/check";
+import { checkDelegationTarget } from "@/lib/security/rbac/delegation";
 
 /**
  * Delegação Bearer via `X-Act-As-User`: permite que um Bearer com scope
@@ -265,6 +267,49 @@ export async function requireAuth(
             ),
           };
         }
+        // Mesma org NÃO basta: isso diz ONDE a delegação vale, não QUEM ela
+        // pode virar. Sem a trava abaixo, um token de serviço com
+        // `users:delegate` aponta pro `owner` do tenant e age com o poder
+        // dele — e o token de serviço existe justamente pra ter MENOS poder
+        // que gente.
+        const [ownerPerms, targetPerms] = await Promise.all([
+          getEffectivePermissions(ident.userId, tokenOwnerOrg.id).catch(() => null),
+          getEffectivePermissions(target.id, tokenOwnerOrg.id).catch(() => null),
+        ]);
+        const verdict = checkDelegationTarget(ownerPerms, targetPerms);
+        if (!verdict.allowed) {
+          audit(
+            {
+              orgId: tokenOwnerOrg.id,
+              userId: ident.userId,
+              ipAddress: extractIpAddress(req),
+              userAgent: req.headers.get("user-agent"),
+            },
+            {
+              action: "DELEGATION_REJECTED",
+              result: "DENIED",
+              metadata: {
+                via: "newton",
+                tokenId: ident.tokenId,
+                requestedTarget: actAsHeader,
+                reason: "target_role_escalation",
+                detail: verdict.reason,
+                escalatedPermissions: verdict.escalatedPermissions,
+              },
+            }
+          );
+          return {
+            ok: false,
+            response: NextResponse.json(
+              // A resposta não enumera as permissões: quem chama é máquina e
+              // não age sobre isso, e a lista descreveria o RBAC do tenant pra
+              // quem já está tentando escalar. O detalhe fica no audit.
+              { error: "Forbidden", reason: "delegate target outranks token owner" },
+              { status: 403 }
+            ),
+          };
+        }
+
         // OK: switch effective actor. A org efetiva é a do dono do token
         // (validada acima), não a resolução independente do target.
         delegatedFromUserId = ident.userId;
