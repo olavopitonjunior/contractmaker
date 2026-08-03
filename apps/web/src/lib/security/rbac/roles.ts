@@ -331,7 +331,18 @@ export function resolvePermissions(
   orgOverrides?: PermissionMap | null
 ): PermissionMap {
   if (role === "custom") return customPermissions ?? {};
-  const base = ROLE_PRESETS[role];
+  // `role` vem do banco (membership.role é String) — pode carregar valores fora
+  // do catálogo, como o "member" que o signup público legado gravava. Sem este
+  // guard, `permissions` ficava undefined e can() derrubava QUALQUER página com
+  // RBAC num TypeError. Menor privilégio: nega tudo (fail-opens documentados,
+  // como o de dealScopeWhere, continuam valendo por decisão própria de lá).
+  const base: PermissionMap | undefined = ROLE_PRESETS[role];
+  if (!base) {
+    console.warn(
+      `[rbac] role desconhecido "${role}" — resolvendo como sem permissões`
+    );
+    return {};
+  }
   if (orgOverrides && Object.keys(orgOverrides).length > 0) {
     return { ...base, ...orgOverrides };
   }
