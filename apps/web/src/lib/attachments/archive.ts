@@ -1,5 +1,5 @@
 /**
- * Ponto ÚNICO que exclui anexo — de deal ou de formulário.
+ * Ponto ÚNICO que exclui anexo — de deal, de formulário ou de proposta.
  *
  * Regra do produto: o sistema não apaga nada automaticamente e nenhuma
  * exclusão pode ficar sem rastro. Toda exclusão passa por aqui, que arquiva a
@@ -24,8 +24,13 @@ import { Prisma } from "@prisma/client";
 /** Cliente Prisma ou o `tx` de uma `$transaction`. */
 type Db = Prisma.TransactionClient;
 
-export type ArchiveOrigin = "deal" | "form";
-export type ArchiveVia = "ui_deal" | "ui_form" | "deal_delete" | "certidao";
+export type ArchiveOrigin = "deal" | "form" | "proposal";
+export type ArchiveVia =
+  | "ui_deal"
+  | "ui_form"
+  | "ui_proposal"
+  | "deal_delete"
+  | "certidao";
 
 interface AttachmentRowLike {
   id: string;
@@ -34,6 +39,7 @@ interface AttachmentRowLike {
   category?: string | null;
   dealId?: string | null;
   formId?: string | null;
+  proposalId?: string | null;
 }
 
 export interface ArchiveArgs {
@@ -65,6 +71,7 @@ export async function archiveAttachment(
       originalId: row.id,
       dealId: row.dealId ?? null,
       formId: row.formId ?? null,
+      proposalId: row.proposalId ?? null,
       filename: row.filename,
       url: row.url,
       category: row.category ?? null,
@@ -81,6 +88,8 @@ export async function archiveAttachment(
 
   if (origin === "deal") {
     await db.dealAttachment.delete({ where: { id: row.id } });
+  } else if (origin === "proposal") {
+    await db.proposalAttachment.delete({ where: { id: row.id } });
   } else {
     await db.formAttachment.delete({ where: { id: row.id } });
   }

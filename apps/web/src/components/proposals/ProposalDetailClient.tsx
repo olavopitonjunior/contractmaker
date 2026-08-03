@@ -104,6 +104,10 @@ export function ProposalDetailClient({
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<null | {
+    id: string;
+    filename: string;
+  }>(null);
   const [contactEdit, setContactEdit] = useState<null | {
     signerId: string;
     name: string;
@@ -142,6 +146,32 @@ export function ProposalDetailClient({
   // alimentada pelo diálogo abaixo — dois `window.prompt` em sequência não davam
   // contexto (qual
   // signatário?), não validavam nada e um Esc no 2º já tinha coletado o 1º.
+  /**
+   * Exclusão de documento da proposta. A confirmação é um Dialog, não
+   * `window.confirm`: o modal nativo trava a automação de navegador (e o
+   * `signerAction` abaixo ainda usa `confirm`, o que é dívida conhecida).
+   * A rota arquiva a linha e preserva o blob, então isto é reversível — o
+   * texto do diálogo diz isso pra não assustar mais do que deve.
+   */
+  async function deleteAttachment(attachmentId: string, filename: string) {
+    setBusy(true);
+    try {
+      const res = await fetch(
+        `/api/proposals/${proposal.id}/attachments/${attachmentId}`,
+        { method: "DELETE" }
+      );
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+      toast.success(`"${filename}" removido dos documentos.`);
+      setDeleteTarget(null);
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao excluir");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function signerAction(
     signerId: string,
     kind: "resend" | "remove" | "contact",
@@ -425,14 +455,32 @@ export function ProposalDetailClient({
             <p className="text-sm text-muted-foreground">Nenhum documento anexado.</p>
           ) : (
             <ul className="space-y-1 text-sm">
-              {attachments.map((a) => (
-                <li key={a.id}>
-                  <a href={a.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-                    {a.filename}
-                  </a>
-                  {a.category && <span className="text-muted-foreground"> · {a.category}</span>}
-                </li>
-              ))}
+              {attachments.map((a) => {
+                // O documento final (dossiê/comprovante) é a peça probatória e
+                // a rota recusa excluí-lo — não oferecer o botão evita um 409
+                // previsível.
+                const isFinal = !!proposal.dossierUrl && a.url === proposal.dossierUrl;
+                return (
+                  <li key={a.id} className="flex items-baseline justify-between gap-3">
+                    <span className="min-w-0">
+                      <a href={a.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                        {a.filename}
+                      </a>
+                      {a.category && <span className="text-muted-foreground"> · {a.category}</span>}
+                    </span>
+                    {canAttach && !isFinal && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => setDeleteTarget({ id: a.id, filename: a.filename })}
+                        className="shrink-0 text-xs text-destructive hover:underline disabled:opacity-50"
+                      >
+                        Excluir
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </Card>
@@ -459,6 +507,33 @@ export function ProposalDetailClient({
       </Card>
 
       {/* Editar contato do signatário */}
+      <Dialog open={deleteTarget != null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Excluir documento</DialogTitle>
+            <DialogDescription>
+              Remover <strong>{deleteTarget?.filename}</strong> dos documentos desta
+              proposta? O arquivo é preservado no armazenamento e a exclusão fica
+              registrada, então é possível restaurá-lo depois.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={busy}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={busy || !deleteTarget}
+              onClick={() => {
+                if (deleteTarget) void deleteAttachment(deleteTarget.id, deleteTarget.filename);
+              }}
+            >
+              Excluir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={contactEdit != null} onOpenChange={(o) => !o && setContactEdit(null)}>
         <DialogContent>
           <DialogHeader>
