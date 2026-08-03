@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db/prisma";
 import { sendFormSummary } from "@/lib/forms/form-summary-mailer";
 import { guardDealScope } from "@/lib/deals/route-helpers";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -102,5 +103,18 @@ export async function POST(
       { status: 502 }
     );
   }
+
+  await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
+    action: "FORM_SUMMARY_SENT",
+    result: "SUCCESS",
+    resource: deal.formId,
+    resourceType: "SalesForm",
+    metadata: {
+      dealId: deal.id,
+      to: parsed.data.to,
+      includeAttachments: parsed.data.includeAttachments,
+    },
+  });
+
   return NextResponse.json(result);
 }
