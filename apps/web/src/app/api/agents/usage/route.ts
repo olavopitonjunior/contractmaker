@@ -31,7 +31,9 @@ const MAX_LATENCIA_MS = 600_000;
 
 const bodySchema = z.object({
   agentKey: z.string().min(1),
-  provider: z.enum(["anthropic", "gemini", "voyage"]).default("anthropic"),
+  provider: z
+    .enum(["anthropic", "gemini", "voyage", "openrouter"])
+    .default("anthropic"),
   model: z.string().min(1).max(128),
   promptTokens: z.number().int().min(0).max(MAX_TOKENS_POR_TURN),
   completionTokens: z.number().int().min(0).max(MAX_TOKENS_POR_TURN).optional(),
