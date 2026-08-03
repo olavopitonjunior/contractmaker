@@ -244,3 +244,119 @@ describe("syncMaxForOrg", () => {
     expect(push).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * O estado é o que separa três situações que, sem ele, se parecem no painel:
+ * "nunca provisionado", "provisionado e entregue" e "provisionado, mas o
+ * serviço não recebeu". A terceira é a perigosa — flag verde, agente mudo.
+ */
+describe("AgentProvisioning — estado do ciclo", () => {
+  beforeEach(() => {
+    mockPrisma.userApiToken.updateMany.mockResolvedValue({ count: 0 } as never);
+    mockPrisma.user.findUnique.mockResolvedValue({ id: "svc-1" } as never);
+    push.mockResolvedValue({ ok: true });
+    deactivate.mockResolvedValue({ ok: true });
+    mockPrisma.agentProvisioning.upsert.mockResolvedValue({} as never);
+  });
+
+  function modulos(flags: Record<string, boolean>) {
+    mockPrisma.orgModule.findMany.mockResolvedValue([
+      { module: "vendas", enabled: true, featureFlags: flags },
+      { module: "locacao", enabled: true, featureFlags: flags },
+    ] as never);
+  }
+
+  function estadoGravado() {
+    const call = mockPrisma.agentProvisioning.upsert.mock.calls[0][0] as {
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    };
+    return call;
+  }
+
+  it("entrega confirmada grava active com deliveredAt e zera tentativas", async () => {
+    modulos({ "vendas.max": true });
+
+    await syncMaxForOrg(ORG);
+
+    const { create, update } = estadoGravado();
+    expect(create.status).toBe("active");
+    expect(create.deliveredAt).toBeInstanceOf(Date);
+    expect(create.lastError).toBeNull();
+    // Zera, não incrementa: um ciclo que fechou bem apaga o histórico de falha.
+    expect(update.attempts).toBe(0);
+  });
+
+  /**
+   * Distinção que o cron consome: `pending_delivery` é "emiti e não entreguei"
+   * (reenviar resolve); `failed` é "não cheguei a emitir" (precisa
+   * reprovisionar).
+   */
+  it("falha de ENTREGA grava pending_delivery e incrementa tentativas", async () => {
+    modulos({ "vendas.max": true });
+    push.mockResolvedValue({ ok: false, reason: "unreachable", detail: "timeout" });
+
+    await syncMaxForOrg(ORG);
+
+    const { create, update } = estadoGravado();
+    expect(create.status).toBe("pending_delivery");
+    expect(create.lastError).toContain("unreachable");
+    expect(update.attempts).toEqual({ increment: 1 });
+  });
+
+  it("falha de PROVISIONAMENTO grava failed, não pending_delivery", async () => {
+    modulos({ "vendas.max": true });
+    mockPrisma.orgMembership.count.mockResolvedValue(2 as never);
+
+    await syncMaxForOrg(ORG);
+
+    expect(estadoGravado().create.status).toBe("failed");
+  });
+
+  it("desligar os dois módulos grava revoked e limpa o erro", async () => {
+    modulos({ "vendas.max": false, "locacao.max": false });
+    mockPrisma.userApiToken.updateMany.mockResolvedValue({ count: 1 } as never);
+
+    await syncMaxForOrg(ORG);
+
+    const { create } = estadoGravado();
+    expect(create.status).toBe("revoked");
+    expect(create.lastError).toBeNull();
+  });
+
+  /**
+   * O provisionamento já aconteceu quando esta linha é gravada. Derrubar a
+   * resposta do painel por causa da observabilidade trocaria um problema de
+   * visibilidade por um de funcionamento.
+   */
+  it("falha ao gravar o estado NÃO derruba o sync", async () => {
+    modulos({ "vendas.max": true });
+    mockPrisma.agentProvisioning.upsert.mockRejectedValue(
+      new Error("coluna nao existe") as never
+    );
+
+    const r = await syncMaxForOrg(ORG);
+
+    expect(r).toEqual({ action: "provisioned", delivered: true });
+  });
+});
+
+/**
+ * O Bearer do agente resolve a org pela membership do dono do token. Sem a
+ * marca, um admin do tenant limpando a lista de membros derruba o agente — e em
+ * silêncio, porque nada falha até a próxima chamada.
+ */
+describe("membership de serviço", () => {
+  it("nasce marcada como isSystem, e a marca é reaplicada no update", async () => {
+    await provisionMaxForOrg({ orgId: ORG });
+
+    const args = mockPrisma.orgMembership.upsert.mock.calls[0][0] as {
+      create: { isSystem: boolean };
+      update: { isSystem: boolean };
+    };
+    expect(args.create.isSystem).toBe(true);
+    // No update também: memberships criadas antes do campo existir só ganham a
+    // marca no primeiro sync.
+    expect(args.update.isSystem).toBe(true);
+  });
+});

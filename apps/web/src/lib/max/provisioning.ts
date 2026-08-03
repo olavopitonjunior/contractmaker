@@ -48,6 +48,9 @@ export const MAX_SCOPES_FASE2: ApiTokenScope[] = [
 /** Domínio dos usuários de serviço. Não recebe e-mail — é identificador. */
 const SERVICE_EMAIL_DOMAIN = "agents.imobpro.local";
 
+/** Chave do agente externo em `AgentProvisioning` e no registry. */
+export const MAX_AGENT_KEY = "max";
+
 export function serviceUserEmail(orgId: string): string {
   return `max+${orgId}@${SERVICE_EMAIL_DOMAIN}`;
 }
@@ -106,10 +109,13 @@ export async function provisionMaxForOrg(params: {
     select: { id: true },
   });
 
+  // `isSystem` marca a membership para que a tela de membros recuse removê-la.
+  // No `update` também, e não só no `create`: as memberships provisionadas
+  // antes deste campo existir precisam ganhá-lo no primeiro sync.
   await prisma.orgMembership.upsert({
     where: { userId_orgId: { userId: serviceUser.id, orgId } },
-    create: { userId: serviceUser.id, orgId, role: "viewer" },
-    update: {},
+    create: { userId: serviceUser.id, orgId, role: "viewer", isSystem: true },
+    update: { isSystem: true },
     select: { id: true },
   });
 
@@ -209,11 +215,19 @@ export async function syncMaxForOrg(orgId: string): Promise<
     // dois, então desligar vendas mantendo locação não pode derrubar o agente.
     const { revoked } = await deprovisionMaxForOrg(orgId);
     if (revoked > 0) await deactivateOrgInMax(orgId);
+    await recordProvisioning(orgId, { status: "revoked", lastError: null });
     return { action: "deprovisioned", revoked };
   }
 
   const r = await provisionMaxForOrg({ orgId });
   if (r.status === "failed") {
+    // Não chegou a emitir token: `failed` (e não `pending_delivery`), porque
+    // reenviar não resolve — o cron precisa reprovisionar do zero.
+    await recordProvisioning(orgId, {
+      status: "failed",
+      lastError: r.reason ?? "provisionamento falhou",
+      bumpAttempts: true,
+    });
     return { action: "provisioned", delivered: false, detail: r.reason };
   }
 
@@ -227,12 +241,63 @@ export async function syncMaxForOrg(orgId: string): Promise<
     // O token existe e é válido; o que faltou foi a entrega. Não revogamos:
     // reprovisionar depois entrega o mesmo estado, e revogar aqui só criaria
     // um tenant sem credencial nenhuma.
-    return {
-      action: "provisioned",
-      delivered: false,
-      detail: `${push.reason}${push.detail ? `: ${push.detail}` : ""}`,
-    };
+    const detail = `${push.reason}${push.detail ? `: ${push.detail}` : ""}`;
+    await recordProvisioning(orgId, {
+      status: "pending_delivery",
+      serviceUserId: r.serviceUserId,
+      tokenId: r.tokenId,
+      lastError: detail,
+      bumpAttempts: true,
+    });
+    return { action: "provisioned", delivered: false, detail };
   }
 
+  await recordProvisioning(orgId, {
+    status: "active",
+    serviceUserId: r.serviceUserId,
+    tokenId: r.tokenId,
+    deliveredAt: new Date(),
+    lastError: null,
+  });
   return { action: "provisioned", delivered: true };
+}
+
+/**
+ * Grava o estado do ciclo. Nunca lança: o provisionamento em si já aconteceu, e
+ * derrubar a resposta do painel por causa da linha de observabilidade trocaria
+ * um problema de visibilidade por um de funcionamento.
+ *
+ * `attempts` zera quando um ciclo fecha bem e incrementa quando falha — é o que
+ * o cron usa para espaçar e para parar de insistir num erro que não é
+ * transitório.
+ */
+async function recordProvisioning(
+  orgId: string,
+  data: {
+    status: "active" | "pending_delivery" | "failed" | "revoked";
+    serviceUserId?: string;
+    tokenId?: string;
+    deliveredAt?: Date;
+    lastError: string | null;
+    bumpAttempts?: boolean;
+  }
+): Promise<void> {
+  const { bumpAttempts, ...rest } = data;
+  try {
+    await prisma.agentProvisioning.upsert({
+      where: { orgId_agentKey: { orgId, agentKey: MAX_AGENT_KEY } },
+      create: {
+        orgId,
+        agentKey: MAX_AGENT_KEY,
+        ...rest,
+        attempts: bumpAttempts ? 1 : 0,
+      },
+      update: {
+        ...rest,
+        attempts: bumpAttempts ? { increment: 1 } : 0,
+      },
+    });
+  } catch (err) {
+    console.error("[max-provisioning] falha ao gravar estado:", err);
+  }
 }
