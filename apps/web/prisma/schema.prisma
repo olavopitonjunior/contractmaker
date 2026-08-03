@@ -724,13 +724,14 @@ model DealAttachment {
 model DeletedAttachment {
   id              String   @id @default(cuid())
   orgId           String
-  /// "deal" | "form" — de qual tabela a linha veio.
+  /// "deal" | "form" | "proposal" — de qual tabela a linha veio.
   origin          String
   /// Id da linha original. Não é único: reexcluir um anexo restaurado gera
   /// uma segunda entrada, e as duas importam para a história.
   originalId      String
   dealId          String?
   formId          String?
+  proposalId      String?
   filename        String
   url             String
   category        String?
@@ -740,7 +741,7 @@ model DeletedAttachment {
   /// Null quando a exclusão veio de rota pública/anônima (era o caso do
   /// formulário antes do gate de membro).
   deletedByUserId String?
-  /// "ui_deal" | "ui_form" | "deal_delete" | "certidao"
+  /// "ui_deal" | "ui_form" | "ui_proposal" | "deal_delete" | "certidao"
   deletedVia      String
   ipAddress       String?
   deletedAt       DateTime @default(now())
@@ -748,6 +749,7 @@ model DeletedAttachment {
   @@index([orgId, deletedAt])
   @@index([dealId])
   @@index([formId])
+  @@index([proposalId])
   @@index([url])
 }
 
