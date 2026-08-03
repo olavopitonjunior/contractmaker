@@ -8,6 +8,7 @@ import {
 import { withApi } from "@/lib/api/with-api";
 import { getContractOrgId, getDealOrgId } from "@/lib/security/org-scope";
 import { calcCostUsd, recordAIUsage } from "@/lib/ai/usage";
+import { maxAgentRouteGate } from "@/lib/max/gate";
 import {
   AGENT_REGISTRY,
   EXTERNAL_AGENT_KEYS,
@@ -32,7 +33,9 @@ const MAX_LATENCIA_MS = 600_000;
 
 const bodySchema = z.object({
   agentKey: z.string().min(1),
-  provider: z.enum(["anthropic", "gemini", "voyage"]).default("anthropic"),
+  provider: z
+    .enum(["anthropic", "gemini", "voyage", "openrouter"])
+    .default("anthropic"),
   model: z.string().min(1).max(128),
   promptTokens: z.number().int().min(0).max(MAX_TOKENS_POR_TURN),
   completionTokens: z.number().int().min(0).max(MAX_TOKENS_POR_TURN).optional(),
@@ -116,6 +119,14 @@ export const POST = withApi("POST /api/agents/usage", async (req: NextRequest) =
       { status: 400 }
     );
   }
+
+  // Entitlement do tenant: org que não contratou o Max não move o custo dela.
+  const denied = await maxAgentRouteGate({
+    orgId,
+    via: authed.ident.via,
+    agentKey: body.agentKey,
+  });
+  if (denied) return denied;
 
   // Id de outra org é recusado, não silenciosamente descartado: quem reporta
   // precisa saber que a atribuição não aconteceu.

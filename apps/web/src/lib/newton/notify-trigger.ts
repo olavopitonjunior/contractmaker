@@ -17,6 +17,10 @@
  */
 
 import { normalizeBrPhone } from "@/lib/validators/phone-br";
+// A sanitização mudou de casa pra `lib/notifications/sanitize.ts` quando o Max
+// (o outro agente de WhatsApp) passou a precisar do mesmo tratamento sem
+// arrastar junto o transporte do Newton.
+import { sanitizeUntrusted } from "@/lib/notifications/sanitize";
 
 const SIDECAR_URL = process.env.NEWTON_SIDECAR_URL;
 const SIDECAR_TOKEN = process.env.NEWTON_SIDECAR_TOKEN;
@@ -53,21 +57,14 @@ export interface NewtonNotifyArgs {
 }
 
 /**
- * Título de deal, nome de parte e corpo de notificação podem vir do FORM
- * PÚBLICO ANÔNIMO — são DADO, nunca instrução (mesma ameaça da regra 19 do
- * agente de contrato / <observacoes_form>). Sanitiza (remove aspas/quebras/
- * controle, trunca) e o buildText cerca em bloco delimitado com instrução
- * explícita de não-obediência.
+ * Reexportada daqui por retrocompatibilidade: a função nasceu neste módulo, e
+ * testes e chamadores a importam de `@/lib/newton/notify-trigger`. A
+ * implementação mudou de casa quando o Max passou a precisar do MESMO
+ * tratamento — ver `lib/notifications/sanitize.ts`. Duas cópias fariam
+ * "sanitizado" significar coisas diferentes em dois canais que carregam o
+ * mesmo texto, vindo da mesma origem não-confiável.
  */
-export function sanitizeUntrusted(raw: string, max: number): string {
-  return raw
-    .replace(/[\r\n\t]+/g, " ")
-    // eslint-disable-next-line no-control-regex
-    .replace(/[\u0000-\u001f\u007f]/g, "")
-    .replace(/["'`<>]/g, "")
-    .trim()
-    .slice(0, max);
-}
+export { sanitizeUntrusted };
 
 /**
  * Exportada só para teste: o `phone` normalizado tem que aparecer no texto das

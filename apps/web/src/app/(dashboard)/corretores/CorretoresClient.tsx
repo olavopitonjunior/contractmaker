@@ -69,6 +69,7 @@ interface Corretor {
   notifyByEmail: boolean;
   notifyByWhatsapp: boolean;
   notifyOptOut: boolean;
+  maxEnabled: boolean;
 }
 
 const PAPEL_LABEL: Record<string, string> = {
@@ -104,6 +105,7 @@ interface EditState {
   notifyByEmail: boolean;
   notifyByWhatsapp: boolean;
   notifyOptOut: boolean;
+  maxEnabled: boolean;
 }
 
 const EMPTY_EDIT: EditState = {
@@ -124,6 +126,7 @@ const EMPTY_EDIT: EditState = {
   notifyByEmail: true,
   notifyByWhatsapp: false,
   notifyOptOut: false,
+  maxEnabled: false,
 };
 
 export default function CorretoresClient() {
@@ -204,6 +207,7 @@ export default function CorretoresClient() {
       notifyByEmail: c.notifyByEmail,
       notifyByWhatsapp: c.notifyByWhatsapp,
       notifyOptOut: c.notifyOptOut,
+      maxEnabled: c.maxEnabled,
     });
     setOpen(true);
   }
@@ -236,6 +240,7 @@ export default function CorretoresClient() {
         notifyByEmail: form.notifyByEmail,
         notifyByWhatsapp: form.notifyByWhatsapp,
         notifyOptOut: form.notifyOptOut,
+        maxEnabled: form.maxEnabled,
       };
 
       let url = "/api/financeiro/split-recipients";
@@ -564,6 +569,25 @@ export default function CorretoresClient() {
               <p className="text-xs text-muted-foreground">
                 Quais eventos disparam atualização é definido no padrão da
                 imobiliária e por venda; aqui é a preferência do corretor.
+              </p>
+            </div>
+
+            {/* Bloco PRÓPRIO, e não mais um switch dentro de "Notificações":
+                as duas coisas se parecem e não são a mesma. Ver o texto de
+                apoio abaixo — ele existe para impedir a marcação por engano. */}
+            <div className="border rounded-md p-3 space-y-3">
+              <div className="text-sm font-medium">Agente Max (WhatsApp)</div>
+              <NotifyToggle
+                label="Corretor da casa — pode conversar com o Max"
+                checked={form.maxEnabled}
+                onCheckedChange={(v) => setForm((f) => ({ ...f, maxEnabled: v }))}
+              />
+              <p className="text-xs text-muted-foreground">
+                Não é o mesmo que receber notificação: um corretor de
+                imobiliária parceira pode receber avisos de uma venda
+                compartilhada sem ser da sua casa. Ligado, o Max reconhece o
+                telefone dele como seu e responde sobre as vendas em que ele é
+                comissionado — só essas.
               </p>
             </div>
 

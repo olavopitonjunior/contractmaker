@@ -49,6 +49,10 @@ const patchSchema = z.object({
   notifyByEmail: z.boolean().optional(),
   notifyByWhatsapp: z.boolean().optional(),
   notifyOptOut: z.boolean().optional(),
+  // Atribuição da imobiliária ao agente Max: "este corretor é da minha casa".
+  // Aditivo e independente das preferências de notificação acima — ver o
+  // comentário do campo em schema.prisma.
+  maxEnabled: z.boolean().optional(),
 });
 
 export async function PATCH(

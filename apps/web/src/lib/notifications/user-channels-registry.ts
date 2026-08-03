@@ -84,14 +84,9 @@ export function policyForType(type: string): UserChannelPolicy | null {
   return USER_CHANNEL_REGISTRY[type] ?? null;
 }
 
-/**
- * Texto da mensagem. Título e corpo já vêm prontos e truncados do sino
- * (200/500 chars); a sanitização anti-injeção acontece no trigger, que é o
- * chokepoint — não duplicar aqui.
- */
-export function buildUserNotifyMessage(n: {
-  title: string;
-  body: string;
-}): string {
-  return `${n.title}: ${n.body}`;
-}
+// `buildUserNotifyMessage` saiu daqui: título e corpo agora viajam SEPARADOS
+// até o agente, porque o Max precisa deles como variáveis distintas de template
+// da Meta. Quem compõe a frase única (para o turn do Newton) é
+// `lib/agents/whatsapp-router.ts`. Título e corpo continuam chegando prontos e
+// truncados do sino (200/500 chars); a sanitização anti-injeção segue no
+// transporte.

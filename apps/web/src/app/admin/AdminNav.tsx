@@ -18,6 +18,9 @@ interface NavItem {
 const ITEMS: NavItem[] = [
   { href: "/admin/orgs", label: "Organizações" },
   { href: "/admin/agents", label: "Agentes de IA" },
+  // Ao lado do console de agentes de propósito: lá se configura o Max (modelo,
+  // instruções, teto); aqui se olha se o canal está de pé.
+  { href: "/admin/max", label: "Max (WhatsApp)" },
   { href: "/admin/metrics", label: "Métricas" },
   { href: "/admin/knowledge", label: "Base de conhecimento" },
   { href: "/admin/support-ai", label: "IA de Suporte" },

@@ -35,6 +35,12 @@ export const PRICING: Record<string, ModelPricing> = {
   "claude-opus-4-20250514": { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
   "claude-sonnet-4-20250514": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   // Google Gemini
+  // OpenRouter — o que o Max e o Newton usam. Preço de tabela do provedor em
+  // 2026-08-03 (US$ por 1M de tokens); conferir ao trocar de modelo, senão o
+  // painel passa a mentir em silêncio, que é o modo de falha desta tabela.
+  "openai/gpt-5.4-nano": { input: 0.2, output: 1.25 },
+  "openai/gpt-5.4-mini": { input: 0.75, output: 4.5 },
+
   "gemini-2.5-flash": { input: 0.3, output: 2.5 },
   "gemini-2.5-flash-lite": { input: 0.1, output: 0.4 },
   "gemini-2.0-flash": { input: 0.1, output: 0.4 },
@@ -71,7 +77,13 @@ export function calcCostUsd(
 // Recording
 // ────────────────────────────────────────────────────────────────────────────
 
-export type AIProvider = "anthropic" | "gemini" | "voyage";
+/**
+ * `openrouter` entrou quando o Max passou a rodar por lá, com o mesmo modelo do
+ * Newton (`openai/gpt-5.4-nano`) por decisão de custo. Sem ele, o agente
+ * externo teria que se declarar `anthropic` — e o painel mostraria um modelo
+ * OpenAI atribuído à Anthropic.
+ */
+export type AIProvider = "anthropic" | "gemini" | "voyage" | "openrouter";
 
 export type AIOperation =
   | "chat"
