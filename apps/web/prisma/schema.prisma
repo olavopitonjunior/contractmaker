@@ -2723,6 +2723,14 @@ model SplitRecipient {
   notifyByEmail      Boolean   @default(true)
   notifyByWhatsapp   Boolean   @default(false)
   notifyOptOut       Boolean   @default(false)
+  // Atribuição explícita da imobiliária: "este corretor é da minha casa e pode
+  // conversar com o meu Max". NÃO é o mesmo que notifyByWhatsapp — receber aviso
+  // de um negócio compartilhado é legítimo para corretor de imobiliária
+  // PARCEIRA; ser reconhecido como da casa não é. `phone` aqui não tem unique
+  // nenhum (ao contrário de User.phone), então o mesmo corretor existe como
+  // commissioner em N orgs e só o dono de cada uma decide se ele fala com o
+  // agente dela. Default false = fail-closed.
+  maxEnabled         Boolean   @default(false)
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
