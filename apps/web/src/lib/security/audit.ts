@@ -142,6 +142,7 @@ export type AuditAction =
   // Canal externo das notificações do sistema → usuário (opt-in LGPD)
   | "USER_NOTIFICATION_PREFS_UPDATE"
   | "FORM_REMINDER_SENT"
+  | "FORM_SUMMARY_SENT"
   | "FORM_PREFILLED_FROM_PROPOSAL"
   | "FORM_LINK_ROTATED"
   | "FORM_LOCKED"
