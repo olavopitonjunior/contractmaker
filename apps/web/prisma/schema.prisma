@@ -282,6 +282,7 @@ model Organization {
   clauses             Clause[]
   agentConfig         AgentConfig?
   agentProfiles       AgentProfile[]
+  agentProvisionings  AgentProvisioning[]
   knowledgeItems      KnowledgeItem[]
   knowledgeItemUsage  KnowledgeItemUsage[]
   contractMemories    ContractMemory[]
@@ -460,6 +461,12 @@ model OrgMembership {
   invitedAt         DateTime  @default(now())
   invitedBy         String?
   lastActiveAt      DateTime?
+  /// Membership de usuário de serviço (agente externo), não de gente. Existe
+  /// para que a tela de membros possa recusar a remoção: o Bearer do agente
+  /// resolve a org pela membership do dono do token, então removê-la derruba o
+  /// agente daquele tenant — em silêncio, porque nada mais falha até a próxima
+  /// chamada.
+  isSystem          Boolean   @default(false)
 
   user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
@@ -1634,6 +1641,52 @@ model SupportAgentConfig {
 //
 // As 3 tabelas antigas seguem no schema por uma release como janela de
 // rollback (mesmo padrão de Clause → KnowledgeItem); nenhum leitor as usa.
+
+/// Estado do provisionamento de um agente EXTERNO num tenant.
+///
+/// Existe para separar três situações que, sem ela, se parecem: "nunca
+/// provisionado", "provisionado e entregue" e "provisionado, mas o serviço não
+/// recebeu o token". A terceira é a perigosa — o flag fica verde no painel e o
+/// agente fica mudo, e a única pista era o corpo de uma resposta HTTP que
+/// ninguém guarda.
+///
+/// Também é o que dá idempotência ao `provisionMaxForOrg`: `createApiToken` não
+/// é idempotente (só o sha256 é persistido, então não há "checar se existe e
+/// reusar"), e sem estado um duplo-clique no painel emite dois tokens vivos —
+/// um deles invisível, porque o valor cru só aparece uma vez.
+model AgentProvisioning {
+  id       String @id @default(cuid())
+  orgId    String
+  /// Chave do agente externo (hoje só "max"). Ver lib/ai/agents/registry.ts.
+  agentKey String
+
+  /// active | pending_delivery | failed | revoked
+  ///
+  /// `pending_delivery` e `failed` são o alvo do cron de reconciliação. A
+  /// distinção importa: `pending_delivery` é "emiti o token e não consegui
+  /// entregar" (recuperável reenviando), `failed` é "não cheguei a emitir"
+  /// (precisa reprovisionar).
+  status        String
+  serviceUserId String?
+  tokenId       String?
+  /// Última entrega CONFIRMADA ao serviço. Null com status active significa
+  /// provisionamento por caminho fora do painel (script), não sucesso.
+  deliveredAt DateTime?
+  /// Motivo da última falha, zerado quando um ciclo fecha bem. Sem ele,
+  /// "URL errada" e "serviço fora do ar" são indistinguíveis no painel.
+  lastError String?
+  /// Tentativas de entrega desde a última confirmação. O cron usa para
+  /// espaçar e para parar de insistir num erro que não é transitório.
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, agentKey])
+  @@index([status])
+}
+
 model AgentProfile {
   id       String  @id @default(cuid())
   /// null = default da plataforma; preenchido = override do tenant.

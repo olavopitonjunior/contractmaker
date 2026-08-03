@@ -78,6 +78,10 @@
       "schedule": "0 12 * * *"
     },
     {
+      "path": "/api/cron/max/reconcile",
+      "schedule": "17 * * * *"
+    },
+    {
       "path": "/api/cron/forms/fill-reminder",
       "schedule": "0 14 * * *"
     },

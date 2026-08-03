@@ -357,6 +357,13 @@ vi.mock("@/lib/db/prisma", () => {
       upsert: vi.fn().mockResolvedValue({}),
       createMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
+    agentProvisioning: {
+      findMany: vi.fn().mockResolvedValue([]),
+      findUnique: vi.fn().mockResolvedValue(null),
+      count: vi.fn().mockResolvedValue(0),
+      upsert: vi.fn().mockResolvedValue({}),
+      update: vi.fn().mockResolvedValue({}),
+    },
     pipeline: {
       findFirst: vi.fn(),
       create: vi.fn().mockResolvedValue({ id: "pipe-mock" }),

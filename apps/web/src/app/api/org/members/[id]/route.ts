@@ -223,6 +223,21 @@ export async function DELETE(
     );
   }
 
+  // Membership de agente, não de gente. O Bearer do agente resolve a org pela
+  // membership do dono do token, então remover esta linha derruba o agente
+  // naquele tenant — e em silêncio, porque nada falha até a próxima chamada.
+  // O caminho de desligar é a feature no painel, que revoga o token e avisa o
+  // serviço; aqui só sobraria um agente órfão com credencial válida.
+  if (membership.isSystem) {
+    return NextResponse.json(
+      {
+        error:
+          "Este é um usuário de serviço de um agente. Desligue o agente nos módulos da organização em vez de remover o membro.",
+      },
+      { status: 422 }
+    );
+  }
+
   // Último admin guard
   if (membership.role === "admin") {
     try {

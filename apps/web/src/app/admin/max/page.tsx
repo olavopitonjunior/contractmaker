@@ -6,10 +6,52 @@ import { prisma } from "@/lib/db/prisma";
 import { fetchMaxStatus } from "@/lib/max/admin-client";
 import { FEATURE } from "@/lib/modules/catalog";
 import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
+import { MAX_AGENT_KEY } from "@/lib/max/provisioning";
 import { MaxStatusPanel } from "./MaxStatusPanel";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Max — Mission Control" };
+
+/**
+ * O estado que separa "roteado" de "funcionando".
+ *
+ * Ausência de linha é significativa e ganha rótulo próprio: são as orgs
+ * provisionadas por script, antes de o estado existir. Mostrá-las como
+ * "entregue" seria afirmar algo que ninguém verificou.
+ */
+function ProvisioningBadge({
+  state,
+}: {
+  state?: { status: string; deliveredAt: Date | null } | null;
+}) {
+  const { label, cls } = (() => {
+    if (!state)
+      return {
+        label: "sem registro",
+        cls: "bg-muted text-muted-foreground",
+      };
+    switch (state.status) {
+      case "active":
+        return state.deliveredAt
+          ? { label: "entregue", cls: "bg-green-100 text-green-800" }
+          : { label: "ativo (sem confirmação)", cls: "bg-amber-100 text-amber-900" };
+      case "pending_delivery":
+        return { label: "token não entregue", cls: "bg-amber-100 text-amber-900" };
+      case "failed":
+        return { label: "falhou", cls: "bg-red-100 text-red-800" };
+      case "revoked":
+        return { label: "revogado", cls: "bg-muted text-muted-foreground" };
+      default:
+        return { label: state.status, cls: "bg-muted text-muted-foreground" };
+    }
+  })();
+
+  return (
+    <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${cls}`}>
+      {label}
+    </span>
+  );
+}
 
 /**
  * Mission Control do Max.
@@ -49,6 +91,21 @@ export default async function MaxMissionControlPage({
     })
   );
 
+  // Estado do provisionamento por tenant. É o que responde a pergunta que a
+  // lista acima NÃO responde: o flag está ligado, mas o serviço chegou a
+  // receber o token? Sem isto, "roteado" e "funcionando" parecem a mesma coisa.
+  const provisionings = await prisma.agentProvisioning.findMany({
+    where: { agentKey: MAX_AGENT_KEY },
+    select: {
+      orgId: true,
+      status: true,
+      deliveredAt: true,
+      lastError: true,
+      attempts: true,
+    },
+  });
+  const porOrg = new Map(provisionings.map((p) => [p.orgId, p]));
+
   const status = await fetchMaxStatus(searchParams.orgId);
 
   return (
@@ -75,16 +132,29 @@ export default async function MaxMissionControlPage({
           <ul className="space-y-1 text-sm">
             {routed
               .filter((r) => r.on)
-              .map((r) => (
-                <li key={r.id} className="flex items-center gap-2">
-                  <span className="font-medium">{r.name}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {[r.vendas && "vendas", r.locacao && "locação"]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </span>
-                </li>
-              ))}
+              .map((r) => {
+                const p = porOrg.get(r.id);
+                return (
+                  <li key={r.id} className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{r.name}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {[r.vendas && "vendas", r.locacao && "locação"]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                    <ProvisioningBadge state={p} />
+                    {p?.lastError ? (
+                      <span
+                        className="text-xs text-muted-foreground"
+                        title={p.lastError}
+                      >
+                        {p.attempts} tentativa(s) — {p.lastError.slice(0, 60)}
+                        {p.lastError.length > 60 ? "…" : ""}
+                      </span>
+                    ) : null}
+                  </li>
+                );
+              })}
           </ul>
         ) : (
           <p className="text-sm text-muted-foreground">
