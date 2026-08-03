@@ -69,7 +69,13 @@ export function sanitizeUntrusted(raw: string, max: number): string {
     .slice(0, max);
 }
 
-function buildText(a: NewtonNotifyArgs, phone: string): string {
+/**
+ * Exportada só para teste: o `phone` normalizado tem que aparecer no texto das
+ * DUAS audiências, e enquanto a função era privada nenhum teste inspecionava o
+ * que ela gera — foi assim que o ramo `deal_broker` ficou com o `a.phone` cru
+ * depois do #189.
+ */
+export function buildText(a: NewtonNotifyArgs, phone: string): string {
   const nome = sanitizeUntrusted(a.recipientName, 120);
   const msg = sanitizeUntrusted(a.message, 600);
 
@@ -101,7 +107,7 @@ function buildText(a: NewtonNotifyArgs, phone: string): string {
 
   return (
     `[deal-notify · sistema] Atualização automática do negócio ${a.dealId}. ` +
-    `Envie via whatsapp_send UMA mensagem informativa pro telefone ${a.phone}. ` +
+    `Envie via whatsapp_send UMA mensagem informativa pro telefone ${phone}. ` +
     fence +
     `Envie SOMENTE para o telefone indicado acima. Não agende lembretes, não ` +
     `espere resposta, não trate isto como mensagem pessoal do operador.`
