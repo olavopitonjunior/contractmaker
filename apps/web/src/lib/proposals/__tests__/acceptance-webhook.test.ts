@@ -1,8 +1,24 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { prisma } from "@/lib/db/prisma";
 
+// O comprovante agora é montado DEPOIS de consultar a ClickSign (precisa dos
+// dados oficiais pra capa), então não é mais chamado no mesmo tick. Coleta os
+// fire-and-forget pra poder aguardá-los antes de assertar.
+const h = vi.hoisted(() => ({ pending: [] as Promise<unknown>[] }));
 vi.mock("@vercel/functions", () => ({
-  waitUntil: (p: Promise<unknown>) => p,
+  waitUntil: (p: Promise<unknown>) => {
+    h.pending.push(p);
+    return p;
+  },
+}));
+const flushWaitUntil = () => Promise.all(h.pending);
+
+vi.mock("../acceptance-record-sync", () => ({
+  syncAcceptanceRecord: vi.fn().mockResolvedValue({
+    facts: { status: "completed", message: "Declaro que li..." },
+    recordUrl: null,
+    raw: {},
+  }),
 }));
 
 vi.mock("../status", () => ({
@@ -17,20 +33,28 @@ vi.mock("../acceptance-proof", () => ({
 import { processProposalAcceptanceEvent } from "../acceptance-webhook";
 import { advanceProposalStatus } from "../status";
 import { buildAcceptanceProof } from "../acceptance-proof";
+import { syncAcceptanceRecord } from "../acceptance-record-sync";
 
 const propFind = prisma.proposal.findFirst as unknown as ReturnType<typeof vi.fn>;
 const propFindUnique = prisma.proposal.findUnique as unknown as ReturnType<typeof vi.fn>;
 const signerFind = prisma.proposalSigner.findFirst as unknown as ReturnType<typeof vi.fn>;
 const advance = advanceProposalStatus as unknown as ReturnType<typeof vi.fn>;
 const proof = buildAcceptanceProof as unknown as ReturnType<typeof vi.fn>;
+const sync = syncAcceptanceRecord as unknown as ReturnType<typeof vi.fn>;
 
 const PROPOSAL = { id: "p1", title: "Proposta X", token: "tok", instrument: "aceite" };
 
 describe("processProposalAcceptanceEvent", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    h.pending.length = 0;
     advance.mockResolvedValue({ moved: true });
     proof.mockResolvedValue({ url: "https://x/comprovante.pdf" });
+    sync.mockResolvedValue({
+      facts: { status: "completed", message: "Declaro que li..." },
+      recordUrl: null,
+      raw: {},
+    });
   });
 
   it("acceptance_term id desconhecido → unknownAcceptance, sem mutação", async () => {
@@ -63,9 +87,61 @@ describe("processProposalAcceptanceEvent", () => {
     });
     const dests = advance.mock.calls.map((c) => c[1]);
     expect(dests).toEqual(["assinada_proponente", "completa"]);
+    await flushWaitUntil();
     expect(proof).toHaveBeenCalledWith(
       "p1",
       expect.objectContaining({ signerName: "Ana", acceptanceId: "acc_1" })
+    );
+  });
+
+  it("completed → busca os dados oficiais na ClickSign e os repassa ao comprovante", async () => {
+    propFind.mockResolvedValue({ ...PROPOSAL, orgId: "org1" });
+    await processProposalAcceptanceEvent({
+      acceptanceId: "acc_1",
+      phase: "completed",
+      payload: { event: { data: { acceptance_term: { signer_name: "Ana" } } } },
+    });
+    await flushWaitUntil();
+
+    expect(sync).toHaveBeenCalledWith(
+      expect.objectContaining({ proposalId: "p1", acceptanceId: "acc_1" })
+    );
+    expect(proof).toHaveBeenCalledWith(
+      "p1",
+      expect.objectContaining({ official: { status: "completed", message: "Declaro que li..." } })
+    );
+  });
+
+  it("sync que LANÇA não derruba o comprovante", async () => {
+    propFind.mockResolvedValue(PROPOSAL);
+    sync.mockRejectedValue(new Error("boom"));
+
+    await processProposalAcceptanceEvent({
+      acceptanceId: "acc_1",
+      phase: "completed",
+      payload: { event: { data: { acceptance_term: { signer_name: "Ana" } } } },
+    });
+    await flushWaitUntil();
+
+    expect(proof).toHaveBeenCalledWith("p1", expect.objectContaining({ signerName: "Ana" }));
+  });
+
+  it("ClickSign fora do ar não impede o comprovante — só perde o bloco oficial", async () => {
+    // Garantia central: o comprovante é o único artefato do Aceite do nosso
+    // lado. Falha na consulta NÃO pode deixar a proposta sem documento final.
+    propFind.mockResolvedValue(PROPOSAL);
+    sync.mockResolvedValue({ facts: {}, recordUrl: null, raw: null, error: "HTTP 500" });
+
+    await processProposalAcceptanceEvent({
+      acceptanceId: "acc_1",
+      phase: "completed",
+      payload: { event: { data: { acceptance_term: { signer_name: "Ana" } } } },
+    });
+    await flushWaitUntil();
+
+    expect(proof).toHaveBeenCalledWith(
+      "p1",
+      expect.objectContaining({ signerName: "Ana", official: {} })
     );
   });
 

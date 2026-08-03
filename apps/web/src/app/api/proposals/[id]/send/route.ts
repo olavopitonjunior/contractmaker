@@ -62,7 +62,17 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     run: async () => {
       const r = await executeProposalSend(params.id);
       if (!r.ok) return blockToResponse(r.block);
-      return { status: 200, body: { ok: true, instrument: r.instrument } };
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          instrument: r.instrument,
+          // O envio pode ter sido rebaixado (assinatura → Aceite) ou ter usado
+          // um default de capacidade não verificado. A UI precisa dizer isso.
+          warnings: r.warnings ?? [],
+          capabilitiesUnverified: r.capabilitiesUnverified ?? false,
+        },
+      };
     },
   });
   return approvalResponse(result);

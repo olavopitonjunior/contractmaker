@@ -3328,8 +3328,14 @@ model ProposalAttachment {
   mime        String
   url         String
   // proposta_assinada_completa | proposta_assinada_reduzida | dossie | documento
+  // | aceite_comprovante          (comprovante que NÓS montamos — acceptance-proof.ts)
+  // | aceite_registro_clicksign   (Registro do Aceite OFICIAL da ClickSign: provas
+  //                                de identidade + mensagens. A API v3 não expõe
+  //                                link de download, então hoje chega por upload
+  //                                manual; acceptance-record-sync.ts tenta pegar
+  //                                sozinho caso a ClickSign passe a devolver.)
   category    String?
-  source      String   @default("manual") // manual | clicksign_signed | dossier
+  source      String   @default("manual") // manual | clicksign_signed | clicksign_acceptance | dossier
   contentHash String?
   byteSize    Int?
   createdAt   DateTime @default(now())
@@ -3349,9 +3355,13 @@ model ProposalEvent {
   // sent | delivered | fetched | viewed | signed_proponente | chained_envelope2
   // | closed | refused | expired | canceled | converted | reminder_sent
   // | revival_requested | status_transition_rejected
+  // | acceptance_term_{sent,completed,refused,expired,canceled}
+  // | acceptance_term_fetched  (resposta CRUA do GET do aceite na ClickSign —
+  //                             é o registro que permite descobrir campos não
+  //                             documentados contra a conta real)
   eventName  String
   payload    Json?
-  source     String   @default("system") // system | public | webhook | cron
+  source     String   @default("system") // system | public | webhook | cron | api
   // sha256(ip + AUTH_SECRET) — NUNCA o IP cru (LGPD).
   ipHash     String?
   userAgent  String?

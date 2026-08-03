@@ -25,6 +25,7 @@ import { ProposalProgressTimeline } from "./ProposalProgressTimeline";
 import { ProposalAssigneeControl } from "./ProposalAssigneeControl";
 import { ProposalActionBar } from "./ProposalActionBar";
 import { ProposalDocumentCard } from "./ProposalDocumentCard";
+import { ProposalAttachmentUpload } from "./ProposalAttachmentUpload";
 import type { ProposalPermissions } from "./ProposalRowActions";
 
 // Rótulo/cor por signatário. Duas fontes de vocabulário DISJUNTAS:
@@ -132,6 +133,10 @@ export function ProposalDetailClient({
   // enviada em outra aba, o botão de editar some junto com o preview — mesmo
   // conjunto que o PATCH e o /preview aceitam no servidor.
   const canEdit = EDITABLE_STATUSES.has(liveStatus);
+  const isAceite = proposal.instrument === "aceite";
+  // Mesma permissão que a rota /attachments/finalize exige (PROPOSAL_SEND):
+  // quem envia a proposta pra assinatura é quem cuida da documentação dela.
+  const canAttach = permissions.send;
 
   // Ações por-signatário (no EnvelopeSigner do envelope em curso). "contact" é
   // alimentada pelo diálogo abaixo — dois `window.prompt` em sequência não davam
@@ -238,7 +243,7 @@ export function ProposalDetailClient({
           <Row label="Valor" value={proposal.resumo.valorLabel ?? "—"} />
           <Row
             label="Instrumento"
-            value={proposal.instrument === "aceite" ? "Aceite via WhatsApp" : "Assinatura (envelope)"}
+            value={isAceite ? "Aceite via WhatsApp" : "Assinatura (envelope)"}
           />
           {proposal.dossierUrl && (
             <a
@@ -247,8 +252,21 @@ export function ProposalDetailClient({
               rel="noreferrer"
               className="mt-2 inline-flex items-center gap-1 text-sm text-primary hover:underline"
             >
-              <FileText className="h-4 w-4" /> Documento final (PDF)
+              <FileText className="h-4 w-4" />{" "}
+              {/* `dossierUrl` é o mesmo campo nos dois modos, mas o que ele
+                  guarda não é a mesma coisa: no envelope é o dossiê com os PDFs
+                  ASSINADOS; no Aceite é um comprovante que nós montamos. Chamar
+                  os dois de "Documento final" fazia o Aceite parecer assinatura. */}
+              {isAceite ? "Comprovante de Aceite (PDF)" : "Documento final (PDF)"}
             </a>
+          )}
+          {isAceite && (
+            <p className="mt-2 border-l-2 border-amber-500 pl-3 text-xs text-muted-foreground">
+              O Aceite via WhatsApp <strong>não é assinatura em documento</strong>: o
+              cliente confirmou por texto + link. O Registro do Aceite oficial, com as
+              provas de identidade e as mensagens trocadas, é emitido pela ClickSign
+              (Aceites → Via WhatsApp) — baixe lá e anexe em Documentos.
+            </p>
           )}
         </Card>
 
@@ -390,19 +408,33 @@ export function ProposalDetailClient({
       />
 
       {/* Documentos */}
-      {attachments.length > 0 && (
+      {(attachments.length > 0 || canAttach) && (
         <Card className="space-y-2 p-4">
-          <h2 className="font-medium">Documentos</h2>
-          <ul className="space-y-1 text-sm">
-            {attachments.map((a) => (
-              <li key={a.id}>
-                <a href={a.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-                  {a.filename}
-                </a>
-                {a.category && <span className="text-muted-foreground"> · {a.category}</span>}
-              </li>
-            ))}
-          </ul>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-medium">Documentos</h2>
+            {canAttach && (
+              <ProposalAttachmentUpload
+                proposalId={proposal.id}
+                category={isAceite ? "aceite_registro_clicksign" : "documento"}
+                label={isAceite ? "Anexar Registro do Aceite" : "Anexar documento"}
+                onUploaded={() => router.refresh()}
+              />
+            )}
+          </div>
+          {attachments.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nenhum documento anexado.</p>
+          ) : (
+            <ul className="space-y-1 text-sm">
+              {attachments.map((a) => (
+                <li key={a.id}>
+                  <a href={a.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                    {a.filename}
+                  </a>
+                  {a.category && <span className="text-muted-foreground"> · {a.category}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
       )}
 
