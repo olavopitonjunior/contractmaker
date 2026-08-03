@@ -23,8 +23,8 @@ import {
 } from "@/components/pipeline/DealProgressTimeline";
 import {
   AGING_DANGER_DAYS,
-  AGING_WARN_DAYS,
-  isTerminalStageName,
+  daysInStage,
+  isStaleDeal,
 } from "@/lib/pipeline/stage-config";
 
 /**
@@ -75,8 +75,9 @@ interface KanbanCardProps {
   /**
    * Instante do render do server (epoch ms) — rótulos relativos derivam dele
    * pra server e client renderizarem o mesmo texto (hidratação, React #418).
+   * Obrigatório: caller sem nowMs reintroduziria o bug em silêncio.
    */
-  nowMs?: number;
+  nowMs: number;
 }
 
 export function KanbanCard({
@@ -84,7 +85,7 @@ export function KanbanCard({
   isOverlay,
   currentStageName = null,
   config = DEFAULT_CARD_CONFIG,
-  nowMs = Date.now(),
+  nowMs,
 }: KanbanCardProps) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: deal.id,
@@ -96,14 +97,11 @@ export function KanbanCard({
   const timeLabel = daysAgo > 0 ? `${daysAgo}d` : hoursAgo > 0 ? `${hoursAgo}h` : "agora";
 
   // Aging por stage — badge só quando acionável (≥ warn), pra não poluir
-  // cards saudáveis. Terminais (Comissão paga/ADM/perdido) não envelhecem.
-  const stageEnteredMs = new Date(deal.stageEnteredAt ?? deal.createdAt).getTime();
-  const daysInStage = Math.floor((nowMs - stageEnteredMs) / 86400000);
-  const showAging =
-    !deal.lostAt &&
-    !isTerminalStageName(currentStageName) &&
-    daysInStage >= AGING_WARN_DAYS;
-  const agingDanger = daysInStage >= AGING_DANGER_DAYS;
+  // cards saudáveis. Regra única em stage-config::isStaleDeal (o filtro
+  // "Só parados" do board usa a mesma).
+  const staleDays = daysInStage(deal.stageEnteredAt, deal.createdAt, nowMs);
+  const showAging = isStaleDeal(deal, currentStageName, nowMs);
+  const agingDanger = staleDays >= AGING_DANGER_DAYS;
 
   function handleCopyFormLink(e: React.MouseEvent) {
     e.preventDefault();
@@ -157,9 +155,9 @@ export function KanbanCard({
                         ? "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400"
                         : "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-400"
                     )}
-                    title={`Sem mudança de estágio há ${daysInStage} dia(s)`}
+                    title={`Sem mudança de estágio há ${staleDays} dia(s)`}
                   >
-                    {daysInStage}d parado
+                    {staleDays}d parado
                   </span>
                 )}
                 {deal.formToken && (

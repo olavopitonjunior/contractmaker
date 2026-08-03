@@ -17,8 +17,8 @@ interface KanbanColumnProps {
   deals: DealCard[];
   isLost?: boolean;
   config?: KanbanCardConfig;
-  /** Instante do render do server — ver KanbanBoard.nowMs. */
-  nowMs?: number;
+  /** Instante do render do server — ver KanbanBoard.nowMs. Obrigatório. */
+  nowMs: number;
   /** Há busca/filtro client ativo — muda o empty state pra "Nenhum resultado". */
   isFiltering?: boolean;
 }

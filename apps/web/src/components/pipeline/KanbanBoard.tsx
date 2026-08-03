@@ -24,10 +24,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useDebounce } from "@/hooks/useDebounce";
-import {
-  AGING_WARN_DAYS,
-  isTerminalStageName,
-} from "@/lib/pipeline/stage-config";
+import { AGING_WARN_DAYS, isStaleDeal } from "@/lib/pipeline/stage-config";
+import { normalizeSearch } from "@/lib/format/text";
 import { KanbanColumn } from "./KanbanColumn";
 import {
   KanbanCard,
@@ -36,11 +34,6 @@ import {
   DEFAULT_CARD_CONFIG,
 } from "./KanbanCard";
 import { MilestoneDateDialog } from "./MilestoneDateDialog";
-
-/** Busca insensível a acento — "joão" acha "Joao" e vice-versa. */
-function normalizeSearch(s: string): string {
-  return s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
-}
 
 const ALL_MANAGERS = "__all__";
 
@@ -108,15 +101,16 @@ interface KanbanBoardProps {
   /**
    * Instante do render do server (epoch ms). Rótulos relativos ("2d", aging)
    * derivam DESTE valor serializado — Date.now() no render do client divergiria
-   * do HTML do server e quebraria a hidratação (React #418).
+   * do HTML do server e quebraria a hidratação (React #418). Obrigatório de
+   * propósito: um caller sem nowMs reintroduziria o bug em silêncio.
    */
-  nowMs?: number;
+  nowMs: number;
 }
 
 export function KanbanBoard({
   stages: initialStages,
   config = DEFAULT_BOARD_CONFIG,
-  nowMs = Date.now(),
+  nowMs,
 }: KanbanBoardProps) {
   const [stages, setStages] = useState(initialStages);
   const [activeCard, setActiveCard] = useState<DealCard | null>(null);
@@ -150,6 +144,10 @@ export function KanbanBoard({
     return stages.map((stage) => ({
       ...stage,
       deals: stage.deals.filter((deal) => {
+        // Card com diálogo de data-marco aberto fica sempre visível — o move
+        // otimista pode tê-lo levado a um stage que o filtro esconderia, e o
+        // diálogo não pode perguntar sobre um card que sumiu da tela.
+        if (pendingMove && deal.id === pendingMove.dealId) return true;
         if (query) {
           const haystack = normalizeSearch(
             `${deal.title} ${deal.clientName ?? ""} ${deal.managerName ?? ""}`
@@ -158,18 +156,11 @@ export function KanbanBoard({
         }
         if (managerFilter !== ALL_MANAGERS && deal.managerName !== managerFilter)
           return false;
-        if (onlyStale) {
-          if (deal.lostAt || isTerminalStageName(stage.name)) return false;
-          const enteredMs = new Date(
-            deal.stageEnteredAt ?? deal.createdAt
-          ).getTime();
-          const daysInStage = Math.floor((nowMs - enteredMs) / 86400000);
-          if (daysInStage < AGING_WARN_DAYS) return false;
-        }
+        if (onlyStale && !isStaleDeal(deal, stage.name, nowMs)) return false;
         return true;
       }),
     }));
-  }, [stages, hasClientFilter, query, managerFilter, onlyStale, nowMs]);
+  }, [stages, hasClientFilter, query, managerFilter, onlyStale, nowMs, pendingMove]);
 
   const totalDeals = useMemo(
     () => stages.reduce((sum, s) => sum + s.deals.length, 0),
