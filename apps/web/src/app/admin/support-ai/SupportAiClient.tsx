@@ -536,6 +536,9 @@ interface Insights {
   };
   pendingCount: number;
   topPending: { id: string; question: string; count: number; screenPath: string | null }[];
+  /** Era a única métrica do admin sem linha por org — o blob global dizia
+   *  "há 12 handoffs" sem dizer de quem. */
+  perTenant: { orgId: string; name: string; total: number; negatives: number; handoffs: number }[];
   recentNegative: { id: string; question: string; screenPath: string | null; createdAt: string }[];
 }
 
@@ -571,6 +574,40 @@ function InsightsTab() {
         <Kpi label="👎" value={k.down} />
         <Kpi label="Baixa confiança" value={k.lowConfidence} />
       </div>
+
+      {(data.perTenant?.length ?? 0) > 0 && (
+        <div>
+          <h3 className="mb-2 text-sm font-medium">Por tenant ({data.windowDays}d)</h3>
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-left text-muted-foreground">
+                <tr>
+                  <th className="p-2 font-medium">Tenant</th>
+                  <th className="p-2 font-medium">Interações</th>
+                  <th className="p-2 font-medium">👎</th>
+                  <th className="p-2 font-medium">Handoffs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.perTenant.map((t) => (
+                  <tr key={t.orgId} className="border-t">
+                    <td className="p-2 font-medium">{t.name}</td>
+                    <td className="p-2 tabular-nums">{t.total}</td>
+                    <td className="p-2 tabular-nums">
+                      {t.negatives > 0 ? (
+                        <span className="text-destructive">{t.negatives}</span>
+                      ) : (
+                        0
+                      )}
+                    </td>
+                    <td className="p-2 tabular-nums">{t.handoffs}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div>

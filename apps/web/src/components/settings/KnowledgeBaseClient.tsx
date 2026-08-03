@@ -24,6 +24,10 @@ interface KnowledgeItem {
   /** `null` = item da base de PLATAFORMA: aparece pra todo tenant, mas só o
    *  super_admin edita. A API já recusa a escrita; aqui a UI para de oferecer. */
   orgId?: string | null;
+  /** Restrição por agente (vazio = todos). Só o /admin envia. */
+  visibleToAgents?: string[];
+  /** Quantas vezes o item entrou num contrato (global). Só o /admin envia. */
+  usageCount?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -265,8 +269,26 @@ export function KnowledgeBaseClient({
             Testar RAG
           </Button>
           {/* Upload e seed escrevem via /api/knowledge/* (rotas do tenant).
-              Ingestão em lote na base de plataforma é trabalho de outro lote —
-              até lá, o /admin cria item a item. */}
+              A ingestão de plataforma chegou no lote da fase 3: mesma UI,
+              rota própria (gate super_admin, categoria obrigatória). O seed
+              segue org-only — é o kit inicial do TENANT, não conteúdo
+              universal. */}
+          {scope === "platform" && (
+            <div className="space-y-1">
+              <KnowledgeUploadCard
+                uploadUrl="/api/admin/knowledge/upload"
+                platform
+                onDone={async () => {
+                  await refresh();
+                  router.refresh();
+                }}
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Teto real por arquivo: ~4,5MB (limite de corpo da Vercel) — o
+                fix é upload direto do navegador, fora deste lote.
+              </p>
+            </div>
+          )}
           {scope === "org" && (
             <>
               <KnowledgeUploadCard
@@ -434,6 +456,23 @@ export function KnowledgeBaseClient({
                             <Badge variant="secondary" className="text-[10px] gap-1">
                               <Lock className="h-2.5 w-2.5" />
                               Plataforma
+                            </Badge>
+                          )}
+                          {/* Restrição por agente existia no banco sem um pixel
+                              de UI — item restrito por API ficava invisível e
+                              não havia como saber, quanto menos desfazer. */}
+                          {scope === "platform" &&
+                            (item.visibleToAgents?.length ?? 0) > 0 && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] text-amber-600"
+                              >
+                                só {item.visibleToAgents!.join(", ")}
+                              </Badge>
+                            )}
+                          {scope === "platform" && (item.usageCount ?? 0) > 0 && (
+                            <Badge variant="outline" className="text-[10px]">
+                              {item.usageCount} uso{item.usageCount === 1 ? "" : "s"}
                             </Badge>
                           )}
                         </div>

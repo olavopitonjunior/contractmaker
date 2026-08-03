@@ -7,6 +7,10 @@ import { checkProposalReadiness, type ReadinessIssue } from "./clicksign-readine
 import { dedupeSigners, SignerCollisionError, type DedupableSigner } from "./signer-dedupe";
 import { decideInstrument, type RoutingSigner, type Instrument, type Channel } from "./routing";
 import { plannedProposalCostCents, plannedAcceptanceCostCents } from "./cost";
+import {
+  detectAndCacheCapabilities,
+  type CapabilityResult,
+} from "@/lib/clicksign/capabilities";
 
 /**
  * `prepareSend` — a DECISÃO de envio de uma proposta. Compõe, em ordem:
@@ -14,6 +18,9 @@ import { plannedProposalCostCents, plannedAcceptanceCostCents } from "./cost";
  *   por capacidade da conta) → budget. Puro o suficiente pra ser testado; a
  *   execução real (criar envelope/Aceite, mandar link) fica no route/executor.
  */
+
+/** Intervalo mínimo entre re-tentativas do probe quando o veredito não conclui. */
+const PROBE_RETRY_MS = 6 * 60 * 60 * 1000;
 
 export type PrepareBlock =
   | { blocked: "not_configured" }
@@ -30,6 +37,8 @@ export interface PrepareOk {
   resolvedChannels: Channel[];
   signers: DedupableSigner[];
   warnings: string[];
+  /** Caiu no default de "conta não assina por WhatsApp" sem medição conclusiva. */
+  capabilitiesUnverified?: boolean;
   planCostCents: number;
   creds: ClickSignCreds;
 }
@@ -41,10 +50,14 @@ export async function prepareSend(
   deps: {
     resolveCreds?: (orgId: string) => Promise<ClickSignCreds | null>;
     getSpent?: (orgId: string) => Promise<number>;
+    probeCaps?: (
+      orgId: string
+    ) => Promise<CapabilityResult | { error: "not_configured" }>;
   } = {}
 ): Promise<PrepareResult> {
   const resolveCreds = deps.resolveCreds ?? resolveClickSignCreds;
   const getSpent = deps.getSpent ?? getMonthlySpendCents;
+  const probeCaps = deps.probeCaps ?? detectAndCacheCapabilities;
 
   const proposal = await prisma.proposal.findUnique({
     where: { id: proposalId },
@@ -94,12 +107,34 @@ export async function prepareSend(
   }
 
   // 3. Roteamento — assinatura (Plus+) vs Aceite, por capacidade da conta.
-  const settings = await getSignatureSettings(proposal.orgId);
+  let settings = await getSignatureSettings(proposal.orgId);
   const routingSigners: RoutingSigner[] = deduped.signers.map((s) => ({
     channel: rowsChannel(rows, s),
     hasEmail: Boolean(s.email && s.email.includes("@")),
     hasPhone: Boolean(s.phone),
   }));
+
+  // Capacidade ainda NÃO MEDIDA + alguém quer WhatsApp: mede antes de decidir,
+  // em vez de assumir `false` e rebaixar pra Aceite em silêncio. O probe cria um
+  // envelope rascunho, testa um signer WhatsApp e deleta o rascunho — nunca
+  // ativa, nunca envia, custo zero.
+  //
+  // O gatilho é `whatsappSignatureAvailable == null` (não `capabilitiesCheckedAt
+  // == null`): `detectAndCacheCapabilities` carimba a data MESMO quando o
+  // veredito é inconclusivo (rede/5xx), e só deixa o flag intacto. Gatear pela
+  // data daria UMA tentativa por org — e logo na primeira conexão, quando falha
+  // transitória é mais provável — desligando a auto-verificação pra sempre.
+  //
+  // O cooldown evita o extremo oposto: sem ele, uma conta genuinamente
+  // inconclusiva pagaria 4 chamadas ClickSign a cada envio.
+  const measured = settings.whatsappSignatureAvailable != null;
+  const lastCheck = settings.capabilitiesCheckedAt?.getTime() ?? 0;
+  const cooldownOver = Date.now() - lastCheck > PROBE_RETRY_MS;
+  if (!measured && cooldownOver && routingSigners.some((s) => s.channel === "whatsapp")) {
+    const probed = await probeCaps(proposal.orgId).catch(() => null);
+    if (probed && !("error" in probed)) settings = await getSignatureSettings(proposal.orgId);
+  }
+
   const decision = decideInstrument({
     hiddenCommission: proposal.hiddenPaths.length > 0,
     signers: routingSigners,
@@ -107,6 +142,7 @@ export async function prepareSend(
       whatsappSignatureAvailable: settings.whatsappSignatureAvailable ?? false,
       acceptanceWhatsappAvailable:
         settings.acceptanceWhatsappAvailable ?? settings.acceptanceEnabled,
+      capabilitiesVerified: settings.whatsappSignatureAvailable != null,
     },
   });
   if (decision.blocked) return { blocked: "routing", message: decision.blocked };
@@ -134,6 +170,7 @@ export async function prepareSend(
     resolvedChannels: decision.resolvedChannels,
     signers: deduped.signers,
     warnings: decision.warnings,
+    ...(decision.capabilitiesUnverified ? { capabilitiesUnverified: true } : {}),
     planCostCents,
     creds,
   };

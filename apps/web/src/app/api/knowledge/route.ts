@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import { createKnowledgeItem } from "@/lib/ai/knowledge";
 import { knowledgeScopeWhere } from "@/lib/ai/knowledge-scope";
 import { VoyageError } from "@/lib/ai/embeddings";
+import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
 const VALID_CATEGORIES = ["legislation", "model", "rule", "glossary", "clause"] as const;
 type Category = (typeof VALID_CATEGORIES)[number];
@@ -118,6 +119,19 @@ export async function POST(req: NextRequest) {
       source: source || "manual",
       createdBy: session.user.id,
     });
+
+    // Auditoria que faltava: só a base de PLATAFORMA tinha rastro, mas o
+    // conteúdo daqui alimenta o que a IA do tenant responde e insere.
+    audit(
+      extractAuditContextFromRequest(req, org.id, session.user.id),
+      {
+        action: "KNOWLEDGE_CREATE",
+        result: "SUCCESS",
+        resourceType: "KnowledgeItem",
+        resource: result.parentId,
+        metadata: { category, title: title.slice(0, 200) },
+      }
+    ).catch(() => {});
 
     return NextResponse.json({
       id: result.parentId,

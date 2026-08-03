@@ -33,6 +33,7 @@ import {
   RAG_SCOPE_CATEGORIES,
 } from "@/lib/ai/agents/store";
 import { resolveAgentProfile } from "@/lib/ai/agents/resolve";
+import { effectiveModels } from "@/lib/ai/agents/model-provenance";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +57,48 @@ export async function GET(req: NextRequest) {
   }
 
   const rows = await listAgentProfiles(orgId);
+
+  // Modelos que REALMENTE rodaram nos últimos 30 dias, direto do AIUsage.
+  // No escopo de plataforma a janela é o sistema inteiro — é a visão que teria
+  // denunciado em maio o modelo aposentado que só foi descoberto em julho.
+  const seenSince = new Date(Date.now() - 30 * 24 * 60 * 60_000);
+  const seenGroups = await prisma.aIUsage.groupBy({
+    by: ["agentKey", "model"],
+    where: {
+      createdAt: { gte: seenSince },
+      ...(orgId ? { orgId } : {}),
+      agentKey: { not: null },
+    },
+    _count: { _all: true },
+  });
+  const seenByAgent = new Map<string, { model: string; calls: number }[]>();
+  for (const s of seenGroups) {
+    if (!s.agentKey) continue;
+    const arr = seenByAgent.get(s.agentKey) ?? [];
+    arr.push({ model: s.model, calls: s._count._all });
+    seenByAgent.set(s.agentKey, arr);
+  }
+  for (const arr of seenByAgent.values()) arr.sort((a, b) => b.calls - a.calls);
+
+  // `updatedBy` é gravado em toda escrita desde o primeiro dia do console e
+  // nunca tinha sido lido por tela nenhuma. Resolve os nomes num lote só.
+  const editorIds = [
+    ...new Set(
+      [...rows.values()]
+        .map((r) => r.updatedBy)
+        .filter((v): v is string => Boolean(v))
+    ),
+  ];
+  // Só `name` no select, de propósito: o GET é legível pela role `support`,
+  // e um fallback pra `email` vazaria o e-mail do staff onde a tela promete
+  // um nome. Sem nome, degrada pro id — feio e inofensivo.
+  const editors = editorIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: editorIds } },
+        select: { id: true, name: true },
+      })
+    : [];
+  const editorName = new Map(editors.map((u) => [u.id, u.name || u.id]));
 
   const agents = await Promise.all(
     AGENT_DEFINITIONS.map(async (def) => {
@@ -85,6 +128,10 @@ export async function GET(req: NextRequest) {
             row?.monthlyBudgetUsd === null || row?.monthlyBudgetUsd === undefined
               ? null
               : Number(row.monthlyBudgetUsd),
+          updatedAt: row?.updatedAt?.toISOString() ?? null,
+          updatedByName: row?.updatedBy
+            ? editorName.get(row.updatedBy) ?? row.updatedBy
+            : null,
         },
         resolved: {
           model: resolved.model,
@@ -92,6 +139,14 @@ export async function GET(req: NextRequest) {
           enabled: resolved.enabled,
           ragScope: resolved.ragScope,
         },
+        /**
+         * Modelo EFETIVO com procedência — a MESMA função que os call-sites
+         * usam (model-provenance.ts). Inclui a camada env, invisível ao
+         * perfil resolvido acima.
+         */
+        provenance: effectiveModels(def.key, resolved),
+        /** Modelos vistos no AIUsage (30d) — a verdade a posteriori. */
+        modelsSeen: seenByAgent.get(def.key) ?? [],
       };
     })
   );
@@ -146,15 +201,38 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
-  // Mesmo guard da rota do tenant: `ragScope` só é gravável para agente que o
-  // runtime honra. Sem isto o console gravaria restrição que nunca é aplicada,
-  // e a próxima pessoa a ler o banco acharia que existe uma em vigor.
-  if (
-    patch.ragScope !== undefined &&
-    !AGENT_REGISTRY[agentKey as AgentKey].supports.ragScope
-  ) {
+  // Guard de `supports` em TODOS os campos que o runtime pode não honrar —
+  // não só ragScope. A UI já desabilita os inputs, mas um super_admin via
+  // curl gravava model/enabled/instructions pra ocr/max/aggregator, e a
+  // próxima pessoa a ler o banco acharia que a config estava em vigor.
+  // (Achado do review do #229 — fecha os três agentes de uma vez.)
+  const supports = AGENT_REGISTRY[agentKey as AgentKey].supports;
+  const naoHonrado = [
+    patch.ragScope !== undefined && !supports.ragScope
+      ? "escopo de base de conhecimento"
+      : null,
+    // temperature/maxTokens viajam com o modelo: são sampling params DELE.
+    // Agente que não honra modelo tampouco os lê (aggregator/ocr/max têm os
+    // dois hardcoded ou fora deste runtime). Exceção documentada: o passive
+    // honra modelo mas trava temp/max_tokens por design (cap de custo) — como
+    // supports.model dele é true, segue aceitando, e o call-site anota isso.
+    (patch.model !== undefined ||
+      patch.fallbackModel !== undefined ||
+      patch.temperature !== undefined ||
+      patch.maxTokens !== undefined) &&
+    !supports.model
+      ? "modelo"
+      : null,
+    patch.enabled !== undefined && !supports.enabled ? "liga/desliga" : null,
+    patch.instructions !== undefined && !supports.instructions
+      ? "instruções"
+      : null,
+  ].filter(Boolean);
+  if (naoHonrado.length > 0) {
     return NextResponse.json(
-      { error: "Este agente não consulta a base de conhecimento." },
+      {
+        error: `Este agente ainda não honra: ${naoHonrado.join(", ")}. Gravar criaria configuração sem efeito.`,
+      },
       { status: 400 }
     );
   }

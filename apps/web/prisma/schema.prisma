@@ -1636,8 +1636,8 @@ model AgentProfile {
   id       String  @id @default(cuid())
   /// null = default da plataforma; preenchido = override do tenant.
   orgId    String?
-  /// analyst | legal | editor | curator | passive | support | ocr | insights |
-  /// chat_legacy | max — catálogo em lib/ai/agents/registry.ts
+  /// analyst | legal | editor | curator | aggregator | passive | support |
+  /// ocr | insights | chat_legacy | max — catálogo em lib/ai/agents/registry.ts
   agentKey String
   enabled  Boolean @default(true)
 
@@ -1679,6 +1679,29 @@ model AgentProfile {
 
   @@unique([orgId, agentKey])
   @@index([agentKey])
+}
+
+/// Histórico do AgentProfile — um snapshot COMPLETO por escrita, gravado
+/// dentro do próprio `upsertAgentProfile` (o único caminho de escrita).
+/// Existe porque um erro de config de agente é silencioso e caro: o efeito
+/// aparece na QUALIDADE da resposta, dias depois, sem nada na tela apontando
+/// pra mudança. Restaurar = NOVA escrita com o snapshot antigo (gera nova
+/// versão, invalida o cache de resolução, aparece no audit) — nunca rewind.
+/// Sem FK pro AgentProfile: a linha de perfil pode ser recriada (delete +
+/// create no upsert de corrida) e o histórico não pode morrer junto.
+model AgentProfileVersion {
+  id        String   @id @default(cuid())
+  /// Espelho das chaves do perfil — é por (orgId, agentKey) que a aba
+  /// Histórico busca, não por profileId.
+  orgId     String?
+  agentKey  String
+  /// O estado COMPLETO do perfil DEPOIS desta escrita (todas as colunas
+  /// editáveis). Diff é snapshot[n] × snapshot[n-1], em memória.
+  snapshot  Json
+  updatedBy String?
+  createdAt DateTime @default(now())
+
+  @@index([orgId, agentKey, createdAt])
 }
 
 // Pendência de suporte: pergunta que a IA não soube responder. Vira item da base
@@ -2200,6 +2223,36 @@ model AuditLog {
 
   @@index([orgId, action, createdAt])
   @@index([userId, createdAt])
+}
+
+/// Motor de alerta da plataforma — o registro deduplicado do que precisa
+/// chegar ao dono por e-mail (destinatários = PlatformRole super_admin, do
+/// banco, não env). Ocorrência repetida da mesma assinatura INCREMENTA
+/// `count` em vez de criar linha — é o que impede o alerta de virar spam e
+/// treinar o dono a ignorá-lo. `notifiedAt` nulo = pendente pro digest;
+/// preenchido = e-mail imediato já saiu (re-arma após 24h).
+/// SEM orgId FK de propósito: alerta sobrevive à exclusão da org (o evento
+/// "org X quebrou e foi apagada" é exatamente o que não pode sumir junto).
+model PlatformAlertEvent {
+  id          String    @id @default(cuid())
+  /// support_signal | integration_failure | ai_budget | model_fallback
+  /// (runtime_error na fase H) — catálogo em lib/alerts/platform-alerts.ts
+  kind        String
+  /// Chave de dedupe DENTRO do kind (ex.: "CLICKSIGN_SEND_FAILED:org123").
+  signature   String
+  orgId       String?
+  /// info | warning | critical — decide tom do e-mail, não roteamento.
+  severity    String    @default("warning")
+  title       String
+  payload     Json?
+  count       Int       @default(1)
+  firstSeenAt DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now())
+  notifiedAt  DateTime?
+
+  @@unique([kind, signature])
+  @@index([lastSeenAt])
+  @@index([notifiedAt])
 }
 
 // Dispositivos confiáveis — fingerprint + cookie assinado.
@@ -3283,8 +3336,14 @@ model ProposalAttachment {
   mime        String
   url         String
   // proposta_assinada_completa | proposta_assinada_reduzida | dossie | documento
+  // | aceite_comprovante          (comprovante que NÓS montamos — acceptance-proof.ts)
+  // | aceite_registro_clicksign   (Registro do Aceite OFICIAL da ClickSign: provas
+  //                                de identidade + mensagens. A API v3 não expõe
+  //                                link de download, então hoje chega por upload
+  //                                manual; acceptance-record-sync.ts tenta pegar
+  //                                sozinho caso a ClickSign passe a devolver.)
   category    String?
-  source      String   @default("manual") // manual | clicksign_signed | dossier
+  source      String   @default("manual") // manual | clicksign_signed | clicksign_acceptance | dossier
   contentHash String?
   byteSize    Int?
   createdAt   DateTime @default(now())
@@ -3304,9 +3363,13 @@ model ProposalEvent {
   // sent | delivered | fetched | viewed | signed_proponente | chained_envelope2
   // | closed | refused | expired | canceled | converted | reminder_sent
   // | revival_requested | status_transition_rejected
+  // | acceptance_term_{sent,completed,refused,expired,canceled}
+  // | acceptance_term_fetched  (resposta CRUA do GET do aceite na ClickSign —
+  //                             é o registro que permite descobrir campos não
+  //                             documentados contra a conta real)
   eventName  String
   payload    Json?
-  source     String   @default("system") // system | public | webhook | cron
+  source     String   @default("system") // system | public | webhook | cron | api
   // sha256(ip + AUTH_SECRET) — NUNCA o IP cru (LGPD).
   ipHash     String?
   userAgent  String?

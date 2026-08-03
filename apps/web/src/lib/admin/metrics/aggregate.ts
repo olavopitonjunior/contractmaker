@@ -15,14 +15,25 @@ export interface OrgGroupRow {
   _sum?: Record<string, number | null | { toString(): string } | undefined>;
 }
 
+/**
+ * Chave sintética do bucket de PLATAFORMA nos mapas por org.
+ *
+ * `orgId IS NULL` é custo real sem tenant a quem atribuir (embedding da base
+ * universal, por exemplo) — o `AIUsage` o grava de propósito desde que a
+ * coluna virou nullable. Estas funções o DESCARTAVAM (`if (!orgId) continue`)
+ * e três telas exibiam um total que não era o total. `.get(PLATFORM_BUCKET)`
+ * devolve a linha; nenhum id de org real colide com a chave.
+ */
+export const PLATFORM_BUCKET = "__platform__";
+
 /** Indexa contagens por orgId a partir de um `groupBy` com `_count: { _all }`. */
 export function countByOrg(rows: OrgGroupRow[]): Map<string, number> {
   const m = new Map<string, number>();
   for (const r of rows) {
-    if (!r.orgId) continue;
+    const key = r.orgId ?? PLATFORM_BUCKET;
     const c =
       typeof r._count === "number" ? r._count : r._count?._all ?? 0;
-    m.set(r.orgId, (m.get(r.orgId) ?? 0) + c);
+    m.set(key, (m.get(key) ?? 0) + c);
   }
   return m;
 }
@@ -31,11 +42,11 @@ export function countByOrg(rows: OrgGroupRow[]): Map<string, number> {
 export function sumByOrg(rows: OrgGroupRow[], field: string): Map<string, number> {
   const m = new Map<string, number>();
   for (const r of rows) {
-    if (!r.orgId) continue;
+    const key = r.orgId ?? PLATFORM_BUCKET;
     const raw = r._sum?.[field];
     const n = raw == null ? 0 : Number(raw);
     if (Number.isNaN(n)) continue;
-    m.set(r.orgId, (m.get(r.orgId) ?? 0) + n);
+    m.set(key, (m.get(key) ?? 0) + n);
   }
   return m;
 }

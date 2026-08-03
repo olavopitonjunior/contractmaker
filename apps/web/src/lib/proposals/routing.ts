@@ -25,6 +25,16 @@ export interface RoutingSigner {
 export interface AccountCapabilities {
   whatsappSignatureAvailable: boolean; // plano Plus+
   acceptanceWhatsappAvailable: boolean;
+  /**
+   * O probe de capacidade já rodou de forma CONCLUSIVA contra esta conta?
+   *
+   * `false` significa que `whatsappSignatureAvailable` é um DEFAULT, não um fato
+   * medido — a conta pode ser Plus e estar sendo rebaixada pra Aceite sem que
+   * ninguém saiba. Era exatamente o caso do tenant que motivou este campo:
+   * `capabilitiesCheckedAt` null, todo WhatsApp virando Aceite em silêncio.
+   * Omitido = tratado como verificado (compat com chamadores antigos/testes).
+   */
+  capabilitiesVerified?: boolean;
 }
 
 export interface RoutingDecision {
@@ -37,7 +47,16 @@ export interface RoutingDecision {
   /** Conflito duro que impede o envio (ex.: signatário sem e-mail nem telefone
    *  utilizável). Quando presente, a UI bloqueia. */
   blocked?: string;
+  /** O roteamento deixou de usar assinatura por WhatsApp com base num default,
+   *  não numa medição. Sinaliza pra UI que vale verificar os recursos da conta
+   *  antes de enviar. */
+  capabilitiesUnverified?: boolean;
 }
+
+/** Aviso único de conta não verificada — compartilhado pelos dois caminhos. */
+const UNVERIFIED_WARNING =
+  "A conta ClickSign nunca foi verificada, então o envio está assumindo que ela NÃO assina por WhatsApp. " +
+  "Se o plano for Plus, verifique os recursos em Configurações antes de enviar — o Aceite não é assinatura no documento.";
 
 /**
  * Decide o instrumento e os canais efetivos.
@@ -53,6 +72,13 @@ export function decideInstrument(input: {
   const wantsWhatsapp = signers.some((s) => s.channel === "whatsapp");
   const warnings: string[] = [];
 
+  // "Não tem Plus" por MEDIÇÃO é um fato; por DEFAULT é um palpite. Só marca
+  // quando o palpite de fato muda o desfecho (alguém queria WhatsApp).
+  const unverified =
+    caps.capabilitiesVerified === false &&
+    !caps.whatsappSignatureAvailable &&
+    wantsWhatsapp;
+
   // Caminho ACEITE: só quando (a) alguém quer WhatsApp, (b) a conta NÃO é Plus,
   // (c) o Aceite está disponível, (d) NÃO há comissão oculta, e (e) todos os
   // signatários têm telefone (o Aceite é WhatsApp-only).
@@ -67,10 +93,12 @@ export function decideInstrument(input: {
     warnings.push(
       "Plano atual: envio por Aceite via WhatsApp (R$ 0,99) — o cliente confirma por texto + link. Para assinatura no documento por WhatsApp, faça upgrade para o Plus."
     );
+    if (unverified) warnings.push(UNVERIFIED_WARNING);
     return {
       instrument: "aceite",
       resolvedChannels: signers.map(() => "whatsapp"),
       warnings,
+      ...(unverified ? { capabilitiesUnverified: true } : {}),
     };
   }
 
@@ -111,7 +139,17 @@ export function decideInstrument(input: {
     resolvedChannels[i] = "email";
   });
 
-  return { instrument: "envelope", resolvedChannels, warnings, blocked };
+  // Degradou WhatsApp→e-mail com base num default: o aviso acima diz "a conta
+  // não tem assinatura por WhatsApp", o que pode ser falso. Qualifica.
+  if (unverified) warnings.push(UNVERIFIED_WARNING);
+
+  return {
+    instrument: "envelope",
+    resolvedChannels,
+    warnings,
+    blocked,
+    ...(unverified ? { capabilitiesUnverified: true } : {}),
+  };
 }
 
 export type ProbeVerdict = "available" | "unavailable" | "inconclusive";

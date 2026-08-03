@@ -63,6 +63,72 @@ describe("decideInstrument — roteamento por capacidade", () => {
   });
 });
 
+describe("decideInstrument — capacidade NÃO verificada", () => {
+  // Cenário real do tenant que motivou o campo: `capabilitiesCheckedAt` null,
+  // `whatsappSignatureAvailable` null → o roteamento assumia `false` e mandava
+  // tudo por Aceite em silêncio. Agora o desfecho é o mesmo, mas ele AVISA.
+  const NAO_VERIFICADO = { ...NAO_PLUS, capabilitiesVerified: false };
+
+  it("Aceite escolhido sem medição → marca capabilitiesUnverified e avisa", () => {
+    const d = decideInstrument({
+      hiddenCommission: false,
+      signers: [wa()],
+      caps: NAO_VERIFICADO,
+    });
+    expect(d.instrument).toBe("aceite");
+    expect(d.capabilitiesUnverified).toBe(true);
+    expect(d.warnings.join(" ")).toMatch(/nunca foi verificada/i);
+  });
+
+  it("degradação WhatsApp→e-mail sem medição também avisa", () => {
+    const d = decideInstrument({
+      hiddenCommission: true, // força envelope
+      signers: [wa()],
+      caps: NAO_VERIFICADO,
+    });
+    expect(d.instrument).toBe("envelope");
+    expect(d.capabilitiesUnverified).toBe(true);
+    expect(d.warnings.join(" ")).toMatch(/nunca foi verificada/i);
+  });
+
+  it("ninguém quer WhatsApp → não avisa (o palpite não mudou nada)", () => {
+    const d = decideInstrument({
+      hiddenCommission: false,
+      signers: [em(), em()],
+      caps: NAO_VERIFICADO,
+    });
+    expect(d.capabilitiesUnverified).toBeUndefined();
+    expect(d.warnings).toHaveLength(0);
+  });
+
+  it("conta MEDIDA como não-Plus → sem aviso de verificação (é fato, não palpite)", () => {
+    const d = decideInstrument({
+      hiddenCommission: false,
+      signers: [wa()],
+      caps: { ...NAO_PLUS, capabilitiesVerified: true },
+    });
+    expect(d.instrument).toBe("aceite");
+    expect(d.capabilitiesUnverified).toBeUndefined();
+    expect(d.warnings.join(" ")).not.toMatch(/nunca foi verificada/i);
+  });
+
+  it("conta Plus verificada → assina por WhatsApp, nada de Aceite", () => {
+    const d = decideInstrument({
+      hiddenCommission: false,
+      signers: [wa()],
+      caps: { ...PLUS, capabilitiesVerified: true },
+    });
+    expect(d.instrument).toBe("envelope");
+    expect(d.resolvedChannels).toEqual(["whatsapp"]);
+    expect(d.capabilitiesUnverified).toBeUndefined();
+  });
+
+  it("campo omitido = compat: trata como verificado (não polui chamador antigo)", () => {
+    const d = decideInstrument({ hiddenCommission: false, signers: [wa()], caps: NAO_PLUS });
+    expect(d.capabilitiesUnverified).toBeUndefined();
+  });
+});
+
 describe("interpretWhatsappProbe — três estados", () => {
   it("2xx → available", () => {
     expect(interpretWhatsappProbe(201, {})).toBe("available");

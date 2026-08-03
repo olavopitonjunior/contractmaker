@@ -1,12 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Mail, Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -17,33 +23,65 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 
+interface OrgMemberOption {
+  email: string;
+  name: string | null;
+}
+
 /**
  * Dialog reusável pra enviar o resumo consolidado do formulário por e-mail
  * (PDF + documentos anexados) e/ou baixar só o PDF. Autenticado — bate nos
- * endpoints deal-level. Usado no DealDetail e na lista de formulários.
+ * endpoints deal-level. O destino é restrito a membros da org (o resumo é
+ * dossiê interno; nunca vai pras partes). Usado no DealDetail e na lista de
+ * formulários.
  */
 export function SendFormSummaryDialog({
   dealId,
-  defaultEmail,
   triggerLabel = "Enviar resumo",
   triggerVariant = "outline",
   triggerSize = "sm",
 }: {
   dealId: string;
-  defaultEmail?: string | null;
   triggerLabel?: string;
   triggerVariant?: "outline" | "default" | "ghost" | "secondary";
   triggerSize?: "sm" | "default";
 }) {
   const [open, setOpen] = useState(false);
-  const [email, setEmail] = useState(defaultEmail ?? "");
+  const [members, setMembers] = useState<OrgMemberOption[] | null>(null);
+  const [email, setEmail] = useState("");
   const [includeAttachments, setIncludeAttachments] = useState(true);
   const [sending, setSending] = useState(false);
   const [downloading, setDownloading] = useState(false);
 
+  useEffect(() => {
+    if (!open || members !== null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/org/members");
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        const list: OrgMemberOption[] = Array.isArray(data.members)
+          ? data.members
+              .map((m: { user?: { email?: string; name?: string | null } }) => ({
+                email: m.user?.email ?? "",
+                name: m.user?.name ?? null,
+              }))
+              .filter((m: OrgMemberOption) => m.email)
+          : [];
+        setMembers(list);
+      } catch {
+        if (!cancelled) setMembers([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, members]);
+
   async function handleSend() {
-    if (!email.trim()) {
-      toast.error("Informe um e-mail de destino");
+    if (!email) {
+      toast.error("Selecione o destinatário");
       return;
     }
     setSending(true);
@@ -51,7 +89,7 @@ export function SendFormSummaryDialog({
       const res = await fetch(`/api/deals/${dealId}/form-summary/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: email.trim(), includeAttachments }),
+        body: JSON.stringify({ to: email, includeAttachments }),
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
@@ -104,20 +142,35 @@ export function SendFormSummaryDialog({
           <DialogTitle>Enviar resumo do formulário</DialogTitle>
           <DialogDescription>
             Gera um PDF consolidado com todos os dados preenchidos e envia por
-            e-mail, com os documentos anexados ao formulário.
+            e-mail para um usuário do sistema, com os documentos anexados ao
+            formulário.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
-            <Label htmlFor="fs-email">E-mail de destino</Label>
-            <Input
-              id="fs-email"
-              type="email"
-              placeholder="destinatario@exemplo.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
+            <Label htmlFor="fs-email">Destinatário (usuário do sistema)</Label>
+            <Select value={email} onValueChange={setEmail}>
+              <SelectTrigger id="fs-email">
+                <SelectValue
+                  placeholder={
+                    members === null ? "Carregando..." : "Selecione um usuário"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {(members ?? []).map((m) => (
+                  <SelectItem key={m.email} value={m.email}>
+                    {m.name ? `${m.name} — ${m.email}` : m.email}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {members !== null && members.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                Nenhum membro encontrado na organização.
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <Checkbox

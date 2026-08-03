@@ -50,6 +50,8 @@ interface AgentRow {
     instructions: string;
     ragScope: RagScope | null;
     monthlyBudgetUsd: number | null;
+    updatedAt: string | null;
+    updatedByName: string | null;
   };
   resolved: {
     model: string;
@@ -57,7 +59,23 @@ interface AgentRow {
     enabled: boolean;
     ragScope: RagScope | null;
   };
+  /** Modelo efetivo com procedência — inclui a camada env, que o resolved não vê. */
+  provenance: Array<{
+    context: string | null;
+    model: string;
+    source: "org" | "platform" | "env" | "fixed" | "default";
+    envVar: string | null;
+  }>;
+  /** Modelos que rodaram de fato nos últimos 30d (AIUsage). */
+  modelsSeen: Array<{ model: string; calls: number }>;
 }
+
+const SOURCE_LABELS: Record<string, string> = {
+  org: "perfil do tenant",
+  platform: "perfil da plataforma",
+  fixed: "fixo por modo",
+  default: "padrão do código",
+};
 
 interface OrgOption {
   id: string;
@@ -67,9 +85,12 @@ interface OrgOption {
 export function AgentsConsoleClient({
   canEdit,
   orgs,
+  onlyAgentKey,
 }: {
   canEdit: boolean;
   orgs: OrgOption[];
+  /** Página de detalhe: renderiza só o card deste agente (aba Config). */
+  onlyAgentKey?: string;
 }) {
   const [scopeOrgId, setScopeOrgId] = useState<string>("");
   const [loading, setLoading] = useState(true);
@@ -115,15 +136,26 @@ export function AgentsConsoleClient({
       const res = await fetch("/api/admin/agents", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
+        // Campo que o runtime não honra fica FORA do body — o PATCH rejeita
+        // configuração sem efeito (guard de `supports`), e mandar o campo
+        // desabilitado derrubaria o save dos demais.
         body: JSON.stringify({
           orgId: scopeOrgId || null,
           agentKey: row.agentKey,
-          enabled: row.own.enabled,
-          model: row.own.model,
-          fallbackModel: row.own.fallbackModel,
-          temperature: row.own.temperature,
-          maxTokens: row.own.maxTokens,
-          instructions: row.own.instructions,
+          ...(row.supports.enabled ? { enabled: row.own.enabled } : {}),
+          // temperature/maxTokens acompanham o modelo (sampling params dele) —
+          // mesmo gate no PATCH.
+          ...(row.supports.model
+            ? {
+                model: row.own.model,
+                fallbackModel: row.own.fallbackModel,
+                temperature: row.own.temperature,
+                maxTokens: row.own.maxTokens,
+              }
+            : {}),
+          ...(row.supports.instructions
+            ? { instructions: row.own.instructions }
+            : {}),
           ...(row.supports.ragScope ? { ragScope: row.own.ragScope } : {}),
           monthlyBudgetUsd: row.own.monthlyBudgetUsd,
         }),
@@ -175,11 +207,27 @@ export function AgentsConsoleClient({
       {loading ? (
         <p className="text-sm text-muted-foreground">Carregando…</p>
       ) : (
-        agents.map((row) => (
+        agents
+          .filter((row) => !onlyAgentKey || row.agentKey === onlyAgentKey)
+          .map((row) => (
           <Card key={row.agentKey}>
             <CardHeader className="pb-2">
               <div className="flex flex-wrap items-center gap-2">
-                <CardTitle className="text-sm">{row.label}</CardTitle>
+                <CardTitle className="text-sm">
+                  {/* Na lista, o título leva à visão separada do agente
+                      (Config/Prompt/Tools/Custo); na própria página de
+                      detalhe (onlyAgentKey) o link seria circular. */}
+                  {onlyAgentKey ? (
+                    row.label
+                  ) : (
+                    <a
+                      href={`/admin/agents/${row.agentKey}`}
+                      className="hover:underline"
+                    >
+                      {row.label}
+                    </a>
+                  )}
+                </CardTitle>
                 <Badge variant="outline" className="font-mono text-[10px]">
                   {row.agentKey}
                 </Badge>
@@ -194,6 +242,19 @@ export function AgentsConsoleClient({
                   )}
               </div>
               <p className="text-xs text-muted-foreground">{row.description}</p>
+              {/* Rastro de quem mexeu por último NESTE escopo. Sem linha no
+                  banco (herda tudo), não há o que atribuir. */}
+              {row.own.updatedAt && (
+                <p className="text-[11px] text-muted-foreground">
+                  Última alteração
+                  {row.own.updatedByName ? ` por ${row.own.updatedByName}` : ""}{" "}
+                  em{" "}
+                  {new Date(row.own.updatedAt).toLocaleString("pt-BR", {
+                    dateStyle: "short",
+                    timeStyle: "short",
+                  })}
+                </p>
+              )}
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -288,6 +349,42 @@ export function AgentsConsoleClient({
                     Ativo
                   </Label>
                 </div>
+              </div>
+
+              {/* O que REALMENTE roda, com procedência — incluindo a camada
+                  env que o select acima não enxerga. Foi um env com modelo
+                  aposentado que rodou a análise passiva por dois meses sem
+                  nenhuma tela acusar. */}
+              <div className="rounded-md border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+                <span className="font-medium text-foreground">Em uso:</span>{" "}
+                {row.provenance.map((p, i) => (
+                  <span key={i}>
+                    {i > 0 && " · "}
+                    {p.context && <span className="font-mono">{p.context}: </span>}
+                    {MODEL_LABELS[p.model] ?? p.model}{" "}
+                    <span
+                      className={
+                        p.source === "env" ? "text-amber-600" : undefined
+                      }
+                    >
+                      ({p.source === "env" ? `env ${p.envVar}` : SOURCE_LABELS[p.source]})
+                    </span>
+                  </span>
+                ))}
+                {row.modelsSeen.length > 0 && (
+                  <>
+                    {" — "}
+                    <span className="font-medium text-foreground">
+                      vistos (30d):
+                    </span>{" "}
+                    {row.modelsSeen.map((s, i) => (
+                      <span key={s.model}>
+                        {i > 0 && ", "}
+                        {MODEL_LABELS[s.model] ?? s.model} ({s.calls})
+                      </span>
+                    ))}
+                  </>
+                )}
               </div>
 
               <div>

@@ -56,7 +56,23 @@ export interface NewtonNotifyArgs {
   linkUrl?: string | null;
 }
 
-function buildText(a: NewtonNotifyArgs, phone: string): string {
+/**
+ * Reexportada daqui por retrocompatibilidade: a função nasceu neste módulo, e
+ * testes e chamadores a importam de `@/lib/newton/notify-trigger`. A
+ * implementação mudou de casa quando o Max passou a precisar do MESMO
+ * tratamento — ver `lib/notifications/sanitize.ts`. Duas cópias fariam
+ * "sanitizado" significar coisas diferentes em dois canais que carregam o
+ * mesmo texto, vindo da mesma origem não-confiável.
+ */
+export { sanitizeUntrusted };
+
+/**
+ * Exportada só para teste: o `phone` normalizado tem que aparecer no texto das
+ * DUAS audiências, e enquanto a função era privada nenhum teste inspecionava o
+ * que ela gera — foi assim que o ramo `deal_broker` ficou com o `a.phone` cru
+ * depois do #189.
+ */
+export function buildText(a: NewtonNotifyArgs, phone: string): string {
   const nome = sanitizeUntrusted(a.recipientName, 120);
   const msg = sanitizeUntrusted(a.message, 600);
 
@@ -88,11 +104,6 @@ function buildText(a: NewtonNotifyArgs, phone: string): string {
 
   return (
     `[deal-notify · sistema] Atualização automática do negócio ${a.dealId}. ` +
-    // `phone` (normalizado), não `a.phone` (cru). O cadastro do corretor guarda
-    // formato livre — "(11) 99906-3228" —, e mandar isso no turn reproduz o
-    // #189 exatamente: o agente repassa o valor ao `whatsapp_send`, que exige
-    // E.164 sem "+", e a mensagem não chega EM SILÊNCIO (o turn devolve ok).
-    // O fix do #189 corrigiu só o ramo `platform_user`; este passou batido.
     `Envie via whatsapp_send UMA mensagem informativa pro telefone ${phone}. ` +
     fence +
     `Envie SOMENTE para o telefone indicado acima. Não agende lembretes, não ` +

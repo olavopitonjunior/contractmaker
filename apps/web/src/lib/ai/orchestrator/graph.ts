@@ -20,6 +20,10 @@ import { runLegal } from "../specialists/legal";
 import { runEditor } from "../specialists/editor";
 import { runCurator } from "../specialists/curator";
 import { quarantineAttachment } from "../sentinel/middleware";
+import {
+  AGGREGATOR_SYSTEM_PROMPT,
+  AGGREGATOR_SYSTEM_PROMPT_LOCACAO,
+} from "../agents/prompt-catalog";
 import { mapToolToAction, buildToolSummary } from "../shared/tool-mapping";
 import { resolveIntent } from "./intent-fallback";
 import { getCheckpointer } from "./checkpointer";
@@ -319,28 +323,10 @@ async function curatorNode(state: GraphState): Promise<Partial<GraphState>> {
   };
 }
 
-const AGGREGATOR_SYSTEM_PROMPT = `Você é o **Orquestrador** num time de agentes jurídicos especializados em contratos imobiliários brasileiros. Os especialistas já fizeram suas consultas e retornaram análises — sua tarefa é redigir a resposta final ao usuário em markdown estruturado.
-
-REGRAS:
-
-1. Responda em PT-BR com norma culta impecável.
-2. NUNCA exiba JSON cru.
-3. Se a pergunta for informativa (lista, explicação, status), responda com markdown organizado (≥100 caracteres). Use cabeçalhos, listas e tabelas quando ajudar.
-4. **LEDGER DE ESCRITAS É A FONTE DA VERDADE SOBRE O QUE FOI APLICADO.** Você recebe um bloco "## LEDGER DE ESCRITAS (determinístico)". Ele — e SOMENTE ele — define o que mudou no documento. NUNCA afirme que algo "foi aplicado/alterado/realizado" se não estiver em **APLICADAS** no ledger.
-   - Se houver itens em **APLICADAS**: use os 3 cabeçalhos LITERAIS \`## Alterações Realizadas\`, \`## Justificativa\`, \`## Verificação\`, descrevendo APENAS o que está em APLICADAS.
-   - Se houver itens em **PENDENTES** (sugestões/planos aguardando aprovação) e nenhuma aplicada: use \`## Proposta (aguardando aprovação)\` e explique que o usuário precisa aprovar via PlanCard/track changes. NÃO diga "realizado".
-   - Se houver **FALHAS** ou **NÃO APLICADAS** (edição não confirmada no documento): use \`## Não foi possível aplicar\`, explique o motivo objetivo do ledger e proponha o próximo passo. NÃO finja sucesso.
-   - Se o ledger estiver inteiramente vazio e a mensagem era informativa: responda normalmente como consulta (sem cabeçalho de alteração).
-5. **PROIBIDO INVENTAR "redação anterior".** Só cite o texto que estava no contrato se ele aparecer literalmente no contexto fornecido. NUNCA construa uma "redação anterior" plausível para depois "substituí-la".
-6. Combine as saídas dos especialistas SEM repetir texto literal. Você é o ponto de síntese.
-7. Cite legislação ou padrões da organização quando especialistas trouxeram evidência. Não invente.
-8. Foque no contrato desta sessão. Não compare com outros contratos sem evidência ancorada.`;
-
-// Variante de locação — mesma disciplina de ledger/síntese, domínio Lei 8.245/91.
-const AGGREGATOR_SYSTEM_PROMPT_LOCACAO = AGGREGATOR_SYSTEM_PROMPT.replace(
-  "contratos imobiliários brasileiros",
-  "contratos de locação de imóveis no Brasil (Lei nº 8.245/91)"
-);
+// AGGREGATOR_SYSTEM_PROMPT{,_LOCACAO} moraram aqui até o console de agentes
+// ganhar a tela de prompts — agora vivem no prompt-catalog (módulo-folha),
+// importados no topo deste arquivo. A rota do /admin não pode importar o grafo
+// inteiro só pra ler duas strings.
 
 async function aggregatorNode(state: GraphState): Promise<Partial<GraphState>> {
   const events: AgentEvent[] = [
@@ -395,10 +381,10 @@ async function aggregatorNode(state: GraphState): Promise<Partial<GraphState>> {
       provider: "anthropic",
       model,
       operation: "chat",
-      // Sem agente: o agregador é o passo de síntese do próprio orquestrador,
-      // não um agente configurável do registry. Atribuí-lo a `chat_legacy` (o
-      // que a derivação faria) seria inventar dado num painel de custo.
-      agentKey: null,
+      // Explícito porque `chat` é ambígua (o legado grava a mesma operação):
+      // a derivação pelo registry não se aplica, e desde que o agregador
+      // entrou no registry ele tem nome próprio no painel de custo.
+      agentKey: "aggregator",
       promptTokens: response.usage?.input_tokens ?? 0,
       completionTokens: response.usage?.output_tokens ?? 0,
       cacheReadTokens:
@@ -572,10 +558,10 @@ async function aggregatorNode(state: GraphState): Promise<Partial<GraphState>> {
       provider: "anthropic",
       model,
       operation: "chat",
-      // Sem agente: o agregador é o passo de síntese do próprio orquestrador,
-      // não um agente configurável do registry. Atribuí-lo a `chat_legacy` (o
-      // que a derivação faria) seria inventar dado num painel de custo.
-      agentKey: null,
+      // Explícito porque `chat` é ambígua (o legado grava a mesma operação):
+      // a derivação pelo registry não se aplica, e desde que o agregador
+      // entrou no registry ele tem nome próprio no painel de custo.
+      agentKey: "aggregator",
       promptTokens: 0,
       latencyMs: Date.now() - t0,
       success: false,

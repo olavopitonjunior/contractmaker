@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select";
 import { X, Save } from "lucide-react";
 import { toast } from "sonner";
+import { AGENT_DEFINITIONS } from "@/lib/ai/agents/registry";
 
 interface Item {
   id: string;
@@ -29,7 +30,16 @@ interface Item {
   content: string;
   tags: string[];
   source: string | null;
+  /** Restrição por agente (vazio = todos). Só existe no escopo de plataforma. */
+  visibleToAgents?: string[];
 }
+
+/**
+ * Agentes que honram `visibleToAgents` — os que consultam a base E carimbam
+ * agentKey (supports.ragScope no registry). Oferecer os demais criaria
+ * restrição sem efeito, o anti-padrão que o console inteiro combate.
+ */
+const RAG_AGENTS = AGENT_DEFINITIONS.filter((d) => d.supports.ragScope);
 
 interface Props {
   open: boolean;
@@ -60,6 +70,7 @@ export function KnowledgeItemForm({
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
   const [source, setSource] = useState("");
+  const [visibleToAgents, setVisibleToAgents] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -69,9 +80,16 @@ export function KnowledgeItemForm({
       setCategory(item?.category || "legislation");
       setTags(item?.tags || []);
       setSource(item?.source || "");
+      setVisibleToAgents(item?.visibleToAgents || []);
       setTagInput("");
     }
   }, [open, item]);
+
+  function toggleAgent(key: string) {
+    setVisibleToAgents((cur) =>
+      cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]
+    );
+  }
 
   function addTag() {
     const t = tagInput.trim();
@@ -113,6 +131,8 @@ export function KnowledgeItemForm({
         category,
         tags,
         source: source || undefined,
+        // Só a plataforma restringe por agente — a API do tenant nem aceita.
+        ...(scope === "platform" ? { visibleToAgents } : {}),
       };
       const url = item ? `${apiBase}/${item.id}` : apiBase;
       const method = item ? "PATCH" : "POST";
@@ -230,6 +250,32 @@ export function KnowledgeItemForm({
               ))}
             </div>
           </div>
+
+          {/* O campo existia no banco desde o RAG global sem um pixel de UI —
+              item restrito por API ficava invisível e irrecuperável pela
+              tela. Só agentes que honram a restrição aparecem. */}
+          {scope === "platform" && (
+            <div className="space-y-2">
+              <Label>Visível só pra estes agentes</Label>
+              <div className="flex flex-wrap gap-1">
+                {RAG_AGENTS.map((a) => (
+                  <Badge
+                    key={a.key}
+                    variant={
+                      visibleToAgents.includes(a.key) ? "default" : "outline"
+                    }
+                    className="cursor-pointer text-xs"
+                    onClick={() => toggleAgent(a.key)}
+                  >
+                    {a.label}
+                  </Badge>
+                ))}
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Nenhum marcado = todos os agentes consultam este item.
+              </p>
+            </div>
+          )}
 
           <div className="flex gap-2 pt-4 border-t">
             <Button onClick={handleSave} disabled={saving}>

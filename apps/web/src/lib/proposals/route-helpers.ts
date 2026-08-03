@@ -10,8 +10,10 @@ import {
 import {
   getEffectivePermissions,
   canAccessProposal,
+  can,
   type EffectivePermissions,
 } from "@/lib/security/rbac/check";
+import type { PermissionKey } from "@/lib/security/rbac/permissions";
 import { assertFeatureEnabled, ModuleDisabledError } from "@/lib/modules/guard";
 import { proposalFeatureForKind } from "@/lib/modules/catalog";
 
@@ -58,6 +60,62 @@ export async function loadScopedProposal(
     return { fail: NextResponse.json({ error: "Não encontrada" }, { status: 404 }) };
   }
   return { auth, eff, proposal };
+}
+
+/**
+ * Escopo + permissão de uma proposta, para caminhos que NÃO têm um NextRequest
+ * (o `onBeforeGenerateToken` do handshake de upload client-direct só recebe um
+ * `Request` cru). Mesma decisão de `loadScopedProposal`, sem o wrapper de auth
+ * — o caller já resolveu sessão e org.
+ *
+ * Devolve um motivo (string) quando NEGADO, ou `null` quando liberado, no mesmo
+ * formato de `guardDealScope`, que é o análogo do lado dos negócios.
+ *
+ * Existe porque conferir só `proposal.orgId === org.id` no handshake deixaria
+ * qualquer membro da org emitir token de upload para QUALQUER proposta dela,
+ * inclusive sem a permissão que o /finalize exige.
+ */
+export async function guardProposalScope(input: {
+  proposalId: string;
+  userId: string;
+  orgId: string;
+  permission: PermissionKey;
+}): Promise<string | null> {
+  const proposal = await prisma.proposal.findUnique({
+    where: { id: input.proposalId },
+    select: {
+      orgId: true,
+      userId: true,
+      responsibleUserId: true,
+      convertedDealId: true,
+    },
+  });
+  if (!proposal || proposal.orgId !== input.orgId) return "Proposal not found";
+
+  const eff = await getEffectivePermissions(input.userId, input.orgId);
+  if (!eff) return "Forbidden";
+
+  const convertedDealManagerUserId = proposal.convertedDealId
+    ? (
+        await prisma.deal.findUnique({
+          where: { id: proposal.convertedDealId },
+          select: { managerUserId: true },
+        })
+      )?.managerUserId ?? null
+    : null;
+
+  if (
+    !canAccessProposal({
+      effective: eff,
+      ownerUserId: proposal.userId,
+      responsibleUserId: proposal.responsibleUserId,
+      convertedDealManagerUserId,
+    })
+  ) {
+    return "Proposal not found";
+  }
+  if (!can(eff, input.permission)) return "Forbidden";
+  return null;
 }
 
 /**

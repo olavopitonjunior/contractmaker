@@ -73,6 +73,16 @@ export function ProposalActionBar({
       // Distingue o canal real no envio: só /send devolve `instrument`. Aceite via
       // WhatsApp ≠ envelope de assinatura — não anunciar "Enviado para assinatura".
       toast.success(d.instrument === "aceite" ? "Enviado por Aceite via WhatsApp" : okMsg);
+
+      // Avisos do roteamento: o envio pode ter sido REBAIXADO (assinatura →
+      // Aceite, ou WhatsApp → e-mail) sem que o corretor tenha pedido isso.
+      // Duração longa e dismissível — some junto com o toast de sucesso perderia
+      // exatamente a informação que importa.
+      if (Array.isArray(d.warnings)) {
+        for (const w of d.warnings as string[]) {
+          toast.warning(w, { duration: 15000, closeButton: true });
+        }
+      }
       setDialog(null);
       setReason("");
       if (opts.redirectPath) router.push(opts.redirectPath);

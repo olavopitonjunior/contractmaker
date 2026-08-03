@@ -6,6 +6,11 @@ import { processClickSignWebhookPayload } from "@/lib/clicksign/webhook-process"
 import type { WebhookPayload } from "@/lib/clicksign/types";
 
 export const runtime = "nodejs";
+// O trabalho pesado roda em `waitUntil` e conta pro tempo da invocação: baixar
+// o PDF assinado, ou — no Aceite — consultar a ClickSign e então renderizar o
+// comprovante com Puppeteer. O comprovante é o ÚNICO artefato do Aceite do
+// nosso lado, então ser morto antes de gerá-lo é perda de dado.
+export const maxDuration = 60;
 
 /**
  * Coleta os headers que importam pra debugar HMAC + identificação. Não

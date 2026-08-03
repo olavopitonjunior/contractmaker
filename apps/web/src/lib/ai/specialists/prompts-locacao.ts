@@ -144,6 +144,27 @@ RATE LIMITS: 5 propostas pendentes/org; 1 proposta/dia/template.
 Responda em PT-BR objetivo. O aggregator combina com outros especialistas.`;
 
 /**
+ * As duas variantes de um especialista, pro console de agentes exibir lado a
+ * lado — usa OS MESMOS consts do `pickSpecialistPrompt`, então o que a tela
+ * mostra é o que o runtime escolhe. "O prompt do Jurídico" não é uma string:
+ * é este par.
+ */
+export function specialistPromptVariants(
+  specialist: "analyst" | "legal" | "editor" | "curator"
+): { venda: string; locacao: string } {
+  switch (specialist) {
+    case "analyst":
+      return { venda: ANALYST_SYSTEM_PROMPT, locacao: ANALYST_SYSTEM_PROMPT_LOCACAO };
+    case "legal":
+      return { venda: LEGAL_SYSTEM_PROMPT, locacao: LEGAL_SYSTEM_PROMPT_LOCACAO };
+    case "editor":
+      return { venda: EDITOR_SYSTEM_PROMPT, locacao: EDITOR_SYSTEM_PROMPT_LOCACAO };
+    case "curator":
+      return { venda: CURATOR_SYSTEM_PROMPT, locacao: CURATOR_SYSTEM_PROMPT_LOCACAO };
+  }
+}
+
+/**
  * Seleciona o prompt do especialista conforme o domínio (venda vs locação).
  */
 export function pickSpecialistPrompt(

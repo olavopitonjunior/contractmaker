@@ -4,6 +4,12 @@ export type AuditResult = "SUCCESS" | "FAILURE" | "DENIED";
 
 export type AuditAction =
   // Auth / identidade
+  //
+  // LOGIN_SUCCESS entrou tarde (2026-08): até então só elevação e logout
+  // eram auditados — "quem entrou e quando" não existia em lugar nenhum.
+  // Gravado no callback jwt do NextAuth (momento do login, credentials e
+  // magic link), fire-and-forget.
+  | "LOGIN_SUCCESS"
   | "LOGIN_ELEVATED"
   | "LOGIN_ELEVATION_FAILED"
   | "USER_LOGOUT"
@@ -136,6 +142,7 @@ export type AuditAction =
   // Canal externo das notificações do sistema → usuário (opt-in LGPD)
   | "USER_NOTIFICATION_PREFS_UPDATE"
   | "FORM_REMINDER_SENT"
+  | "FORM_SUMMARY_SENT"
   | "FORM_PREFILLED_FROM_PROPOSAL"
   | "FORM_LINK_ROTATED"
   | "FORM_LOCKED"
@@ -317,11 +324,21 @@ export type AuditAction =
   // DIMOB / fiscal
   | "FISCAL_SETTINGS_UPDATE"
   | "AGENT_CONFIG_UPDATE"
+  // Agente externo (Max) reportou custo via POST /api/agents/usage — era a
+  // única rota M2M de escrita sem rastro, e escreve numa tabela que alimenta
+  // teto por agente.
+  | "AGENT_USAGE_REPORTED"
   // Base de conhecimento da PLATAFORMA (KnowledgeItem.orgId IS NULL) — escrita
   // que todos os tenants passam a ler, feita por super_admin fora de qualquer org.
   | "PLATFORM_KNOWLEDGE_CREATE"
   | "PLATFORM_KNOWLEDGE_UPDATE"
   | "PLATFORM_KNOWLEDGE_DELETE"
+  // Base de conhecimento do TENANT — não era auditada (só a de plataforma
+  // tinha ação). O conteúdo daqui alimenta o que a IA responde e insere em
+  // contrato; quem mudou o quê importa tanto quanto na plataforma.
+  | "KNOWLEDGE_CREATE"
+  | "KNOWLEDGE_UPDATE"
+  | "KNOWLEDGE_DELETE"
   // Imobiliária adotou o texto de uma cláusula de slot da plataforma na sua.
   // Escrita org-scoped, mas o conteúdo passa a vir de fora — vale rastro.
   | "CLAUSE_ADOPT_PLATFORM"
@@ -348,6 +365,26 @@ export interface AuditEntry {
   resource?: string;
   resourceType?: string;
   metadata?: Record<string, unknown>;
+}
+
+/**
+ * Prefixos de ação que significam "uma integração externa falhou pro
+ * usuário" — o recorte que vira alerta imediato pro dono da plataforma.
+ * DENIED fica fora de propósito: negação de authz é o sistema funcionando.
+ */
+const INTEGRATION_ALERT_PREFIXES = [
+  "CLICKSIGN_",
+  "ENVELOPE_",
+  "KYC_",
+  "CHARGE_",
+  "TRANSFER_",
+  "CERTIDAO_",
+  "SERASA_",
+  "ACCOUNT_",
+] as const;
+
+export function isIntegrationAction(action: string): boolean {
+  return INTEGRATION_ALERT_PREFIXES.some((p) => action.startsWith(p));
 }
 
 /**
@@ -392,6 +429,28 @@ export async function audit(
         userAgent: ctx.userAgent ? ctx.userAgent.slice(0, 1000) : null,
       },
     });
+
+    // Gatilho do motor de alerta: FAILURE de integração vira alerta pro dono
+    // da plataforma. AQUI porque o audit() é o único chokepoint por onde toda
+    // falha de integração já passa — instrumentar os N call-sites um a um
+    // deixaria buraco no primeiro esquecido. Import dinâmico + fire-and-forget:
+    // alerta quebrado não pode quebrar o audit, e o módulo de alerta puxa o
+    // client de e-mail que nem todo caller do audit precisa carregar.
+    if (entry.result === "FAILURE" && isIntegrationAction(entry.action)) {
+      import("@/lib/alerts/platform-alerts")
+        .then(({ reportPlatformAlert }) =>
+          reportPlatformAlert({
+            kind: "integration_failure",
+            signature: `${entry.action}:${ctx.orgId ?? "platform"}`,
+            orgId: ctx.orgId ?? null,
+            severity: "warning",
+            title: `Integração falhando: ${entry.action}`,
+            payload: { resource: entry.resource ?? null },
+            notify: "immediate",
+          })
+        )
+        .catch(() => {});
+    }
   } catch (err) {
     // Nunca propagar — audit log é best-effort
     console.error("[audit] failed to persist", {
