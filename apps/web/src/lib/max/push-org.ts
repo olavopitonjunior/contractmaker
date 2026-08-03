@@ -1,4 +1,5 @@
 import { signedBody } from "@/lib/max/hmac";
+import { maxServiceUrl } from "@/lib/max/endpoint";
 
 /**
  * Entrega do acesso de um tenant ao serviço do Max.
@@ -38,7 +39,7 @@ async function call(
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   try {
-    const res = await fetch(`${NOTIFY_URL.replace(/\/+$/, "")}/api/orgs`, {
+    const res = await fetch(maxServiceUrl(NOTIFY_URL, "/api/orgs"), {
       method,
       headers,
       body,
