@@ -97,7 +97,7 @@ export default async function PipelinePage({
   });
 
   if (!pipeline) {
-    return <p className="text-muted-foreground p-6">Pipeline nao configurado.</p>;
+    return <p className="text-muted-foreground p-6">Pipeline não configurado.</p>;
   }
 
   const allDeals = pipeline.stages.flatMap((s) => s.deals);
@@ -304,8 +304,8 @@ export default async function PipelinePage({
         </Card>
       </div>
 
-      {/* Kanban */}
-      <KanbanBoard stages={stages} />
+      {/* Kanban — nowMs serializado evita Date.now() no render do client (#418) */}
+      <KanbanBoard stages={stages} nowMs={Date.now()} />
     </div>
   );
 }
