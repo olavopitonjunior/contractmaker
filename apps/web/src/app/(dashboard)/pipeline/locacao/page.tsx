@@ -263,6 +263,7 @@ export default async function PipelineLocacaoPage({
       {/* Kanban — mesmo board de vendas, config de locação */}
       <KanbanBoard
         stages={stages}
+        nowMs={Date.now()}
         config={{
           basePath: "/locacao/deals",
           timelineKind: "locacao",

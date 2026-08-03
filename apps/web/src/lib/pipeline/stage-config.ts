@@ -51,6 +51,30 @@ export function isTerminalStageName(name: string | null | undefined): boolean {
   return !!name && ALL_TERMINAL_STAGES.has(name);
 }
 
+/** Dias inteiros desde a entrada no stage atual (fallback: criação do deal). */
+export function daysInStage(
+  stageEnteredAt: string | null | undefined,
+  createdAt: string,
+  nowMs: number
+): number {
+  const enteredMs = new Date(stageEnteredAt ?? createdAt).getTime();
+  return Math.floor((nowMs - enteredMs) / 86_400_000);
+}
+
+/**
+ * Regra única de "deal parado" — badge "Xd parado" do card e filtro "Só
+ * parados" do board DEVEM concordar; mudanças na regra acontecem só aqui.
+ * Perdidos e stages terminais não envelhecem.
+ */
+export function isStaleDeal(
+  deal: { lostAt: string | null; stageEnteredAt?: string | null; createdAt: string },
+  stageName: string | null | undefined,
+  nowMs: number
+): boolean {
+  if (deal.lostAt || isTerminalStageName(stageName)) return false;
+  return daysInStage(deal.stageEnteredAt, deal.createdAt, nowMs) >= AGING_WARN_DAYS;
+}
+
 export function stageConfigForKind(kind: string | null | undefined): StageConfig {
   const key = kind && kind in TERMINAL_STAGES_BY_KIND ? kind : "venda";
   return {

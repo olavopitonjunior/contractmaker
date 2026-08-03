@@ -15,14 +15,16 @@ import {
 import { toast } from "sonner";
 import Link from "next/link";
 import { formPublicPath } from "@/lib/forms/form-url";
+import { formatMoneyBR } from "@/lib/format/money";
+import { formatDayMonthBR } from "@/lib/format/datetime";
 import {
   DealProgressTimeline,
   type PipelineKind,
 } from "@/components/pipeline/DealProgressTimeline";
 import {
   AGING_DANGER_DAYS,
-  AGING_WARN_DAYS,
-  isTerminalStageName,
+  daysInStage,
+  isStaleDeal,
 } from "@/lib/pipeline/stage-config";
 
 /**
@@ -70,12 +72,12 @@ interface KanbanCardProps {
   /** Nome do stage da coluna — destaca o nó atual da timeline. */
   currentStageName?: string | null;
   config?: KanbanCardConfig;
-}
-
-function formatShort(iso: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  /**
+   * Instante do render do server (epoch ms) — rótulos relativos derivam dele
+   * pra server e client renderizarem o mesmo texto (hidratação, React #418).
+   * Obrigatório: caller sem nowMs reintroduziria o bug em silêncio.
+   */
+  nowMs: number;
 }
 
 export function KanbanCard({
@@ -83,25 +85,23 @@ export function KanbanCard({
   isOverlay,
   currentStageName = null,
   config = DEFAULT_CARD_CONFIG,
+  nowMs,
 }: KanbanCardProps) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: deal.id,
   });
 
-  const msAgo = Date.now() - new Date(deal.createdAt).getTime();
+  const msAgo = nowMs - new Date(deal.createdAt).getTime();
   const hoursAgo = Math.floor(msAgo / 3600000);
   const daysAgo = Math.floor(msAgo / 86400000);
   const timeLabel = daysAgo > 0 ? `${daysAgo}d` : hoursAgo > 0 ? `${hoursAgo}h` : "agora";
 
   // Aging por stage — badge só quando acionável (≥ warn), pra não poluir
-  // cards saudáveis. Terminais (Comissão paga/ADM/perdido) não envelhecem.
-  const stageEnteredMs = new Date(deal.stageEnteredAt ?? deal.createdAt).getTime();
-  const daysInStage = Math.floor((Date.now() - stageEnteredMs) / 86400000);
-  const showAging =
-    !deal.lostAt &&
-    !isTerminalStageName(currentStageName) &&
-    daysInStage >= AGING_WARN_DAYS;
-  const agingDanger = daysInStage >= AGING_DANGER_DAYS;
+  // cards saudáveis. Regra única em stage-config::isStaleDeal (o filtro
+  // "Só parados" do board usa a mesma).
+  const staleDays = daysInStage(deal.stageEnteredAt, deal.createdAt, nowMs);
+  const showAging = isStaleDeal(deal, currentStageName, nowMs);
+  const agingDanger = staleDays >= AGING_DANGER_DAYS;
 
   function handleCopyFormLink(e: React.MouseEvent) {
     e.preventDefault();
@@ -155,9 +155,9 @@ export function KanbanCard({
                         ? "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400"
                         : "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-400"
                     )}
-                    title={`Sem mudança de estágio há ${daysInStage} dia(s)`}
+                    title={`Sem mudança de estágio há ${staleDays} dia(s)`}
                   >
-                    {daysInStage}d parado
+                    {staleDays}d parado
                   </span>
                 )}
                 {deal.formToken && (
@@ -203,7 +203,7 @@ export function KanbanCard({
                 <XOctagon className="h-3.5 w-3.5 mt-0.5 shrink-0 text-red-600" />
                 <div className="text-[10px] leading-tight">
                   <div className="font-medium text-red-700 dark:text-red-400">
-                    Perdido em {formatShort(deal.lostAt)}
+                    Perdido em {formatDayMonthBR(deal.lostAt)}
                   </div>
                   {deal.lostReason && (
                     <div
@@ -233,10 +233,7 @@ export function KanbanCard({
             <div className="flex items-center justify-between">
               {deal.value != null && deal.value > 0 ? (
                 <span className="text-sm font-semibold text-primary tabular-nums">
-                  R${" "}
-                  {deal.value.toLocaleString("pt-BR", {
-                    minimumFractionDigits: 0,
-                  })}
+                  {formatMoneyBR(deal.value, { decimals: 0 })}
                 </span>
               ) : (
                 <span className="text-xs text-muted-foreground">Sem valor</span>
