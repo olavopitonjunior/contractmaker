@@ -20,6 +20,20 @@ import { notifyProposalMilestone } from "./notify-proposal";
  * não rastreia aceite por-signatário.
  */
 
+/**
+ * Terminais NEGATIVOS — proposta morta. Sinos de acompanhamento (entrega,
+ * aceite de parte) não tocam a partir daqui: um evento tardio numa proposta
+ * cancelada/recusada seria ruído. `completa`/`convertida` NÃO entram: no Aceite
+ * multi-termo os termos são paralelos, então entrega e aceite do proprietário
+ * depois da proposta fechar são a ordem normal, não anomalia.
+ */
+const DEAD_FOR_TRACKING = new Set([
+  "cancelada",
+  "expirada",
+  "recusada_proponente",
+  "recusada_vendedor",
+]);
+
 interface AcceptanceEventInput {
   acceptanceId: string;
   phase: string; // sent | completed | refused | expired | canceled | error | ...
@@ -138,10 +152,30 @@ export async function processProposalAcceptanceEvent(
   }
 
   switch (input.phase) {
-    case "sent":
+    case "sent": {
       // No Aceite a ClickSign confirma a ENTREGA — "Entregue" é real neste modo.
       await advanceProposalStatus(proposal.id, "entregue", { deliveredAt: new Date() });
+
+      // Sino POR SIGNATÁRIO, não gateado em `adv.moved`: este case roda pro
+      // termo do proponente E pro do proprietário, mas o status só se move na
+      // primeira vez (a CAS rejeita a segunda). Gatear no `moved` faria a
+      // entrega ao proprietário nunca avisar. Quem segura replay aqui é a
+      // @@unique([type, batchId]) via dedupeSuffix — mesmo padrão de
+      // `accepted_party`. Gate só em terminais NEGATIVOS: entrega tardia numa
+      // proposta morta não toca sino.
+      if (!DEAD_FOR_TRACKING.has(proposal.status)) {
+        waitUntil(
+          notifyProposalMilestone({
+            proposalId: proposal.id,
+            orgId: proposal.orgId,
+            userId: proposal.userId,
+            kind: "delivered",
+            dedupeSuffix: signer?.id ?? "proponente",
+          })
+        );
+      }
       break;
+    }
 
     case "completed": {
       // Só o aceite do PROPONENTE completa a proposta. O aceite de um proprietário
@@ -154,13 +188,7 @@ export async function processProposalAcceptanceEvent(
         // (proposta morta) — aceite do proprietário DEPOIS de completa/
         // convertida é a ordem normal do Aceite multi-termo (termos paralelos)
         // e falha_envio segue viva/reenviável; nesses casos o sino toca.
-        const DEAD_FOR_PARTY_ACCEPT = new Set([
-          "cancelada",
-          "expirada",
-          "recusada_proponente",
-          "recusada_vendedor",
-        ]);
-        if (!DEAD_FOR_PARTY_ACCEPT.has(proposal.status)) {
+        if (!DEAD_FOR_TRACKING.has(proposal.status)) {
           // Body condiciona ao momento: pós-completa/convertida, "aguardando
           // o proponente" seria falso — o aceite é confirmação de arquivo.
           const afterCompletion =
