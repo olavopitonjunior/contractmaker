@@ -227,7 +227,7 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
     defaultModel: SONNET_MODEL,
     tenantEditable: false,
     external: true,
-    operations: ["max_chat"],
+    operations: ["max_chat", "max_transcribe"],
     // Os endpoints já existem (`/api/agents/{profile,usage}` e, desde a Sessão
     // C, `/api/agents/knowledge/search` — esta ÚLTIMA já honra `enabled` e o
     // teto mensal, recusando consulta de agente desligado). Mesmo assim isto
