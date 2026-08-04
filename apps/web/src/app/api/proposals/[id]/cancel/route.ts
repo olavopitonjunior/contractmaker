@@ -56,6 +56,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     },
     req,
     idempotencyKey: req.headers.get("x-idempotency-key"),
+    // Cancelar é irreversível, mas quem pede é o dono da proposta e o pedido é
+    // explícito ("cancela essa proposta"). Segurar atrás de uma aprovação que só
+    // existe na tela do app deixaria o corretor sem saída pelo WhatsApp — o
+    // mesmo beco do /send. A intent fica gravada como `executed`, com quem pediu.
+    autoApprove: true,
     run: async () => {
       const res = await runProposalCancel({
         proposalId: proposal.id,
