@@ -6,6 +6,7 @@ import {
   ListChecks,
   Users,
   Briefcase,
+  MessageCircle,
   type LucideIcon,
 } from "lucide-react";
 
@@ -21,7 +22,8 @@ export type OnboardingStepKey =
   | "clicksign"
   | "form"
   | "invite"
-  | "deal";
+  | "deal"
+  | "max";
 
 export const STEP_ORDER: OnboardingStepKey[] = [
   "google",
@@ -31,6 +33,9 @@ export const STEP_ORDER: OnboardingStepKey[] = [
   "form",
   "invite",
   "deal",
+  // Por último de propósito: só faz sentido depois que existe equipe e negócio
+  // pra o agente ter sobre o que falar.
+  "max",
 ];
 
 export interface StepMeta {
@@ -126,6 +131,17 @@ export const STEP_META: Record<OnboardingStepKey, StepMeta> = {
     icon: Briefcase,
     cta: "Criar negócio",
   },
+  max: {
+    key: "max",
+    short: "Max (WhatsApp)",
+    title: "Ativar o Max no WhatsApp",
+    eyebrow: "Assistente",
+    desc: "Avisos e dúvidas no WhatsApp da equipe.",
+    blurb:
+      "O Max avisa sua equipe no WhatsApp quando um contrato é assinado, uma comissão é paga ou um formulário trava — e responde dúvidas sobre o processo. Ele reconhece cada pessoa pelo telefone do cadastro, então quem não tiver telefone cadastrado não recebe nada.",
+    icon: MessageCircle,
+    cta: "Ativar o Max",
+  },
 };
 
 /**
@@ -156,5 +172,7 @@ export function stepUrl(
     case "deal":
       // `?novo=1` destaca (e abre) o dropdown "Novo negócio" no Kanban.
       return opts?.locacaoOnly ? "/pipeline/locacao?novo=1" : "/pipeline?novo=1";
+    case "max":
+      return "/settings/ai-agents#max";
   }
 }

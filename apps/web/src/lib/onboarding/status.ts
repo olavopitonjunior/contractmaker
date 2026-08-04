@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
-import { getOrgModules } from "@/lib/modules/read";
-import type { ModuleKey } from "@/lib/modules/catalog";
+import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
+import { FEATURE, type ModuleKey } from "@/lib/modules/catalog";
 import { STEP_ORDER, type OnboardingStepKey } from "./steps";
 
 /**
@@ -120,6 +120,50 @@ export async function getOnboardingStatus(orgId: string): Promise<OnboardingStat
   // --- templates ---
   const templatesDone = activeTemplates > 0;
 
+  // --- max (passo OPCIONAL, e só existe quando a org tem o canal disponível) ---
+  //
+  // A metade que importa é a SEGUNDA. Provisionar o Max sem ninguém com
+  // telefone deixa o tenant com a feature verde e o agente mudo — foi
+  // exatamente o estado dos quatro primeiros tenants, onde 1 de 13 pessoas
+  // tinha telefone. Por isso o passo só fecha quando alguém de fato pode
+  // receber, e o `detail` mostra o placar mesmo quando ainda não fechou.
+  //
+  // `deliveredAt` não-nulo, e não só `status: "active"`: "ativo sem
+  // confirmação" é o estado das orgs provisionadas por script, e afirmar
+  // entrega que ninguém observou é o erro que já custou um hotfix.
+  const maxAvailable =
+    isFeatureEnabled(modules, FEATURE.VENDAS_MAX) ||
+    isFeatureEnabled(modules, FEATURE.LOCACAO_MAX);
+
+  const [maxProvisioning, comTelefone, recebendo] = maxAvailable
+    ? await Promise.all([
+        prisma.agentProvisioning.findUnique({
+          where: { orgId_agentKey: { orgId, agentKey: "max" } },
+          select: { status: true, deliveredAt: true },
+        }),
+        prisma.orgMembership.count({
+          where: { orgId, user: { phone: { not: null }, deletedAt: null } },
+        }),
+        prisma.userNotificationPreference.count({
+          where: { orgId, whatsappOptInAt: { not: null } },
+        }),
+      ])
+    : [null, 0, 0];
+
+  const maxProvisionado =
+    maxProvisioning?.status === "active" && maxProvisioning.deliveredAt != null;
+  const maxDone = maxProvisionado && recebendo > 0;
+
+  const maxDetail = !maxAvailable
+    ? undefined
+    : !maxProvisionado
+      ? "aguardando ativação"
+      : recebendo === 0
+        ? comTelefone === 0
+          ? "ninguém com telefone cadastrado ainda"
+          : `${comTelefone} com telefone · ninguém optou por receber`
+        : undefined;
+
   const doneByKey: Record<OnboardingStepKey, boolean> = {
     google: googleDone,
     profile: profileDone,
@@ -128,6 +172,7 @@ export async function getOnboardingStatus(orgId: string): Promise<OnboardingStat
     form: formDone,
     invite: inviteDone,
     deal: deals > 0,
+    max: maxDone,
   };
   const detailByKey: Partial<Record<OnboardingStepKey, string>> = {
     profile: profileDetail,
@@ -135,12 +180,23 @@ export async function getOnboardingStatus(orgId: string): Promise<OnboardingStat
     clicksign: !clicksignDone
       ? "necessário para enviar assinaturas"
       : undefined,
+    max: maxDetail,
   };
 
-  // clicksign é OPCIONAL (não bloqueia os 100%). Os demais são obrigatórios.
-  const OPTIONAL_STEPS: OnboardingStepKey[] = ["clicksign"];
+  // clicksign e max sao OPCIONAIS (nao bloqueiam os 100%). Os demais sao
+  // obrigatorios.
+  //
+  // O `max` e opcional por dois motivos: o canal e compartilhado e nem toda org
+  // o tem disponivel, e metade do passo depende de opt-in PESSOAL de outra
+  // pessoa (LGPD — o dono nao liga WhatsApp por ninguem). Passo obrigatorio que
+  // o dono nao consegue fechar sozinho e onboarding que nunca termina.
+  const OPTIONAL_STEPS: OnboardingStepKey[] = ["clicksign", "max"];
 
-  const steps: OnboardingStep[] = STEP_ORDER.map((key) => ({
+  // Org sem o canal disponivel nao ve o passo — nao adianta oferecer o que o
+  // super_admin ainda nao liberou.
+  const visibleSteps = STEP_ORDER.filter((k) => k !== "max" || maxAvailable);
+
+  const steps: OnboardingStep[] = visibleSteps.map((key) => ({
     key,
     done: doneByKey[key],
     required: !OPTIONAL_STEPS.includes(key),
