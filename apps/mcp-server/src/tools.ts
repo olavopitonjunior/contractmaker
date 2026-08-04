@@ -2205,7 +2205,7 @@ export const tools: Tool[] = [
   {
     name: "update_proposal_signer",
     description:
-      "Corrige o CONTATO de quem assina (telefone, e-mail, nome, CPF) numa proposta já enviada — o caso clássico é 'mandei pro número errado'. Altera também na ClickSign, então o link passa a valer pro contato novo. Só funciona enquanto a pessoa não assinou. Depois de corrigir, chame `resend_proposal_signer` pra avisar o contato certo. NÃO cancele nem crie outra proposta por causa de telefone errado. O `signerId` vem de `get_proposal`.",
+      "Corrige o CONTATO de quem assina (telefone, e-mail, nome, CPF) **enquanto a proposta ainda NÃO foi enviada** (status rascunho/falha_envio); aí é só chamar e seguir. **Depois de enviada a ClickSign recusa** e isto responde 409 — nesse caso o único caminho é `cancel_proposal` e criar de novo com o contato certo, avisando o corretor que vai gastar um envelope novo. O `signerId` NÃO é o do array `signers` de `get_proposal`: é o de `envelopes[].signers[]`, do envelope da proposta.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2234,7 +2234,7 @@ export const tools: Tool[] = [
   {
     name: "resend_proposal_signer",
     description:
-      "Reenvia o convite de assinatura pra UM signatário — depois de corrigir o contato, ou quando a pessoa diz que não recebeu. Não cria proposta nova.",
+      "Reenvia o convite de assinatura pra UM signatário — quando a pessoa diz que não recebeu, ou depois de corrigir o contato de uma proposta ainda não enviada. Não cria proposta nova. O `signerId` vem de `envelopes[].signers[]` em `get_proposal`.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2255,7 +2255,7 @@ export const tools: Tool[] = [
   {
     name: "remove_proposal_signer",
     description:
-      "Tira UM signatário da proposta (pessoa errada foi incluída), enquanto ela não assinou. Não cancela a proposta inteira — pra isso é `cancel_proposal`.",
+      "Tira UM signatário da proposta (pessoa errada foi incluída), enquanto ela não assinou. Não cancela a proposta inteira — pra isso é `cancel_proposal`. Atenção: NÃO existe tool pra adicionar signatário depois, então remover o proponente de uma proposta enviada a deixa sem quem assine — nesse caso o certo é cancelar e criar de novo. O `signerId` vem de `envelopes[].signers[]` em `get_proposal`.",
     inputSchema: {
       type: "object",
       properties: {
