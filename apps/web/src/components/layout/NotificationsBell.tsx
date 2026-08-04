@@ -13,6 +13,7 @@ import {
   FileText,
   Clock,
   MessageCircle,
+  Send,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -61,7 +62,12 @@ function iconForType(type: string) {
     case "envelope_signed":
     case "proposal_completed":
     case "proposal_accepted_party":
+    case "proposal_signed_proponente":
       return <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />;
+    // Entrega é andamento, não desfecho — ícone neutro pra não competir com os
+    // marcos que pedem ação.
+    case "proposal_delivered":
+      return <Send className="h-4 w-4 text-blue-600 shrink-0" />;
     case "envelope_refused":
     case "proposal_refused":
       return <XCircle className="h-4 w-4 text-red-600 shrink-0" />;

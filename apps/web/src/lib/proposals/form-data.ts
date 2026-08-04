@@ -18,6 +18,7 @@
 import { parseMoneyBR } from "@/lib/format/money";
 import { GARANTIA_TIPOS, type GarantiaTipo } from "@/lib/contracts/template-category";
 import { computeDedupeKey } from "./signer-dedupe";
+import { DEFAULT_PROPOSAL_VALIDITY_DAYS } from "./create-schema";
 
 /**
  * Modelos (schemaType) oferecidos por tipo de proposta. O 1º é o default da
@@ -128,7 +129,9 @@ export function emptyProposalForm(
     imovelEndereco: "",
     ilistSnapshot: null,
     valor: "",
-    validadeDias: "5",
+    // Mesmo padrão que o servidor aplica quando o prazo não vem (create-schema.ts)
+    // — a UI mandava 5 e divergia em silêncio do que a API/agente cria.
+    validadeDias: String(DEFAULT_PROPOSAL_VALIDITY_DAYS),
     comissao: false,
     esconderComissao: false,
     garantia: emptyGarantia(),
@@ -399,7 +402,7 @@ export function parseProposalForm(input: {
   // Validade guardada como INSTANTE (validUntil); o form pede DIAS. Reconstitui
   // a partir de agora — arredondando pra cima pra não perder um dia por causa
   // das horas já corridas desde a criação.
-  let validadeDias = "5";
+  let validadeDias = String(DEFAULT_PROPOSAL_VALIDITY_DAYS);
   if (input.validUntil) {
     const diff = new Date(input.validUntil).getTime() - Date.now();
     const dias = Math.max(0, Math.ceil(diff / 86_400_000));

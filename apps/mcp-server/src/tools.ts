@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { callApi, callBridge, logProactiveOutbound } from "./index.js";
 import { validateInWindow } from "./cron-window.js";
+import { explainApiError } from "./api-error.js";
 
 /**
  * Reconhece JID de grupo. Cobre três formatos, de propósito:
@@ -1930,16 +1931,59 @@ export const tools: Tool[] = [
           type: "object",
           description: "Campos da proposta (livre, validado pelo schema do form)",
         },
-        validUntil: { type: "string", description: "ISO 8601, opcional" },
+        validUntil: {
+          type: "string",
+          description:
+            "ISO 8601 em UTC (terminando em Z). OPCIONAL — omita: sem prazo informado a proposta vale 7 dias. Não pergunte a validade ao usuário.",
+        },
         signers: {
           type: "array",
-          description: "Signatários [{name,email,phone?,documentation?}]",
-          items: { type: "object" },
+          description:
+            "Pessoas que assinam. `role` é OBRIGATÓRIO em cada uma: quem faz a oferta é `proponente`, o dono do imóvel é `vendedor`.",
+          items: {
+            type: "object",
+            properties: {
+              role: {
+                type: "string",
+                enum: ["proponente", "vendedor", "conjuge", "testemunha"],
+              },
+              name: { type: "string" },
+              email: { type: "string" },
+              cpf: { type: "string", description: "Só dígitos ou formatado" },
+              phone: { type: "string" },
+              notifyChannel: {
+                type: "string",
+                enum: ["email", "whatsapp", "sms"],
+                description:
+                  "Por onde avisar. Default 'email' — para Aceite por WhatsApp, mande 'whatsapp' com o telefone preenchido.",
+              },
+            },
+            required: ["role", "name"],
+          },
+        },
+        propertyId: { type: "string", description: "Imóvel do cadastro, opcional" },
+        comissaoIncluida: {
+          type: "boolean",
+          description: "Inclui a comissão no corpo da proposta",
+        },
+        hiddenPaths: {
+          type: "array",
+          description:
+            "Campos a esconder da via do proprietário (ex.: comissão). Não-vazio faz a 2ª via sair reduzida.",
+          items: { type: "string" },
         },
       },
       required: ["title", "schemaType"],
     },
     handler: async (args) => {
+      // A rota exige ISO-8601 estrito em UTC; data com offset (-03:00) ou só
+      // "AAAA-MM-DD" reprovaria no Zod. Normaliza o que dá pra normalizar e
+      // deixa o resto seguir, pra falha virar mensagem traduzida e não crash.
+      let validUntil = args.validUntil as string | undefined;
+      if (typeof validUntil === "string") {
+        const d = new Date(validUntil);
+        if (!Number.isNaN(d.getTime())) validUntil = d.toISOString();
+      }
       const r = await callApi({
         method: "POST",
         path: "/api/proposals",
@@ -1947,11 +1991,14 @@ export const tools: Tool[] = [
           title: args.title,
           schemaType: args.schemaType,
           dataJson: args.dataJson ?? {},
-          validUntil: args.validUntil,
+          validUntil,
           signers: args.signers,
+          propertyId: args.propertyId,
+          comissaoIncluida: args.comissaoIncluida,
+          hiddenPaths: args.hiddenPaths,
         },
       });
-      return r.body;
+      return explainApiError(r) ?? r.body;
     },
   },
   {
