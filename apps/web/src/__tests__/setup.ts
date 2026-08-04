@@ -203,6 +203,16 @@ vi.mock("@/lib/db/prisma", () => {
         .fn()
         .mockResolvedValue({ role: "owner", customRole: null }),
     },
+    // Papéis customizados. O provisionamento do Max cria um por org, com o
+    // mínimo que ele usa (ver `upsertMaxRole`).
+    customRole: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+      upsert: vi.fn().mockResolvedValue({ id: "role-1" }),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+    },
     auditLog: {
       create: vi.fn().mockResolvedValue({}),
       findMany: vi.fn().mockResolvedValue([]),
