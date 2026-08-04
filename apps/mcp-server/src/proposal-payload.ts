@@ -67,9 +67,14 @@ function pessoaToData(p: PessoaInput): Record<string, unknown> {
 
 function parseValor(raw: unknown): number | null {
   if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) return raw;
-  const s = str(raw);
+  const s = str(raw).replace(/^r\$\s*/i, "");
   if (!s) return null;
-  // "1.000.000,00" / "1000000" / "R$ 400.000"
+  // String com letra é valor POR EXTENSO ("400 mil", "1 milhão") — descartar as
+  // letras e ficar com os dígitos transformaria "400 mil" em R$ 400, uma
+  // proposta válida e enviável com valor absurdo. Recusar força o chamador a
+  // mandar número, que é o que o inputSchema declara.
+  if (/[a-záéíóú]/i.test(s)) return null;
+  // "1.000.000,00" / "1000000" / "400.000"
   const limpo = s.replace(/[^\d.,-]/g, "");
   const normalizado = limpo.includes(",")
     ? limpo.replace(/\./g, "").replace(",", ".")

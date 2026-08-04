@@ -121,6 +121,25 @@ describe("o mínimo obrigatório, em linguagem de corretor", () => {
   });
 });
 
+describe("valor — nunca inventar número a partir de texto", () => {
+  it('recusa valor por extenso: "400 mil" NÃO vira R$ 400', () => {
+    // Descartar as letras e ficar com os dígitos transformaria "400 mil" numa
+    // proposta válida de R$ 400 — enviável, assinável, absurda.
+    for (const valor of ["400 mil", "1 milhão", "quatrocentos mil"]) {
+      const out = buildProposalPayload({ ...ARGS_MINIMO, valor });
+      expect(out.ok).toBe(false);
+      expect(out.message).toContain("valor");
+    }
+  });
+
+  it('aceita formatos numéricos BR: "R$ 1.000.000,00"', () => {
+    const out = buildProposalPayload({ ...ARGS_MINIMO, valor: "R$ 1.000.000,00" });
+    expect(out.ok).toBe(true);
+    const data = out.body!.dataJson as Record<string, unknown>;
+    expect((data.pagamento as Record<string, unknown>).valor_total).toBe(1000000);
+  });
+});
+
 describe("vendedor — o fantasma que travou três envios", () => {
   it("sem contato: recusa e oferece seguir só com o proponente", () => {
     const out = buildProposalPayload({
