@@ -72,6 +72,7 @@ export const MCP_TOOL_NAMES: readonly string[] = [
   "update_proposal",
   "update_proposal_signer",
   "resend_proposal_signer",
+  "add_proposal_signer",
   "remove_proposal_signer",
   "record_insurance_quote",
   "get_deal_insurance",
