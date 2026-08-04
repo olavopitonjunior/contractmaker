@@ -2239,7 +2239,7 @@ export const tools: Tool[] = [
   {
     name: "update_proposal_signer",
     description:
-      "Corrige o CONTATO de quem assina (telefone, e-mail, nome, CPF) **enquanto a proposta ainda NÃO foi enviada** (status rascunho/falha_envio); aí é só chamar e seguir. **Depois de enviada a ClickSign recusa** e isto responde 409 — nesse caso o único caminho é `cancel_proposal` e criar de novo com o contato certo, avisando o corretor que vai gastar um envelope novo. O `signerId` NÃO é o do array `signers` de `get_proposal`: é o de `envelopes[].signers[]`, do envelope da proposta.",
+      "Corrige o CONTATO de quem assina (telefone, e-mail, nome, CPF) **enquanto a proposta ainda NÃO foi enviada** (status rascunho/falha_envio); aí é só chamar e seguir. **Depois de enviada a ClickSign recusa** e isto responde 409 — nesse caso NÃO cancele: use `remove_proposal_signer` no errado e `add_proposal_signer` com o contato certo, que a pessoa é notificada na hora e a proposta continua de pé. O `signerId` NÃO é o do array `signers` de `get_proposal`: é o de `envelopes[].signers[]`, do envelope da proposta.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2287,9 +2287,43 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "add_proposal_signer",
+    description:
+      "Acrescenta um signatário à proposta JÁ ENVIADA (envelope em curso) — a pessoa é notificada na hora. É a segunda metade do conserto de contato errado: `remove_proposal_signer` tira o errado, esta põe o certo, SEM cancelar a proposta nem gastar tudo de novo. Exige telefone OU e-mail.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        name: { type: "string", description: "Nome completo" },
+        phone: { type: "string", description: "Com DDD" },
+        email: { type: "string" },
+        documentation: { type: "string", description: "CPF" },
+        role: {
+          type: "string",
+          enum: ["proponente", "vendedor", "conjuge", "testemunha"],
+        },
+      },
+      required: ["proposalId", "name"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/signers`,
+        body: {
+          name: args.name,
+          phone: args.phone,
+          email: args.email,
+          documentation: args.documentation,
+          role: args.role ?? "proponente",
+        },
+      });
+      return explainApiError(r) ?? r.body;
+    },
+  },
+  {
     name: "remove_proposal_signer",
     description:
-      "Tira UM signatário da proposta (pessoa errada foi incluída), enquanto ela não assinou. Não cancela a proposta inteira — pra isso é `cancel_proposal`. Atenção: NÃO existe tool pra adicionar signatário depois, então remover o proponente de uma proposta enviada a deixa sem quem assine — nesse caso o certo é cancelar e criar de novo. O `signerId` vem de `envelopes[].signers[]` em `get_proposal`.",
+      "Tira UM signatário da proposta (pessoa errada foi incluída), enquanto ela não assinou. Não cancela a proposta inteira — pra isso é `cancel_proposal`. Se removeu o proponente, ponha outro com `add_proposal_signer`: proposta sem quem assine não fecha. O `signerId` vem de `envelopes[].signers[]` em `get_proposal`.",
     inputSchema: {
       type: "object",
       properties: {

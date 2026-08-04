@@ -47,8 +47,10 @@
     <p>_______________________________________</p>
     <p style="font-size: 10pt;">{{#each compradores}}{{this.nome}}{{#unless @last}}; {{/unless}}{{/each}} — Proponente</p>
   </div>
+  {{#if vendedores.length}}
   <div style="margin-top: 24px;">
     <p>_______________________________________</p>
     <p style="font-size: 10pt;">{{#each vendedores}}{{this.nome}}{{#unless @last}}; {{/unless}}{{/each}} — Vendedor(es)</p>
   </div>
+  {{/if}}
 </div>

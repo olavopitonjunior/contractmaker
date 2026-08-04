@@ -94,6 +94,34 @@ describe("payload da tool → template real → documento legível", () => {
     expect(html).not.toContain("1.000.000");
   });
 
+  it("sem vendedor, não imprime linha de assinatura em branco", () => {
+    const out = buildProposalPayload({
+      schemaType: "compra_venda_v1",
+      proponente: { nome: "Patrícia Andrade", telefone: "11970325533" },
+      imovel: { endereco: "Rua Senador Godói, 606" },
+      valor: 1000000,
+      canal: "whatsapp",
+    });
+    const html = render(out.body!.dataJson as Record<string, unknown>);
+    expect(html).toContain("— Proponente");
+    // Antes saía "_____ — Vendedor(es)" vazio num documento que ninguém do
+    // outro lado assina: o corretor lia como campo faltando.
+    expect(html).not.toContain("Vendedor(es)");
+  });
+
+  it("com vendedor, a linha de assinatura dele aparece", () => {
+    const out = buildProposalPayload({
+      schemaType: "compra_venda_v1",
+      proponente: { nome: "Patrícia Andrade", telefone: "11970325533" },
+      imovel: { endereco: "Rua Senador Godói, 606" },
+      valor: 1000000,
+      canal: "whatsapp",
+      vendedor: { nome: "Júnior Garrido", telefone: "13997826692" },
+    });
+    const html = render(out.body!.dataJson as Record<string, unknown>);
+    expect(html).toContain("Júnior Garrido — Vendedor(es)");
+  });
+
   it("sem comissão informada, a seção de intermediação não existe", () => {
     const out = buildProposalPayload({
       schemaType: "compra_venda_v1",
