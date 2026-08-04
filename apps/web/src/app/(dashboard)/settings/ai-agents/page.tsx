@@ -3,6 +3,9 @@ import { prisma } from "@/lib/db/prisma";
 import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { PageHeader } from "@/components/layout/page-header";
 import { AiAgentsClient } from "./AiAgentsClient";
+import { MaxAgentCard } from "@/components/settings/MaxAgentCard";
+import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
+import { FEATURE } from "@/lib/modules/catalog";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Agentes de IA" };
@@ -35,6 +38,45 @@ export default async function AiAgentsSettingsPage() {
   });
   const canEdit = membership?.role === "owner" || membership?.role === "admin";
 
+  // Estado do Max lido no servidor: são quatro contagens baratas e o card é o
+  // ÚNICO lugar onde o dono vê a diferença entre "ativei" e "alguém recebe".
+  const modules = await getOrgModules(org.id);
+  const maxAvailable =
+    isFeatureEnabled(modules, FEATURE.VENDAS_MAX) ||
+    isFeatureEnabled(modules, FEATURE.LOCACAO_MAX);
+
+  const [prov, membersTotal, membersWithPhone, optedIn] = maxAvailable
+    ? await Promise.all([
+        prisma.agentProvisioning.findUnique({
+          where: { orgId_agentKey: { orgId: org.id, agentKey: "max" } },
+          select: { status: true, deliveredAt: true, lastError: true },
+        }),
+        prisma.orgMembership.count({
+          where: { orgId: org.id, user: { deletedAt: null } },
+        }),
+        prisma.orgMembership.count({
+          where: {
+            orgId: org.id,
+            user: { phone: { not: null }, deletedAt: null },
+          },
+        }),
+        prisma.userNotificationPreference.count({
+          where: { orgId: org.id, whatsappOptInAt: { not: null } },
+        }),
+      ])
+    : [null, 0, 0, 0];
+
+  const maxState = {
+    available: maxAvailable,
+    // `deliveredAt` e nao so `status`: "ativo sem confirmacao" e o estado das
+    // orgs provisionadas por script, e nao e entrega observada.
+    active: prov?.status === "active" && prov.deliveredAt != null,
+    lastError: prov?.lastError ?? null,
+    membersTotal,
+    membersWithPhone,
+    optedIn,
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -46,6 +88,7 @@ export default async function AiAgentsSettingsPage() {
           Somente proprietários e administradores da organização podem editar.
         </p>
       )}
+      <MaxAgentCard state={maxState} canEdit={canEdit} />
       <AiAgentsClient canEdit={canEdit} />
     </div>
   );
