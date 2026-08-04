@@ -209,6 +209,13 @@ describe("explainApiError — nunca vaza interno pro WhatsApp", () => {
     }
   });
 
+  it("402 de orçamento explica a causa certa, não 'dados errados'", () => {
+    // body real: { error: "budget", ... } — token único, nunca repassado cru.
+    const out = explainApiError({ status: 402, body: { error: "budget", spentCents: 9900 } })!;
+    expect(out.message).toContain("orçamento");
+    expect(out.message).not.toContain("dados");
+  });
+
   it("dá mensagem específica pro 409 de contato duplicado", () => {
     // Texto real que a rota devolve — chega ao corretor como está.
     const body = {
