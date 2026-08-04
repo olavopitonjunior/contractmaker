@@ -130,7 +130,11 @@ export type AIOperation =
   // Agente externo (Max, LangGraph fora deste repo) reportando o próprio turn
   // por `POST /api/agents/usage`. O custo dele roda em infra nossa e some do
   // painel se não voltar por aqui.
-  | "max_chat";
+  | "max_chat"
+  // Áudio ou imagem que chegou ao Max por WhatsApp, transcrito aqui. Roda neste
+  // repo de propósito: a chave do Gemini e o painel de custo já vivem aqui, e o
+  // serviço do Max não precisa de mais um segredo pra girar.
+  | "max_transcribe";
 
 export interface RecordUsageParams {
   /** `null` = custo de PLATAFORMA (base universal), sem tenant a quem atribuir. */
