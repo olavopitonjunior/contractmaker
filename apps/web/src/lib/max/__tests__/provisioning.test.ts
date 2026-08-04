@@ -5,7 +5,7 @@ import {
   deprovisionMaxForOrg,
   syncMaxForOrg,
   serviceUserEmail,
-  MAX_SCOPES_FASE2,
+  MAX_SCOPES,
 } from "../provisioning";
 import { pushOrgToMax, deactivateOrgInMax } from "@/lib/max/push-org";
 import { createApiToken, revokeApiToken } from "@/lib/auth/api-token";
@@ -51,7 +51,7 @@ describe("provisionMaxForOrg", () => {
     expect(r.status).toBe("created");
     expect(r.rawToken).toBe("cmt_novo");
     expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: "svc-1", scopes: MAX_SCOPES_FASE2 })
+      expect.objectContaining({ userId: "svc-1", scopes: MAX_SCOPES })
     );
   });
 
@@ -127,14 +127,36 @@ describe("provisionMaxForOrg", () => {
   });
 
   /**
-   * Enquanto `X-Act-As-User` aceitar delegar para o `owner` sem comparar roles,
-   * este escopo faz o token do bot valer o poder do dono do tenant.
+   * O Max escreve UMA coisa: formulário de venda. `documents:rw` é o escopo que
+   * `POST /api/forms` exige, e é o teto do que ele pode fazer.
+   *
+   * A lista é fixada inteira de propósito. Escopo é congelado na emissão do
+   * token, então acrescentar um aqui sem reemitir não tem efeito — e acrescentar
+   * um SEM QUERER é uma ampliação de poder que nenhum outro teste pegaria. Este
+   * teste falhar é o lembrete de que a mudança precisa de reprovision.
    */
-  it("os escopos da Fase 2 NÃO incluem users:delegate nem escrita", async () => {
-    expect(MAX_SCOPES_FASE2).not.toContain("users:delegate");
-    expect(MAX_SCOPES_FASE2).not.toContain("documents:rw");
-    expect(MAX_SCOPES_FASE2).not.toContain("proposals:rw");
-    expect(MAX_SCOPES_FASE2).toEqual(["agents:r", "agents:rw", "metrics:r"]);
+  it("os escopos do Max cobrem a escrita de formulário e nada além", async () => {
+    expect(MAX_SCOPES).toEqual([
+      "agents:r",
+      "agents:rw",
+      "metrics:r",
+      "documents:rw",
+    ]);
+  });
+
+  /**
+   * Não é redundante com o teste acima: aquele fixa a lista, este diz POR QUE
+   * estes dois em particular não podem entrar sem decisão explícita.
+   *
+   * `users:delegate` deixou de ser bloqueado por falta da trava (#249 entregou)
+   * e passou a ser desnecessário: `requireApiAuth` — o helper de todas as rotas
+   * que o Max chama — ignora `X-Act-As-User`. Ligar não daria poder novo, só
+   * superfície. `proposals:rw` é da fase seguinte, e proposta carrega valores e
+   * vai para terceiro: outro patamar de consequência.
+   */
+  it("não ganha delegação nem escrita de proposta de carona", async () => {
+    expect(MAX_SCOPES).not.toContain("users:delegate");
+    expect(MAX_SCOPES).not.toContain("proposals:rw");
   });
 
   it("org inexistente falha sem criar nada", async () => {
