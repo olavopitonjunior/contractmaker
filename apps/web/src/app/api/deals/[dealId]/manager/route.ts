@@ -4,7 +4,6 @@ import { prisma } from "@/lib/db/prisma";
 import { can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { loadScopedDeal } from "@/lib/deals/route-helpers";
-import { getManagerSettings } from "@/lib/deals/manager";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
 export const runtime = "nodejs";
@@ -16,9 +15,15 @@ const bodySchema = z.object({
 });
 
 /**
- * PATCH /api/deals/[dealId]/manager — define/troca o gerente do negócio.
- * Molde do assignee de proposta (api/proposals/[id]/assignee). `clear:true`
- * remove — bloqueado (422) quando a org exige gerente (managerRequired).
+ * PATCH /api/deals/[dealId]/manager — define/troca/remove o gerente do negócio.
+ * Molde do assignee de proposta (api/proposals/[id]/assignee).
+ *
+ * `clear:true` remove sempre — inclusive com `managerRequired` ligado. O toggle
+ * da org governa a CRIAÇÃO de negócio (resolveManagerForCreate), não a gestão
+ * de um negócio existente: o admin precisa poder deixar um negócio órfão de
+ * propósito (gerente desligado, carteira em transição), e negócio sem gerente
+ * simplesmente sai do escopo restrito dos gerentes (dealScopeWhere) e segue
+ * visível pra quem tem deal.view.all.
  */
 export async function PATCH(
   req: NextRequest,
@@ -50,17 +55,6 @@ export async function PATCH(
 
   let next: string | null;
   if (clear) {
-    const { managerRequired } = await getManagerSettings(auth.org.id);
-    if (managerRequired) {
-      return NextResponse.json(
-        {
-          error: "gerente_obrigatorio",
-          message:
-            "Esta organização exige um gerente responsável — troque em vez de remover.",
-        },
-        { status: 422 }
-      );
-    }
     next = null;
   } else {
     // Só membros da org podem ser gerentes (não restringe ao role gerente —
