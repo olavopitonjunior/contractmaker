@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db/prisma";
 import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
 import { FEATURE, type ModuleKey } from "@/lib/modules/catalog";
+import { getMaxReach } from "@/lib/max/reach";
 import { STEP_ORDER, type OnboardingStepKey } from "./steps";
 
 /**
@@ -135,20 +136,21 @@ export async function getOnboardingStatus(orgId: string): Promise<OnboardingStat
     isFeatureEnabled(modules, FEATURE.VENDAS_MAX) ||
     isFeatureEnabled(modules, FEATURE.LOCACAO_MAX);
 
-  const [maxProvisioning, comTelefone, recebendo] = maxAvailable
+  // A conta de alcance mora em `lib/max/reach.ts` — é a MESMA do card de
+  // `/settings/ai-agents`, e duas cópias dela é o jeito mais rápido de as duas
+  // telas discordarem sobre o mesmo fato.
+  const [maxProvisioning, alcance] = maxAvailable
     ? await Promise.all([
         prisma.agentProvisioning.findUnique({
           where: { orgId_agentKey: { orgId, agentKey: "max" } },
           select: { status: true, deliveredAt: true },
         }),
-        prisma.orgMembership.count({
-          where: { orgId, user: { phone: { not: null }, deletedAt: null } },
-        }),
-        prisma.userNotificationPreference.count({
-          where: { orgId, whatsappOptInAt: { not: null } },
-        }),
+        getMaxReach(orgId),
       ])
-    : [null, 0, 0];
+    : [null, { membersTotal: 0, membersWithPhone: 0, optedIn: 0 }];
+
+  const comTelefone = alcance.membersWithPhone;
+  const recebendo = alcance.optedIn;
 
   const maxProvisionado =
     maxProvisioning?.status === "active" && maxProvisioning.deliveredAt != null;

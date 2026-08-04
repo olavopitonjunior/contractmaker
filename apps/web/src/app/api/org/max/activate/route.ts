@@ -10,7 +10,8 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
 import { FEATURE } from "@/lib/modules/catalog";
-import { syncMaxForOrg } from "@/lib/max/provisioning";
+import { syncMaxForOrg, MAX_AGENT_KEY } from "@/lib/max/provisioning";
+import { prisma } from "@/lib/db/prisma";
 
 export const dynamic = "force-dynamic";
 
@@ -76,6 +77,24 @@ export async function POST(req: NextRequest) {
       },
       { status: 409 }
     );
+  }
+
+  // Já ativo e com entrega confirmada? Não toca em nada.
+  //
+  // `syncMaxForOrg` sempre ROTACIONA (`createApiToken` não é idempotente), e
+  // uma rotação sobre um tenant saudável é troca de credencial sem motivo: se o
+  // push falhar nesse mesmo ciclo, o agente cai para aquele tenant até a
+  // reconciliação. O card esconde o botão quando ativo, mas a UI não é a
+  // fronteira — duplo-submit, retry de rede ou chamada direta chegam aqui.
+  //
+  // Reconectar continua funcionando, que é o caso de uso real: qualquer estado
+  // diferente de "ativo E entregue" cai no sync normal.
+  const atual = await prisma.agentProvisioning.findUnique({
+    where: { orgId_agentKey: { orgId: ctx.orgId, agentKey: MAX_AGENT_KEY } },
+    select: { status: true, deliveredAt: true },
+  });
+  if (atual?.status === "active" && atual.deliveredAt != null) {
+    return NextResponse.json({ ok: true, delivered: true, noop: true });
   }
 
   const result = await syncMaxForOrg(ctx.orgId);
