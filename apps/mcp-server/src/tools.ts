@@ -1858,7 +1858,7 @@ export const tools: Tool[] = [
   {
     name: "list_proposals",
     description:
-      "Lista propostas da org (escopo RBAC: corretor vê só as próprias/atribuídas). Filtros opcionais por status e kind.",
+      "**A tool pra consultar PROPOSTAS do sistema** — 'quais propostas eu tenho', 'como está a proposta da Patrícia', 'a última que mandei'. Escopo RBAC: corretor vê só as próprias/atribuídas. Filtros opcionais por status e kind. Não confundir com `nc_propostas`/`prop_*`, que são a ficha de acompanhamento do grupo Negócios NC e não enxergam o que existe no ImobPro.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2078,7 +2078,7 @@ export const tools: Tool[] = [
   {
     name: "cancel_proposal",
     description:
-      "HITL. Cancela a proposta (destrói envelopes ClickSign em curso — re-enviar gasta orçamento de novo). **Cria ActionIntent** que precisa de aprovação humana. SEMPRE confirma verbalmente com user antes.",
+      "Cancela a proposta inteira. Executa na hora quando o corretor pede. IRREVERSÍVEL: destrói os envelopes ClickSign em curso e reenviar gasta orçamento de novo — por isso não é o remédio pra contato errado (aí é `update_proposal_signer` + `resend_proposal_signer`) nem pra dado errado (aí é `update_proposal`). Use quando o negócio caiu ou a proposta não deve mais existir.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2168,6 +2168,108 @@ export const tools: Tool[] = [
         body: {},
       });
       return r.body;
+    },
+  },
+  {
+    name: "update_proposal",
+    description:
+      "Corrige uma proposta JÁ CRIADA (título, dados, validade). Use isto em vez de criar outra quando algo saiu errado — duas propostas do mesmo negócio confundem todo mundo. Para trocar o contato de quem assina, é `update_proposal_signer`.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        title: { type: "string" },
+        dataJson: { type: "object", description: "Substitui os dados da proposta" },
+        validUntil: { type: "string", description: "ISO 8601 em UTC (terminando em Z)" },
+        comissaoIncluida: { type: "boolean" },
+      },
+      required: ["proposalId"],
+    },
+    handler: async (args) => {
+      const body: Record<string, unknown> = {};
+      if (args.title !== undefined) body.title = args.title;
+      if (args.dataJson !== undefined) body.dataJson = args.dataJson;
+      if (args.comissaoIncluida !== undefined) body.comissaoIncluida = args.comissaoIncluida;
+      if (typeof args.validUntil === "string") {
+        const d = new Date(args.validUntil);
+        body.validUntil = Number.isNaN(d.getTime()) ? args.validUntil : d.toISOString();
+      }
+      const r = await callApi({
+        method: "PATCH",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}`,
+        body,
+      });
+      return explainApiError(r) ?? r.body;
+    },
+  },
+  {
+    name: "update_proposal_signer",
+    description:
+      "Corrige o CONTATO de quem assina (telefone, e-mail, nome, CPF) numa proposta já enviada — o caso clássico é 'mandei pro número errado'. Altera também na ClickSign, então o link passa a valer pro contato novo. Só funciona enquanto a pessoa não assinou. Depois de corrigir, chame `resend_proposal_signer` pra avisar o contato certo. NÃO cancele nem crie outra proposta por causa de telefone errado. O `signerId` vem de `get_proposal`.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        signerId: { type: "string", description: "id do signatário, vindo de get_proposal" },
+        name: { type: "string" },
+        email: { type: "string" },
+        phone: { type: "string", description: "Telefone do signatário, com DDD" },
+        documentation: { type: "string", description: "CPF" },
+      },
+      required: ["proposalId", "signerId"],
+    },
+    handler: async (args) => {
+      const body: Record<string, unknown> = {};
+      for (const k of ["name", "email", "phone", "documentation"] as const) {
+        if (args[k] !== undefined) body[k] = args[k];
+      }
+      const r = await callApi({
+        method: "PATCH",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/signers/${encodeURIComponent(args.signerId as string)}`,
+        body,
+      });
+      return explainApiError(r) ?? r.body;
+    },
+  },
+  {
+    name: "resend_proposal_signer",
+    description:
+      "Reenvia o convite de assinatura pra UM signatário — depois de corrigir o contato, ou quando a pessoa diz que não recebeu. Não cria proposta nova.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        signerId: { type: "string" },
+      },
+      required: ["proposalId", "signerId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/signers/${encodeURIComponent(args.signerId as string)}/resend`,
+        body: {},
+      });
+      return explainApiError(r) ?? r.body;
+    },
+  },
+  {
+    name: "remove_proposal_signer",
+    description:
+      "Tira UM signatário da proposta (pessoa errada foi incluída), enquanto ela não assinou. Não cancela a proposta inteira — pra isso é `cancel_proposal`.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        signerId: { type: "string" },
+      },
+      required: ["proposalId", "signerId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "DELETE",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/signers/${encodeURIComponent(args.signerId as string)}`,
+      });
+      return explainApiError(r) ?? r.body;
     },
   },
 
