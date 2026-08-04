@@ -77,17 +77,11 @@ export function DealManagerChip({
       const data = await res.json().catch(() => ({}) as Record<string, unknown>);
 
       if (!res.ok) {
-        if (res.status === 422 && data?.error === "gerente_obrigatorio") {
-          toast.error(
-            (typeof data.message === "string" && data.message) ||
-              "Esta organização exige um gerente responsável — troque em vez de remover."
-          );
-        } else {
-          toast.error(
+        toast.error(
+          (typeof data.message === "string" && data.message) ||
             (typeof data.error === "string" && data.error) ||
-              "Falha ao atualizar o gerente."
-          );
-        }
+            "Falha ao atualizar o gerente."
+        );
         return;
       }
 
@@ -100,7 +94,11 @@ export function DealManagerChip({
       setCurrentName(manager ? manager.name?.trim() || manager.email : null);
       setDraft(nextId);
       setOpen(false);
-      toast.success(nextId ? "Gerente atualizado." : "Gerente removido.");
+      toast.success(
+        nextId
+          ? "Gerente atualizado."
+          : "Gerente removido — o negócio some do kanban dos gerentes."
+      );
       router.refresh();
     } catch {
       toast.error("Falha ao atualizar o gerente.");
