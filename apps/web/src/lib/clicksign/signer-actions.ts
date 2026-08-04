@@ -394,6 +394,21 @@ export async function updateSignerAction(
       }
     } catch (err) {
       if (err instanceof ClicksignError) {
+        // Medido em produção (2026-08-04): PATCH de signatário em envelope
+        // `running` volta 404 da ClickSign — o recurso deixa de ser editável
+        // depois que o envelope sai. Sem esta tradução o operador (e o agente)
+        // recebe "Resposta não-JSON da Clicksign (HTTP 404)", que não diz o que
+        // fazer, e o caso é justamente o mais comum: mandou pro contato errado.
+        // Restrito a 404 + running pra não engolir erro transitório (5xx) nem
+        // falha de validação (422), que continuam subindo como estão.
+        if (err.status === 404 && envStatus === "running") {
+          return {
+            ok: false,
+            status: 409,
+            error:
+              "A ClickSign não permite trocar o contato de um signatário depois que o documento já foi enviado. Cancele e envie de novo com o contato correto.",
+          };
+        }
         return { ok: false, status: 502, error: `Clicksign: ${err.message}` };
       }
       throw err;

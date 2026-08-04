@@ -143,8 +143,37 @@ describe("explainApiError — nunca vaza interno pro WhatsApp", () => {
     expect(out.message).toBe("Não consegui registrar a proposta com esses dados.");
   });
 
+  it("repassa a frase que o servidor escreveu pro usuário", () => {
+    // O 409 de contato pós-envio: a explicação do servidor diz o que fazer, e
+    // perdê-la foi o que deixou o agente sem saída no incidente de 04/08.
+    const body = {
+      error:
+        "A ClickSign não permite trocar o contato de um signatário depois que o documento já foi enviado. Cancele e envie de novo com o contato correto.",
+    };
+    const out = explainApiError({ status: 409, body })!;
+    expect(out.message).toContain("Cancele e envie de novo");
+  });
+
+  it("não repassa JSON nem stack disfarçados de mensagem", () => {
+    // NB: array de issues do Zod NÃO entra aqui de propósito — aquilo o
+    // tradutor entende e vira frase de negócio, que é o comportamento correto.
+    for (const error of [
+      '{"detail":"envelope_signer not found","code":404}',
+      "TypeError: undefined is not a function\n    at foo (/app/x.js:1:1)",
+      "{ code: 'P2002' }",
+    ]) {
+      const out = explainApiError({ status: 409, body: { error } })!;
+      expect(out.message).toBe("Não deu pra fazer essa alteração no estado atual da proposta.");
+    }
+  });
+
   it("dá mensagem específica pro 409 de contato duplicado", () => {
-    const out = explainApiError({ status: 409, body: { error: "…" } })!;
+    // Texto real que a rota devolve — chega ao corretor como está.
+    const body = {
+      error:
+        "Dois signatários têm o mesmo contato. Informe e-mail ou CPF distinto para cada um (cada pessoa assina separadamente).",
+    };
+    const out = explainApiError({ status: 409, body })!;
     expect(out.message).toContain("mesmo contato");
   });
 
