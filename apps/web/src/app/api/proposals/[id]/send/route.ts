@@ -59,6 +59,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     },
     req,
     idempotencyKey: req.headers.get("x-idempotency-key"),
+    // Pedir o envio JÁ É a autorização. O corretor que diz "manda a proposta"
+    // pelo WhatsApp não tem como aprovar uma ActionIntent — a aprovação vive na
+    // tela do app —, então o pedido dele ficava `pending` e expirava em 24h sem
+    // nada acontecer, o que ele lê como "o Newton não faz". A intent continua
+    // gravada (quem pediu, payload, resultado) e a idempotencyKey segue
+    // impedindo envio duplicado; some só o segundo humano.
+    autoApprove: true,
     run: async () => {
       const r = await executeProposalSend(params.id);
       if (!r.ok) return blockToResponse(r.block);

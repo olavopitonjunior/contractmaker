@@ -115,6 +115,22 @@ export interface RequireApprovalArgs<T = unknown> {
    * de criar nova. Vem do header X-Idempotency-Key se presente.
    */
   idempotencyKey?: string | null;
+  /**
+   * Executa direto no Bearer, sem passar por aprovação humana — a intent é
+   * gravada como `executed`, não `pending`.
+   *
+   * NÃO é um atalho de conveniência: é uma decisão de produto por ação. Vale
+   * quando o pedido do humano JÁ É a autorização e a segunda confirmação só
+   * atrasa — o corretor que diz "manda a proposta" no WhatsApp não tem como
+   * aprovar uma intent (a aprovação vive na tela do app), então o pedido dele
+   * morria pendente e expirava em 24h.
+   *
+   * A intent continua sendo criada: o rastro de quem pediu, com que payload e
+   * com que resultado é o que torna a ação auditável, e é o que faz o replay
+   * com a mesma idempotencyKey devolver o resultado guardado em vez de gastar
+   * de novo. Some só o passo humano.
+   */
+  autoApprove?: boolean;
 }
 
 function normalizeCtx(
@@ -202,6 +218,52 @@ export async function requireApproval<T>(
       idempotencyKey,
     },
   });
+
+  if (args.autoApprove) {
+    // Executa já, mas mantendo a intent como registro. Falha vira `failed` com
+    // a mensagem — não pode ficar `pending` sugerindo que alguém ainda aprova.
+    try {
+      const r = await args.run();
+      await prisma.actionIntent.update({
+        where: { id: intent.id },
+        data: {
+          status: "executed",
+          approvedBy: ctx.userId,
+          approvedAt: new Date(),
+          executedAt: new Date(),
+          resultJson: r as unknown as object,
+        },
+      });
+      await audit(
+        extractAuditContextFromRequest(args.req, ctx.orgId, ctx.actor.effectiveUserId),
+        {
+          action: "INTENT_EXECUTED",
+          result: "SUCCESS",
+          resource: intent.id,
+          resourceType: "ActionIntent",
+          metadata: { intentAction: args.action, statusCode: r.status, autoApproved: true },
+        }
+      );
+      return { status: r.status, body: r.body, via: "executed" };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await prisma.actionIntent.update({
+        where: { id: intent.id },
+        data: { status: "failed", errorMessage: message.slice(0, 1000) },
+      });
+      await audit(
+        extractAuditContextFromRequest(args.req, ctx.orgId, ctx.actor.effectiveUserId),
+        {
+          action: "INTENT_EXECUTED",
+          result: "FAILURE",
+          resource: intent.id,
+          resourceType: "ActionIntent",
+          metadata: { intentAction: args.action, error: message.slice(0, 500), autoApproved: true },
+        }
+      );
+      throw err;
+    }
+  }
 
   await audit(
     extractAuditContextFromRequest(args.req, ctx.orgId, ctx.actor.effectiveUserId),

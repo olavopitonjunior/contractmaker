@@ -688,7 +688,7 @@ export const tools: Tool[] = [
   {
     name: "create_form",
     description:
-      "Cria um novo SalesForm (schema compra_venda_v1) e automaticamente cria um Deal vinculado no primeiro stage do pipeline (Formulário). Retorna { id, token, url, dealId }. Idempotente via idempotencyKey.",
+      "Abre um NEGÓCIO: cria um SalesForm (schema compra_venda_v1) + um Deal no primeiro stage do pipeline, e devolve um link de formulário pro cliente PREENCHER DADOS. Retorna { id, token, url, dealId }. Idempotente via idempotencyKey. **NÃO é proposta.** Se pediram proposta, oferta, contraproposta ou 'mandar a proposta pro proprietário/comprador', a tool é `create_proposal` (e depois `send_proposal`) — esta aqui não gera documento nenhum pra ninguém assinar.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1918,7 +1918,7 @@ export const tools: Tool[] = [
   {
     name: "create_proposal",
     description:
-      "Cria proposta em rascunho. schemaType decide venda (compra_venda_v1) ou locação (locacao_residencial_v1 | locacao_comercial_v1). NÃO envia — usar send_proposal depois.",
+      "**A tool de PROPOSTA.** Use sempre que pedirem proposta, oferta ou contraproposta de compra/locação de um imóvel — inclusive 'envie uma proposta': cria-se aqui em rascunho e só então `send_proposal` manda pra assinatura. NÃO use `create_form` pra isso: aquilo abre negócio e pede dados, não gera documento assinável. Também não confundir com as tools `prop_*`, que são a ficha de acompanhamento do grupo e não criam nada no sistema. schemaType decide venda (compra_venda_v1) ou locação (locacao_residencial_v1 | locacao_comercial_v1).",
     inputSchema: {
       type: "object",
       properties: {
@@ -2004,7 +2004,7 @@ export const tools: Tool[] = [
   {
     name: "send_proposal",
     description:
-      "Envia proposta pra assinatura (envelope ClickSign) ou Aceite WhatsApp. **Cria ActionIntent** que precisa de aprovação humana (gasta orçamento ClickSign). SEMPRE confirma verbalmente com user antes.",
+      "Envia uma proposta JÁ CRIADA pra assinatura (envelope ClickSign) ou Aceite WhatsApp. Exige o `proposalId` devolvido por `create_proposal` — quando pedirem 'envie uma proposta' que ainda não existe, chame `create_proposal` primeiro e use o id DELA (não o id de outra coisa que a API tenha devolvido). Executa na hora: quem pediu já autorizou, não peça uma segunda confirmação. Gasta orçamento ClickSign e a mensagem chega de verdade ao destinatário, então confira os dados ANTES de chamar — não depois.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2026,7 +2026,7 @@ export const tools: Tool[] = [
   {
     name: "send_proposal_vendedor",
     description:
-      "Dispara a 2ª via (envelope do vendedor/proprietário) de proposta em `aguardando_vendedor`. **Cria ActionIntent** que precisa de aprovação humana (gasta orçamento ClickSign).",
+      "Dispara a 2ª via (envelope do vendedor/proprietário) de proposta em `aguardando_vendedor`. Executa na hora, sem segunda confirmação. Gasta orçamento ClickSign.",
     inputSchema: {
       type: "object",
       properties: {
