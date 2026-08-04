@@ -83,6 +83,9 @@ export type AuditAction =
   | "ORG_CREATED"
   | "ORG_UPDATED"
   | "ORG_MODULES_UPDATED"
+  // Dono da imobiliaria ativou/reconectou o Max por conta propria
+  // (POST /api/org/max/activate), sem passar pelo painel de plataforma.
+  | "ORG_MAX_ACTIVATED"
   | "ORG_SUSPENDED"
   | "ORG_REACTIVATED"
   | "ORG_DELETED"

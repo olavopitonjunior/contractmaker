@@ -285,14 +285,30 @@ export function OnboardingWizard({
               <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-primary text-primary-foreground">
                 <ActiveIcon className="h-4 w-4" />
               </span>
+              {/* `status.steps.length`, e NÃO `STEP_ORDER.length`: nem todo passo
+                  é exibido para toda org (o do Max só aparece quando o canal
+                  está disponível). Contar pelo catálogo faria a org sem o canal
+                  ler "de 8" com sete passos na tela. */}
               <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
-                Passo {activeIdx + 1} de {STEP_ORDER.length} · {meta.eyebrow}
+                Passo {activeIdx + 1} de {status.steps.length} · {meta.eyebrow}
               </span>
             </div>
             <h2 className="mt-3.5 font-display text-[22px] font-semibold tracking-tight text-balance">
               {meta.title}
             </h2>
             <p className="mt-1.5 max-w-[52ch] text-sm text-muted-foreground">{meta.blurb}</p>
+
+            {/* O `detail` diz por que o passo AINDA não fechou — "ninguém com
+                telefone cadastrado ainda", "necessário para enviar
+                assinaturas". Ele era calculado em `getOnboardingStatus` e não
+                era lido por superfície nenhuma: o dado existia e o usuário
+                nunca via. Some quando o passo fecha, porque aí não há o que
+                explicar. */}
+            {!activeStep?.done && activeStep?.detail && (
+              <p className="mt-2 max-w-[52ch] text-sm font-medium text-amber-700">
+                {activeStep.detail}
+              </p>
+            )}
 
             <div className="mt-5">
               {active === "google" && <GoogleDriveCard initial={google} />}
