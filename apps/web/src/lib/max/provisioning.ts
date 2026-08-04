@@ -30,19 +30,36 @@ import { FEATURE } from "@/lib/modules/catalog";
  */
 
 /**
- * Fase 2: ler persona, consultar a base e reportar custo. Nada de escrita.
+ * Ler persona, consultar a base, reportar custo — e criar formulário de venda.
  *
- * `users:delegate` fica de fora **de propósito, e não por enquanto**: enquanto
- * `X-Act-As-User` aceitar delegar para o `owner` (`context.ts:231-239` valida só
- * "o alvo é membro da org do dono do token", sem comparar roles), esse escopo
- * faz o token do bot valer o poder do dono do tenant. Aí tanto "role mínimo"
- * quanto "N tokens contêm o estrago" viram ficção. Travar o alvo da delegação é
- * pré-requisito da Fase 3.
+ * `documents:rw` entrou na Fase 3, quando o Max passou a criar formulário por
+ * conversa. É o escopo que `POST /api/forms` exige; note que ele é mais largo
+ * que o uso (cobre outras rotas de documento), porque o catálogo de escopos não
+ * tem granularidade menor. O que contém o estrago é o resto: um token por org,
+ * `role: "viewer"` na membership, e a confirmação humana do lado do Max — o
+ * modelo não tem ferramenta que executa, só que PROPÕE.
+ *
+ * `users:delegate` segue de fora, mas o motivo MUDOU. Era pré-requisito: com
+ * `X-Act-As-User` aceitando delegar para o `owner`, o token do bot valia o poder
+ * do dono do tenant. Isso foi resolvido (#249, `lib/security/rbac/delegation.ts`
+ * ligado em `context.ts`). Hoje ele fica de fora porque **não precisamos dele**:
+ * o Deal nasce do usuário de serviço e o corretor entra por `corretorIds`, que o
+ * `/api/forms` já usa para semear comissionados e destinatários de notificação.
+ * Some a isso que `requireApiAuth` — o helper de TODAS as rotas que o Max chama —
+ * ignora `X-Act-As-User`; a delegação só existe no `requireAuth` legado. Ligar o
+ * escopo aqui não teria efeito nenhum, só superfície.
+ *
+ * **Escopo é congelado na emissão.** Mudar esta lista não altera token nenhum já
+ * existente: é preciso reemitir por org, via
+ * `POST /api/admin/orgs/[orgId]/max/reprovision`. Não desligue e religue a
+ * feature no painel — aquele caminho passa por revogação e deixa uma janela com
+ * o tenant sem credencial.
  */
-export const MAX_SCOPES_FASE2: ApiTokenScope[] = [
+export const MAX_SCOPES: ApiTokenScope[] = [
   "agents:r",
   "agents:rw",
   "metrics:r",
+  "documents:rw",
 ];
 
 /** Domínio dos usuários de serviço. Não recebe e-mail — é identificador. */
@@ -80,7 +97,7 @@ export async function provisionMaxForOrg(params: {
   scopes?: ApiTokenScope[];
 }): Promise<ProvisionResult> {
   const { orgId } = params;
-  const scopes = params.scopes ?? MAX_SCOPES_FASE2;
+  const scopes = params.scopes ?? MAX_SCOPES;
 
   const org = await prisma.organization.findUnique({
     where: { id: orgId },

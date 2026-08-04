@@ -8,6 +8,7 @@ import { FEATURE } from "@/lib/modules/catalog";
 import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
 import { MAX_AGENT_KEY } from "@/lib/max/provisioning";
 import { MaxStatusPanel } from "./MaxStatusPanel";
+import { ReprovisionButton } from "./ReprovisionButton";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Max — Mission Control" };
@@ -74,6 +75,7 @@ export default async function MaxMissionControlPage({
   if (!session?.user?.id) redirect("/login");
   const platformRole = await getPlatformRole(session.user.id);
   if (!platformRole) redirect("/");
+  const podeReemitir = platformRole.role === "super_admin";
 
   const orgs = await prisma.organization.findMany({
     select: { id: true, name: true },
@@ -151,6 +153,14 @@ export default async function MaxMissionControlPage({
                         {p.attempts} tentativa(s) — {p.lastError.slice(0, 60)}
                         {p.lastError.length > 60 ? "…" : ""}
                       </span>
+                    ) : null}
+                    {/*
+                      Só `super_admin`: a rota exige esse papel, e um botão que
+                      responde 403 é pior que botão nenhum — parece defeito do
+                      sistema em vez de falta de permissão.
+                    */}
+                    {podeReemitir ? (
+                      <ReprovisionButton orgId={r.id} orgName={r.name} />
                     ) : null}
                   </li>
                 );
