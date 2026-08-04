@@ -277,15 +277,19 @@ export async function GET(req: NextRequest) {
   }));
 
   // A estrutura de avisos é da PLATAFORMA (vale pra qualquer imobiliária), mas
-  // o transporte de WhatsApp hoje é o Newton, que atende só um tenant. Sem
-  // este sinal, um admin de outra imobiliária marcaria WhatsApp e nada
-  // aconteceria — o envio viraria `skipped` num log que ele nunca vê.
+  // o transporte de WhatsApp depende de a org ter um agente. Sem este sinal, um
+  // admin marcaria WhatsApp e nada aconteceria — o envio viraria `skipped` num
+  // log que ele nunca vê.
+  //
+  // Pergunta pelo ROTEADOR, não por um agente específico: perguntar só pelo
+  // Newton deixava toda org só-Max com a tela dizendo "sem agente de WhatsApp"
+  // e os checkboxes desabilitados, apesar de `user-channels.ts` já saber
+  // entregar pelo Max. Quem adicionar um terceiro agente não mexe aqui.
   //
   // E-mail não depende de agente: funciona pra todo mundo.
-  const { isNewtonEnabledForOrg } = await import("@/lib/newton/gate");
-  const whatsappAgentAvailable = await isNewtonEnabledForOrg(ctx.orgId).catch(
-    () => false
-  );
+  const { resolveWhatsappAgent } = await import("@/lib/agents/whatsapp-router");
+  const whatsappAgentAvailable =
+    (await resolveWhatsappAgent(ctx.orgId)) !== null;
 
   return NextResponse.json({
     settings,
@@ -421,15 +425,17 @@ export async function PATCH(req: NextRequest) {
         );
       }
 
-      // A imobiliária tem agente de WhatsApp? A estrutura de avisos é da
-      // plataforma, mas o transporte hoje é o Newton, que atende um tenant só.
-      // Aceitar a marcação sem agente produziria `skipped` silencioso.
+      // A imobiliária tem agente de WhatsApp? Aceitar a marcação sem agente
+      // produziria `skipped` silencioso. Pelo ROTEADOR, não por um agente
+      // específico — ver o comentário equivalente no GET.
       const querWhatsapp = userIds.some((id) =>
         Object.values(matriz[id]).some((c) => c.whatsapp === true)
       );
       if (querWhatsapp) {
-        const { isNewtonEnabledForOrg } = await import("@/lib/newton/gate");
-        if (!(await isNewtonEnabledForOrg(ctx.orgId))) {
+        const { resolveWhatsappAgent } = await import(
+          "@/lib/agents/whatsapp-router"
+        );
+        if ((await resolveWhatsappAgent(ctx.orgId)) === null) {
           return NextResponse.json(
             {
               error:
