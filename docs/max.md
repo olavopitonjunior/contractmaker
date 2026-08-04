@@ -156,9 +156,26 @@ produto: **notificação de sistema por e-mail passa a sair de madrugada**.
 
 **Um service-user + um token por org RE/MAX** — obrigatório: o Bearer deriva a
 org do dono do token (não existe header de org). Escopos: F1
-`agents:r, agents:rw, metrics:r`; F3 soma **só `documents:rw`**
-(`MAX_SCOPES`, `lib/max/provisioning.ts`). `locacao:rw` e `proposals:rw` entram
-quando as respectivas ferramentas existirem — escopo sem uso é superfície.
+`agents:r, agents:rw, metrics:r`; F3 soma `documents:rw` (form de venda) e
+`locacao:rw` (form de locação) — ver `MAX_SCOPES` em `lib/max/provisioning.ts`.
+
+**`proposals:rw` NÃO entra**, mesmo com o Max criando rascunho de proposta: o
+`POST /api/proposals` é gateado por `PERMISSION.PROPOSAL_CREATE` além do escopo,
+e a sub-função `vendas.propostas` nasce desligada. Quando a proposta por
+conversa for ligada de verdade, o escopo entra junto do reprovision.
+
+**O escopo não basta — o PAPEL também conta.** `locacao:rw` sozinho não abre
+nada: `ensureLocacaoApiAccess` exige `PERMISSION.LEASE_CREATE`, e a membership
+do Max era `viewer`, que não tem. A membership passou a apontar para um
+`CustomRole` por org (`upsertMaxRole`, nome `Max (agente)`) com exatamente
+quatro permissões: `lease.view`, `lease.create`, `property.view`,
+`deal.view_assigned_only`.
+
+Promover a `gestor_locacao` teria sido mais curto e errado: aquele preset dá
+CRUD de imóvel, geração de aluguel, criação de despesa e **rescisão** de
+contrato — poder guardado para o dia em que alguém achasse um jeito de usá-lo. O
+sync reescreve o mapa do papel toda vez, então ampliar pela tela de papéis é
+revertido no próximo reprovision.
 
 **Escopo é congelado na emissão do token.** Mudar `MAX_SCOPES` não altera token
 nenhum já emitido: é preciso reemitir por org, via
