@@ -34,6 +34,8 @@ const auth = vi.mocked(requireAuth);
 const perm = vi.mocked(requirePermission);
 const sync = vi.mocked(syncMaxForOrg);
 const mockPrisma = vi.mocked(prisma);
+const provisionamento = mockPrisma.agentProvisioning
+  .findUnique as unknown as ReturnType<typeof vi.fn>;
 
 const req = () =>
   new NextRequest("http://localhost/api/org/max/activate", { method: "POST" });
@@ -61,6 +63,8 @@ beforeEach(() => {
     delivered: true,
   } as never);
   disponivel(true);
+  // Default: nunca provisionado — o caminho de primeira ativação.
+  provisionamento.mockResolvedValue(null);
 });
 
 describe("as duas chaves", () => {
@@ -120,11 +124,54 @@ describe("entrega ao serviço", () => {
     expect(body.detail).toContain("timeout");
   });
 
-  it("chamar duas vezes é seguro — o sync é idempotente", async () => {
-    await POST(req());
+  /**
+   * `syncMaxForOrg` SEMPRE rotaciona — `createApiToken` não devolve o valor cru
+   * duas vezes, então não há "checar se existe e reusar". Rotacionar um tenant
+   * saudável é trocar credencial sem motivo: se o push falhar nesse ciclo, o
+   * agente cai para aquele tenant até a reconciliação.
+   *
+   * O card esconde o botão quando ativo, mas a UI não é a fronteira —
+   * duplo-submit, retry de rede e chamada direta chegam na rota.
+   */
+  it("já ativo e entregue → noop, NÃO rotaciona o token", async () => {
+    provisionamento.mockResolvedValue({
+      status: "active",
+      deliveredAt: new Date("2026-08-03T18:27:50Z"),
+    } as never);
+
+    const res = await POST(req());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, delivered: true, noop: true });
+    expect(sync).not.toHaveBeenCalled();
+  });
+
+  /**
+   * O contrapeso do teste acima: reconectar é o caso de uso REAL do botão, e
+   * "provisionado sem entrega confirmada" é exatamente o estado que precisa
+   * dele. Uma trava que barrasse isso deixaria o dono sem saída.
+   */
+  it("ativo SEM entrega confirmada → reconecta de verdade", async () => {
+    provisionamento.mockResolvedValue({
+      status: "active",
+      deliveredAt: null,
+    } as never);
+
+    const res = await POST(req());
+
+    expect(res.status).toBe(200);
+    expect(sync).toHaveBeenCalledWith("org-1");
+  });
+
+  it("entrega pendente → reconecta", async () => {
+    provisionamento.mockResolvedValue({
+      status: "pending_delivery",
+      deliveredAt: null,
+    } as never);
+
     await POST(req());
 
-    expect(sync).toHaveBeenCalledTimes(2);
-    expect(sync).toHaveBeenNthCalledWith(2, "org-1");
+    expect(sync).toHaveBeenCalledWith("org-1");
   });
 });

@@ -6,6 +6,7 @@ import { AiAgentsClient } from "./AiAgentsClient";
 import { MaxAgentCard } from "@/components/settings/MaxAgentCard";
 import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
 import { FEATURE } from "@/lib/modules/catalog";
+import { getMaxReach } from "@/lib/max/reach";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Agentes de IA" };
@@ -38,33 +39,24 @@ export default async function AiAgentsSettingsPage() {
   });
   const canEdit = membership?.role === "owner" || membership?.role === "admin";
 
-  // Estado do Max lido no servidor: são quatro contagens baratas e o card é o
-  // ÚNICO lugar onde o dono vê a diferença entre "ativei" e "alguém recebe".
+  // Estado do Max lido no servidor: o card é o ÚNICO lugar onde o dono vê a
+  // diferença entre "ativei" e "alguém recebe". A conta de alcance vem de
+  // `getMaxReach`, a MESMA usada pela etapa do onboarding — as duas telas
+  // afirmam o mesmo número por construção.
   const modules = await getOrgModules(org.id);
   const maxAvailable =
     isFeatureEnabled(modules, FEATURE.VENDAS_MAX) ||
     isFeatureEnabled(modules, FEATURE.LOCACAO_MAX);
 
-  const [prov, membersTotal, membersWithPhone, optedIn] = maxAvailable
+  const [prov, alcance] = maxAvailable
     ? await Promise.all([
         prisma.agentProvisioning.findUnique({
           where: { orgId_agentKey: { orgId: org.id, agentKey: "max" } },
           select: { status: true, deliveredAt: true, lastError: true },
         }),
-        prisma.orgMembership.count({
-          where: { orgId: org.id, user: { deletedAt: null } },
-        }),
-        prisma.orgMembership.count({
-          where: {
-            orgId: org.id,
-            user: { phone: { not: null }, deletedAt: null },
-          },
-        }),
-        prisma.userNotificationPreference.count({
-          where: { orgId: org.id, whatsappOptInAt: { not: null } },
-        }),
+        getMaxReach(org.id),
       ])
-    : [null, 0, 0, 0];
+    : [null, { membersTotal: 0, membersWithPhone: 0, optedIn: 0 }];
 
   const maxState = {
     available: maxAvailable,
@@ -72,9 +64,7 @@ export default async function AiAgentsSettingsPage() {
     // orgs provisionadas por script, e nao e entrega observada.
     active: prov?.status === "active" && prov.deliveredAt != null,
     lastError: prov?.lastError ?? null,
-    membersTotal,
-    membersWithPhone,
-    optedIn,
+    ...alcance,
   };
 
   return (

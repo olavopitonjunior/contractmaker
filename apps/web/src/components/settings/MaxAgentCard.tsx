@@ -68,6 +68,15 @@ export function MaxAgentCard({
       }
       setActive(true);
       toast.success("Max ativado para a sua imobiliária.");
+    } catch {
+      // Sem isto, `fetch` rejeitado (rede caída, DNS, offline) virava rejeição
+      // não tratada: nenhum aviso, o botão voltava ao normal e nada acontecia.
+      // É exatamente o modo de falha que o `delivered:false` existe pra evitar
+      // um passo adiante — o dono clica de novo achando que não fez nada, e
+      // cada clique rotaciona o token.
+      toast.error(
+        "Não foi possível falar com o servidor. Verifique a conexão e tente de novo."
+      );
     } finally {
       setBusy(false);
     }
