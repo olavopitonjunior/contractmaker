@@ -30,6 +30,11 @@ interface JsonSchemaProp {
   items?: JsonSchemaProp;
 }
 
+let buildProposalPayload: (a: Record<string, unknown>) => {
+  ok: boolean;
+  message?: string;
+  body?: Record<string, unknown>;
+};
 let createProposalInput: JsonSchemaProp;
 let explainApiError: (r: { status: number; body: unknown }) => {
   _error: true;
@@ -40,7 +45,9 @@ let explainApiError: (r: { status: number; body: unknown }) => {
 beforeAll(async () => {
   const toolsMod = await import("../../../../../mcp-server/src/tools.js");
   const errMod = await import("../../../../../mcp-server/src/api-error.js");
+  const payloadMod = await import("../../../../../mcp-server/src/proposal-payload.js");
   explainApiError = errMod.explainApiError;
+  buildProposalPayload = payloadMod.buildProposalPayload;
 
   const tool = (toolsMod.tools as Array<{ name: string; inputSchema: JsonSchemaProp }>).find(
     (t) => t.name === "create_proposal"
@@ -62,43 +69,59 @@ function knownKeys(schema: z.ZodObject<z.ZodRawShape>): string[] {
 }
 
 describe("paridade create_proposal (tool MCP) ↔ POST /api/proposals (Zod)", () => {
-  it("declara signers como objeto tipado, não `{type:'object'}` livre", () => {
-    const signers = createProposalInput.properties?.signers;
-    expect(signers?.type).toBe("array");
-    expect(signers?.items?.properties).toBeDefined();
+  // A tool NÃO espelha mais o Zod campo a campo: ela recebe o que o corretor
+  // fala (proponente/imóvel/valor/canal) e MONTA o corpo. A paridade que
+  // importa agora é a de saída — o que ela monta tem de passar no Zod da rota,
+  // sempre. Antes, quando o agente montava `dataJson` e `signers` sozinho, a
+  // divergência silenciosa gerava PDF vazio e 400 por `role` faltando.
+  const ARGS = {
+    schemaType: "compra_venda_v1",
+    proponente: { nome: "Patrícia Andrade", telefone: "11970325533", cpf: "390.533.447-05" },
+    imovel: { endereco: "Rua Senador Godói, 606", cidade: "São Paulo", uf: "SP" },
+    valor: 1000000,
+    canal: "whatsapp",
+  };
+
+  it("o corpo montado passa no Zod da rota", () => {
+    const out = buildProposalPayload(ARGS);
+    expect(out.ok).toBe(true);
+    const parsed = createSchema.safeParse(out.body);
+    if (!parsed.success) throw new Error(parsed.error.message);
+    expect(parsed.success).toBe(true);
   });
 
-  it("exige em signers.items.required tudo que o Zod exige", () => {
-    const toolRequired = [...(createProposalInput.properties?.signers?.items?.required ?? [])].sort();
-    // O bug original: `role` era obrigatório no Zod e nem aparecia na tool.
-    expect(toolRequired).toEqual(requiredKeys(signerSchema));
-    expect(toolRequired).toContain("role");
+  it("com vendedor, também passa — e com os dois papéis válidos", () => {
+    const out = buildProposalPayload({
+      ...ARGS,
+      vendedor: { nome: "Júnior Garrido", telefone: "13997826692" },
+    });
+    const parsed = createSchema.safeParse(out.body);
+    expect(parsed.success).toBe(true);
+    const roles = (out.body!.signers as Array<{ role: string }>).map((s) => s.role);
+    expect(roles.every((r) => (SIGNER_ROLES as readonly string[]).includes(r))).toBe(true);
   });
 
-  it("usa exatamente os papéis que o Zod aceita", () => {
-    const toolRoles = createProposalInput.properties?.signers?.items?.properties?.role?.enum;
-    expect([...(toolRoles ?? [])].sort()).toEqual([...SIGNER_ROLES].sort());
+  it("todo signatário montado tem os campos obrigatórios do Zod", () => {
+    const out = buildProposalPayload(ARGS);
+    const obrigatorios = requiredKeys(signerSchema);
+    for (const s of out.body!.signers as Array<Record<string, unknown>>) {
+      for (const k of obrigatorios) expect(s[k]).toBeTruthy();
+    }
   });
 
-  it("não declara nenhuma propriedade de signer que o Zod desconheça", () => {
-    // Pega o `documentation` fantasma: a tool o anunciava, o Zod o descartava
-    // no strip, e o CPF nunca chegava no banco.
-    const toolProps = Object.keys(
-      createProposalInput.properties?.signers?.items?.properties ?? {}
-    );
-    const zodKeys = knownKeys(signerSchema);
-    expect(toolProps.filter((p) => !zodKeys.includes(p))).toEqual([]);
+  it("não monta chave que o Zod desconheça (o `documentation` fantasma)", () => {
+    const out = buildProposalPayload(ARGS);
+    const topo = knownKeys(createSchema);
+    expect(Object.keys(out.body!).filter((k) => !topo.includes(k))).toEqual([]);
+    const doSigner = knownKeys(signerSchema);
+    for (const s of out.body!.signers as Array<Record<string, unknown>>) {
+      expect(Object.keys(s).filter((k) => !doSigner.includes(k))).toEqual([]);
+    }
   });
 
-  it("não declara nenhum campo de topo que o Zod desconheça", () => {
-    const toolProps = Object.keys(createProposalInput.properties ?? {});
-    const zodKeys = knownKeys(createSchema);
-    expect(toolProps.filter((p) => !zodKeys.includes(p))).toEqual([]);
-  });
-
-  it("mantém title e schemaType obrigatórios nos dois lados", () => {
+  it("a tool exige o mínimo no próprio inputSchema", () => {
     expect([...(createProposalInput.required ?? [])].sort()).toEqual(
-      requiredKeys(createSchema).filter((k) => k !== "dataJson")
+      ["canal", "imovel", "proponente", "schemaType", "valor"]
     );
   });
 });
@@ -184,6 +207,13 @@ describe("explainApiError — nunca vaza interno pro WhatsApp", () => {
       const out = explainApiError({ status: 409, body: { error } })!;
       expect(out.message).toBe("Não deu pra fazer essa alteração no estado atual da proposta.");
     }
+  });
+
+  it("402 de orçamento explica a causa certa, não 'dados errados'", () => {
+    // body real: { error: "budget", ... } — token único, nunca repassado cru.
+    const out = explainApiError({ status: 402, body: { error: "budget", spentCents: 9900 } })!;
+    expect(out.message).toContain("orçamento");
+    expect(out.message).not.toContain("dados");
   });
 
   it("dá mensagem específica pro 409 de contato duplicado", () => {

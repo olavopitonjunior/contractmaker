@@ -96,7 +96,13 @@ export function blockToResponse(block: PrepareResult): { status: number; body: u
       const nome = (i: { signerIndex: number }) =>
         block.signers?.[i.signerIndex]?.name?.trim() || `Signatário ${i.signerIndex + 1}`;
       const message = block.issues
-        .map((i) => `${nome(i)}: ${i.reason}${i.hint ? ` (${i.hint})` : ""}`)
+        .map((i) => {
+          const texto = `${i.reason}${i.hint ? ` (${i.hint})` : ""}`;
+          // Pendência do documento não pertence a signatário nenhum — prefixar
+          // com "Signatário 0" mandaria o leitor procurar a pessoa errada, que
+          // é exatamente o erro que este bloco existe pra não repetir.
+          return i.signerIndex < 0 ? texto : `${nome(i)}: ${texto}`;
+        })
         .join(" ");
       return { status: 422, body: { error: "preflight", message, issues: block.issues } };
     }

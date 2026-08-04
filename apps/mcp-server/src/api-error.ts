@@ -53,6 +53,7 @@ const BY_FIELD: Record<string, string> = {
 /** Mensagens por status, quando não há issues de validação pra traduzir. */
 const BY_STATUS: Record<number, string> = {
   401: "Não estou autorizado a fazer isso agora.",
+  402: "O orçamento de envios do mês foi atingido — este envio não foi feito. Fale com o administrador da imobiliária.",
   403: "Não tenho permissão para isso nesta conta.",
   404: "Não encontrei essa proposta.",
   // 409 cobre dois casos distintos nas propostas; o texto do servidor é mais
