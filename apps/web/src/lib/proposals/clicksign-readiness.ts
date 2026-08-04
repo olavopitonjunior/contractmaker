@@ -174,18 +174,21 @@ export function checkProposalContent(
   const isVenda = schemaType === "compra_venda_v1";
   const parte = isVenda ? "compradores" : "locatarios";
 
+  // Frases secas, uma por pendência: a remediação ("refaça com os dados
+  // completos") repetida a cada item vira ruído quando as três faltam juntas —
+  // e é justamente o caso comum. Quem monta a resposta ao usuário compõe.
   if (!primeiroNome(d[parte])) {
-    add("O documento sairia sem o nome do proponente. Refaça a proposta com os dados completos.");
+    add("O documento sairia sem o nome do proponente.");
   }
   if (!enderecoDoPrimeiroImovel(d.imoveis)) {
-    add("O documento sairia sem o endereço do imóvel. Refaça a proposta com os dados completos.");
+    add("O documento sairia sem o endereço do imóvel.");
   }
 
   const valorOk = isVenda
     ? numeroPositivo((d.pagamento as Record<string, unknown> | undefined)?.valor_total)
     : numeroPositivo((d.locacao as Record<string, unknown> | undefined)?.valor_aluguel);
   if (!valorOk) {
-    add("O documento sairia sem o valor. Refaça a proposta com os dados completos.");
+    add("O documento sairia sem o valor.");
   }
 
   return issues;
