@@ -154,6 +154,25 @@ describe("explainApiError — nunca vaza interno pro WhatsApp", () => {
     expect(out.message).toContain("Cancele e envie de novo");
   });
 
+  it("nunca repassa código de erro solto como se fosse explicação", () => {
+    // O 422 de preflight vinha com `error:"preflight"` e nada mais. O agente
+    // repassava isso e, sem saber a causa, inventava uma — disse ao corretor
+    // que faltava o e-mail da compradora quando o furo era outro signatário.
+    const out = explainApiError({ status: 422, body: { error: "preflight" } })!;
+    expect(out.message).not.toContain("preflight");
+    expect(out.message).toBe("Faltam informações para seguir com o envio.");
+  });
+
+  it("prefere `message` quando `error` é só o código", () => {
+    const body = {
+      error: "preflight",
+      message: "Vendedor: Informe o nome completo (nome e sobrenome).",
+    };
+    const out = explainApiError({ status: 422, body })!;
+    expect(out.message).toContain("Vendedor");
+    expect(out.message).toContain("nome completo");
+  });
+
   it("não repassa JSON nem stack disfarçados de mensagem", () => {
     // NB: array de issues do Zod NÃO entra aqui de propósito — aquilo o
     // tradutor entende e vira frase de negócio, que é o comportamento correto.

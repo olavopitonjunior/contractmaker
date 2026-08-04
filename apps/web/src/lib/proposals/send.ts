@@ -26,7 +26,16 @@ export type PrepareBlock =
   | { blocked: "not_configured" }
   | { blocked: "no_signers" }
   | { blocked: "already_sending" }
-  | { blocked: "preflight"; issues: ReadinessIssue[] }
+  // `signers` acompanha as issues porque `ReadinessIssue` só carrega
+  // `signerIndex` — um número. Sem o nome ao lado, quem lê (operador ou agente)
+  // atribui a pendência à pessoa errada: em 04/08 o agente leu "Informe o
+  // e-mail" de um signatário fantasma e disse ao corretor que faltava o e-mail
+  // da compradora, mandando ele atrás do dado errado.
+  | {
+      blocked: "preflight";
+      issues: ReadinessIssue[];
+      signers: Array<{ name: string; role: string }>;
+    }
   | { blocked: "collision"; message: string }
   | { blocked: "routing"; message: string }
   | { blocked: "budget"; spentCents: number; budgetCents: number; planCostCents: number };
@@ -84,7 +93,13 @@ export async function prepareSend(
       notifyChannel: r.notifyChannel,
     }))
   );
-  if (issues.length > 0) return { blocked: "preflight", issues };
+  if (issues.length > 0) {
+    return {
+      blocked: "preflight",
+      issues,
+      signers: rows.map((r) => ({ name: r.name, role: r.role })),
+    };
+  }
 
   // 2. Dedupe — "sem duplicidade". Colisão entre grupos → erro duro.
   let deduped;

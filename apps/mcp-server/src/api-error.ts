@@ -75,9 +75,15 @@ const BY_STATUS: Record<number, string> = {
  */
 function humanServerMessage(body: unknown): string | null {
   if (!body || typeof body !== "object") return null;
-  const raw = (body as { error?: unknown }).error;
+  const b = body as { error?: unknown; message?: unknown };
+  // `message` tem precedência: quando existe, `error` costuma ser o CÓDIGO
+  // ("preflight", "budget") e a explicação está aqui.
+  const raw = typeof b.message === "string" && b.message.trim() ? b.message : b.error;
   if (typeof raw !== "string") return null;
   const s = raw.trim();
+  // Palavra única sem espaço é código de erro, não frase — repassar "preflight"
+  // pro corretor é pior que o genérico, porque soa a explicação e não é.
+  if (!/\s/.test(s)) return null;
   if (!s || s.length > 300) return null;
   if (/^[[{]/.test(s)) return null; // JSON stringificado
   if (/\bat \w+ \(|Prisma|\bP\d{4}\b|Error:|undefined|_id\b|[{}]/.test(s)) return null;

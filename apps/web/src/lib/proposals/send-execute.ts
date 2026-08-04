@@ -90,8 +90,16 @@ export type SendResult =
 export function blockToResponse(block: PrepareResult): { status: number; body: unknown } {
   if ("ok" in block) return { status: 500, body: { error: "estado inesperado" } };
   switch (block.blocked) {
-    case "preflight":
-      return { status: 422, body: { error: "preflight", issues: block.issues } };
+    case "preflight": {
+      // `error: "preflight"` sozinho é um código, não uma explicação — quem
+      // recebe só isso inventa a causa. `message` diz DE QUEM é cada pendência.
+      const nome = (i: { signerIndex: number }) =>
+        block.signers?.[i.signerIndex]?.name?.trim() || `Signatário ${i.signerIndex + 1}`;
+      const message = block.issues
+        .map((i) => `${nome(i)}: ${i.reason}${i.hint ? ` (${i.hint})` : ""}`)
+        .join(" ");
+      return { status: 422, body: { error: "preflight", message, issues: block.issues } };
+    }
     case "budget":
       return { status: 402, body: { error: "budget", ...block } };
     case "not_configured":
