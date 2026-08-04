@@ -34,7 +34,18 @@ const okSigner = (over = {}) => ({
 describe("prepareSend", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    propFind.mockResolvedValue({ orgId: "org1", hiddenPaths: [] });
+    // `dataJson` com conteúdo: desde 2026-08-04 o prepareSend também barra
+    // proposta cujo DOCUMENTO sairia vazio (ver checkProposalContent).
+    propFind.mockResolvedValue({
+      orgId: "org1",
+      hiddenPaths: [],
+      schemaType: "compra_venda_v1",
+      dataJson: {
+        compradores: [{ nome: "Fulano de Tal" }],
+        imoveis: [{ endereco: "Rua X, 1" }],
+        pagamento: { valor_total: 500000 },
+      },
+    });
     settingsMock.mockResolvedValue(settings());
   });
 

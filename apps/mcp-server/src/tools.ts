@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { callApi, callBridge, logProactiveOutbound } from "./index.js";
 import { validateInWindow } from "./cron-window.js";
 import { explainApiError } from "./api-error.js";
+import { buildProposalPayload } from "./proposal-payload.js";
 
 /**
  * Reconhece JID de grupo. Cobre três formatos, de propósito:
@@ -1918,64 +1919,106 @@ export const tools: Tool[] = [
   {
     name: "create_proposal",
     description:
-      "**A tool de PROPOSTA.** Use sempre que pedirem proposta, oferta ou contraproposta de compra/locação de um imóvel — inclusive 'envie uma proposta': cria-se aqui em rascunho e só então `send_proposal` manda pra assinatura. NÃO use `create_form` pra isso: aquilo abre negócio e pede dados, não gera documento assinável. Também não confundir com as tools `prop_*`, que são a ficha de acompanhamento do grupo e não criam nada no sistema. schemaType decide venda (compra_venda_v1) ou locação (locacao_residencial_v1 | locacao_comercial_v1).",
+      "**A tool de PROPOSTA.** Use sempre que pedirem proposta, oferta ou contraproposta de compra/locação de um imóvel — inclusive 'envie uma proposta': cria-se aqui em rascunho e só então `send_proposal` manda pra assinatura. NÃO use `create_form` pra isso: aquilo abre negócio e pede dados, não gera documento assinável. Também não confundir com as tools `prop_*`, que são a ficha de acompanhamento do grupo e não criam nada no sistema. O MÍNIMO pra proposta existir: proponente com nome completo, endereço do imóvel, valor, e o canal (whatsapp ou e-mail) com o contato correspondente. Sem um desses eu recuso e digo o que falta — colete e chame de novo.",
     inputSchema: {
       type: "object",
       properties: {
-        title: { type: "string" },
         schemaType: {
           type: "string",
           enum: ["compra_venda_v1", "locacao_residencial_v1", "locacao_comercial_v1"],
+          description: "compra_venda_v1 para venda; os locacao_* para aluguel.",
         },
-        dataJson: {
+        proponente: {
           type: "object",
-          description: "Campos da proposta (livre, validado pelo schema do form)",
+          description: "Quem está fazendo a oferta. OBRIGATÓRIO.",
+          properties: {
+            nome: { type: "string", description: "Nome COMPLETO (nome e sobrenome)" },
+            telefone: { type: "string", description: "Com DDD. Obrigatório se canal=whatsapp" },
+            email: { type: "string", description: "Obrigatório se canal=email" },
+            cpf: { type: "string" },
+          },
+          required: ["nome"],
+        },
+        imovel: {
+          type: "object",
+          description: "O imóvel da proposta. `endereco` é OBRIGATÓRIO.",
+          properties: {
+            endereco: { type: "string", description: "Rua e número, como o corretor falou" },
+            numero: { type: "string" },
+            bairro: { type: "string" },
+            cidade: { type: "string" },
+            uf: { type: "string" },
+            matricula: { type: "string" },
+          },
+          required: ["endereco"],
+        },
+        valor: {
+          type: "number",
+          description: "Valor da proposta em reais. OBRIGATÓRIO.",
+        },
+        canal: {
+          type: "string",
+          enum: ["whatsapp", "email"],
+          description:
+            "Por onde a proposta vai pro proponente. OBRIGATÓRIO — whatsapp exige telefone, email exige e-mail.",
+        },
+        vendedor: {
+          type: "object",
+          description:
+            "OPCIONAL — o proprietário, SÓ quando o corretor informar o contato dele. Sem telefone nem e-mail eu recuso: signatário sem contato trava o envio. Na dúvida, omita: a proposta vai só pro proponente.",
+          properties: {
+            nome: { type: "string", description: "Nome completo" },
+            telefone: { type: "string" },
+            email: { type: "string" },
+          },
+          required: ["nome"],
+        },
+        comissao: {
+          type: "object",
+          description: "Opcional. Só entra no documento com número.",
+          properties: {
+            percentual: { type: "number", description: "Ex.: 6 para 6%" },
+            valor: { type: "number" },
+          },
+        },
+        pagamento: {
+          type: "object",
+          properties: {
+            sinal: { type: "number", description: "Entrada/sinal, se houver" },
+            forma: { type: "string", description: "Ex.: 'à vista' ou 'entrada + financiamento'" },
+          },
+        },
+        title: {
+          type: "string",
+          description: "Opcional — sem isto eu monto com proponente + imóvel.",
         },
         validUntil: {
           type: "string",
           description:
             "ISO 8601 em UTC (terminando em Z). OPCIONAL — omita: sem prazo informado a proposta vale 7 dias. Não pergunte a validade ao usuário.",
         },
-        signers: {
-          type: "array",
-          description:
-            "Pessoas que assinam. `role` é OBRIGATÓRIO em cada uma: quem faz a oferta é `proponente`, o dono do imóvel é `vendedor`. **Cada signatário precisa de `phone` OU `email`** — signatário sem contato trava o envio depois, porque não há como avisá-lo. **Não invente signatário**: se o corretor não passou o vendedor, ou disse que não é pra mandar pro vendedor, mande SÓ o proponente. Nunca use nome de espaço reservado tipo 'Proprietário (do cadastro)'.",
-          items: {
-            type: "object",
-            properties: {
-              role: {
-                type: "string",
-                enum: ["proponente", "vendedor", "conjuge", "testemunha"],
-              },
-              name: { type: "string" },
-              email: { type: "string" },
-              cpf: { type: "string", description: "Só dígitos ou formatado" },
-              phone: { type: "string" },
-              notifyChannel: {
-                type: "string",
-                enum: ["email", "whatsapp", "sms"],
-                description:
-                  "Por onde avisar. Default 'email' — para Aceite por WhatsApp, mande 'whatsapp' com o telefone preenchido.",
-              },
-            },
-            required: ["role", "name"],
-          },
-        },
         propertyId: { type: "string", description: "Imóvel do cadastro, opcional" },
-        comissaoIncluida: {
-          type: "boolean",
-          description: "Inclui a comissão no corpo da proposta",
-        },
         hiddenPaths: {
           type: "array",
           description:
             "Campos a esconder da via do proprietário (ex.: comissão). Não-vazio faz a 2ª via sair reduzida.",
           items: { type: "string" },
         },
+        dataJson: {
+          type: "object",
+          description:
+            "Escape hatch pra campos fora do mínimo. Complementa, nunca sobrescreve — o corpo do documento é montado dos campos acima.",
+        },
       },
-      required: ["title", "schemaType"],
+      required: ["schemaType", "proponente", "imovel", "valor", "canal"],
     },
     handler: async (args) => {
+      // O corpo é MONTADO aqui, não copiado do que o modelo mandou: o template
+      // lê caminhos fixos e forma inventada gera PDF vazio (ver proposal-payload.ts).
+      const built = buildProposalPayload(args as Record<string, unknown>);
+      if (!built.ok) {
+        return { _error: true, status: 400, message: built.message };
+      }
       // A rota exige ISO-8601 estrito em UTC; data com offset (-03:00) ou só
       // "AAAA-MM-DD" reprovaria no Zod. Normaliza o que dá pra normalizar e
       // deixa o resto seguir, pra falha virar mensagem traduzida e não crash.
@@ -1987,16 +2030,7 @@ export const tools: Tool[] = [
       const r = await callApi({
         method: "POST",
         path: "/api/proposals",
-        body: {
-          title: args.title,
-          schemaType: args.schemaType,
-          dataJson: args.dataJson ?? {},
-          validUntil,
-          signers: args.signers,
-          propertyId: args.propertyId,
-          comissaoIncluida: args.comissaoIncluida,
-          hiddenPaths: args.hiddenPaths,
-        },
+        body: { ...built.body, validUntil },
       });
       return explainApiError(r) ?? r.body;
     },

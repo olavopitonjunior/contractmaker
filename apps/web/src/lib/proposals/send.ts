@@ -3,7 +3,11 @@ import { resolveClickSignCreds, getSignatureSettings } from "@/lib/clicksign/acc
 import { getMonthlySpendCents } from "@/lib/clicksign/executor";
 import { getMonthlyBudgetCents } from "@/lib/clicksign/costs";
 import type { ClickSignCreds } from "@/lib/clicksign/account";
-import { checkProposalReadiness, type ReadinessIssue } from "./clicksign-readiness";
+import {
+  checkProposalReadiness,
+  checkProposalContent,
+  type ReadinessIssue,
+} from "./clicksign-readiness";
 import { dedupeSigners, SignerCollisionError, type DedupableSigner } from "./signer-dedupe";
 import { decideInstrument, type RoutingSigner, type Instrument, type Channel } from "./routing";
 import { plannedProposalCostCents, plannedAcceptanceCostCents } from "./cost";
@@ -70,7 +74,7 @@ export async function prepareSend(
 
   const proposal = await prisma.proposal.findUnique({
     where: { id: proposalId },
-    select: { orgId: true, hiddenPaths: true },
+    select: { orgId: true, hiddenPaths: true, schemaType: true, dataJson: true },
   });
   if (!proposal) return { blocked: "no_signers" };
 
@@ -93,6 +97,11 @@ export async function prepareSend(
       notifyChannel: r.notifyChannel,
     }))
   );
+  // Conteúdo do documento junto do preflight de signatários: os dois barram no
+  // mesmo ponto e chegam ao usuário na mesma lista. Sem isto, proposta com
+  // `dataJson` de forma errada é enviada como PDF vazio, sem ninguém notar.
+  issues.push(...checkProposalContent(proposal.schemaType, proposal.dataJson));
+
   if (issues.length > 0) {
     return {
       blocked: "preflight",
