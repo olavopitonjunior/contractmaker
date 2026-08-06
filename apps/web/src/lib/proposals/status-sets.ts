@@ -73,6 +73,19 @@ export const AWAITING_SIGNATURE_STATUSES = new Set<string>([
 ]);
 
 /**
+ * De onde "enviar ao proprietário/vendedor" é válido: na parada de decisão
+ * (caminho feliz) e em `aguardando_vendedor` (retry manual quando a 2ª via
+ * falhou em criar envelope — sem isto a proposta ficava presa sem botão).
+ */
+export const SEND_VENDEDOR_STATUSES = new Set<string>([
+  "assinada_proponente",
+  "aguardando_vendedor",
+]);
+
+/** Parada durável de decisão humana — a UI mostra o card "sua vez". */
+export const AWAITING_DECISION_STATUSES = new Set<string>(["assinada_proponente"]);
+
+/**
  * "Em aberto" — proposta enviada e ainda em curso (nem terminal nem rascunho).
  * Base dos KPIs da lista e do polling de tempo real. Fonte única (server + client).
  */
