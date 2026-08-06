@@ -105,6 +105,9 @@ const OWNS_BELL: Record<DealNotifEvent, boolean> = {
   contract_signed: false,
   charge_created: false,
   charge_paid: false,
+  // Sino do SLA é do cron sla-check (que decide entre individual e digest
+  // >5/dia) — o motor aqui cuida SÓ dos canais externos, se a org ligar.
+  deal_sla_breached: false,
 };
 
 function buildTexts(params: {
@@ -156,6 +159,13 @@ function buildTexts(params: {
       return {
         title: "Comissão paga",
         body: `A cobrança de comissão do negócio ${t} foi paga.`,
+      };
+    case "deal_sla_breached":
+      return {
+        title: "Negócio atrasado (SLA)",
+        body: stageName
+          ? `O negócio ${t} estourou o prazo da etapa "${stageName}".`
+          : `O negócio ${t} estourou o prazo da etapa atual.`,
       };
   }
 }

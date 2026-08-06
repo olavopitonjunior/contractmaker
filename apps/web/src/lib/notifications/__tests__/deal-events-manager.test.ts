@@ -501,10 +501,13 @@ describe("notifyDealEvent — público manager (v3)", () => {
    * Ao contrário da parte, o gerente NÃO tem allowlist: ele é operador da
    * esteira e o vocabulário interno ("contrato pronto") é o dele.
    */
-  it("alcança os 8 marcos do negócio, sem allowlist", async () => {
+  it("alcança os 8 marcos do negócio, sem allowlist (SLA fica de fora: default OFF)", async () => {
     dealFind.mockResolvedValue(dealRow());
 
     for (const ev of DEAL_NOTIF_EVENTS) {
+      // deal_sla_breached nasce com externos OFF (DEFAULT_EVENT_OVERRIDES) —
+      // coberto no teste seguinte.
+      if (ev === "deal_sla_breached") continue;
       vi.clearAllMocks();
       dealFind.mockResolvedValue(dealRow());
       orgSettingsFind.mockResolvedValue(null);
@@ -525,5 +528,25 @@ describe("notifyDealEvent — público manager (v3)", () => {
       expect(sendEmail, `evento ${ev}`).toHaveBeenCalledTimes(1);
       expect(dispatch, `evento ${ev}`).toHaveBeenCalledTimes(1);
     }
+  });
+
+  it("deal_sla_breached NÃO dispara externo sem a org ligar (default OFF)", async () => {
+    vi.clearAllMocks();
+    dealFind.mockResolvedValue(dealRow());
+    orgSettingsFind.mockResolvedValue(null);
+    rosterFind.mockResolvedValue([]);
+    membershipFirst.mockResolvedValue(membership());
+
+    await notifyDealEvent({
+      dealId: "deal1",
+      orgId: "org1",
+      event: "deal_sla_breached",
+      dedupeKey: "s1:20260806",
+    });
+
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+    // Sino também não: OWNS_BELL=false — quem emite é o cron sla-check.
+    expect(notifCreate).not.toHaveBeenCalled();
   });
 });

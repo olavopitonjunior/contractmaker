@@ -161,12 +161,34 @@ describe("público party — defaults OFF e allowlist de eventos", () => {
 describe("público manager — default ON e sem allowlist", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("sem config nenhuma, TODO evento nasce com manager ligado nos 2 canais", async () => {
+  it("sem config nenhuma, todo MARCO nasce com manager ligado nos 2 canais (SLA é a exceção: nasce OFF)", async () => {
     orgSettingsFind.mockResolvedValue(null);
     const cfg = await resolveEffectiveNotificationConfig("org1");
     for (const ev of DEAL_NOTIF_EVENTS) {
+      if (ev === "deal_sla_breached") continue;
       expect(cfg.events[ev].manager).toEqual({ email: true, whatsapp: true });
     }
+    // DEFAULT_EVENT_OVERRIDES: alerta de SLA é operacional (sino via cron) —
+    // canal externo só se a org ligar na matriz.
+    expect(cfg.events.deal_sla_breached.broker).toEqual({
+      email: false,
+      whatsapp: false,
+    });
+    expect(cfg.events.deal_sla_breached.manager).toEqual({
+      email: false,
+      whatsapp: false,
+    });
+  });
+
+  it("org consegue LIGAR o evento de SLA na matriz (override é default, não trava)", async () => {
+    orgSettingsFind.mockResolvedValue({
+      settingsJson: {
+        events: { deal_sla_breached: { manager: { email: true } } },
+      },
+    });
+    const cfg = await resolveEffectiveNotificationConfig("org1");
+    expect(cfg.events.deal_sla_breached.manager.email).toBe(true);
+    expect(cfg.events.deal_sla_breached.manager.whatsapp).toBe(false);
   });
 
   it("manager vale em evento FORA da allowlist de party — não há zeramento", async () => {

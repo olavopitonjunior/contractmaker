@@ -12,6 +12,10 @@ export const DEAL_NOTIF_EVENTS = [
   "contract_signed",
   "charge_created",
   "charge_paid",
+  // SLA do pipeline (plano 2026-08, Fase 3): deal passou de slaDueAt.
+  // Sino é emitido pelo CRON sla-check (com digest >5/dia) — OWNS_BELL=false;
+  // canais externos nascem OFF (ver DEFAULT_EVENT_OVERRIDES).
+  "deal_sla_breached",
 ] as const;
 
 export type DealNotifEvent = (typeof DEAL_NOTIF_EVENTS)[number];
@@ -25,6 +29,7 @@ export const DEAL_NOTIF_EVENT_LABEL: Record<DealNotifEvent, string> = {
   contract_signed: "Contrato assinado",
   charge_created: "Cobrança gerada",
   charge_paid: "Cobrança paga",
+  deal_sla_breached: "Negócio atrasado (SLA)",
 };
 
 export interface ChannelToggles {
@@ -110,5 +115,22 @@ export const DEFAULT_EVENT: ResolvedEventConfig = {
 
 /** Party zerado — usado pra silenciar eventos fora da allowlist. */
 export const PARTY_OFF = { email: false, whatsapp: false } as const;
+
+/**
+ * Defaults POR EVENTO que divergem do DEFAULT_EVENT. `deal_sla_breached`
+ * nasce com canais externos 100% OFF: o alerta de SLA é operacional (sino
+ * interno via cron); e-mail/WhatsApp diário de "negócio atrasado" pro
+ * corretor/gerente é decisão da imobiliária na matriz — nunca um default que
+ * liga sozinho num deploy.
+ */
+export const DEFAULT_EVENT_OVERRIDES: Partial<
+  Record<DealNotifEvent, ResolvedEventConfig>
+> = {
+  deal_sla_breached: {
+    broker: { email: false, whatsapp: false },
+    party: { ...PARTY_OFF },
+    manager: { email: false, whatsapp: false },
+  },
+};
 
 export const DEFAULT_FORM_REMINDER = { enabled: true, days: [2, 5] };
