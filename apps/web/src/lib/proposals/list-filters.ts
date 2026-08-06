@@ -3,12 +3,18 @@
  * corretor ("Em aberto", "Com o cliente", …) em vez dos 14 status técnicos.
  * Compartilhado entre a página (resolve o `where`) e o componente de filtros
  * (renderiza o select) pra não divergirem.
+ *
+ * CLIENT-SAFE (importado por ProposalFilters, "use client") — o filtro que
+ * precisa de condição de BANCO além do status ("2ª via falhou" olha envelopes)
+ * declara `requiresServer` e é resolvido em list-filters.server.ts.
  */
 export interface StatusFilterOption {
   id: string;
   label: string;
   /** null = sem filtro (todos). */
   statuses: string[] | null;
+  /** true = o where completo vem de list-filters.server.ts (condição extra). */
+  requiresServer?: boolean;
 }
 
 export const STATUS_FILTERS: StatusFilterOption[] = [
@@ -20,7 +26,17 @@ export const STATUS_FILTERS: StatusFilterOption[] = [
   },
   { id: "rascunho", label: "Rascunho / falha", statuses: ["rascunho", "falha_envio", "aguardando_aprovacao"] },
   { id: "cliente", label: "Com o cliente", statuses: ["enviada", "entregue", "visualizada"] },
-  { id: "proprietario", label: "Com o proprietário", statuses: ["assinada_proponente", "aguardando_vendedor"] },
+  // "proprietario" quebrou em dois (2026-08): a parada de decisão é bola do
+  // CORRETOR; a 2ª via em curso é bola do proprietário — juntos, o filtro
+  // escondia exatamente as propostas que pedem ação.
+  { id: "decisao", label: "Aguardando sua decisão", statuses: ["assinada_proponente"] },
+  { id: "proprietario", label: "Com o proprietário", statuses: ["aguardando_vendedor"] },
+  {
+    id: "segunda_via_falhou",
+    label: "2ª via falhou",
+    statuses: ["aguardando_vendedor"],
+    requiresServer: true,
+  },
   { id: "concluida", label: "Concluídas", statuses: ["completa", "convertida"] },
   {
     id: "encerrada",
