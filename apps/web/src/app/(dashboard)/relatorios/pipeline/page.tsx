@@ -11,6 +11,7 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { prisma } from "@/lib/db/prisma";
 import { getPipelineReport } from "@/lib/pipeline/reports";
 import { getFunnelByChannel } from "@/lib/pipeline/funnel";
+import { getProposalFunnel, getStuckProposals } from "@/lib/proposals/funnel";
 import { slaStatusFrom } from "@/lib/pipeline/sla";
 import { PipelineReportCharts } from "@/components/relatorios/PipelineReportCharts";
 
@@ -35,6 +36,7 @@ const ABAS = [
   { key: "visao", label: "Visão geral" },
   { key: "corretores", label: "Por corretor" },
   { key: "canais", label: "Por canal" },
+  { key: "propostas", label: "Propostas" },
   { key: "negocios", label: "Negócios" },
 ] as const;
 type Aba = (typeof ABAS)[number]["key"];
@@ -101,6 +103,13 @@ export default async function PipelineReportPage({
   });
   const channelRows =
     aba === "canais" ? await getFunnelByChannel({ orgId, kind, from }) : [];
+  const [proposalFunnel, stuckProposals] =
+    aba === "propostas"
+      ? await Promise.all([
+          getProposalFunnel({ orgId, kind, from }),
+          getStuckProposals({ orgId, kind, now: new Date(nowMs) }),
+        ])
+      : [null, []];
   const drilldown =
     aba === "negocios"
       ? await prisma.deal.findMany({
@@ -441,6 +450,147 @@ export default async function PipelineReportPage({
             </p>
           </CardContent>
         </Card>
+      )}
+
+      {aba === "propostas" && proposalFunnel && (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">
+                Funil de propostas (criação → envio → visualização → assinatura →
+                negócio)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40 text-xs">
+                    <tr>
+                      <th className="text-left p-2">Etapa</th>
+                      <th className="text-right p-2">Propostas</th>
+                      <th className="text-right p-2">% do total</th>
+                      <th className="text-right p-2">Mediana até aqui</th>
+                      <th className="text-right p-2">P90</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      {
+                        label: "Criadas",
+                        n: proposalFunnel.total,
+                        med: null as number | null,
+                        p90: null as number | null,
+                      },
+                      {
+                        label: "Enviadas",
+                        n: proposalFunnel.enviadas,
+                        med: proposalFunnel.medianCreateToSend,
+                        p90: null,
+                      },
+                      {
+                        label: "Visualizadas",
+                        n: proposalFunnel.visualizadas,
+                        med: proposalFunnel.medianSendToView,
+                        p90: proposalFunnel.p90SendToView,
+                      },
+                      {
+                        label: "Assinadas pelo proponente",
+                        n: proposalFunnel.assinadas,
+                        med: proposalFunnel.medianViewToSign,
+                        p90: proposalFunnel.p90ViewToSign,
+                      },
+                      {
+                        label: "Convertidas em negócio",
+                        n: proposalFunnel.convertidas,
+                        med: proposalFunnel.medianSignToConvert,
+                        p90: null,
+                      },
+                    ].map((row) => (
+                      <tr key={row.label} className="border-t">
+                        <td className="p-2 font-medium">{row.label}</td>
+                        <td className="text-right p-2 tabular-nums">{row.n}</td>
+                        <td className="text-right p-2 tabular-nums">
+                          {proposalFunnel.total > 0
+                            ? `${Math.round((row.n / proposalFunnel.total) * 100)}%`
+                            : "—"}
+                        </td>
+                        <td className="text-right p-2 tabular-nums">{fmtDays(row.med)}</td>
+                        <td className="text-right p-2 tabular-nums">{fmtDays(row.p90)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="px-3 py-2 text-[11px] text-muted-foreground border-t">
+                Tempo de cada linha = da etapa anterior até esta. Assinatura vem
+                dos eventos da proposta; conversão é a ponte proposta → negócio.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">
+                Paradas além da régua (aguardando alguém)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40 text-xs">
+                    <tr>
+                      <th className="text-left p-2">Proposta</th>
+                      <th className="text-left p-2">Status</th>
+                      <th className="text-left p-2">Responsável</th>
+                      <th className="text-right p-2">Dias parada</th>
+                      <th className="text-right p-2">SLA</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stuckProposals.map((p) => (
+                      <tr key={p.id} className="border-t">
+                        <td className="p-2">
+                          <Link
+                            href={
+                              p.convertedDealId
+                                ? `${dealPathBase}/${p.convertedDealId}`
+                                : `/pipeline/propostas/${p.id}`
+                            }
+                            className="font-medium hover:underline"
+                          >
+                            {p.title}
+                          </Link>
+                        </td>
+                        <td className="p-2">{p.status.replace(/_/g, " ")}</td>
+                        <td className="p-2">{p.responsibleLabel ?? "—"}</td>
+                        <td className="text-right p-2 tabular-nums">{p.ageDays}</td>
+                        <td className="text-right p-2">
+                          <Badge
+                            variant="outline"
+                            className={
+                              p.slaStatus === "atrasado"
+                                ? "border-red-500 text-red-700"
+                                : "border-amber-500 text-amber-700"
+                            }
+                          >
+                            {p.slaStatus === "atrasado" ? "Atrasado" : "Atenção"}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                    {stuckProposals.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="p-6 text-center text-muted-foreground">
+                          Nenhuma proposta parada além da régua. 🎉
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </>
       )}
 
       {aba === "negocios" && (
