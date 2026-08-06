@@ -19,11 +19,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { proposalStatusView, proposalEventLabel } from "@/lib/proposals/status-view";
-import { EDITABLE_STATUSES } from "@/lib/proposals/status-sets";
+import { EDITABLE_STATUSES, AWAITING_DECISION_STATUSES } from "@/lib/proposals/status-sets";
 import { useProposalPolling } from "@/hooks/useProposalPolling";
 import { ProposalProgressTimeline } from "./ProposalProgressTimeline";
 import { ProposalAssigneeControl } from "./ProposalAssigneeControl";
 import { ProposalActionBar } from "./ProposalActionBar";
+import { ProposalDecisionCard } from "./ProposalDecisionCard";
+import type { PlanVendedor } from "./EnviarProprietarioDialog";
 import { ProposalDocumentCard } from "./ProposalDocumentCard";
 import { ProposalAttachmentUpload } from "./ProposalAttachmentUpload";
 import type { ProposalPermissions } from "./ProposalRowActions";
@@ -92,15 +94,37 @@ export function ProposalDetailClient({
   members,
   permissions,
   sentSnapshotHtml,
+  planVendedores = [],
+  vendedorCostLabel = null,
+  vendedorIncluded = true,
 }: {
   proposal: Proposal;
-  signers: { id: string; name: string; role: string; channel: string; status: string }[];
-  events: { id: string; eventName: string; receivedAtLabel: string }[];
+  signers: {
+    id: string;
+    name: string;
+    role: string;
+    channel: string;
+    status: string;
+    /** "1ª via" | "2ª via" | "Pendente" — de qual via/estado a linha vem. */
+    viaLabel?: string | null;
+  }[];
+  events: {
+    id: string;
+    eventName: string;
+    receivedAtLabel: string;
+    /** Razão extraída do payload (falhas da 2ª via, preflight etc.). */
+    detail?: string | null;
+  }[];
   attachments: { id: string; filename: string; category: string | null; url: string }[];
   members: { id: string; name: string }[];
   permissions: ProposalPermissions;
   /** Documento congelado no envio (null enquanto a proposta não saiu). */
   sentSnapshotHtml: string | null;
+  /** Linhas de vendedor do PLANO (parada de decisão) + custo da 2ª via. */
+  planVendedores?: PlanVendedor[];
+  vendedorCostLabel?: string | null;
+  /** Há vendedor na jornada? (omite o nó Proprietário da timeline) */
+  vendedorIncluded?: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -255,13 +279,26 @@ export function ProposalDetailClient({
               convertedDealId: proposal.convertedDealId,
             }}
             permissions={permissions}
+            kind={proposal.kind}
+            vendedores={planVendedores}
+            custoLabel={vendedorCostLabel}
           />
         </div>
       </div>
 
+      {/* Card de decisão — o proponente assinou, a bola é do corretor */}
+      {AWAITING_DECISION_STATUSES.has(liveStatus) && permissions.send && (
+        <ProposalDecisionCard
+          proposalId={proposal.id}
+          kind={proposal.kind}
+          vendedores={planVendedores}
+          custoLabel={vendedorCostLabel}
+        />
+      )}
+
       {/* Linha do tempo */}
       <Card className="p-4">
-        <ProposalProgressTimeline status={liveStatus} />
+        <ProposalProgressTimeline status={liveStatus} vendedorIncluded={vendedorIncluded} />
       </Card>
 
       {/* Resumo + Responsável */}
@@ -353,8 +390,8 @@ export function ProposalDetailClient({
               live && live.signers.length > 0
                 ? live.signers
                     .filter((s) => s.status !== "removed")
-                    .map((s) => ({ id: s.id, name: s.name, role: s.role ?? "", channel: s.channel, status: s.status, sent: true }))
-                : signers.map((s) => ({ id: s.id, name: s.name, role: s.role, channel: s.channel, status: s.status, sent: false }));
+                    .map((s) => ({ id: s.id, name: s.name, role: s.role ?? "", channel: s.channel, status: s.status, sent: true, viaLabel: null as string | null }))
+                : signers.map((s) => ({ id: s.id, name: s.name, role: s.role, channel: s.channel, status: s.status, sent: false, viaLabel: s.viaLabel ?? null }));
             if (rows.length === 0) {
               return <p className="text-sm text-muted-foreground">Nenhum signatário definido ainda.</p>;
             }
@@ -391,6 +428,11 @@ export function ProposalDetailClient({
                       <div className="flex justify-between gap-2">
                         <span className="truncate">
                           {s.name} <span className="text-muted-foreground">· {s.role}</span>
+                          {s.viaLabel ? (
+                            <span className="ml-1 rounded border px-1 text-[10px] text-muted-foreground">
+                              {s.viaLabel}
+                            </span>
+                          ) : null}
                         </span>
                         <span className="flex shrink-0 items-center gap-2">
                           <span className="text-xs text-muted-foreground">{s.channel}</span>
@@ -500,6 +542,9 @@ export function ProposalDetailClient({
                   <span className="text-sm">{proposalEventLabel(e.eventName)}</span>
                   <span className="text-xs text-muted-foreground">{e.receivedAtLabel}</span>
                 </div>
+                {e.detail && (
+                  <p className="text-xs text-muted-foreground">{e.detail}</p>
+                )}
               </li>
             ))}
           </ol>
