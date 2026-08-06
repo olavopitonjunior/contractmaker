@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db/prisma";
 import { requireCronAuth } from "@/lib/security/cron-auth";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
 import { syncEnvelopeState } from "@/lib/clicksign/sync";
-import { sendVendedorEnvelope } from "@/lib/proposals/send-execute";
+import { sendVendedorVia } from "@/lib/proposals/send-execute";
 import { buildDossier } from "@/lib/proposals/dossier";
 
 export const runtime = "nodejs";
@@ -77,7 +77,7 @@ export async function GET(req: NextRequest) {
   });
   for (const p of stuck) {
     try {
-      await sendVendedorEnvelope(p.id);
+      await sendVendedorVia(p.id, "cron");
       result.chainedRetried++;
     } catch {
       result.errors++;
