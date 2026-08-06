@@ -1,6 +1,5 @@
 import { requireFeaturePage } from "@/lib/modules/page-guard";
-import { getPipelineByKind } from "@/lib/modules/resolve";
-import { FEATURE, MODULE } from "@/lib/modules/catalog";
+import { FEATURE } from "@/lib/modules/catalog";
 import { KanbanBoard } from "@/components/pipeline/KanbanBoard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -23,12 +22,15 @@ import {
 } from "lucide-react";
 import { getIListConnection } from "@/lib/ilist/connection";
 import { getEffectivePermissions, dealScopeWhere } from "@/lib/security/rbac/check";
-import { DEAL_CARD_INCLUDE, toDealCard } from "@/lib/pipeline/deal-dates";
+import { prisma } from "@/lib/db/prisma";
+import { getBoardStages, getBoardKpis } from "@/lib/pipeline/board-query";
+import { parseBoardFilters } from "@/lib/pipeline/list-filters";
+import { PipelineFilters } from "@/components/pipeline/PipelineFilters";
 
 export default async function PipelinePage({
   searchParams,
 }: {
-  searchParams?: { arquivados?: string; novo?: string };
+  searchParams?: Record<string, string | string[] | undefined>;
 }) {
   // Gate de módulo: tenant só-locação (vendas OFF) é redirecionado pra /locacao.
   // NÃO usar layout aqui — /pipeline/locacao é filho deste segmento e precisa
@@ -40,55 +42,64 @@ export default async function PipelinePage({
   const eff = await getEffectivePermissions(userId, orgId);
   const dealScope = dealScopeWhere(eff) ?? { id: "__none__" };
 
-  // ?arquivados=1 mostra também os deals arquivados (recuperação). Default oculta.
-  const includeArchived = searchParams?.arquivados === "1";
+  // Filtros server-side da URL (?q=&responsavel=&sla=&periodo=&canal=&arquivados=1)
+  // — entram no WHERE da query do board (list-filters.ts).
+  const filters = parseBoardFilters(searchParams);
 
   // iList (RE/MAX): entrada extra no dropdown só quando o tenant tem conexão
   // provisionada pelo super-admin (gating por existência — ver lib/ilist/connection.ts).
   const hasIList = (await getIListConnection(orgId)) !== null;
 
-  // Filtra SEMPRE por kind="venda" (getPipelineByKind) — evita o footgun de
-  // findFirst({ orgId }) sem kind, que pegaria o pipeline de locação.
-  const pipeline = await getPipelineByKind(orgId, MODULE.VENDAS, {
-    include: {
-      stages: {
-        orderBy: { position: "asc" },
-        include: {
-          deals: {
-            where: {
-              ...(includeArchived ? {} : { archivedAt: null }),
-              ...dealScope,
-            },
-            orderBy: { position: "asc" },
-            include: DEAL_CARD_INCLUDE,
-          },
-        },
-      },
-    },
+  // nowMs único pro render — cards, board e filtros de SLA derivam dele (#418).
+  const nowMs = Date.now();
+
+  // Board com cap de 200/stage + _count filtrado (board-query.ts). O where
+  // interno já filtra kind="venda" no pipeline — mesmo footgun-guard do
+  // getPipelineByKind.
+  const board = await getBoardStages({
+    orgId,
+    kind: "venda",
+    filters,
+    extraWhere: dealScope,
+    orderBy: { position: "asc" },
+    nowMs,
   });
 
-  if (!pipeline) {
+  if (!board) {
     return <p className="text-muted-foreground p-6">Pipeline não configurado.</p>;
   }
 
-  const allDeals = pipeline.stages.flatMap((s) => s.deals);
-  const concludedStage = pipeline.stages.find((s) => s.name === "Comissão paga");
-  const concludedDeals = concludedStage?.deals.length || 0;
-  const lostStage = pipeline.stages.find((s) => s.name === "Negócio perdido");
-  const lostDeals = lostStage?.deals.length || 0;
-  const activeDeals = allDeals.length - concludedDeals - lostDeals;
-  const totalValue = allDeals.reduce((sum, d) => sum + (d.value || 0), 0);
-  const conversionRate =
-    allDeals.length > 0 ? Math.round((concludedDeals / allDeals.length) * 100) : 0;
-
-  // Microcopy V1: deltas e médias derivados (sem query extra)
+  // KPIs da ORG via aggregate — visão default (sem arquivados), independem
+  // dos filtros da URL e do cap por coluna.
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
-  const dealsToday = allDeals.filter(
-    (d) => d.createdAt.getTime() >= startOfToday.getTime()
-  ).length;
-  const dealsWithValue = allDeals.filter((d) => (d.value || 0) > 0).length;
-  const ticketMedio = dealsWithValue > 0 ? totalValue / dealsWithValue : 0;
+  const [kpis, responsaveisRaw] = await Promise.all([
+    getBoardKpis(
+      { pipelineId: board.pipelineId, archivedAt: null, ...dealScope },
+      startOfToday
+    ),
+    prisma.user.findMany({
+      where: { deals: { some: { pipelineId: board.pipelineId } } },
+      select: { id: true, name: true, email: true },
+      orderBy: { name: "asc" },
+    }),
+  ]);
+  const responsaveis = responsaveisRaw.map((u) => ({
+    id: u.id,
+    label: u.name?.trim() || u.email || u.id,
+  }));
+
+  const stageIdByName = new Map(board.stages.map((s) => [s.name, s.id]));
+  const countFor = (name: string) =>
+    kpis.byStageId[stageIdByName.get(name) ?? ""]?.count ?? 0;
+  const concludedDeals = countFor("Comissão paga");
+  const lostDeals = countFor("Negócio perdido");
+  const activeDeals = kpis.totalDeals - concludedDeals - lostDeals;
+  const totalValue = kpis.totalValue;
+  const conversionRate =
+    kpis.totalDeals > 0 ? Math.round((concludedDeals / kpis.totalDeals) * 100) : 0;
+  const dealsToday = kpis.dealsToday;
+  const ticketMedio = kpis.dealsWithValue > 0 ? totalValue / kpis.dealsWithValue : 0;
   const fmtBRLShort = (v: number) =>
     v >= 1_000_000
       ? `R$ ${(v / 1_000_000).toFixed(1)}M`
@@ -96,13 +107,12 @@ export default async function PipelinePage({
         ? `R$ ${(v / 1000).toFixed(0)}k`
         : `R$ ${v.toFixed(0)}`;
 
-  // nowMs único pro render — cards e board derivam rótulos/SLA dele (#418).
-  const nowMs = Date.now();
-  const stages = pipeline.stages.map((stage) => ({
+  const stages = board.stages.map((stage) => ({
     id: stage.id,
     name: stage.name,
     color: stage.color || "#6366f1",
-    deals: stage.deals.map((deal) => toDealCard(deal, nowMs, stage.name)),
+    deals: stage.deals,
+    total: stage.total,
   }));
 
   return (
@@ -253,8 +263,15 @@ export default async function PipelinePage({
         </Card>
       </div>
 
+      {/* Filtros server-side — filtram a QUERY (cap 200/stage), não só os cards */}
+      <PipelineFilters
+        filters={filters}
+        responsaveis={responsaveis}
+        totals={board.totals}
+      />
+
       {/* Kanban — nowMs serializado evita Date.now() no render do client (#418) */}
-      <KanbanBoard stages={stages} nowMs={nowMs} />
+      <KanbanBoard stages={stages} nowMs={nowMs} hideToolbar />
     </div>
   );
 }
