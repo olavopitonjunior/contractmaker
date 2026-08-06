@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
+import { moveDealStage } from "@/lib/pipeline/move-stage";
 import {
   ensureLocacaoAccess,
   isRouteError,
@@ -72,21 +73,14 @@ export async function POST(
     );
   }
 
-  await prisma.deal.update({
-    where: { id: deal.id },
-    data: { stageId: formularioStage.id, stageEnteredAt: new Date() },
-  });
-
-  await audit(extractAuditContextFromRequest(req, ctx.orgId, ctx.userId), {
-    action: "DEAL_STAGE_CHANGE",
-    result: "SUCCESS",
-    resource: deal.id,
-    resourceType: "Deal",
-    metadata: {
-      kind: "ficha_aprovada",
-      fromStage: deal.stage.id,
-      toStage: formularioStage.id,
-    },
+  await moveDealStage({
+    dealId: deal.id,
+    toStageId: formularioStage.id,
+    reason: "aprovar_ficha",
+    actorUserId: ctx.userId,
+    orgId: ctx.orgId,
+    auditCtx: extractAuditContextFromRequest(req, ctx.orgId, ctx.userId),
+    auditMetadata: { kind: "ficha_aprovada" },
   });
 
   // Notificação do processo: ficha aprovada avança pra "Formulário".

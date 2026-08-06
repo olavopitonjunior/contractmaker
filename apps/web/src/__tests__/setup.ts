@@ -257,6 +257,7 @@ vi.mock("@/lib/db/prisma", () => {
       groupBy: vi.fn().mockResolvedValue([]),
       findMany: vi.fn().mockResolvedValue([]),
       findUnique: vi.fn(),
+      findUniqueOrThrow: vi.fn(),
       findFirst: vi.fn().mockResolvedValue(null),
       create: vi.fn(),
       update: vi.fn().mockResolvedValue({}),
@@ -381,7 +382,22 @@ vi.mock("@/lib/db/prisma", () => {
     },
     pipelineStage: {
       findFirst: vi.fn(),
+      findUnique: vi.fn(),
       createMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    // Histórico de stage + política de SLA (plano 2026-08, Fase 3).
+    dealStageHistory: {
+      findFirst: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn().mockResolvedValue({ id: "dsh-mock" }),
+      update: vi.fn().mockResolvedValue({}),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    slaPolicy: {
+      findFirst: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+      upsert: vi.fn().mockResolvedValue({}),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     salesForm: {
       findUnique: vi.fn(),

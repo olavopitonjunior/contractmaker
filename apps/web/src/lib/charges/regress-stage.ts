@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db/prisma";
+import { moveDealStage } from "@/lib/pipeline/move-stage";
 import { audit } from "@/lib/security/audit";
 import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
 
@@ -71,26 +72,14 @@ export async function regressDealStageAfterChargeCancel(
     return { regressed: false, reason: "no_target_stage" };
   }
 
-  await prisma.deal.update({
-    where: { id: deal.id },
-    data: { stageId: targetStage.id, stageEnteredAt: new Date() },
+  await moveDealStage({
+    dealId: deal.id,
+    toStageId: targetStage.id,
+    reason: "charge_cancelled_regress",
+    actorUserId: actor.userId,
+    orgId: actor.orgId,
+    auditCtx: { orgId: actor.orgId, userId: actor.userId },
   });
-
-  await audit(
-    { orgId: actor.orgId, userId: actor.userId },
-    {
-      action: "DEAL_STAGE_CHANGE",
-      result: "SUCCESS",
-      resource: deal.id,
-      resourceType: "Deal",
-      metadata: {
-        kind: "charge_cancelled_regress",
-        fromStage: deal.stage.id,
-        toStage: targetStage.id,
-        toStageName: targetStage.name,
-      },
-    }
-  ).catch(() => {});
 
   queueSurveyDispatch(deal.id, targetStage.name);
 

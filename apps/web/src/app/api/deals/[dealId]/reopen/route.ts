@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
+import { moveDealStage } from "@/lib/pipeline/move-stage";
 import {
   requireApiAuth,
   isAuthFailure,
@@ -97,34 +98,22 @@ export async function POST(
     );
   }
 
-  await prisma.deal.update({
-    where: { id: deal.id },
-    data: {
-      stageId: targetStage.id,
-      stageEnteredAt: new Date(),
-      lostAt: null,
-      lostReason: null,
-    },
+  await moveDealStage({
+    dealId: deal.id,
+    toStageId: targetStage.id,
+    reason: "reopen",
+    actorUserId: apiAuth.actor.effectiveUserId,
+    orgId: apiAuth.org.id,
+    dealData: { lostAt: null, lostReason: null },
+    auditCtx: extractAuditContextFromRequest(req, apiAuth.org.id, apiAuth.actor.effectiveUserId),
+    auditMetadata: mergeAuditMetadata(
+      {
+        kind: "reopened",
+        restoredFromAuditId: lastLostAudit?.id ?? null,
+      },
+      apiAuth.actor
+    ),
   });
-
-  await audit(
-    extractAuditContextFromRequest(req, apiAuth.org.id, apiAuth.actor.effectiveUserId),
-    {
-      action: "DEAL_STAGE_CHANGE",
-      result: "SUCCESS",
-      resource: deal.id,
-      resourceType: "Deal",
-      metadata: mergeAuditMetadata(
-        {
-          kind: "reopened",
-          fromStage: deal.stage.id,
-          toStage: targetStage.id,
-          restoredFromAuditId: lastLostAudit?.id ?? null,
-        },
-        apiAuth.actor
-      ),
-    }
-  );
 
   return NextResponse.json({
     status: "reaberto",

@@ -1,5 +1,6 @@
 import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
+import { moveDealStage } from "@/lib/pipeline/move-stage";
 import {
   notifyDealEvent,
   stageChangeDedupeKey,
@@ -226,9 +227,11 @@ export async function runContractApproval(
         (s) => s.name === assinaturaStageName
       );
       if (assinaturaStage) {
-        await prisma.deal.update({
-          where: { id: deal.id },
-          data: { stageId: assinaturaStage.id, stageEnteredAt: new Date() },
+        await moveDealStage({
+          dealId: deal.id,
+          toStageId: assinaturaStage.id,
+          reason: "contract_approved",
+          orgId: deal.pipeline.orgId,
         });
         // Notificação do processo: aprovação avançou o stage. O evento
         // contract_sent (envio real do envelope) é outro momento — dispara no

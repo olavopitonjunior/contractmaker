@@ -578,6 +578,13 @@ model Deal {
   // ponto que muda stageId (drag, auto-promotes, mark-lost/reopen, geração).
   // Null em deals pré-migração sem backfill exato — UI cai pra createdAt.
   stageEnteredAt   DateTime? @default(now())
+  // SLA materializado (2026-08, plano F3): instantes ABSOLUTOS em que o deal
+  // entra em "atenção" (warn) e "atrasado" (due), escritos por moveDealStage a
+  // partir da política CONGELADA na entrada do stage. Query-áveis (filtro do
+  // kanban e cron sla-check sem date-math por linha). Null = stage terminal ou
+  // deal pré-backfill.
+  slaWarnAt        DateTime?
+  slaDueAt         DateTime?
   // Serasa (2026-05) — registro de consentimento LGPD por deal pra consultas
   // restritas (score, restritivos, vínculos). Shape: { serasaConsent: { at,
   // by, baseLegal } }. Sem o campo populado, POST /certidoes retorna 412
@@ -626,8 +633,85 @@ model Deal {
   // Lead que originou (se veio de conversão Lead -> Deal)
   fromLead Lead?
 
+  stageHistory DealStageHistory[]
+
   @@index([pipelineId, archivedAt])
   @@index([managerUserId])
+  // Filtro de SLA do kanban ("atrasados primeiro") e varredura do cron.
+  @@index([pipelineId, slaDueAt])
+}
+
+// ============================================================================
+// Histórico de permanência por stage (plano 2026-08-06, Fase 3). Toda mudança
+// de stage passa por lib/pipeline/move-stage.ts, que fecha o intervalo aberto
+// e abre o próximo — o AuditLog continua existindo, mas relatório/SLA leem
+// DAQUI (metadata de audit é blob não-queryável e o formato variou ao longo
+// do tempo: nome vs id).
+//
+// INVARIANTE: no máximo UM intervalo aberto (exitedAt IS NULL) por deal.
+// O índice ÚNICO PARCIAL que garante isso vive em SQL puro na migration
+// (`DealStageHistory_open_interval_key`) — Prisma não modela índice parcial;
+// scripts/check-migrations.ts assere a existência via pg_indexes.
+// ============================================================================
+model DealStageHistory {
+  id            String    @id @default(cuid())
+  orgId         String
+  dealId        String
+  // "venda" | "locacao" — denormalizado do pipeline pro agregado não fazer join.
+  kind          String
+  stageId       String
+  // SNAPSHOTS: stages são renomeáveis/reordenáveis; o relatório histórico
+  // precisa do nome/posição DA ÉPOCA.
+  stageName     String
+  stagePosition Int
+  fromStageId   String?
+  enteredAt     DateTime  @default(now())
+  // null = intervalo ABERTO (stage atual do deal).
+  exitedAt      DateTime?
+  durationSec   Int?
+  // Política de SLA CONGELADA na entrada (mudar a política depois não
+  // reclassifica o passado). Null = stage terminal (não envelhece).
+  slaWarnDays   Int?
+  slaDangerDays Int?
+  // Por que o deal entrou aqui: drag | mark_lost | reopen | auto_signed |
+  // auto_commission_paid | charge_created | charge_cancelled_regress |
+  // contract_approved | contract_generation | aprovar_ficha | archive |
+  // manual_update | mark_signed | mark_commission_paid | convert |
+  // backfill | backfill_gap (estimados).
+  reason        String
+  actorUserId   String?
+  // true = intervalo reconstruído por backfill (datas aproximadas). Relatórios
+  // excluem por default.
+  estimated     Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+
+  deal Deal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([dealId, enteredAt])
+  @@index([orgId, kind, stageId, exitedAt])
+  @@index([orgId, kind, enteredAt])
+}
+
+// Política de SLA configurável por org (tela /settings/sla). Relacional de
+// propósito (não blob JSON): o cron e os relatórios filtram por (orgId, scope,
+// key). `key` = stageId (scope=deal_stage) ou status TEXT (scope=
+// proposal_status) — SEM FK: status de proposta não é tabela e stage apagado
+// não pode derrubar a política em cascata. Ausência de linha = defaults de
+// código (AGING_WARN_DAYS/AGING_DANGER_DAYS); "Restaurar padrão" = DELETE.
+model SlaPolicy {
+  id         String   @id @default(cuid())
+  orgId      String
+  scope      String // "deal_stage" | "proposal_status"
+  key        String
+  kind       String // "venda" | "locacao"
+  warnDays   Int
+  dangerDays Int
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([orgId, scope, key])
+  @@index([orgId, kind])
 }
 
 // Lead — pré-Deal. Newton acumula docs/notes/conversa antes de virar negocio

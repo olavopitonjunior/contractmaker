@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import { moveDealStage } from "@/lib/pipeline/move-stage";
 import {
   notifyDealEvent,
   stageChangeDedupeKey,
@@ -70,13 +71,13 @@ export async function POST(
     );
   }
 
-  await prisma.deal.update({
-    where: { id: deal.id },
-    data: {
-      stageId: targetStage.id,
-      stageEnteredAt: new Date(),
-      commissionPaidAt: new Date(),
-    },
+  await moveDealStage({
+    dealId: deal.id,
+    toStageId: targetStage.id,
+    reason: "mark_signed",
+    actorUserId: session.user.id,
+    orgId: org.id,
+    dealData: { commissionPaidAt: new Date() },
   });
 
   // Notificação do processo (endpoint manual legado — sem evento semântico

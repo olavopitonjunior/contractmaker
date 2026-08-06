@@ -21,6 +21,10 @@ vi.mock("@/lib/db/prisma", async () => {
   };
 });
 
+vi.mock("@/lib/pipeline/move-stage", () => ({
+  moveDealStage: vi.fn().mockResolvedValue({ moved: true }),
+}));
+
 vi.mock("@/lib/security/audit", () => ({
   audit: vi.fn().mockResolvedValue({}),
 }));
@@ -31,6 +35,9 @@ import { prisma } from "@/lib/db/prisma";
 const mockEnvelopeFindUnique = vi.mocked(prisma.envelope.findUnique);
 const mockDealFindUnique = vi.mocked(prisma.deal.findUnique);
 const mockDealUpdate = vi.mocked(prisma.deal.update);
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+import { moveDealStage } from "@/lib/pipeline/move-stage";
+const mockMove = vi.mocked(moveDealStage);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -63,8 +70,6 @@ describe("autoPromoteDealOnContractSigned", () => {
       stage: { id: "s-env", name: "Enviado para assinatura" },
       pipeline: pipelineWithStages(),
     } as never);
-    mockDealUpdate.mockResolvedValueOnce({} as never);
-
     const result = await autoPromoteDealOnContractSigned("env-1");
 
     expect(result).toEqual({
@@ -72,10 +77,15 @@ describe("autoPromoteDealOnContractSigned", () => {
       fromStageId: "s-env",
       toStageId: "s-sign",
     });
-    expect(mockDealUpdate).toHaveBeenCalledWith({
-      where: { id: "deal-1" },
-      data: { stageId: "s-sign", stageEnteredAt: expect.any(Date) },
-    });
+    // Mudança de stage passa pelo mutador único (histórico + SLA + audit).
+    expect(mockMove).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dealId: "deal-1",
+        toStageId: "s-sign",
+        reason: "auto_signed",
+      })
+    );
+    expect(mockDealUpdate).not.toHaveBeenCalled();
   });
 
   it("não promove envelope de attachment (avulso)", async () => {

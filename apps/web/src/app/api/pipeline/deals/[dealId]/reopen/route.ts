@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import { moveDealStage } from "@/lib/pipeline/move-stage";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { LOST_STAGE_NAME, stageConfigForKind } from "@/lib/pipeline/stage-config";
 import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
@@ -96,25 +97,16 @@ export async function POST(
     );
   }
 
-  await prisma.deal.update({
-    where: { id: deal.id },
-    data: {
-      stageId: targetStage.id,
-      stageEnteredAt: new Date(),
-      lostAt: null,
-      lostReason: null,
-    },
-  });
-
-  await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
-    action: "DEAL_STAGE_CHANGE",
-    result: "SUCCESS",
-    resource: deal.id,
-    resourceType: "Deal",
-    metadata: {
+  await moveDealStage({
+    dealId: deal.id,
+    toStageId: targetStage.id,
+    reason: "reopen",
+    actorUserId: session.user.id,
+    orgId: org.id,
+    dealData: { lostAt: null, lostReason: null },
+    auditCtx: extractAuditContextFromRequest(req, org.id, session.user.id),
+    auditMetadata: {
       kind: "reopened",
-      fromStage: deal.stage.id,
-      toStage: targetStage.id,
       restoredFromAuditId: lastLostAudit?.id ?? null,
     },
   });
