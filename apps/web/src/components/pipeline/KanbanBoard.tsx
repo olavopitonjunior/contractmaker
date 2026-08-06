@@ -156,7 +156,15 @@ export function KanbanBoard({
         }
         if (managerFilter !== ALL_MANAGERS && deal.managerName !== managerFilter)
           return false;
-        if (onlyStale && !isStaleDeal(deal, stage.name, nowMs)) return false;
+        if (onlyStale) {
+          // Mesma preferência do badge do KanbanCard: slaStatus do server
+          // (política por org) > regra fixa isStaleDeal (caller legado).
+          const stale =
+            deal.slaStatus !== undefined
+              ? deal.slaStatus === "atencao" || deal.slaStatus === "atrasado"
+              : isStaleDeal(deal, stage.name, nowMs);
+          if (!stale) return false;
+        }
         return true;
       }),
     }));

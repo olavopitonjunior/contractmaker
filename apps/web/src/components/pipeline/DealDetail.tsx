@@ -27,6 +27,7 @@ import {
   type SummarySection,
 } from "@/lib/forms/negotiation-summary";
 import { DealProgressTimeline } from "@/components/pipeline/DealProgressTimeline";
+import { deriveDealMilestones } from "@/lib/pipeline/deal-dates";
 import { DealManagerChip } from "@/components/deals/DealManagerChip";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
@@ -1078,11 +1079,7 @@ export function DealDetail({
         <DealProgressTimeline
           variant="full"
           currentStageName={deal.stage.name}
-          formOpenedAt={deal.form?.createdAt ?? null}
-          formCompletedAt={deal.form?.completedAt ?? null}
-          contractSignedAt={deal.envelopes[0]?.closedAt ?? deal.contractSignedAt ?? null}
-          chargeCreatedAt={deal.commissionCharges[0]?.createdAt ?? deal.chargeIssuedAt ?? null}
-          commissionPaidAt={deal.commissionPaidAt}
+          {...deriveDealMilestones(deal)}
         />
       )}
 

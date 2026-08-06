@@ -26,6 +26,7 @@ import {
   daysInStage,
   isStaleDeal,
 } from "@/lib/pipeline/stage-config";
+import type { SlaStatus } from "@/lib/pipeline/sla";
 
 /**
  * Config que adapta o card por esteira. Default = vendas (mantém comportamento
@@ -64,6 +65,14 @@ export interface DealCard {
   lostReason: string | null;
   /** Quando o deal entrou no stage atual (aging). Null = usa createdAt. */
   stageEnteredAt?: string | null;
+  /**
+   * Status de SLA computado no SERVER (toDealCard — política por org via
+   * slaWarnAt/slaDueAt materializados). `null` = sem SLA (terminal/perdido/
+   * desabilitado); `undefined` = caller legado → fallback isStaleDeal (5/10).
+   */
+  slaStatus?: SlaStatus | null;
+  /** Dias no stage atual, computado no server junto com slaStatus. */
+  daysInStage?: number;
 }
 
 interface KanbanCardProps {
@@ -96,12 +105,22 @@ export function KanbanCard({
   const daysAgo = Math.floor(msAgo / 86400000);
   const timeLabel = daysAgo > 0 ? `${daysAgo}d` : hoursAgo > 0 ? `${hoursAgo}h` : "agora";
 
-  // Aging por stage — badge só quando acionável (≥ warn), pra não poluir
-  // cards saudáveis. Regra única em stage-config::isStaleDeal (o filtro
-  // "Só parados" do board usa a mesma).
-  const staleDays = daysInStage(deal.stageEnteredAt, deal.createdAt, nowMs);
-  const showAging = isStaleDeal(deal, currentStageName, nowMs);
-  const agingDanger = staleDays >= AGING_DANGER_DAYS;
+  // Aging por stage — badge só quando acionável, pra não poluir cards
+  // saudáveis. Preferência: slaStatus do server (política de SLA por org);
+  // caller legado sem o campo cai na regra fixa stage-config::isStaleDeal
+  // (o filtro "Só parados" do board usa a mesma preferência).
+  const staleDays =
+    deal.daysInStage ?? daysInStage(deal.stageEnteredAt, deal.createdAt, nowMs);
+  const slaStatus: SlaStatus | null =
+    deal.slaStatus !== undefined
+      ? deal.slaStatus
+      : isStaleDeal(deal, currentStageName, nowMs)
+        ? staleDays >= AGING_DANGER_DAYS
+          ? "atrasado"
+          : "atencao"
+        : null;
+  const showAging = slaStatus === "atencao" || slaStatus === "atrasado";
+  const agingDanger = slaStatus === "atrasado";
 
   function handleCopyFormLink(e: React.MouseEvent) {
     e.preventDefault();

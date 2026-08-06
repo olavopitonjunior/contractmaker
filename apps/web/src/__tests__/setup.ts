@@ -261,6 +261,7 @@ vi.mock("@/lib/db/prisma", () => {
       findFirst: vi.fn().mockResolvedValue(null),
       create: vi.fn(),
       update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       delete: vi.fn().mockResolvedValue({}),
       count: vi.fn().mockResolvedValue(0),
     },
@@ -391,6 +392,7 @@ vi.mock("@/lib/db/prisma", () => {
       findMany: vi.fn().mockResolvedValue([]),
       create: vi.fn().mockResolvedValue({ id: "dsh-mock" }),
       update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     slaPolicy: {
@@ -423,6 +425,7 @@ vi.mock("@/lib/db/prisma", () => {
     // precisam de rows fazem mockResolvedValue no próprio caso.
     $queryRaw: vi.fn().mockResolvedValue([]),
     $queryRawUnsafe: vi.fn().mockResolvedValue([]),
+    $executeRaw: vi.fn().mockResolvedValue(0),
     $executeRawUnsafe: vi.fn().mockResolvedValue(0),
     commissionCharge: {
       groupBy: vi.fn().mockResolvedValue([]),
