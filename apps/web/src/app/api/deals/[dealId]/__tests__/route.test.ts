@@ -4,6 +4,13 @@ import { GET, DELETE, PATCH } from "../route";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { createMockSession, createMockOrg } from "@/__tests__/helpers";
+import { moveDealStage } from "@/lib/pipeline/move-stage";
+
+// Mudança de stage passa pelo mutador único (histórico + SLA + audit).
+vi.mock("@/lib/pipeline/move-stage", () => ({
+  moveDealStage: vi.fn().mockResolvedValue({ moved: true }),
+}));
+const mockMove = vi.mocked(moveDealStage);
 
 const mockAuth = vi.mocked(auth);
 const mockGetUserOrg = vi.mocked(getUserOrg);
@@ -148,7 +155,6 @@ describe("DELETE /api/deals/[dealId] (retrofit Newton)", () => {
     mockPrisma.pipelineStage.findFirst.mockResolvedValue({
       id: "stage-arq",
     } as never);
-    mockPrisma.deal.update.mockResolvedValue({} as never);
 
     const url = "http://localhost/api/deals/d1?soft=1";
     const res = await DELETE(
@@ -158,10 +164,13 @@ describe("DELETE /api/deals/[dealId] (retrofit Newton)", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.mode).toBe("soft");
-    expect(mockPrisma.deal.update).toHaveBeenCalledWith({
-      where: { id: "d1" },
-      data: { stageId: "stage-arq", stageEnteredAt: expect.any(Date) },
-    });
+    expect(mockMove).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dealId: "d1",
+        toStageId: "stage-arq",
+        reason: "archive",
+      })
+    );
   });
 
   it("soft delete sem stage Arquivado retorna 400", async () => {
@@ -239,14 +248,15 @@ describe("PATCH /api/deals/[dealId] (Newton stage move)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("200 happy path: stage move", async () => {
+  it("200 happy path: stage move via moveDealStage", async () => {
     mockAuth.mockResolvedValue(createMockSession() as never);
     mockPrisma.deal.findUnique.mockResolvedValue(baseDeal as never);
     mockPrisma.pipelineStage.findFirst.mockResolvedValue({
       id: "s2",
       name: "Negociação",
     } as never);
-    mockPrisma.deal.update.mockResolvedValue({
+    // A rota relê o deal DEPOIS do move (o update mudou de dono).
+    mockPrisma.deal.findUniqueOrThrow.mockResolvedValue({
       id: "d1",
       title: "x",
       stageId: "s2",
@@ -259,5 +269,8 @@ describe("PATCH /api/deals/[dealId] (Newton stage move)", () => {
     const json = await res.json();
     expect(json.stageId).toBe("s2");
     expect(json.stage.name).toBe("Negociação");
+    expect(mockMove).toHaveBeenCalledWith(
+      expect.objectContaining({ dealId: "d1", toStageId: "s2", reason: "manual_update" })
+    );
   });
 });

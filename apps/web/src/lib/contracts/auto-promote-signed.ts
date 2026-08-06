@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db/prisma";
+import { moveDealStage } from "@/lib/pipeline/move-stage";
 import { audit } from "@/lib/security/audit";
 import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
 
@@ -113,26 +114,13 @@ export async function autoPromoteDealOnContractSigned(
       return { promoted: false, reason: "stage_missing" };
     }
 
-    await prisma.deal.update({
-      where: { id: deal.id },
-      data: { stageId: targetStage.id, stageEnteredAt: new Date() },
+    await moveDealStage({
+      dealId: deal.id,
+      toStageId: targetStage.id,
+      reason: "auto_signed",
+      orgId: envelope.orgId,
+      auditMetadata: { envelopeId: envelope.id },
     });
-
-    await audit(
-      { orgId: envelope.orgId, userId: null },
-      {
-        action: "DEAL_STAGE_CHANGE",
-        result: "SUCCESS",
-        resource: deal.id,
-        resourceType: "Deal",
-        metadata: {
-          kind: "auto_signed",
-          fromStage: deal.stage.id,
-          toStage: targetStage.id,
-          envelopeId: envelope.id,
-        },
-      }
-    ).catch(() => {});
 
     queueSurveyDispatch(deal.id, targetStage.name);
 

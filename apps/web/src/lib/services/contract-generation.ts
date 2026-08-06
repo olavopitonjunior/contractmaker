@@ -1,5 +1,6 @@
 import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
+import { moveDealStage } from "@/lib/pipeline/move-stage";
 import { renderContratoHTML } from "@/lib/render/handlebars";
 import { isGoogleDocsFeatureEnabled } from "@/lib/google/client";
 import { uploadHtmlAsGoogleDoc } from "@/lib/google/upload-rendered-html";
@@ -1110,19 +1111,20 @@ export async function generateContractForDeal(
     (s) => s.name === "Confecção de Contrato"
   );
 
-  await prisma.deal.update({
-    where: { id: deal.id },
-    data: {
-      title: derivedTitle,
-      value: derivedValue ?? deal.value,
-      // Sempre grava o derivado (null LIMPA): comprador trocado/removido não
-      // pode deixar o nome antigo no card — o kanban antigo re-derivava ao vivo.
-      clientName,
-      ...(confeccaoStage
-        ? { stageId: confeccaoStage.id, stageEnteredAt: new Date() }
-        : {}),
-    },
-  });
+  // Sempre grava o derivado (null LIMPA): comprador trocado/removido não
+  // pode deixar o nome antigo no card — o kanban antigo re-derivava ao vivo.
+  const dealMeta = { title: derivedTitle, value: derivedValue ?? deal.value, clientName };
+  if (confeccaoStage) {
+    await moveDealStage({
+      dealId: deal.id,
+      toStageId: confeccaoStage.id,
+      reason: "contract_generation",
+      orgId,
+      dealData: dealMeta,
+    });
+  } else {
+    await prisma.deal.update({ where: { id: deal.id }, data: dealMeta });
+  }
 
   // Transfer form attachments to deal. Idempotente: pula urls que já viraram
   // DealAttachment (evita duplicação quando o contrato é regerado). Preserva
@@ -1476,19 +1478,20 @@ export async function generateLocacaoContractForDeal(
     include: { stages: { orderBy: { position: "asc" } } },
   });
   const confeccaoStage = pipeline?.stages.find((s) => s.name === "Em contrato");
-  await prisma.deal.update({
-    where: { id: deal.id },
-    data: {
-      title: derivedTitle,
-      value: derivedValue ?? deal.value,
-      // Sempre grava o derivado (null LIMPA): comprador trocado/removido não
-      // pode deixar o nome antigo no card — o kanban antigo re-derivava ao vivo.
-      clientName,
-      ...(confeccaoStage
-        ? { stageId: confeccaoStage.id, stageEnteredAt: new Date() }
-        : {}),
-    },
-  });
+  // Sempre grava o derivado (null LIMPA): comprador trocado/removido não
+  // pode deixar o nome antigo no card — o kanban antigo re-derivava ao vivo.
+  const dealMeta = { title: derivedTitle, value: derivedValue ?? deal.value, clientName };
+  if (confeccaoStage) {
+    await moveDealStage({
+      dealId: deal.id,
+      toStageId: confeccaoStage.id,
+      reason: "contract_generation",
+      orgId,
+      dealData: dealMeta,
+    });
+  } else {
+    await prisma.deal.update({ where: { id: deal.id }, data: dealMeta });
+  }
 
   // Render linter (genérico) — materializa findings como ContractComment.
   waitUntil(

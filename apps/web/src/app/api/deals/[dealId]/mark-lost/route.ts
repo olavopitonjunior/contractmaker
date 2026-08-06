@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
+import { moveDealStage } from "@/lib/pipeline/move-stage";
 import {
   requireApiAuth,
   isAuthFailure,
@@ -101,36 +102,23 @@ export async function POST(
     ? `[${parsed.data.category}] ${parsed.data.reason}`
     : parsed.data.reason;
 
-  await prisma.deal.update({
-    where: { id: deal.id },
-    data: {
-      stageId: targetStage.id,
-      stageEnteredAt: new Date(),
-      lostAt: new Date(),
-      lostReason: formattedReason,
-    },
+  await moveDealStage({
+    dealId: deal.id,
+    toStageId: targetStage.id,
+    reason: "mark_lost",
+    actorUserId: apiAuth.actor.effectiveUserId,
+    orgId: apiAuth.org.id,
+    dealData: { lostAt: new Date(), lostReason: formattedReason },
+    auditCtx: extractAuditContextFromRequest(req, apiAuth.org.id, apiAuth.actor.effectiveUserId),
+    auditMetadata: mergeAuditMetadata(
+      {
+        kind: "lost",
+        reason: parsed.data.reason,
+        category: parsed.data.category ?? null,
+      },
+      apiAuth.actor
+    ),
   });
-
-  await audit(
-    extractAuditContextFromRequest(req, apiAuth.org.id, apiAuth.actor.effectiveUserId),
-    {
-      action: "DEAL_STAGE_CHANGE",
-      result: "SUCCESS",
-      resource: deal.id,
-      resourceType: "Deal",
-      metadata: mergeAuditMetadata(
-        {
-          kind: "lost",
-          reason: parsed.data.reason,
-          category: parsed.data.category ?? null,
-          previousStageId: deal.stage.id,
-          previousStageName: deal.stage.name,
-          toStage: targetStage.id,
-        },
-        apiAuth.actor
-      ),
-    }
-  );
 
   return NextResponse.json({
     status: "perdido",
