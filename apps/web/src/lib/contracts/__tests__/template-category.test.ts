@@ -7,6 +7,7 @@ vi.mock("@/lib/db/prisma", () => ({
 }));
 
 import {
+  deriveCategory,
   deriveCategoryFromPayment,
   deriveTemplateFacts,
   matchCriteriaSummary,
@@ -79,6 +80,62 @@ describe("deriveCategoryFromPayment", () => {
     ).toBe("compra_e_venda");
     expect(deriveCategoryFromPayment({})).toBe("compra_e_venda");
     expect(deriveCategoryFromPayment(null)).toBe("compra_e_venda");
+  });
+});
+
+describe("deriveCategory — escolha humana como prior sobre a heurística", () => {
+  // Payloads que fazem a HEURÍSTICA devolver cada uma das 6 categorias.
+  const PAYLOAD_BY_CATEGORY: Record<string, Record<string, unknown>> = {
+    compra_e_venda: { pagamento: { parcelas: [{ tipo: "recursos_proprios" }] } },
+    permuta: { pagamento: { parcelas: [{ tipo: "permuta_imovel" }] } },
+    outros: { pagamento: { parcelas: [{ tipo: "outros" }] } },
+    financiamento: { pagamento: { parcelas: [{ tipo: "financiamento" }] } },
+    fgts: { pagamento: { parcelas: [{ tipo: "fgts" }] } },
+    consorcio: { pagamento: { parcelas: [{ tipo: "cessao_consorcio" }] } },
+  };
+
+  // Tabela 6 categorias × 3 estados de modalidade (ausente | a_vista |
+  // financiamento). Regras: ausente reproduz a heurística byte a byte;
+  // a_vista NUNCA sobrescreve; financiamento só puxa quando a heurística caiu
+  // no grupo SEM alienação (consórcio/fgts são do grupo com alienação e ficam).
+  const TABLE: Array<[string, string | undefined, string]> = [
+    ["compra_e_venda", undefined, "compra_e_venda"],
+    ["compra_e_venda", "a_vista", "compra_e_venda"],
+    ["compra_e_venda", "financiamento", "financiamento"],
+    ["permuta", undefined, "permuta"],
+    ["permuta", "a_vista", "permuta"],
+    ["permuta", "financiamento", "financiamento"],
+    ["outros", undefined, "outros"],
+    ["outros", "a_vista", "outros"],
+    ["outros", "financiamento", "financiamento"],
+    ["financiamento", undefined, "financiamento"],
+    ["financiamento", "a_vista", "financiamento"],
+    ["financiamento", "financiamento", "financiamento"],
+    ["fgts", undefined, "fgts"],
+    ["fgts", "a_vista", "fgts"],
+    ["fgts", "financiamento", "fgts"],
+    ["consorcio", undefined, "consorcio"],
+    ["consorcio", "a_vista", "consorcio"],
+    ["consorcio", "financiamento", "consorcio"],
+  ];
+
+  it.each(TABLE)(
+    "heurística %s + modalidade %s → %s",
+    (heuristica, modalidade, esperado) => {
+      const payload = {
+        ...PAYLOAD_BY_CATEGORY[heuristica],
+        ...(modalidade ? { modalidade } : {}),
+      };
+      // Sanidade: o payload realmente produz a categoria heurística declarada.
+      expect(deriveCategoryFromPayment(payload)).toBe(heuristica);
+      expect(deriveCategory(payload)).toBe(esperado);
+    }
+  );
+
+  it("ausente/inválido reproduz a heurística (nulls inclusive)", () => {
+    expect(deriveCategory(null)).toBe("compra_e_venda");
+    expect(deriveCategory({})).toBe("compra_e_venda");
+    expect(deriveCategory({ modalidade: "qualquer_coisa" })).toBe("compra_e_venda");
   });
 });
 

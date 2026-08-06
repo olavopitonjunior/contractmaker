@@ -15,6 +15,7 @@ import type { LocacaoSettings } from "@/lib/contracts/default-config";
 import type { LeaseSignerData } from "@/components/locacao/SendLeaseEnvelopeDialog";
 import { LocacaoDealHeaderActions } from "@/components/locacao/LocacaoDealHeaderActions";
 import { LocacaoDadosTab } from "@/components/locacao/LocacaoDadosTab";
+import { SendFormSummaryDialog } from "@/components/forms/SendFormSummaryDialog";
 import type { LocacaoAttachment } from "@/components/locacao/LocacaoDocumentsTab";
 import {
   LocacaoCreditAnalysisCard,
@@ -424,6 +425,11 @@ export function LocacaoDealDetail({
 
         {/* DADOS — visão do form.dataJson (paridade com a aba Dados de vendas) */}
         <TabsContent value="dados" className="mt-4">
+          {deal.formToken && (
+            <div className="mb-3 flex items-center justify-end">
+              <SendFormSummaryDialog dealId={deal.id} />
+            </div>
+          )}
           <LocacaoDadosTab
             dealId={deal.id}
             dataJson={deal.dataJson}
