@@ -99,7 +99,9 @@ export function FormsActions({ formId, token, status, hasDeal, dealId, title, sc
         )}
         {hasDeal &&
           dealId &&
-          (schemaType ?? "compra_venda_v1") === "compra_venda_v1" &&
+          ["compra_venda_v1", "locacao_residencial_v1", "locacao_comercial_v1"].includes(
+            schemaType ?? "compra_venda_v1"
+          ) &&
           (status === "completo" || status === "vinculado") && (
             <SendFormSummaryDialog dealId={dealId} triggerLabel="Resumo" />
           )}

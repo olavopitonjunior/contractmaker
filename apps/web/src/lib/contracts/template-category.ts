@@ -91,6 +91,34 @@ export function deriveCategoryFromPayment(dataJson: unknown): TemplateCategory {
   return "compra_e_venda";
 }
 
+/**
+ * Categoria final = heurística das parcelas + a ESCOLHA HUMANA como prior.
+ *
+ * O seletor de modalidade da etapa Pagamento grava `dataJson.modalidade`; a
+ * heurística continua a autoridade sobre a categoria FINA (consórcio, FGTS,
+ * permuta), mas quando o usuário declarou "financiamento" e as parcelas não
+ * carregam nenhum sinal do grupo com alienação (form antigo editado à mão,
+ * OCR que perdeu o tipo da parcela), a declaração vence e puxa o grupo.
+ *
+ * `modalidade: "a_vista"` NÃO sobrescreve a heurística de propósito: consórcio
+ * e FGTS pertencem ao grupo "com alienação" mesmo sem financiamento bancário, e
+ * o default `.default("a_vista")` do Zod tornaria qualquer form legado capaz de
+ * rebaixar um financiamento real. Ausente → comportamento anterior, byte a byte.
+ */
+export function deriveCategory(dataJson: unknown): TemplateCategory {
+  const heuristic = deriveCategoryFromPayment(dataJson);
+  const modalidade = (dataJson && typeof dataJson === "object"
+    ? (dataJson as { modalidade?: unknown }).modalidade
+    : undefined);
+  if (
+    modalidade === "financiamento" &&
+    CATEGORY_TO_GROUP[heuristic] !== "com_alienacao"
+  ) {
+    return "financiamento";
+  }
+  return heuristic;
+}
+
 export interface TemplateLite {
   id: string;
   category: string | null;
@@ -133,7 +161,7 @@ export async function selectTemplateForDeal(
   orgId: string,
   dataJson: unknown
 ): Promise<{ template: ContractTemplate; category: TemplateCategory } | null> {
-  const category = deriveCategoryFromPayment(dataJson);
+  const category = deriveCategory(dataJson);
   const { prisma } = await import("@/lib/db/prisma");
   const templates = await prisma.contractTemplate.findMany({
     where: { orgId, status: "active" },

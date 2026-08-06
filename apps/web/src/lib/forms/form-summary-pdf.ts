@@ -155,13 +155,18 @@ export async function generateFormSummaryPdf(formId: string): Promise<GeneratedP
   });
   if (!form) throw new Error(`SalesForm ${formId} não encontrado`);
 
-  // O builder é venda-only (dataJson de locação tem outra estrutura:
-  // locadores/locatarios/garantia). Sem este guard ele devolve [] e a gente
-  // gerava, persistia na pasta do deal e MANDAVA POR E-MAIL um PDF com
-  // "Nenhuma informação preenchida." — falha silenciosa pior que erro.
-  if (form.schemaType !== "compra_venda_v1") {
+  // O builder cobre venda e locação (2026-08). Qualquer outro schemaType
+  // devolveria [] e a gente gerava, persistia na pasta do deal e MANDAVA POR
+  // E-MAIL um PDF com "Nenhuma informação preenchida." — falha silenciosa pior
+  // que erro; por isso o guard continua, só que com a lista suportada.
+  const SUPPORTED_SCHEMAS = [
+    "compra_venda_v1",
+    "locacao_residencial_v1",
+    "locacao_comercial_v1",
+  ];
+  if (!SUPPORTED_SCHEMAS.includes(form.schemaType)) {
     throw new Error(
-      "Resumo consolidado disponível apenas para formulários de compra e venda"
+      "Resumo consolidado disponível apenas para formulários de venda e locação"
     );
   }
 
@@ -170,10 +175,17 @@ export async function generateFormSummaryPdf(formId: string): Promise<GeneratedP
     category: a.category,
   }));
 
-  const sections = buildConsolidatedFormSummary(
-    prepareDataForSummary(form.dataJson as Record<string, unknown> | null),
-    { schemaType: form.schemaType, attachments }
-  );
+  // O enrich é de VENDA (buckets de pagamento derivados de parcelas[].tipo);
+  // locação já guarda os valores canônicos no dataJson e passa cru.
+  const preparedData =
+    form.schemaType === "compra_venda_v1"
+      ? prepareDataForSummary(form.dataJson as Record<string, unknown> | null)
+      : (form.dataJson as Record<string, unknown> | null);
+
+  const sections = buildConsolidatedFormSummary(preparedData, {
+    schemaType: form.schemaType,
+    attachments,
+  });
 
   const html = renderFormSummaryHtml(sections, {
     orgName: form.org?.name ?? "Contractmaker",

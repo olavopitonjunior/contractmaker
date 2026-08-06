@@ -1,13 +1,13 @@
 /**
- * Resumo consolidado do formulário de venda (compra_venda_v1) a partir do
- * `dataJson` (DadosContratoForm). Puro: não chama rede nem DB. Estende
- * `buildNegotiationSummary` (que cobre Pagamento/Comissão/Condições) com as
- * seções faltantes — Partes, Imóveis, Config e Documentos anexados — pra virar
- * um PDF consolidado enviável por e-mail.
+ * Resumo consolidado do formulário a partir do `dataJson`. Puro: não chama
+ * rede nem DB.
  *
- * Escopo v1: SÓ venda. Locação tem dataJson de estrutura diferente
- * (locador/locatario/fiador) e rota própria — `buildConsolidatedFormSummary`
- * retorna [] pra qualquer schemaType != "compra_venda_v1".
+ * Venda (compra_venda_v1): estende `buildNegotiationSummary` (Pagamento/
+ * Comissão/Condições) com Partes, Imóveis, Config e Documentos anexados.
+ * Locação (locacao_residencial_v1 / locacao_comercial_v1, 2026-08): seções
+ * próprias — Partes, Imóvel, Aluguel e Reajuste, Garantia, Observações,
+ * Documentos — porque o dataJson tem outra estrutura (locadores/locatarios/
+ * garantia/aluguel). SchemaType desconhecido → [].
  *
  * Defensivo: todo acesso é opcional, então funciona com forms parciais.
  */
@@ -17,6 +17,8 @@ import {
   type SummarySection,
   type SummaryRow,
 } from "@/lib/forms/negotiation-summary";
+import { GARANTIA_LABELS } from "@/lib/contracts/template-category";
+import { LOCACAO_SCHEMA_TYPES } from "@/lib/forms/validation-locacao";
 
 type AnyObj = Record<string, unknown>;
 const obj = (v: unknown): AnyObj => (v && typeof v === "object" ? (v as AnyObj) : {});
@@ -226,14 +228,17 @@ export interface BuildConsolidatedOptions {
 }
 
 /**
- * Monta o resumo consolidado. Retorna [] pra schemaType != compra_venda_v1
- * (feature venda-only na v1).
+ * Monta o resumo consolidado. Venda e locação têm builders próprios;
+ * schemaType desconhecido retorna [].
  */
 export function buildConsolidatedFormSummary(
   formData: Record<string, unknown> | null | undefined,
   opts: BuildConsolidatedOptions = {}
 ): SummarySection[] {
   const schemaType = opts.schemaType ?? "compra_venda_v1";
+  if ((LOCACAO_SCHEMA_TYPES as readonly string[]).includes(schemaType)) {
+    return buildLocacaoConsolidatedSummary(formData, opts);
+  }
   if (schemaType !== "compra_venda_v1") return [];
   if (!formData) return [];
   const data = formData as AnyObj;
@@ -427,17 +432,170 @@ export function buildConsolidatedFormSummary(
   }
 
   // ---- Documentos anexados ----
-  const attachments = opts.attachments ?? [];
-  if (attachments.length > 0) {
-    const rows: SummaryRow[] = attachments.map((a, i) => {
-      const cat = a.category ? CATEGORY_LABEL[a.category] ?? a.category : "";
-      return {
-        label: cat || `Documento ${i + 1}`,
-        value: a.filename || "—",
-      };
+  pushAttachmentsSection(sections, opts.attachments);
+
+  return sections;
+}
+
+function pushAttachmentsSection(
+  sections: SummarySection[],
+  attachments: FormSummaryAttachment[] | undefined
+) {
+  if (!attachments || attachments.length === 0) return;
+  const rows: SummaryRow[] = attachments.map((a, i) => {
+    const cat = a.category ? CATEGORY_LABEL[a.category] ?? a.category : "";
+    return {
+      label: cat || `Documento ${i + 1}`,
+      value: a.filename || "—",
+    };
+  });
+  sections.push({ title: "Documentos anexados", rows });
+}
+
+/**
+ * Resumo consolidado de LOCAÇÃO (residencial e comercial). Estrutura própria:
+ * locadores/locatarios (shape de parte espelhado de venda, + renda mensal),
+ * `imovel` objeto único, `aluguel` (valor/encargos/reajuste/vigência),
+ * `garantia` (enum + fiador) e `observacoes`.
+ */
+function buildLocacaoConsolidatedSummary(
+  formData: Record<string, unknown> | null | undefined,
+  opts: BuildConsolidatedOptions
+): SummarySection[] {
+  if (!formData) return [];
+  const data = formData as AnyObj;
+  const sections: SummarySection[] = [];
+
+  // ---- Partes ----
+  const pushParties = (list: unknown[], singular: string) => {
+    list.forEach((raw, i) => {
+      const parte = obj(raw);
+      if (!hasIdentity(parte)) return;
+      const nome = partyName(parte);
+      const title =
+        list.length > 1
+          ? `${singular} ${i + 1}${nome ? ` — ${nome}` : ""}`
+          : `${singular}${nome ? ` — ${nome}` : ""}`;
+      const sec = partySection(parte, title);
+      if (!sec) return;
+      // Renda/faturamento — insumo da análise de crédito, só existe em locação.
+      const renda = brl(parte.renda_mensal);
+      if (renda) sec.rows.push({ label: "Renda mensal declarada", value: renda });
+      const faturamento = brl(parte.faturamento_mensal);
+      if (faturamento) {
+        sec.rows.push({ label: "Faturamento mensal", value: faturamento });
+      }
+      sections.push(sec);
     });
-    sections.push({ title: "Documentos anexados", rows });
+  };
+  pushParties(arr(data.locadores), "Locador");
+  pushParties(arr(data.locatarios), "Locatário");
+
+  // ---- Imóvel ----
+  const imovel = obj(data.imovel);
+  const imovelSec = imovelSection(imovel, "Imóvel");
+  const extraImovelRows: SummaryRow[] = [];
+  pushIf(extraImovelRows, "Tipo", str(imovel.kind));
+  pushIf(extraImovelRows, "Destinação", str(imovel.destinacao));
+  const area = Number(imovel.area);
+  if (Number.isFinite(area) && area > 0) {
+    extraImovelRows.push({ label: "Área", value: `${area} m²` });
   }
+  const vagas = Number(imovel.vagas_garagem);
+  if (Number.isFinite(vagas) && vagas > 0) {
+    extraImovelRows.push({ label: "Vagas de garagem", value: String(vagas) });
+  }
+  pushIf(extraImovelRows, "Condomínio", str(imovel.condominio_nome));
+  if (imovelSec) {
+    imovelSec.rows.push(...extraImovelRows);
+    sections.push(imovelSec);
+  } else if (extraImovelRows.length > 0) {
+    sections.push({ title: "Imóvel", rows: extraImovelRows });
+  }
+
+  // ---- Aluguel e reajuste ----
+  const aluguel = obj(data.aluguel);
+  const aluguelRows: SummaryRow[] = [];
+  pushIf(aluguelRows, "Aluguel mensal", brl(aluguel.valor));
+  pushIf(aluguelRows, "Encargos mensais (total)", brl(aluguel.encargos));
+  pushIf(aluguelRows, "· Condomínio", brl(aluguel.condominio_mensal));
+  pushIf(aluguelRows, "· IPTU mensal", brl(aluguel.iptu_mensal));
+  pushIf(aluguelRows, "· Outros encargos", brl(aluguel.outros_encargos));
+  const diaVenc = Number(aluguel.dia_vencimento);
+  if (Number.isFinite(diaVenc) && diaVenc > 0) {
+    aluguelRows.push({ label: "Vencimento", value: `Dia ${diaVenc}` });
+  }
+  pushIf(aluguelRows, "Índice de reajuste", str(aluguel.indice_reajuste));
+  pushIf(aluguelRows, "Início da vigência", dateBR(aluguel.vigencia_inicio));
+  const vigencia = Number(aluguel.vigencia_meses);
+  if (Number.isFinite(vigencia) && vigencia > 0) {
+    aluguelRows.push({ label: "Vigência", value: `${vigencia} meses` });
+  }
+  pushIf(aluguelRows, "Meio de pagamento", str(aluguel.meio_pagamento));
+  if (aluguelRows.length > 0) {
+    sections.push({ title: "Aluguel e reajuste", rows: aluguelRows });
+  }
+
+  // ---- Garantia ----
+  const garantia = obj(data.garantia);
+  const garantiaRows: SummaryRow[] = [];
+  const tipoGarantia = str(garantia.tipo);
+  if (tipoGarantia) {
+    garantiaRows.push({
+      label: "Modalidade",
+      value:
+        GARANTIA_LABELS[tipoGarantia as keyof typeof GARANTIA_LABELS] ??
+        tipoGarantia,
+    });
+  }
+  pushIf(garantiaRows, "Seguradora / provedora", str(garantia.provider));
+  const caucaoMeses = Number(garantia.caucao_meses);
+  if (tipoGarantia === "caucao" && Number.isFinite(caucaoMeses) && caucaoMeses > 0) {
+    garantiaRows.push({
+      label: "Caução",
+      value: `${caucaoMeses} ${caucaoMeses === 1 ? "aluguel" : "aluguéis"}`,
+    });
+  }
+  pushIf(garantiaRows, "Título de capitalização", brl(garantia.titulo_valor));
+  pushIf(garantiaRows, "Tomador da apólice", str(garantia.seguro_tomador));
+  const fiador = obj(garantia.fiador);
+  if (hasIdentity(fiador)) {
+    const fiadorSec = partySection(fiador, "Fiador");
+    if (fiadorSec) {
+      garantiaRows.push({
+        label: "Fiador",
+        value: partyName(fiador) || "—",
+      });
+      if (garantiaRows.length > 0) {
+        sections.push({ title: "Garantia locatícia", rows: garantiaRows });
+      }
+      fiadorSec.title = `Fiador${partyName(fiador) ? ` — ${partyName(fiador)}` : ""}`;
+      sections.push(fiadorSec);
+    }
+  } else if (garantiaRows.length > 0) {
+    sections.push({ title: "Garantia locatícia", rows: garantiaRows });
+  }
+
+  // ---- Foro / assinatura ----
+  const cfgRows: SummaryRow[] = [];
+  pushIf(cfgRows, "Foro", str(data.foro));
+  const assinatura = obj(data.assinatura);
+  const local = [str(assinatura.cidade), str(assinatura.uf)].filter(Boolean).join("/");
+  pushIf(cfgRows, "Local de assinatura", local);
+  pushIf(cfgRows, "Data de assinatura", dateBR(assinatura.data));
+  if (cfgRows.length > 0) sections.push({ title: "Configuração contratual", rows: cfgRows });
+
+  // ---- Observações gerais ----
+  const observacoes = str(data.observacoes);
+  if (observacoes) {
+    sections.push({
+      title: "Observações gerais",
+      rows: [{ label: "Anotações", value: observacoes }],
+    });
+  }
+
+  // ---- Documentos anexados ----
+  pushAttachmentsSection(sections, opts.attachments);
 
   return sections;
 }

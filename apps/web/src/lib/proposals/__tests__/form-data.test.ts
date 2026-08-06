@@ -86,8 +86,9 @@ describe("buildProposalDataJson", () => {
 
   it("locação escreve os DOIS shapes de valor e de imóvel", () => {
     const d = buildProposalDataJson(locacaoForm()) as Record<string, never>;
-    // listagem/convert
-    expect(d.locacao).toEqual({ valor_aluguel: 3500 });
+    // listagem/convert (garantia vira string humana pro {{locacao.garantia}}
+    // do template — 1.3)
+    expect(d.locacao).toEqual({ valor_aluguel: 3500, garantia: "Caução" });
     expect(d.imoveis).toEqual([{ endereco: "Rua das Flores, 100" }]);
     // templates de proposta de locação
     expect(d.aluguel).toEqual({ valor: 3500 });
@@ -96,7 +97,7 @@ describe("buildProposalDataJson", () => {
 
   it("parseMoneyBR, não replace: '1000.00' é mil (não cem mil)", () => {
     const d = buildProposalDataJson(locacaoForm({ valor: "1000.00" })) as Record<string, never>;
-    expect(d.locacao).toEqual({ valor_aluguel: 1000 });
+    expect(d.locacao).toMatchObject({ valor_aluguel: 1000 });
   });
 
   it("garantia sem fiador não escreve bloco de fiador morto", () => {
@@ -120,6 +121,105 @@ describe("buildProposalDataJson", () => {
     expect((buildProposalDataJson(v2) as Record<string, never>).imoveis).toEqual([
       { endereco: "Rua Y, 2" },
     ]);
+  });
+});
+
+describe("condições estruturadas + observações (Fase 1.2/1.3)", () => {
+  it("locação: prazo/entrada escrevem o par template (locacao.*) + canônico (aluguel.*)", () => {
+    const d = buildProposalDataJson(
+      locacaoForm({ prazoMeses: "30", dataEntrada: "2026-09-01" })
+    ) as Record<string, never>;
+    expect(d.locacao).toMatchObject({
+      prazo_meses: 30,
+      data_entrada: "2026-09-01",
+      garantia: "Caução",
+    });
+    // Dot-paths canônicos do SalesForm — o convert copia verbatim.
+    expect(d.aluguel).toEqual({
+      valor: 3500,
+      vigencia_meses: 30,
+      vigencia_inicio: "2026-09-01",
+    });
+  });
+
+  it("locação: garantia com detalhes vira string humana", () => {
+    const v = locacaoForm();
+    v.garantia = { ...v.garantia, tipo: "seguro_fianca", provider: "Porto Seguro" };
+    const d = buildProposalDataJson(v) as Record<string, { garantia?: string }>;
+    expect((d.locacao as { garantia?: string }).garantia).toBe(
+      "Seguro fiança — Porto Seguro"
+    );
+  });
+
+  it("venda: modalidade/sinal/banco escrevem canônico + strings do template", () => {
+    const v: ProposalFormValues = {
+      ...emptyProposalForm("venda", "compra_venda_v1"),
+      proponentes: locacaoForm().proponentes,
+      valor: "850.000,00",
+      modalidade: "financiamento",
+      sinal: "50.000,00",
+      bancoFinanciamento: "Caixa Econômica Federal",
+    };
+    const d = buildProposalDataJson(v) as Record<string, never>;
+    expect(d.modalidade).toBe("financiamento");
+    expect(d.pagamento).toEqual({
+      valor_total: 850000,
+      sinal_arras: 50000,
+      sinal: 50000,
+      banco_financiamento: "Caixa Econômica Federal",
+      forma: "Financiamento bancário (Caixa Econômica Federal)",
+    });
+  });
+
+  it("venda sem modalidade não inventa forma nem modalidade", () => {
+    const v: ProposalFormValues = {
+      ...emptyProposalForm("venda", "compra_venda_v1"),
+      proponentes: locacaoForm().proponentes,
+      valor: "500.000,00",
+    };
+    const d = buildProposalDataJson(v) as Record<string, never>;
+    expect(d.modalidade).toBeUndefined();
+    expect(d.pagamento).toEqual({ valor_total: 500000 });
+  });
+
+  it("observações vão pra RAIZ do dataJson (mesmo dot-path do SalesForm)", () => {
+    const d = buildProposalDataJson(
+      locacaoForm({ observacoes: "  Aceita pet de pequeno porte.  " })
+    ) as Record<string, never>;
+    expect(d.observacoes).toBe("Aceita pet de pequeno porte.");
+    const semObs = buildProposalDataJson(locacaoForm()) as Record<string, never>;
+    expect(semObs.observacoes).toBeUndefined();
+  });
+
+  it("roundtrip build→parse preserva os campos novos", () => {
+    const original = locacaoForm({
+      prazoMeses: "24",
+      dataEntrada: "2026-10-15",
+      observacoes: "Entrada condicionada à vistoria.",
+    });
+    const back = parseProposalForm({
+      kind: "locacao",
+      schemaType: "locacao_residencial_v1",
+      dataJson: buildProposalDataJson(original),
+    });
+    expect(back.prazoMeses).toBe("24");
+    expect(back.dataEntrada).toBe("2026-10-15");
+    expect(back.observacoes).toBe("Entrada condicionada à vistoria.");
+
+    const vendaOriginal: ProposalFormValues = {
+      ...emptyProposalForm("venda", "compra_venda_v1"),
+      proponentes: locacaoForm().proponentes,
+      valor: "850.000,00",
+      modalidade: "a_vista",
+      sinal: "10.000,00",
+    };
+    const backVenda = parseProposalForm({
+      kind: "venda",
+      schemaType: "compra_venda_v1",
+      dataJson: buildProposalDataJson(vendaOriginal),
+    });
+    expect(backVenda.modalidade).toBe("a_vista");
+    expect(backVenda.sinal).toBe("10.000,00");
   });
 });
 

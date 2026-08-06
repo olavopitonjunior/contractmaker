@@ -494,6 +494,29 @@ export const dadosContratoSchema = step1Schema
       }
     }
 
+    // Consistência modalidade × parcelas: "a_vista" declarada junto com
+    // parcela de financiamento (ou banco preenchido) é contradição — a UI
+    // re-semeia ao trocar a modalidade, então isso só acontece em escrita por
+    // fora dela (OCR, voz, import de CCV, edição direta do dataJson). Issue
+    // informativo no finalize (não bloqueia), apontando a etapa que corrige.
+    // Nota: form legado sem `modalidade` gravada parseia como "a_vista" pelo
+    // default do Zod e pode ganhar este aviso — a mensagem pede conferência,
+    // não afirma erro.
+    const temParcelaFinanciamento = (data.pagamento?.parcelas ?? []).some(
+      (p) => p.tipo === "financiamento"
+    );
+    const temBanco = Boolean(data.pagamento?.banco_financiamento?.trim());
+    if (data.modalidade === "a_vista" && (temParcelaFinanciamento || temBanco)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Modalidade marcada como venda sem financiamento, mas há parcela de financiamento" +
+          (temBanco && !temParcelaFinanciamento ? " (banco preenchido)" : "") +
+          ". Confira a modalidade na etapa Pagamento.",
+        path: ["modalidade"],
+      });
+    }
+
     // Pagamento: soma das parcelas == valor_total (tolerância 0.01).
     // Só aplica quando ambos > 0 — formulários em rascunho ficam livres.
     const valorTotal = data.pagamento?.valor_total ?? 0;
@@ -521,8 +544,9 @@ export const STEP_LABELS = [
   "Posse/Propriedade",
   "Pagamento",
   // Era "Comissão e Config": as configurações contratuais migraram pra aba
-  // "Configurações" do editor de contrato.
-  "Comissão e Testemunhas",
+  // "Configurações" do editor de contrato. As observações gerais entraram no
+  // rótulo em 2026-08 pra etapa anunciar o campo livre do fim.
+  "Comissão, Testemunhas e Observações",
 ] as const;
 
 // Campos obrigatórios por etapa — array LEGADO mantido pra retrocompat.
