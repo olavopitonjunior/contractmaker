@@ -126,6 +126,9 @@ const EVENT_LABEL: Record<string, string> = {
   chained_envelope2_preflight_failed: "2ª via bloqueada — dados do proprietário incompletos",
   chained_envelope2_no_creds: "2ª via bloqueada — ClickSign não configurada",
   manual_sync: "Sincronização manual",
+  envelope_replaced: "Envelope anterior substituído",
+  chained_envelope2_wrong_status: "2ª via bloqueada — proposta fora do ponto de envio",
+  vendedor_via_canceled: "2ª via cancelada/expirada — voltou pra sua decisão",
   // Parada de decisão / conclusão manual (Fase 2 do plano 2026-08-06).
   awaiting_owner_decision: "Aguardando sua decisão",
   completed_manually: "Concluída sem enviar ao proprietário",

@@ -27,6 +27,8 @@ import { prepareSend, type PrepareResult } from "./send";
 import { withVendedorSendLock } from "./send-lock";
 import { ensureProposalDefaultWitnesses } from "./witnesses";
 import { advanceProposalStatus } from "./status";
+import { SEND_VENDEDOR_STATUSES } from "./status-sets";
+import { notifyProposalMilestone } from "./notify-proposal";
 import { toE164BR } from "./clicksign-readiness";
 import type { ClicksignRole } from "@/lib/clicksign/roles";
 import type { AuthMethod } from "@/lib/clicksign/types";
@@ -405,8 +407,37 @@ async function runClickSignEnvelope(p: {
   const subject = fillPlaceholders(p.settings.proposalEmailSubject, p);
   const message = fillPlaceholders(p.settings.proposalEmailMessage, p);
 
+  // `canceled` entrou no cleanup (bug D): uma 2ª via expirada/cancelada na
+  // ClickSign deixava a row `canceled` pra sempre e o recriar estourava o
+  // @@unique([proposalId, via]) (P2002). Antes de apagar, o id remoto vai pra
+  // um ProposalEvent — é o rastro de auditoria do envelope substituído.
+  const replaced = await prisma.envelope.findMany({
+    where: {
+      proposalId: p.proposalId,
+      via: p.via,
+      status: { in: ["draft", "failed", "canceled"] },
+      clicksignId: { not: null },
+    },
+    select: { id: true, clicksignId: true, status: true },
+  });
+  if (replaced.length > 0) {
+    await prisma.proposalEvent
+      .create({
+        data: {
+          proposalId: p.proposalId,
+          eventName: "envelope_replaced",
+          source: "system",
+          payload: { via: p.via, replaced },
+        },
+      })
+      .catch(() => {});
+  }
   await prisma.envelope.deleteMany({
-    where: { proposalId: p.proposalId, via: p.via, status: { in: ["draft", "failed"] } },
+    where: {
+      proposalId: p.proposalId,
+      via: p.via,
+      status: { in: ["draft", "failed", "canceled"] },
+    },
   });
 
   const envelope = await prisma.envelope.create({
@@ -615,9 +646,13 @@ export type SendVendedorResult =
         | "preflight"
         | "budget"
         | "locked" // outro processo está enviando agora (lock)
+        | "wrong_status" // guard anti-double-charge: status fora de SEND_VENDEDOR_STATUSES
         | "error";
       detail?: string;
     };
+
+/** De onde veio a chamada — decide notificação (manual já vê o resultado). */
+export type SendVendedorOrigin = "manual" | "cron" | "webhook";
 
 /**
  * Mapeia SendVendedorResult pra { status, body } HTTP. Compartilhado entre a
@@ -665,6 +700,15 @@ export function vendedorResultToResponse(
         status: 409,
         body: { error: "Envio ao vendedor já em andamento. Aguarde alguns segundos." },
       };
+    case "wrong_status":
+      return {
+        status: 409,
+        body: {
+          error:
+            "A proposta não está no ponto de enviar a via do proprietário (o proponente precisa ter assinado).",
+          detail: result.detail,
+        },
+      };
     case "not_found":
       return { status: 404, body: { error: "Proposta não encontrada." } };
     default:
@@ -676,20 +720,52 @@ export function vendedorResultToResponse(
 }
 
 export async function sendVendedorEnvelope(
-  proposalId: string
+  proposalId: string,
+  origin: SendVendedorOrigin = "manual"
 ): Promise<SendVendedorResult> {
   // Serializa com um lock distribuído: webhook (waitUntil) + botão + cron podem
   // disparar concorrentemente e a guarda de existência sozinha é TOCTOU (ambos
   // checam antes de qualquer draft existir). Lock ausente (sem Redis) → fail-open.
   return withVendedorSendLock(
     proposalId,
-    () => sendVendedorEnvelopeLocked(proposalId),
+    () => sendVendedorEnvelopeLocked(proposalId, origin),
     { ok: false, reason: "locked" }
   );
 }
 
+/**
+ * Dispatcher da 2ª via por INSTRUMENTO da proposta. TODOS os callers (rota,
+ * executor de intent, cron reconcile, webhook) passam por aqui — é o único
+ * lugar que sabe se a 2ª rodada vai por envelope ou por Aceite WhatsApp.
+ * O braço de Aceite entra na paridade (PR 2.5); até lá, registra e falha
+ * visível em vez de mandar um envelope pra uma jornada de Aceite.
+ */
+export async function sendVendedorVia(
+  proposalId: string,
+  origin: SendVendedorOrigin
+): Promise<SendVendedorResult> {
+  const proposal = await prisma.proposal.findUnique({
+    where: { id: proposalId },
+    select: { instrument: true },
+  });
+  if (!proposal) return { ok: false, reason: "not_found" };
+  if (proposal.instrument === "aceite") {
+    await logProposalEvent(proposalId, "chained_aceite2_failed", {
+      error: "2ª via por Aceite ainda não suportada (paridade no PR 2.5)",
+      origin,
+    });
+    return {
+      ok: false,
+      reason: "error",
+      detail: "A 2ª via por Aceite (WhatsApp) ainda não é suportada — use o envio manual por envelope.",
+    };
+  }
+  return sendVendedorEnvelope(proposalId, origin);
+}
+
 async function sendVendedorEnvelopeLocked(
-  proposalId: string
+  proposalId: string,
+  origin: SendVendedorOrigin
 ): Promise<SendVendedorResult> {
   // Idempotência (2ª linha de defesa, dentro do lock): running/closed = já enviado;
   // draft RECENTE = em voo. Draft velho (tentativa que crashou) NÃO bloqueia —
@@ -711,15 +787,41 @@ async function sendVendedorEnvelopeLocked(
   const proposal = await prisma.proposal.findUnique({ where: { id: proposalId } });
   if (!proposal) return { ok: false, reason: "not_found" };
 
+  // Guard ANTI-DOUBLE-CHARGE por status (2026-08): antes não havia NENHUM guard
+  // de status aqui — o guard vivia só na rota, e webhook/cron chamavam sem ele.
+  // Com o lock fail-open (Redis fora), um replay de webhook numa proposta já
+  // completa/cancelada criava um 2º envelope real (R$/signer). O CAS do status
+  // não protege: esta função hoje avança DEPOIS de gastar.
+  if (!SEND_VENDEDOR_STATUSES.has(proposal.status)) {
+    await logProposalEvent(proposalId, "chained_envelope2_wrong_status", {
+      status: proposal.status,
+      origin,
+    });
+    return { ok: false, reason: "wrong_status", detail: `status atual: ${proposal.status}` };
+  }
+
   const rows = await prisma.proposalSigner.findMany({
     where: { proposalId, included: true, role: "vendedor" },
     orderBy: { signingGroup: "asc" },
   });
   if (rows.length === 0) return { ok: false, reason: "no_vendedor" };
 
+  // Sino de falha da 2ª via — o buraco operacional que o plano fecha: a falha
+  // só existia como ProposalEvent que ninguém abria. Dedupe por motivo
+  // (batchId proposal:{id}:vendedor_send_failed:{reason}).
+  const notifyFailure = (reason: string) =>
+    notifyProposalMilestone({
+      proposalId,
+      orgId: proposal.orgId,
+      userId: proposal.userId,
+      kind: "vendedor_send_failed",
+      dedupeSuffix: reason,
+    }).catch(() => {});
+
   const creds = await resolveClickSignCreds(proposal.orgId);
   if (!creds) {
     await logProposalEvent(proposalId, "chained_envelope2_no_creds");
+    await notifyFailure("no_creds");
     return { ok: false, reason: "no_creds" };
   }
   const settings = await getSignatureSettings(proposal.orgId);
@@ -748,6 +850,7 @@ async function sendVendedorEnvelopeLocked(
   );
   if (issues.length > 0) {
     await logProposalEvent(proposalId, "chained_envelope2_preflight_failed", { issues });
+    await notifyFailure("preflight");
     // issues são objetos ReadinessIssue — extrai a razão legível (senão o detail
     // vira "[object Object]" no 422 que o operador/cron lê).
     return { ok: false, reason: "preflight", detail: issues.map((i) => i.reason).join("; ") };
@@ -790,8 +893,20 @@ async function sendVendedorEnvelopeLocked(
       budgetCents,
       costCents,
     });
+    await notifyFailure("budget");
     return { ok: false, reason: "budget" };
   }
+
+  // Prazo PRÓPRIO da 2ª via (bug C): a via do proprietário nascia com
+  // deadline = validUntil, que na parada de decisão (dias parada) já podia
+  // estar VENCIDO — o envelope nascia expirado. Agora: o que for MAIOR entre a
+  // validade da proposta e hoje + prazo da org (default 7 dias).
+  const ownerDays = settings.proposalOwnerDeadlineDays ?? 7;
+  const minDeadline = new Date(Date.now() + ownerDays * 86_400_000);
+  const vendedorDeadlineAt =
+    proposal.validUntil && proposal.validUntil > minDeadline
+      ? proposal.validUntil
+      : minDeadline;
 
   try {
     await runClickSignEnvelope({
@@ -803,14 +918,33 @@ async function sendVendedorEnvelopeLocked(
       html,
       creds,
       settings,
-      deadlineAt: proposal.validUntil ?? null,
+      deadlineAt: vendedorDeadlineAt,
       costCents,
     });
-    await logProposalEvent(proposalId, "chained_envelope2_sent");
+    // Avanço DEPOIS do sucesso (antes o webhook avançava antes de gastar):
+    // falha por budget/preflight/erro deixa a proposta na parada de decisão,
+    // com o botão de reenvio na tela. No retry a partir de aguardando_vendedor
+    // o advance é replay (no-op) — o CAS protege.
+    await advanceProposalStatus(proposalId, "aguardando_vendedor");
+    await prisma.proposal.update({
+      where: { id: proposalId },
+      data: { vendedorDeadlineAt },
+    });
+    await logProposalEvent(proposalId, "chained_envelope2_sent", { origin });
+    if (origin !== "manual") {
+      // Quem clicou no botão já viu o resultado; webhook/cron avisam pelo sino.
+      await notifyProposalMilestone({
+        proposalId,
+        orgId: proposal.orgId,
+        userId: proposal.userId,
+        kind: "vendedor_sent",
+      }).catch(() => {});
+    }
     return { ok: true };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     await logProposalEvent(proposalId, "chained_envelope2_failed", { error: detail });
+    await notifyFailure("error");
     return { ok: false, reason: "error", detail };
   }
 }
