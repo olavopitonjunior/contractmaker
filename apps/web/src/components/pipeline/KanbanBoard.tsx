@@ -93,6 +93,9 @@ interface Stage {
   name: string;
   color: string;
   deals: DealCard[];
+  /** Total de deals do stage no server (pós-filtro) — pode exceder os
+   *  carregados (cap 200/stage do board-query). Ausente = sem cap. */
+  total?: number;
 }
 
 interface KanbanBoardProps {
@@ -105,12 +108,19 @@ interface KanbanBoardProps {
    * propósito: um caller sem nowMs reintroduziria o bug em silêncio.
    */
   nowMs: number;
+  /**
+   * Oculta a toolbar client (busca/gerente/parados/arquivados) — usado quando
+   * a page renderiza a PipelineFilters server-side (PR 3.4), que filtra na
+   * QUERY em vez de nos cards carregados.
+   */
+  hideToolbar?: boolean;
 }
 
 export function KanbanBoard({
   stages: initialStages,
   config = DEFAULT_BOARD_CONFIG,
   nowMs,
+  hideToolbar = false,
 }: KanbanBoardProps) {
   const [stages, setStages] = useState(initialStages);
   const [activeCard, setActiveCard] = useState<DealCard | null>(null);
@@ -339,7 +349,9 @@ export function KanbanBoard({
       onDragEnd={handleDragEnd}
     >
       <div className="space-y-3">
-        {/* Toolbar: busca + filtros client-side + toggle de arquivados (server) */}
+        {/* Toolbar: busca + filtros client-side + toggle de arquivados (server).
+            Oculta quando a page usa a PipelineFilters server-side. */}
+        {!hideToolbar && (
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -403,6 +415,7 @@ export function KanbanBoard({
             </span>
           )}
         </div>
+        )}
 
         <div className="flex gap-4 overflow-x-auto pb-4">
           {filteredStages
@@ -414,6 +427,7 @@ export function KanbanBoard({
                 name={stage.name}
                 color={stage.color}
                 deals={stage.deals}
+                total={stage.total}
                 config={config}
                 nowMs={nowMs}
                 isFiltering={hasClientFilter}
@@ -437,6 +451,7 @@ export function KanbanBoard({
                       name={lost.name}
                       color={lost.color}
                       deals={lost.deals}
+                      total={lost.total}
                       isLost
                       config={config}
                       nowMs={nowMs}

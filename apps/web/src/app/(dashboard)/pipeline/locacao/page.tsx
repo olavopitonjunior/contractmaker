@@ -9,7 +9,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { KanbanBoard } from "@/components/pipeline/KanbanBoard";
 import { NovoNegocioLocacaoDropdown } from "@/components/locacao/NovoNegocioLocacaoDropdown";
 import { BarChart3, DollarSign, Building2 } from "lucide-react";
-import { DEAL_CARD_INCLUDE, toDealCard } from "@/lib/pipeline/deal-dates";
+import { getBoardStages, getBoardKpis } from "@/lib/pipeline/board-query";
+import { parseBoardFilters } from "@/lib/pipeline/list-filters";
+import { PipelineFilters } from "@/components/pipeline/PipelineFilters";
 
 export const dynamic = "force-dynamic";
 
@@ -31,15 +33,15 @@ const STAGE_COLOR_HEX: Record<string, string> = {
 export default async function PipelineLocacaoPage({
   searchParams,
 }: {
-  searchParams?: { arquivados?: string };
+  searchParams?: Record<string, string | string[] | undefined>;
 }) {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
   const org = await getUserOrg(session.user.id);
   if (!org) redirect("/");
 
-  // ?arquivados=1 mostra também os deals arquivados (recuperação). Default oculta.
-  const includeArchived = searchParams?.arquivados === "1";
+  // Filtros server-side da URL (mesma barra de vendas — list-filters.ts).
+  const filters = parseBoardFilters(searchParams);
 
   // Guard de módulo: org sem locação habilitada não acessa o pipeline de locação.
   const modules = await getOrgModules(org.id);
@@ -51,27 +53,18 @@ export default async function PipelineLocacaoPage({
   const eff = await getEffectivePermissions(effUserId, org.id);
   const dealScope = dealScopeWhere(eff) ?? { id: "__none__" };
 
-  const pipeline = await prisma.pipeline.findFirst({
-    where: { orgId: org.id, kind: "locacao" },
-    include: {
-      stages: {
-        orderBy: { position: "asc" },
-        include: {
-          deals: {
-            where: {
-              kind: "locacao",
-              ...(includeArchived ? {} : { archivedAt: null }),
-              ...dealScope,
-            },
-            orderBy: { createdAt: "desc" },
-            include: DEAL_CARD_INCLUDE,
-          },
-        },
-      },
-    },
+  // nowMs único pro render — cards, board e filtros de SLA derivam dele (#418).
+  const nowMs = Date.now();
+  const board = await getBoardStages({
+    orgId: org.id,
+    kind: "locacao",
+    filters,
+    extraWhere: { kind: "locacao", ...dealScope },
+    orderBy: { createdAt: "desc" },
+    nowMs,
   });
 
-  if (!pipeline) {
+  if (!board) {
     return (
       <Card>
         <CardContent className="py-12 text-center">
@@ -87,21 +80,40 @@ export default async function PipelineLocacaoPage({
     );
   }
 
-  const allDeals = pipeline.stages.flatMap((s) => s.deals);
-  const admStage = pipeline.stages.find((s) => s.name === "ADM");
-  const lostStage = pipeline.stages.find((s) => s.name === "Negócio perdido");
-  const graduatedDeals = admStage?.deals.length ?? 0;
-  const lostDeals = lostStage?.deals.length ?? 0;
-  const activeDeals = allDeals.length - graduatedDeals - lostDeals;
-  const totalValue = allDeals.reduce((sum, d) => sum + (d.value || 0), 0);
-
+  // KPIs da ORG via aggregate — visão default (sem arquivados), independem
+  // dos filtros da URL e do cap por coluna.
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
-  const dealsToday = allDeals.filter(
-    (d) => d.createdAt.getTime() >= startOfToday.getTime()
-  ).length;
-  const dealsWithValue = allDeals.filter((d) => (d.value || 0) > 0).length;
-  const ticketMedio = dealsWithValue > 0 ? totalValue / dealsWithValue : 0;
+  const [kpis, responsaveisRaw] = await Promise.all([
+    getBoardKpis(
+      {
+        pipelineId: board.pipelineId,
+        kind: "locacao",
+        archivedAt: null,
+        ...dealScope,
+      },
+      startOfToday
+    ),
+    prisma.user.findMany({
+      where: { deals: { some: { pipelineId: board.pipelineId } } },
+      select: { id: true, name: true, email: true },
+      orderBy: { name: "asc" },
+    }),
+  ]);
+  const responsaveis = responsaveisRaw.map((u) => ({
+    id: u.id,
+    label: u.name?.trim() || u.email || u.id,
+  }));
+
+  const stageIdByName = new Map(board.stages.map((s) => [s.name, s.id]));
+  const countFor = (name: string) =>
+    kpis.byStageId[stageIdByName.get(name) ?? ""]?.count ?? 0;
+  const graduatedDeals = countFor("ADM");
+  const lostDeals = countFor("Negócio perdido");
+  const activeDeals = kpis.totalDeals - graduatedDeals - lostDeals;
+  const totalValue = kpis.totalValue;
+  const dealsToday = kpis.dealsToday;
+  const ticketMedio = kpis.dealsWithValue > 0 ? totalValue / kpis.dealsWithValue : 0;
   const fmtBRLShort = (v: number) =>
     v >= 1_000_000
       ? `R$ ${(v / 1_000_000).toFixed(1)}M`
@@ -109,13 +121,12 @@ export default async function PipelineLocacaoPage({
         ? `R$ ${(v / 1000).toFixed(0)}k`
         : `R$ ${v.toFixed(0)}`;
 
-  // nowMs único pro render — cards e board derivam rótulos/SLA dele (#418).
-  const nowMs = Date.now();
-  const stages = pipeline.stages.map((stage) => ({
+  const stages = board.stages.map((stage) => ({
     id: stage.id,
     name: stage.name,
     color: STAGE_COLOR_HEX[stage.color ?? ""] ?? stage.color ?? "#6366f1",
-    deals: stage.deals.map((deal) => toDealCard(deal, nowMs, stage.name)),
+    deals: stage.deals,
+    total: stage.total,
   }));
 
   // CTAs de criação (locação tem fluxos próprios: form público + wizard).
@@ -210,10 +221,18 @@ export default async function PipelineLocacaoPage({
         </Card>
       </div>
 
+      {/* Filtros server-side — mesma barra de vendas */}
+      <PipelineFilters
+        filters={filters}
+        responsaveis={responsaveis}
+        totals={board.totals}
+      />
+
       {/* Kanban — mesmo board de vendas, config de locação */}
       <KanbanBoard
         stages={stages}
         nowMs={nowMs}
+        hideToolbar
         config={{
           basePath: "/locacao/deals",
           timelineKind: "locacao",
