@@ -45,6 +45,13 @@ describe("advanceProposalStatus — CAS idempotente", () => {
     });
   });
 
+  it("devolve o `from` REAL lido antes do CAS (era hardcoded 'rascunho')", async () => {
+    findUnique.mockResolvedValue({ status: "entregue" });
+    updateMany.mockResolvedValue({ count: 1 });
+    const r = await advanceProposalStatus("p1", "visualizada");
+    expect(r).toEqual({ moved: true, from: "entregue", to: "visualizada" });
+  });
+
   it("replay (já no destino) → moved:false, reason replay, SEM evento de rejeição", async () => {
     updateMany.mockResolvedValue({ count: 0 });
     findUnique.mockResolvedValue({ status: "visualizada" });

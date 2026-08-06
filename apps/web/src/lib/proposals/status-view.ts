@@ -51,10 +51,12 @@ export function proposalStatusView(status: string): StatusView {
       return view("Entregue", "cliente", INFO);
     case "visualizada":
       return view("Visualizou", "cliente", INFO);
+    // Eram HOMÔNIMOS ("Aguardando vendedor") — o corretor não distinguia a
+    // parada de decisão (bola dele) da 2ª via em curso (bola do proprietário).
     case "assinada_proponente":
-      return view("Aguardando vendedor", "proprietario", WARNING);
+      return view("Aguardando sua decisão", "sua_vez", WARNING);
     case "aguardando_vendedor":
-      return view("Aguardando vendedor", "proprietario", WARNING);
+      return view("Com o proprietário", "proprietario", WARNING);
     case "completa":
       return view("Completa", "sua_vez", SUCCESS);
     case "convertida":
@@ -105,9 +107,9 @@ const EVENT_LABEL: Record<string, string> = {
   fetched: "Baixada",
   viewed: "Visualizada",
   signed_proponente: "Proponente assinou",
-  chained_envelope2: "Enviado ao vendedor",
-  chained_envelope2_pending: "Aguardando envio ao vendedor",
-  send_counterparty: "Enviado ao vendedor",
+  chained_envelope2: "Enviado ao proprietário",
+  chained_envelope2_pending: "Aguardando envio ao proprietário",
+  send_counterparty: "Enviado ao proprietário",
   closed: "Concluída",
   refused: "Recusada",
   expired: "Expirada",
@@ -116,6 +118,24 @@ const EVENT_LABEL: Record<string, string> = {
   reminder_sent: "Lembrete enviado",
   assignee_changed: "Responsável alterado",
   status_transition_rejected: "Transição de status rejeitada",
+  // Nomes REAIS gravados por send-execute.ts (os 5 chained_envelope2_* caíam
+  // no fallback cru na timeline — 2026-08).
+  chained_envelope2_sent: "2ª via enviada ao proprietário",
+  chained_envelope2_failed: "Falha ao enviar a 2ª via",
+  chained_envelope2_budget_exceeded: "2ª via bloqueada — orçamento de assinaturas",
+  chained_envelope2_preflight_failed: "2ª via bloqueada — dados do proprietário incompletos",
+  chained_envelope2_no_creds: "2ª via bloqueada — ClickSign não configurada",
+  manual_sync: "Sincronização manual",
+  // Parada de decisão / conclusão manual (Fase 2 do plano 2026-08-06).
+  awaiting_owner_decision: "Aguardando sua decisão",
+  completed_manually: "Concluída sem enviar ao proprietário",
+  signer_added: "Signatário adicionado",
+  // Aceite (WhatsApp) — 2ª rodada, paridade com o envelope.
+  chained_aceite2_sent: "2ª via (aceite) enviada ao proprietário",
+  chained_aceite2_failed: "Falha ao enviar a 2ª via (aceite)",
+  chained_aceite2_budget_exceeded: "2ª via (aceite) bloqueada — orçamento",
+  chained_aceite2_preflight_failed: "2ª via (aceite) bloqueada — dados incompletos",
+  chained_aceite2_no_creds: "2ª via (aceite) bloqueada — ClickSign não configurada",
 };
 
 export function proposalEventLabel(eventName: string): string {
@@ -123,6 +143,10 @@ export function proposalEventLabel(eventName: string): string {
   if (eventName.startsWith("acceptance_term_")) {
     return `Termo de aceite — ${eventName.slice("acceptance_term_".length)}`;
   }
+  // Fallback por PREFIXO: variantes futuras de 2ª via ganham um rótulo genérico
+  // legível em vez do nome técnico cru.
+  if (eventName.startsWith("chained_envelope2_")) return "2ª via — atualização";
+  if (eventName.startsWith("chained_aceite2_")) return "2ª via (aceite) — atualização";
   return eventName;
 }
 
@@ -140,7 +164,7 @@ export const PROPOSAL_TIMELINE: TimelineNode[] = [
   { key: "entregue", label: "Entregue" },
   { key: "visualizada", label: "Visualizada" },
   { key: "assinada", label: "Proponente" },
-  { key: "vendedor", label: "Vendedor" },
+  { key: "vendedor", label: "Proprietário" },
   { key: "completa", label: "Completa" },
   { key: "convertida", label: "Negócio" },
 ];

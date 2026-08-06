@@ -68,7 +68,11 @@ export const ALLOWED_FROM: Record<ProposalStatus, ProposalStatus[]> = {
   falha_envio: ["enviada"],
 };
 
-const TERMINAL: ProposalStatus[] = [
+/**
+ * Exportado pra o teste de paridade com `TERMINAL_STATUSES` (status-sets.ts) —
+ * os dois já divergiram em silêncio antes; agora um teste quebra se divergirem.
+ */
+export const TERMINAL: readonly ProposalStatus[] = [
   "convertida",
   "recusada_proponente",
   "recusada_vendedor",
@@ -96,13 +100,22 @@ export async function advanceProposalStatus(
   to: ProposalStatus,
   extra?: Prisma.ProposalUpdateManyMutationInput
 ): Promise<AdvanceResult> {
-  const from = ALLOWED_FROM[to];
+  const allowedFrom = ALLOWED_FROM[to];
+  // Best-effort: lê o status ANTES do CAS pra devolver o `from` REAL (era
+  // hardcoded "rascunho", inutilizando o campo pra caller/telemetria). Pode
+  // raciar com outro writer — por isso "best-effort": o CAS continua sendo a
+  // única autoridade da transição; o pre-read só informa o resultado.
+  const pre = await prisma.proposal.findUnique({
+    where: { id: proposalId },
+    select: { status: true },
+  });
+  const preStatus = (pre?.status ?? null) as ProposalStatus | null;
   const res = await prisma.proposal.updateMany({
-    where: { id: proposalId, status: { in: from } },
+    where: { id: proposalId, status: { in: [...allowedFrom] } },
     data: { status: to, ...extra },
   });
   if (res.count > 0) {
-    return { moved: true, from: "rascunho", to }; // `from` real não é conhecido aqui; caller loga o destino
+    return { moved: true, from: preStatus ?? "rascunho", to };
   }
 
   // Não moveu — descobrir por quê.

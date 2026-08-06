@@ -59,18 +59,45 @@ export const DELETABLE_STATUSES = new Set<string>([
 ]);
 
 /**
- * Assinatura EM CURSO — o polling em tempo real deve continuar mesmo quando não
- * há envelope `running` naquele instante. Cobre a janela entre o envelope dos
- * proponentes fechar (assinada_proponente/aguardando_vendedor) e o 2º envelope do
- * vendedor ser criado — sem isto o poller parava e a página ficava presa.
+ * Assinatura EM CURSO — alguém de fora ainda precisa assinar.
+ *
+ * `assinada_proponente` SAIU (2026-08): ele virou a PARADA DURÁVEL da decisão
+ * humana (enviar 2ª via ao proprietário ou concluir sem enviar) — não há
+ * assinatura pendente ali, há decisão do corretor. `aguardando_vendedor` fica:
+ * cobre a janela entre criar e ativar o 2º envelope.
  */
 export const AWAITING_SIGNATURE_STATUSES = new Set<string>([
   "enviada",
   "entregue",
   "visualizada",
+  "aguardando_vendedor",
+]);
+
+/**
+ * Polling em TEMPO REAL (3-10s) — só onde um evento externo (cliente/
+ * proprietário assinando) pode chegar a qualquer momento. A parada de decisão
+ * (`assinada_proponente`) fica de fora de propósito: é durável (pode ficar dias)
+ * e mantê-la no poller vira carga eterna no Neon sem informação nova.
+ */
+export const LIVE_POLL_STATUSES = new Set<string>([
+  "enviada",
+  "entregue",
+  "visualizada",
+  "aguardando_vendedor",
+]);
+
+/**
+ * De onde "enviar ao proprietário/vendedor" é válido: na parada de decisão
+ * (caminho feliz) e em `aguardando_vendedor` (retry manual quando a 2ª via
+ * falhou em criar envelope — sem isto a proposta ficava presa sem botão).
+ */
+export const SEND_VENDEDOR_STATUSES = new Set<string>([
   "assinada_proponente",
   "aguardando_vendedor",
 ]);
+
+/** Parada durável de decisão humana — a UI mostra o card "sua vez". */
+export const AWAITING_DECISION_STATUSES = new Set<string>(["assinada_proponente"]);
 
 /**
  * "Em aberto" — proposta enviada e ainda em curso (nem terminal nem rascunho).
@@ -93,17 +120,24 @@ export const REMINDABLE_STATUSES = new Set<string>([
   "aguardando_vendedor",
 ]);
 
-/** Convertível em negócio (assinatura concluída o suficiente). */
-export const CONVERTABLE_STATUSES = new Set<string>([
-  "completa",
-  "assinada_proponente",
-  "aguardando_vendedor",
-]);
+/**
+ * Convertível em negócio DIRETO (sem motivo). Só `completa`: o executor
+ * (`convertProposalToDeal`) sempre exigiu `status === "completa"` pra conversão
+ * assinada — oferecer o botão em assinada_proponente/aguardando_vendedor dava
+ * 400 na hora do clique (bug A do plano 2026-08-06).
+ */
+export const CONVERTABLE_STATUSES = new Set<string>(["completa"]);
 
-/** Convertível SEM assinatura (com motivo). */
+/**
+ * Convertível SEM assinatura completa (com motivo obrigatório). Inclui a parada
+ * de decisão e aguardando_vendedor: o proponente já assinou, mas o executor
+ * trata como `convertedWithoutSignature` — a UI pede o motivo e segue.
+ */
 export const CONVERT_UNSIGNED_STATUSES = new Set<string>([
   "enviada",
   "entregue",
   "visualizada",
   "rascunho",
+  "assinada_proponente",
+  "aguardando_vendedor",
 ]);
