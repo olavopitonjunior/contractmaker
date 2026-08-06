@@ -11,8 +11,11 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { redirect } from "next/navigation";
 import { ProposalsListClient } from "@/components/proposals/ProposalsListClient";
 import { statusesForFilter } from "@/lib/proposals/list-filters";
-import { OPEN_STATUSES } from "@/lib/proposals/status-sets";
+import { proposalListWhereForFilter } from "@/lib/proposals/list-filters.server";
+import { OPEN_STATUSES, AWAITING_DECISION_STATUSES } from "@/lib/proposals/status-sets";
 import { responsibleDisplay } from "@/lib/proposals/status-view";
+import { proposalRoundView } from "@/lib/proposals/round-view";
+import { GARANTIA_LABELS, type GarantiaTipo } from "@/lib/contracts/template-category";
 import { formatDayMonthBR, deadlineBR } from "@/lib/format/datetime";
 import { formatMoneyBR } from "@/lib/format/money";
 
@@ -50,7 +53,11 @@ export default async function PropostasPage({
 
   const q = searchParams.q?.trim() || undefined;
   const qLower = q?.toLowerCase();
+  // `statusList` continua alimentando o pré-filtro RAW da busca; o where
+  // completo (que pode ter condição de envelope — "2ª via falhou") vem do
+  // resolver server-only.
   const statusList = statusesForFilter(searchParams.status);
+  const statusWhere = proposalListWhereForFilter(searchParams.status);
   const responsibleUserId = searchParams.responsibleUserId || undefined;
 
   // Busca `q`: proponente e imóvel vivem no dataJson (JSON), onde o `contains` do
@@ -99,7 +106,7 @@ export default async function PropostasPage({
       where: {
         ...scope,
         kind: tipo === "venda" ? "venda" : "locacao",
-        ...(statusList ? { status: { in: statusList } } : {}),
+        ...statusWhere,
         ...(responsibleUserId ? { responsibleUserId } : {}),
         ...(searchIdFilter ?? {}),
       },
@@ -138,13 +145,34 @@ export default async function PropostasPage({
   const kpiWhere = { ...scope, kind: tipo === "venda" ? "venda" : "locacao" };
   const expiringCutoff = new Date(Date.now() + 2 * 86_400_000);
   const openList = [...OPEN_STATUSES];
-  const [openCount, convertedCount, expiringCount] = await Promise.all([
-    prisma.proposal.count({ where: { ...kpiWhere, status: { in: openList } } }),
-    prisma.proposal.count({ where: { ...kpiWhere, status: "convertida" } }),
-    prisma.proposal.count({
-      where: { ...kpiWhere, status: { in: openList }, validUntil: { not: null, lte: expiringCutoff } },
-    }),
-  ]);
+  const decisionList = [...AWAITING_DECISION_STATUSES];
+  // Round-view da lista SEM N+1: 1 query batch resolve quais das propostas em
+  // aguardando_vendedor têm a 2ª via viva (running/closed).
+  const aguardandoIds = proposals
+    .filter((p) => p.status === "aguardando_vendedor")
+    .map((p) => p.id);
+  const [openCount, convertedCount, expiringCount, decisionCount, liveReduzidas] =
+    await Promise.all([
+      prisma.proposal.count({ where: { ...kpiWhere, status: { in: openList } } }),
+      prisma.proposal.count({ where: { ...kpiWhere, status: "convertida" } }),
+      prisma.proposal.count({
+        where: { ...kpiWhere, status: { in: openList }, validUntil: { not: null, lte: expiringCutoff } },
+      }),
+      prisma.proposal.count({ where: { ...kpiWhere, status: { in: decisionList } } }),
+      aguardandoIds.length > 0
+        ? prisma.envelope.findMany({
+            where: {
+              proposalId: { in: aguardandoIds },
+              via: "reduzida",
+              status: { in: ["running", "closed"] },
+            },
+            select: { proposalId: true },
+          })
+        : Promise.resolve([] as { proposalId: string | null }[]),
+    ]);
+  const withLiveReduzida = new Set(
+    liveReduzidas.map((e) => e.proposalId).filter(Boolean) as string[]
+  );
 
   const members = memberRows
     .map((m) => ({ id: m.user.id, name: m.user.name ?? "Sem nome" }))
@@ -182,7 +210,11 @@ export default async function PropostasPage({
         prazo: { label: prazo.shortLabel, tone: prazo.tone },
         convertedDealId: p.convertedDealId,
         responsible: resp,
-        resumo: summarize(p.dataJson),
+        resumo: summarize(p.dataJson, p.kind),
+        round: proposalRoundView({
+          status: p.status,
+          hasActiveVendedorVia: withLiveReduzida.has(p.id),
+        }),
       };
     })
     .filter((r) => {
@@ -199,7 +231,12 @@ export default async function PropostasPage({
   return (
     <ProposalsListClient
       proposals={rows}
-      kpis={{ open: openCount, converted: convertedCount, expiring: expiringCount }}
+      kpis={{
+        open: openCount,
+        converted: convertedCount,
+        expiring: expiringCount,
+        awaitingDecision: decisionCount,
+      }}
       tipo={tipo}
       showTabs={vendasOn && locacaoOn}
       members={members}
@@ -213,12 +250,16 @@ export default async function PropostasPage({
   );
 }
 
-// Resumo leve pra tabela (proponente + imóvel + valor) sem expor o dataJson
-// inteiro. `proponente` também alimenta a busca (post-filter na page).
-function summarize(dataJson: unknown): {
+// Resumo leve pra tabela (proponente + imóvel + valor + condições do negócio)
+// sem expor o dataJson inteiro. `proponente` também alimenta a busca.
+function summarize(
+  dataJson: unknown,
+  kind: string
+): {
   proponente: string | null;
   imovel: string | null;
   valorLabel: string | null;
+  negocio: string | null;
 } {
   const d = (dataJson ?? {}) as Record<string, unknown>;
   const imoveis = d.imoveis as Array<{ endereco?: string; numero?: string }> | undefined;
@@ -230,12 +271,41 @@ function summarize(dataJson: unknown): {
   const partes = (d.compradores ?? d.locatarios) as Array<{ nome?: string }> | undefined;
   const proponente = partes?.[0]?.nome?.trim() || null;
   const pag = d.pagamento as { valor_total?: number } | undefined;
-  const loc = d.locacao as { valor_aluguel?: number } | undefined;
+  const loc = d.locacao as
+    | { valor_aluguel?: number; prazo_meses?: number; garantia?: string }
+    | undefined;
   const valor = pag?.valor_total ?? loc?.valor_aluguel ?? null;
+
+  // Chip de negócio por tipo (Fase 1.3 alimenta os dados): venda = modalidade;
+  // locação = garantia + prazo. O aluguel já é a coluna Valor.
+  let negocio: string | null = null;
+  if (kind === "venda") {
+    const modalidade = d.modalidade;
+    negocio =
+      modalidade === "financiamento"
+        ? "Financiamento"
+        : modalidade === "a_vista"
+          ? "À vista"
+          : null;
+  } else {
+    const garantiaObj = d.garantia as { tipo?: string } | undefined;
+    const garantiaLabel =
+      loc?.garantia ??
+      (garantiaObj?.tipo
+        ? GARANTIA_LABELS[garantiaObj.tipo as GarantiaTipo] ?? garantiaObj.tipo
+        : null);
+    const prazo =
+      typeof loc?.prazo_meses === "number" && loc.prazo_meses > 0
+        ? `${loc.prazo_meses}m`
+        : null;
+    negocio = [garantiaLabel, prazo].filter(Boolean).join(" · ") || null;
+  }
+
   return {
     proponente,
     imovel,
     // Determinístico (sem ICU), pelo mesmo motivo das datas.
     valorLabel: typeof valor === "number" ? formatMoneyBR(valor, { decimals: 0 }) : null,
+    negocio,
   };
 }

@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { proposalStatusView, initials } from "@/lib/proposals/status-view";
 import { LIVE_POLL_STATUSES } from "@/lib/proposals/status-sets";
+import { ROUND_LABELS, type ProposalRound } from "@/lib/proposals/round-view";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import { ProposalFilters, type ListFilters } from "./ProposalFilters";
@@ -38,7 +39,15 @@ export interface ProposalRow {
   prazo: { label: string; tone: "none" | "warn" | "danger" };
   convertedDealId: string | null;
   responsible: { name: string; isNonUser: boolean; image: string | null };
-  resumo: { proponente: string | null; imovel: string | null; valorLabel: string | null };
+  resumo: {
+    proponente: string | null;
+    imovel: string | null;
+    valorLabel: string | null;
+    /** Chip de negócio: venda = modalidade; locação = garantia + prazo. */
+    negocio: string | null;
+  };
+  /** Rodada do fluxo em duas vias (round-view) — resolvida no servidor. */
+  round: ProposalRound;
 }
 
 export function ProposalsListClient({
@@ -57,7 +66,7 @@ export function ProposalsListClient({
   permissions: ProposalPermissions;
   filters: ListFilters;
   /** Totais da ORG (independentes dos filtros da tabela) — evita KPI subcontado. */
-  kpis: { open: number; converted: number; expiring: number };
+  kpis: { open: number; converted: number; expiring: number; awaitingDecision: number };
 }) {
   const router = useRouter();
   // Gating de CTA (feature Gerente) — libera enquanto carrega pra não piscar.
@@ -80,7 +89,12 @@ export function ProposalsListClient({
 
   // Totais da ORG (do servidor), NÃO do array filtrado/capado — senão filtrar a
   // tabela pra "Concluídas" zerava "Em aberto" e o take:200 subcontava.
-  const { open: emAberto, converted: convertidas, expiring: expirando } = kpis;
+  const {
+    open: emAberto,
+    converted: convertidas,
+    expiring: expirando,
+    awaitingDecision: aguardandoDecisao,
+  } = kpis;
 
   return (
     <div className="space-y-4 p-4 md:p-6">
@@ -108,8 +122,13 @@ export function ProposalsListClient({
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-3 sm:max-w-xl">
+      <div className="grid grid-cols-2 gap-3 sm:max-w-3xl sm:grid-cols-4">
         <Kpi label="Em aberto" value={emAberto} />
+        <Kpi
+          label="Aguardando decisão"
+          value={aguardandoDecisao}
+          tone={aguardandoDecisao > 0 ? "warn" : undefined}
+        />
         <Kpi label="Convertidas" value={convertidas} tone="success" />
         <Kpi label="Expirando" value={expirando} tone={expirando > 0 ? "warn" : undefined} />
       </div>
@@ -132,6 +151,7 @@ export function ProposalsListClient({
                 <TableRow>
                   <TableHead>Proponente</TableHead>
                   <TableHead>Responsável</TableHead>
+                  <TableHead>{tipo === "venda" ? "Negócio" : "Condições"}</TableHead>
                   <TableHead className="text-right">{tipo === "venda" ? "Valor" : "Aluguel"}</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Prazo</TableHead>
@@ -173,6 +193,15 @@ export function ProposalsListClient({
                           )}
                         </div>
                       </TableCell>
+                      <TableCell>
+                        {p.resumo.negocio ? (
+                          <Badge variant="outline" className="font-normal text-muted-foreground">
+                            {p.resumo.negocio}
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {p.resumo.valorLabel ?? "—"}
                         {tipo === "locacao" && p.resumo.valorLabel != null && (
@@ -183,6 +212,17 @@ export function ProposalsListClient({
                         <Badge variant="outline" className={sv.className}>
                           {sv.label}
                         </Badge>
+                        {(p.round === "segunda_via_falhou" || p.round === "segunda_via_enviada") && (
+                          <div
+                            className={
+                              p.round === "segunda_via_falhou"
+                                ? "mt-0.5 text-[11px] font-medium text-destructive"
+                                : "mt-0.5 text-[11px] text-muted-foreground"
+                            }
+                          >
+                            {ROUND_LABELS[p.round]}
+                          </div>
+                        )}
                         <div className="mt-0.5 text-[11px] text-muted-foreground">
                           {p.sentAtLabel
                             ? `enviada ${p.sentAtLabel}`
@@ -208,6 +248,7 @@ export function ProposalsListClient({
                             status: p.status,
                             instrument: p.instrument,
                             convertedDealId: p.convertedDealId,
+                            kind: tipo,
                           }}
                           permissions={permissions}
                         />
