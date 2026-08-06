@@ -23,23 +23,41 @@ import {
   REMINDABLE_STATUSES,
   CONVERTABLE_STATUSES,
   CONVERT_UNSIGNED_STATUSES,
+  SEND_VENDEDOR_STATUSES,
+  AWAITING_DECISION_STATUSES,
 } from "@/lib/proposals/status-sets";
+import { parseProposalApiError } from "@/lib/proposals/api-errors";
+import {
+  EnviarProprietarioDialog,
+  type PlanVendedor,
+} from "./EnviarProprietarioDialog";
 
 export function ProposalActionBar({
   proposal,
   permissions,
+  kind = "venda",
+  vendedores = [],
+  custoLabel = null,
 }: {
   proposal: { id: string; status: string; instrument: string; convertedDealId: string | null };
   permissions: ProposalPermissions;
+  /** venda | locacao — só muda a copy (proprietário × locador). */
+  kind?: string;
+  vendedores?: PlanVendedor[];
+  custoLabel?: string | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const [dialog, setDialog] = useState<null | "cancel" | "delete" | "convertUnsigned">(null);
+  const [dialog, setDialog] = useState<null | "cancel" | "delete" | "convertUnsigned" | "complete">(null);
+  const [sendVendedorOpen, setSendVendedorOpen] = useState(false);
   const [reason, setReason] = useState("");
 
+  const vendedorLabel = kind === "locacao" ? "locador" : "proprietário";
   const { status, instrument } = proposal;
   const canSend = permissions.send && (status === "rascunho" || status === "falha_envio");
-  const canSendVendedor = permissions.send && status === "aguardando_vendedor";
+  // Parada de decisão (caminho feliz) + retry em aguardando_vendedor.
+  const canSendVendedor = permissions.send && SEND_VENDEDOR_STATUSES.has(status);
+  const canComplete = permissions.send && AWAITING_DECISION_STATUSES.has(status);
   const canRemind =
     permissions.resend && REMINDABLE_STATUSES.has(status) && instrument === "envelope";
   const canConvert = permissions.convert && CONVERTABLE_STATUSES.has(status);
@@ -59,17 +77,7 @@ export function ProposalActionBar({
     try {
       const res = await fetch(url, init);
       const d = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        if (d.error === "preflight" && Array.isArray(d.issues)) {
-          throw new Error(
-            "Corrija antes de enviar: " +
-              d.issues.map((i: { reason: string }) => i.reason).join(" · ")
-          );
-        }
-        throw new Error(
-          d.error === "budget" ? "Orçamento de assinaturas excedido." : d.error ?? `HTTP ${res.status}`
-        );
-      }
+      if (!res.ok) throw new Error(parseProposalApiError(d, res.status));
       // Distingue o canal real no envio: só /send devolve `instrument`. Aceite via
       // WhatsApp ≠ envelope de assinatura — não anunciar "Enviado para assinatura".
       toast.success(d.instrument === "aceite" ? "Enviado por Aceite via WhatsApp" : okMsg);
@@ -109,8 +117,13 @@ export function ProposalActionBar({
         </Button>
       )}
       {canSendVendedor && (
-        <Button disabled={busy} onClick={() => run(`/api/proposals/${proposal.id}/send-vendedor`, jsonPost(), "Enviado ao vendedor")}>
-          <UserCheck className="mr-1.5 h-4 w-4" /> Enviar ao vendedor
+        <Button disabled={busy} onClick={() => setSendVendedorOpen(true)}>
+          <UserCheck className="mr-1.5 h-4 w-4" /> Enviar ao {vendedorLabel}
+        </Button>
+      )}
+      {canComplete && (
+        <Button variant="outline" disabled={busy} onClick={() => setDialog("complete")}>
+          <CheckCircle2 className="mr-1.5 h-4 w-4" /> Concluir sem enviar
         </Button>
       )}
       {canRemind && (
@@ -138,6 +151,46 @@ export function ProposalActionBar({
           <Trash2 className="mr-1.5 h-4 w-4" /> Excluir
         </Button>
       )}
+
+      <EnviarProprietarioDialog
+        open={sendVendedorOpen}
+        onOpenChange={setSendVendedorOpen}
+        proposalId={proposal.id}
+        vendedorLabel={vendedorLabel}
+        vendedores={vendedores}
+        custoLabel={custoLabel}
+      />
+
+      {/* Concluir sem enviar (motivo OPCIONAL) */}
+      <AlertDialog open={dialog === "complete"} onOpenChange={(o) => !o && setDialog(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Concluir sem enviar ao {vendedorLabel}</AlertDialogTitle>
+            <AlertDialogDescription>
+              A proposta fecha como concluída com a assinatura do proponente — a via
+              do {vendedorLabel} não será enviada. Motivo é opcional e fica no
+              histórico.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Motivo (opcional)" rows={3} />
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Voltar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy}
+              onClick={(e) => {
+                e.preventDefault();
+                run(
+                  `/api/proposals/${proposal.id}/complete`,
+                  jsonPost({ reason: reason.trim() || undefined }),
+                  "Proposta concluída"
+                );
+              }}
+            >
+              Concluir proposta
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Cancelar (com motivo) */}
       <AlertDialog open={dialog === "cancel"} onOpenChange={(o) => !o && setDialog(null)}>

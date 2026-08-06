@@ -13,6 +13,9 @@ import { ProposalDetailClient } from "@/components/proposals/ProposalDetailClien
 import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { formatDateTimeBR, deadlineBR } from "@/lib/format/datetime";
 import { formatMoneyBR } from "@/lib/format/money";
+import { checkProposalReadiness } from "@/lib/proposals/clicksign-readiness";
+import { plannedProposalCostCents } from "@/lib/proposals/cost";
+import { getSignatureSettings } from "@/lib/clicksign/account";
 
 export const dynamic = "force-dynamic";
 
@@ -97,6 +100,10 @@ export default async function PropostaDetailPage({
   // terminais (polling off) — ex.: numa recusada não dava pra ver quem recusou.
   // Papel exibível: traduz a qualificação ClickSign (inglês) → PT via
   // clicksignRoleLabel (inclui testemunha; sourceKind colapsaria pra comprador).
+  // A `via` NÃO é descartada (2026-08): o detalhe distingue a 1ª via
+  // (proponente) da 2ª (proprietário) e marca as linhas do plano ainda sem
+  // envelope como "Pendente".
+  const VIA_LABEL: Record<string, string> = { completa: "1ª via", reduzida: "2ª via" };
   const envelopeSigners = envelopes.flatMap((e) =>
     e.signers.map((s) => ({
       id: s.id,
@@ -104,15 +111,32 @@ export default async function PropostaDetailPage({
       role: clicksignRoleLabel(s.role) ?? "",
       channel: s.notifyChannel,
       status: s.status,
+      viaLabel: VIA_LABEL[e.via ?? ""] ?? e.via ?? null,
     }))
   );
+  // Vendedores do PLANO sem envelope da 2ª via (parada de decisão): aparecem
+  // como via "Pendente" — antes sumiam da lista (só o ramo de envelope rendia).
+  const hasReduzida = envelopes.some((e) => e.via === "reduzida");
+  const pendingVendedores =
+    envelopeSigners.length > 0 && !hasReduzida
+      ? planSigners
+          .filter((ps) => ps.role === "vendedor" && ps.included)
+          .map((ps) => ({
+            id: ps.id,
+            name: ps.name,
+            role: PLAN_ROLE_LABEL.vendedor,
+            channel: ps.notifyChannel,
+            status: "",
+            viaLabel: "Pendente",
+          }))
+      : [];
   // Fallback pro ProposalSigner quando NÃO há envelope: propostas via Aceite
   // (WhatsApp) não criam Envelope, então o status por-signatário vive em
   // ProposalSigner.acceptanceStatus — sem isto o Aceite perdia a visibilidade de
   // quem aceitou/recusou. Também cobre rascunho (acceptanceStatus vazio → sem badge).
   const signers =
     envelopeSigners.length > 0
-      ? envelopeSigners.filter((s) => s.status !== "removed")
+      ? [...envelopeSigners.filter((s) => s.status !== "removed"), ...pendingVendedores]
       : planSigners.map((s) => ({
           id: s.id,
           name: s.name,
@@ -122,6 +146,7 @@ export default async function PropostaDetailPage({
           role: PLAN_ROLE_LABEL[s.role ?? ""] ?? s.role ?? "",
           channel: s.notifyChannel,
           status: s.acceptanceStatus ?? "",
+          viaLabel: null as string | null,
         }));
 
   const d = (proposal.dataJson ?? {}) as Record<string, unknown>;
@@ -138,6 +163,31 @@ export default async function PropostaDetailPage({
   // #418/#423, que faz a página re-renderizar do zero e o card "Documento"
   // aparecer vazio). Ver lib/format/datetime.ts.
   const prazo = deadlineBR(proposal.validUntil);
+
+  // Insumos do braço "enviar ao proprietário" da parada de decisão: linhas de
+  // vendedor do plano + pendência de preflight por linha + custo previsto.
+  const vendedorRows = planSigners.filter((ps) => ps.role === "vendedor" && ps.included);
+  const planVendedores = vendedorRows.map((ps) => {
+    const issues = checkProposalReadiness([
+      { name: ps.name, email: ps.email, cpf: ps.cpf, phone: ps.phone, notifyChannel: ps.notifyChannel ?? "email" },
+    ]);
+    return {
+      id: ps.id,
+      name: ps.name,
+      email: ps.email,
+      phone: ps.phone,
+      issue: issues.length > 0 ? issues.map((i) => i.reason).join("; ") : null,
+    };
+  });
+  let vendedorCostLabel: string | null = null;
+  if (vendedorRows.length > 0) {
+    const settings = await getSignatureSettings(org.id);
+    const cents = plannedProposalCostCents({
+      signerCount: vendedorRows.length,
+      costOverrides: settings.costOverridesJson as Record<string, unknown> | null,
+    });
+    vendedorCostLabel = formatMoneyBR(cents / 100);
+  }
 
   const permissions = {
     send: can(eff, PERMISSION.PROPOSAL_SEND),
@@ -187,6 +237,7 @@ export default async function PropostaDetailPage({
         id: e.id,
         eventName: e.eventName,
         receivedAtLabel: formatDateTimeBR(e.receivedAt),
+        detail: extractEventDetail(e.payload),
       }))}
       attachments={attachments.map((a) => ({
         id: a.id,
@@ -196,8 +247,35 @@ export default async function PropostaDetailPage({
       }))}
       members={memberRows.map((m) => ({ id: m.user.id, name: m.user.name ?? "Sem nome" }))}
       permissions={permissions}
+      planVendedores={planVendedores}
+      vendedorCostLabel={vendedorCostLabel}
+      vendedorIncluded={vendedorRows.length > 0}
     />
   );
+}
+
+/**
+ * Razão legível de um evento a partir do payload (falhas da 2ª via, preflight,
+ * substituição de envelope). Null quando não há nada digno de mostrar.
+ */
+function extractEventDetail(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const p = payload as {
+    error?: unknown;
+    reason?: unknown;
+    status?: unknown;
+    issues?: Array<{ reason?: unknown }>;
+  };
+  if (typeof p.error === "string" && p.error) return p.error;
+  if (Array.isArray(p.issues)) {
+    const reasons = p.issues
+      .map((i) => (typeof i?.reason === "string" ? i.reason : null))
+      .filter(Boolean);
+    if (reasons.length > 0) return reasons.join("; ");
+  }
+  if (typeof p.reason === "string" && p.reason) return p.reason;
+  if (typeof p.status === "string" && p.status) return `status: ${p.status}`;
+  return null;
 }
 
 function summarize(d: Record<string, unknown>, kind: string) {
