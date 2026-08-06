@@ -30,14 +30,33 @@ vi.mock("../acceptance-proof", () => ({
   buildAcceptanceMessage: vi.fn().mockReturnValue("Declaro que li..."),
 }));
 
+vi.mock("../send-execute", () => ({
+  sendVendedorVia: vi.fn().mockResolvedValue({ ok: true }),
+}));
+
+vi.mock("../notify-proposal", () => ({
+  notifyProposalMilestone: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@/lib/clicksign/account", () => ({
+  getSignatureSettings: vi.fn().mockResolvedValue({ proposalAutoChainVendedor: false }),
+}));
+
 import { processProposalAcceptanceEvent } from "../acceptance-webhook";
 import { advanceProposalStatus } from "../status";
 import { buildAcceptanceProof } from "../acceptance-proof";
 import { syncAcceptanceRecord } from "../acceptance-record-sync";
+import { sendVendedorVia } from "../send-execute";
+import { notifyProposalMilestone } from "../notify-proposal";
+import { getSignatureSettings } from "@/lib/clicksign/account";
 
 const propFind = prisma.proposal.findFirst as unknown as ReturnType<typeof vi.fn>;
 const propFindUnique = prisma.proposal.findUnique as unknown as ReturnType<typeof vi.fn>;
 const signerFind = prisma.proposalSigner.findFirst as unknown as ReturnType<typeof vi.fn>;
+const signerCountMock = prisma.proposalSigner.count as unknown as ReturnType<typeof vi.fn>;
+const sendVend = sendVendedorVia as unknown as ReturnType<typeof vi.fn>;
+const notify = notifyProposalMilestone as unknown as ReturnType<typeof vi.fn>;
+const settings = getSignatureSettings as unknown as ReturnType<typeof vi.fn>;
 const advance = advanceProposalStatus as unknown as ReturnType<typeof vi.fn>;
 const proof = buildAcceptanceProof as unknown as ReturnType<typeof vi.fn>;
 const sync = syncAcceptanceRecord as unknown as ReturnType<typeof vi.fn>;
@@ -50,6 +69,9 @@ describe("processProposalAcceptanceEvent", () => {
     h.pending.length = 0;
     advance.mockResolvedValue({ moved: true });
     proof.mockResolvedValue({ url: "https://x/comprovante.pdf" });
+    signerCountMock.mockResolvedValue(0);
+    settings.mockResolvedValue({ proposalAutoChainVendedor: false });
+    sendVend.mockResolvedValue({ ok: true });
     sync.mockResolvedValue({
       facts: { status: "completed", message: "Declaro que li..." },
       recordUrl: null,
@@ -180,6 +202,56 @@ describe("processProposalAcceptanceEvent", () => {
     const r = await processProposalAcceptanceEvent({ acceptanceId: "acc_2", phase: "completed", payload: {} });
     expect(r.handled).toBe(true);
     // Não deve ter chamado assinada_proponente/completa.
+    const dests = advance.mock.calls.map((c) => c[1]);
+    expect(dests).not.toContain("completa");
+  });
+
+  it("FLIP: proponente aceita COM vendedor cadastrado → PARA na decisão (comprovante mantido)", async () => {
+    signerFind.mockResolvedValue(null); // fallback: acceptanceClicksignId da Proposal → proponente
+    propFind.mockResolvedValue({ ...PROPOSAL, orgId: "org1", userId: "u1", status: "visualizada", validUntil: null });
+    signerCountMock.mockResolvedValue(1);
+    await processProposalAcceptanceEvent({ acceptanceId: "acc_1", phase: "completed", payload: {} });
+    await flushWaitUntil();
+    const dests = advance.mock.calls.map((c) => c[1]);
+    expect(dests).toEqual(["assinada_proponente"]);
+    expect(dests).not.toContain("completa");
+    expect(sendVend).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ kind: "awaiting_decision" }));
+    // O comprovante do aceite do proponente CONTINUA sendo gerado na parada.
+    expect(proof).toHaveBeenCalled();
+  });
+
+  it("FLIP: auto-chain ON dispara a 2ª rodada do Aceite via dispatcher", async () => {
+    signerFind.mockResolvedValue(null);
+    propFind.mockResolvedValue({ ...PROPOSAL, orgId: "org1", userId: "u1", status: "visualizada", validUntil: null });
+    signerCountMock.mockResolvedValue(1);
+    settings.mockResolvedValue({ proposalAutoChainVendedor: true });
+    await processProposalAcceptanceEvent({ acceptanceId: "acc_1", phase: "completed", payload: {} });
+    await flushWaitUntil();
+    expect(sendVend).toHaveBeenCalledWith("p1", "webhook");
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ kind: "signed_proponente" }));
+  });
+
+  it("paridade: aceite do VENDEDOR fecha o conjunto em aguardando_vendedor → completa", async () => {
+    signerFind.mockResolvedValue({ id: "s2", role: "vendedor", proposalId: "p1" });
+    propFindUnique.mockResolvedValue({ ...PROPOSAL, orgId: "org1", userId: "u1", status: "aguardando_vendedor", validUntil: null });
+    signerCountMock.mockResolvedValue(0); // nenhum vendedor pendente após o update da linha
+    await processProposalAcceptanceEvent({ acceptanceId: "acc_2", phase: "completed", payload: {} });
+    await flushWaitUntil();
+    expect(advance).toHaveBeenCalledWith(
+      "p1",
+      "completa",
+      expect.objectContaining({ completedAt: expect.any(Date) })
+    );
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ kind: "completed" }));
+  });
+
+  it("aceite do vendedor com OUTRO vendedor pendente NÃO completa", async () => {
+    signerFind.mockResolvedValue({ id: "s2", role: "vendedor", proposalId: "p1" });
+    propFindUnique.mockResolvedValue({ ...PROPOSAL, orgId: "org1", userId: "u1", status: "aguardando_vendedor", validUntil: null });
+    signerCountMock.mockResolvedValue(1); // ainda falta um
+    await processProposalAcceptanceEvent({ acceptanceId: "acc_2", phase: "completed", payload: {} });
+    await flushWaitUntil();
     const dests = advance.mock.calls.map((c) => c[1]);
     expect(dests).not.toContain("completa");
   });

@@ -22,7 +22,7 @@ import { buildAcceptanceMessage } from "./acceptance-proof";
 import { renderProposalVia } from "./render";
 import { selectPropostaTemplate } from "./template-select";
 import { checkProposalReadiness } from "./clicksign-readiness";
-import { plannedProposalCostCents } from "./cost";
+import { plannedProposalCostCents, plannedAcceptanceCostCents } from "./cost";
 import { prepareSend, type PrepareResult } from "./send";
 import { withVendedorSendLock } from "./send-lock";
 import { ensureProposalDefaultWitnesses } from "./witnesses";
@@ -276,7 +276,17 @@ async function sendAceite(
   let termsCreated = 0;
   let termsPresent = 0; // criados agora + pré-existentes (retry)
 
-  for (const s of decision.signers) {
+  // Paridade com o envelope (2026-08): o envio INICIAL não manda termo pro
+  // VENDEDOR — a 2ª rodada dele passa pela parada de decisão
+  // (sendVendedorAceite). Fallback defensivo: se o filtro zerar a lista
+  // (proposta atípica só com vendedores), manda a todos como antes — nunca
+  // deixar o envio sem nenhum termo.
+  const nonVendedor = decision.signers.filter(
+    (s) => matchSignerRow(rows, s)?.role !== "vendedor"
+  );
+  const targets = nonVendedor.length > 0 ? nonVendedor : decision.signers;
+
+  for (const s of targets) {
     const row = matchSignerRow(rows, s);
     if (!row) continue;
     // Já enviado (retry) → reaproveita e não cobra de novo.
@@ -750,17 +760,154 @@ export async function sendVendedorVia(
   });
   if (!proposal) return { ok: false, reason: "not_found" };
   if (proposal.instrument === "aceite") {
-    await logProposalEvent(proposalId, "chained_aceite2_failed", {
-      error: "2ª via por Aceite ainda não suportada (paridade no PR 2.5)",
+    return withVendedorSendLock(
+      proposalId,
+      () => sendVendedorAceiteLocked(proposalId, origin),
+      { ok: false, reason: "locked" }
+    );
+  }
+  return sendVendedorEnvelope(proposalId, origin);
+}
+
+/**
+ * 2ª rodada do ACEITE (WhatsApp): manda o termo pros vendedores/proprietários,
+ * espelhando sendVendedorEnvelopeLocked — lock (no dispatcher), guard de
+ * status anti-double-charge, preflight, budget (plannedAcceptanceCostCents),
+ * avanço pra aguardando_vendedor SÓ no sucesso e eventos chained_aceite2_*.
+ * Idempotência POR LINHA via `ProposalSigner.acceptanceClicksignId @unique`
+ * (linha com termo não é reenviada — retry não duplica cobrança).
+ */
+async function sendVendedorAceiteLocked(
+  proposalId: string,
+  origin: SendVendedorOrigin
+): Promise<SendVendedorResult> {
+  const proposal = await prisma.proposal.findUnique({ where: { id: proposalId } });
+  if (!proposal) return { ok: false, reason: "not_found" };
+
+  if (!SEND_VENDEDOR_STATUSES.has(proposal.status)) {
+    await logProposalEvent(proposalId, "chained_aceite2_wrong_status", {
+      status: proposal.status,
       origin,
     });
+    return { ok: false, reason: "wrong_status", detail: `status atual: ${proposal.status}` };
+  }
+
+  const rows = await prisma.proposalSigner.findMany({
+    where: { proposalId, included: true, role: "vendedor" },
+    orderBy: { signingGroup: "asc" },
+  });
+  if (rows.length === 0) return { ok: false, reason: "no_vendedor" };
+
+  const pending = rows.filter((r) => !r.acceptanceClicksignId);
+  if (pending.length === 0) {
+    // Todos já têm termo (retry/replay) — garante o status e sai idempotente.
+    await advanceProposalStatus(proposalId, "aguardando_vendedor");
+    return { ok: false, reason: "already" };
+  }
+
+  const notifyFailure = (reason: string) =>
+    notifyProposalMilestone({
+      proposalId,
+      orgId: proposal.orgId,
+      userId: proposal.userId,
+      kind: "vendedor_send_failed",
+      dedupeSuffix: `aceite:${reason}`,
+    }).catch(() => {});
+
+  const creds = await resolveClickSignCreds(proposal.orgId);
+  if (!creds) {
+    await logProposalEvent(proposalId, "chained_aceite2_no_creds");
+    await notifyFailure("no_creds");
+    return { ok: false, reason: "no_creds" };
+  }
+  const settings = await getSignatureSettings(proposal.orgId);
+
+  // Preflight: Aceite é 100% WhatsApp — telefone nacional válido + nome completo.
+  const issues = checkProposalReadiness(
+    pending.map((r) => ({
+      name: r.name,
+      email: r.email,
+      cpf: r.cpf,
+      phone: r.phone,
+      notifyChannel: "whatsapp",
+    }))
+  );
+  if (issues.length > 0) {
+    await logProposalEvent(proposalId, "chained_aceite2_preflight_failed", { issues });
+    await notifyFailure("preflight");
+    return { ok: false, reason: "preflight", detail: issues.map((i) => i.reason).join("; ") };
+  }
+
+  // Budget: custo do Aceite (~R$0,99/termo, cobrado na entrega) — mesmo gate
+  // do envelope, com o custo do instrumento certo.
+  const costCents = plannedAcceptanceCostCents(pending.length);
+  const budgetCents =
+    settings.proposalBudgetCents ?? getMonthlyBudgetCents(settings.monthlyBudgetCents);
+  const spentCents = await getMonthlySpendCents(proposal.orgId);
+  if (spentCents + costCents > budgetCents) {
+    await logProposalEvent(proposalId, "chained_aceite2_budget_exceeded", {
+      spentCents,
+      budgetCents,
+      costCents,
+    });
+    await notifyFailure("budget");
+    return { ok: false, reason: "budget" };
+  }
+
+  const link = `${process.env.NEXTAUTH_URL ?? "https://staging.imobpro.ia.br"}/p/${proposal.token}`;
+  const numero = proposal.id.slice(-8);
+  let created = 0;
+  let lastError: string | null = null;
+  for (const row of pending) {
+    const phone = toClicksignPhone(row.phone) ?? "";
+    if (!phone) continue; // preflight já barrou; defensivo
+    try {
+      const message = buildAcceptanceMessage({ numero, title: proposal.title, link });
+      const resp = await createAcceptanceWhatsapp(
+        { title: `Proposta ${numero}`, message, signerName: row.name, signerPhone: phone },
+        creds
+      );
+      const acceptanceId = extractId(resp);
+      if (acceptanceId) {
+        await prisma.proposalSigner.update({
+          where: { id: row.id },
+          data: { acceptanceClicksignId: acceptanceId, acceptanceStatus: "sent" },
+        });
+        created++;
+      }
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      console.error(`[proposals] Aceite 2ª via falhou pro signatário ${row.id}:`, err);
+    }
+  }
+
+  if (created === 0) {
+    await logProposalEvent(proposalId, "chained_aceite2_failed", { error: lastError });
+    await notifyFailure("error");
+    return { ok: false, reason: "error", detail: lastError ?? "Nenhum termo criado." };
+  }
+
+  // Sucesso (≥1 termo criado; os que falharam ficam pro retry — a idempotência
+  // por linha garante que só os pendentes são reenviados).
+  await advanceProposalStatus(proposalId, "aguardando_vendedor");
+  await logProposalEvent(proposalId, "chained_aceite2_sent", { created, origin });
+  if (origin !== "manual") {
+    await notifyProposalMilestone({
+      proposalId,
+      orgId: proposal.orgId,
+      userId: proposal.userId,
+      kind: "vendedor_sent",
+    }).catch(() => {});
+  }
+  if (created < pending.length) {
+    await notifyFailure("parcial");
     return {
       ok: false,
       reason: "error",
-      detail: "A 2ª via por Aceite (WhatsApp) ainda não é suportada — use o envio manual por envelope.",
+      detail: `Termos criados: ${created}/${pending.length} — reenvie para completar.`,
     };
   }
-  return sendVendedorEnvelope(proposalId, origin);
+  return { ok: true };
 }
 
 async function sendVendedorEnvelopeLocked(

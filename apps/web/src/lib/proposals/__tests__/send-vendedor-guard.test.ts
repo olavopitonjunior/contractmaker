@@ -106,14 +106,24 @@ describe("sendVendedorVia — dispatcher por instrumento", () => {
     signerFindMany.mockResolvedValue([]);
   });
 
-  it("instrument=aceite → falha visível (paridade chega no PR 2.5)", async () => {
-    propFind.mockResolvedValueOnce({ instrument: "aceite" });
+  it("instrument=aceite roteia pro braço de Aceite (guard de status incluso)", async () => {
+    propFind
+      .mockResolvedValueOnce({ instrument: "aceite" }) // dispatcher
+      .mockResolvedValueOnce({
+        id: "p1",
+        orgId: "org1",
+        userId: "u1",
+        status: "completa",
+        validUntil: null,
+        title: "T",
+        token: "tok",
+      }); // locked (aceite)
     const r = await sendVendedorVia("p1", "webhook");
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe("error");
+    if (!r.ok) expect(r.reason).toBe("wrong_status");
     expect(eventCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ eventName: "chained_aceite2_failed" }),
+        data: expect.objectContaining({ eventName: "chained_aceite2_wrong_status" }),
       })
     );
   });
