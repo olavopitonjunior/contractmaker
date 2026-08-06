@@ -64,24 +64,39 @@ export async function POST(
     );
   }
 
-  // Lookup do estágio prévio no último audit "lost" deste deal
-  const lastLostAudit = await prisma.auditLog.findFirst({
-    where: {
-      action: "DEAL_STAGE_CHANGE",
-      resource: deal.id,
-      resourceType: "Deal",
-    },
-    orderBy: { createdAt: "desc" },
+  // Estágio prévio: DealStageHistory primeiro (o intervalo ABERTO do deal é o
+  // do stage "perdido"; seu fromStageId é de onde ele veio — robusto contra
+  // audits posteriores, que quebravam o lookup antigo). AuditLog fica como
+  // FALLBACK pra deals perdidos antes do histórico existir.
+  const openHist = await prisma.dealStageHistory.findFirst({
+    where: { dealId: deal.id, exitedAt: null },
+    select: { fromStageId: true, reason: true },
   });
-
-  const previousStageId =
-    lastLostAudit?.metadata &&
-    typeof lastLostAudit.metadata === "object" &&
-    !Array.isArray(lastLostAudit.metadata) &&
-    (lastLostAudit.metadata as Record<string, unknown>).kind === "lost"
-      ? ((lastLostAudit.metadata as Record<string, unknown>)
-          .previousStageId as string | undefined)
+  let previousStageId: string | undefined =
+    openHist && openHist.reason === "mark_lost" && openHist.fromStageId
+      ? openHist.fromStageId
       : undefined;
+
+  let lastLostAudit: { id: string } | null = null;
+  if (!previousStageId) {
+    const auditRow = await prisma.auditLog.findFirst({
+      where: {
+        action: "DEAL_STAGE_CHANGE",
+        resource: deal.id,
+        resourceType: "Deal",
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    lastLostAudit = auditRow;
+    previousStageId =
+      auditRow?.metadata &&
+      typeof auditRow.metadata === "object" &&
+      !Array.isArray(auditRow.metadata) &&
+      (auditRow.metadata as Record<string, unknown>).kind === "lost"
+        ? ((auditRow.metadata as Record<string, unknown>)
+            .previousStageId as string | undefined)
+        : undefined;
+  }
 
   const { reopenFallback } = stageConfigForKind(deal.pipeline.kind);
   const targetStage =
