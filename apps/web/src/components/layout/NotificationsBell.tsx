@@ -59,6 +59,11 @@ function iconForType(type: string) {
       return <FileText className="h-4 w-4 text-blue-600 shrink-0" />;
     case "deal_form_reminder":
       return <Clock className="h-4 w-4 text-amber-500 shrink-0" />;
+    // SLA do pipeline: estouro individual (vermelho) e digest diário (âmbar).
+    case "deal_sla_breached":
+      return <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />;
+    case "deal_sla_digest":
+      return <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />;
     case "envelope_signed":
     case "proposal_completed":
     case "proposal_accepted_party":
