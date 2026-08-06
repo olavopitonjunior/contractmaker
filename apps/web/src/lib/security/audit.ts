@@ -137,6 +137,8 @@ export type AuditAction =
   // Política de SLA por stage (plano 2026-08, Fase 3)
   | "ORG_SLA_POLICY_UPDATE"
   | "ORG_SLA_POLICY_RESET"
+  // Export CSV do relatório do pipeline (PR 3.7)
+  | "REPORT_EXPORTED"
   | "FORM_CREATE"
   | "FORM_UPDATE"
   | "FORM_PATCH_REJECTED_PATH"
