@@ -47,6 +47,9 @@ export const HIGH_RISK_ACTIONS = [
   // Cancelar destrói envelopes ClickSign em curso — irreversível (re-enviar
   // gasta orçamento de novo). Session cancela direto; Bearer exige aprovação.
   "PROPOSAL_CANCEL",
+  // Concluir sem enviar ao proprietário fecha a proposta (terminal `completa`)
+  // — decisão do handoff (plano 2026-08-06). Padrão PROPOSAL_CANCEL.
+  "PROPOSAL_COMPLETE",
 ] as const;
 
 export type IntentAction = (typeof HIGH_RISK_ACTIONS)[number];

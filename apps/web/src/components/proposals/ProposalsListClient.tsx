@@ -8,7 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { proposalStatusView, initials } from "@/lib/proposals/status-view";
-import { OPEN_STATUSES } from "@/lib/proposals/status-sets";
+import { LIVE_POLL_STATUSES } from "@/lib/proposals/status-sets";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import { ProposalFilters, type ListFilters } from "./ProposalFilters";
@@ -68,9 +68,11 @@ export function ProposalsListClient({
   const canCreateProposal =
     perms.loading || perms.can(PERMISSION.PROPOSAL_CREATE);
 
-  // Tempo real leve: enquanto houver proposta em aberto, dá refresh no server
-  // component a cada 10s (o webhook já atualizou o DB). Sem polling por-proposta.
-  const hasOpen = proposals.some((p) => OPEN_STATUSES.has(p.status));
+  // Tempo real leve: enquanto houver proposta com evento EXTERNO possível
+  // (assinatura em curso), dá refresh no server component a cada 10s (o webhook
+  // já atualizou o DB). A parada de decisão fica fora — é o corretor que age,
+  // e mantê-la aqui deixava a lista pollando por dias (bug B).
+  const hasOpen = proposals.some((p) => LIVE_POLL_STATUSES.has(p.status));
   useEffect(() => {
     if (!hasOpen) return;
     const t = setInterval(() => router.refresh(), 10_000);

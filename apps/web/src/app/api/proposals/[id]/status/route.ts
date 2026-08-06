@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { loadScopedProposal } from "@/lib/proposals/route-helpers";
-import { TERMINAL_STATUSES, AWAITING_SIGNATURE_STATUSES } from "@/lib/proposals/status-sets";
+import { TERMINAL_STATUSES, LIVE_POLL_STATUSES } from "@/lib/proposals/status-sets";
 import { clicksignRoleLabel } from "@/lib/clicksign/roles";
 
 export const runtime = "nodejs";
@@ -62,12 +62,14 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
   // "Ativo" = ainda há algo esperando (pra o hook saber quando parar de pollar).
   // Não basta ter envelope `running`: durante o handoff proponente→vendedor não
-  // há envelope vivo por alguns segundos, e o poller não pode parar aí. Segue
-  // ativo em qualquer estado de assinatura-em-curso, para só nos terminais.
+  // há envelope vivo por alguns segundos, e o poller não pode parar aí.
+  // A PARADA DE DECISÃO (assinada_proponente) fica FORA: é durável (dias) e
+  // pollar ali é carga eterna no Neon sem informação nova — quem muda o estado
+  // é o próprio corretor, na tela (bug B do plano 2026-08-06).
   const active =
     !TERMINAL_STATUSES.has(proposal.status) &&
     (envelopes.some((e) => e.status === "running") ||
-      AWAITING_SIGNATURE_STATUSES.has(proposal.status));
+      LIVE_POLL_STATUSES.has(proposal.status));
 
   return NextResponse.json({
     status: proposal.status,
