@@ -8,6 +8,7 @@ import { isNewtonEnabledForDeal } from "@/lib/newton/gate";
 import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
 import { surveyFeatureForKind } from "@/lib/modules/catalog";
 import { getEffectivePermissions, canAccessDeal } from "@/lib/security/rbac/check";
+import { DEAL_MILESTONE_INCLUDE } from "@/lib/pipeline/deal-dates";
 
 export default async function DealPage({
   params,
@@ -45,17 +46,7 @@ export default async function DealPage({
         orderBy: { version: "desc" },
       },
       certidaoJobs: { orderBy: { createdAt: "desc" }, take: 1 },
-      envelopes: {
-        where: { source: "contract", status: "closed", contract: { kind: "contract" } },
-        select: { closedAt: true },
-        orderBy: { closedAt: "desc" },
-        take: 1,
-      },
-      commissionCharges: {
-        select: { createdAt: true },
-        orderBy: { createdAt: "asc" },
-        take: 1,
-      },
+      ...DEAL_MILESTONE_INCLUDE,
     },
   });
 
