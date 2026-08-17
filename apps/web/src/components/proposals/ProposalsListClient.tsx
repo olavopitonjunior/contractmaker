@@ -208,6 +208,7 @@ export function ProposalsListClient({
                             convertedDealId: p.convertedDealId,
                           }}
                           permissions={permissions}
+                          members={members}
                         />
                       </TableCell>
                     </TableRow>

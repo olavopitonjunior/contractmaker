@@ -73,14 +73,24 @@ export function ProposalForm({
   proposalId,
   initial,
   schemaOptions,
+  members = [],
+  canAssign = false,
 }: {
   mode: "create" | "edit";
   proposalId?: string;
   initial: ProposalFormValues;
   schemaOptions: SchemaOption[];
+  /** Membros da org pro select de responsável (só usado em create + canAssign). */
+  members?: { id: string; name: string }[];
+  /** PROPOSAL_ASSIGN — sem ela o select não aparece e o POST não manda o campo. */
+  canAssign?: boolean;
 }) {
   const router = useRouter();
   const [v, setV] = useState<ProposalFormValues>(initial);
+  // Responsável comercial na criação (admin cria e atribui num passo só).
+  // Fora do ProposalFormValues de propósito: o PATCH de edição não aceita o
+  // campo — lá a troca é pelo ProposalAssigneeControl do detalhe.
+  const [responsibleUserId, setResponsibleUserId] = useState("");
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -156,6 +166,9 @@ export function ProposalForm({
         signers: buildProposalSigners(v),
         comissaoIncluida: v.comissao,
         hiddenPaths: buildHiddenPaths(v),
+        ...(mode === "create" && canAssign && responsibleUserId
+          ? { responsibleUserId }
+          : {}),
       };
       const res = await fetch(
         mode === "create" ? "/api/proposals" : `/api/proposals/${proposalId}`,
@@ -421,6 +434,34 @@ export function ProposalForm({
               />
             </div>
           </div>
+
+          {mode === "create" && canAssign && members.length > 0 && (
+            <div className="space-y-1">
+              <Label>Responsável</Label>
+              <Select
+                value={responsibleUserId || "none"}
+                onValueChange={(val) =>
+                  setResponsibleUserId(val === "none" ? "" : val)
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Eu mesmo" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Eu mesmo</SelectItem>
+                  {members.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Gerente ou corretor que responde pela proposta. Dá pra trocar
+                depois no detalhe da proposta.
+              </p>
+            </div>
+          )}
         </Card>
 
         {/* ---------- Garantia (locação) ---------- */}

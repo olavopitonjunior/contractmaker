@@ -43,6 +43,7 @@ export default async function PropostaDetailPage({
     include: {
       user: { select: { id: true, name: true } },
       responsibleUser: { select: { id: true, name: true, image: true } },
+      convertedDeal: { select: { managerUserId: true } },
     },
   });
   if (!proposal || proposal.orgId !== org.id) notFound();
@@ -54,6 +55,9 @@ export default async function PropostaDetailPage({
       effective: eff,
       ownerUserId: proposal.userId,
       responsibleUserId: proposal.responsibleUserId,
+      // Sem isto o gerente do deal convertido abria a proposta pela API
+      // (route-helpers passa o campo) mas levava notFound() na UI.
+      convertedDealManagerUserId: proposal.convertedDeal?.managerUserId ?? null,
     })
   ) {
     notFound();

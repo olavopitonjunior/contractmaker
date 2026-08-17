@@ -12,7 +12,9 @@ import {
   CheckCircle2,
   Ban,
   Trash2,
+  UserRound,
 } from "lucide-react";
+import { ProposalAssigneeDialog } from "./ProposalAssigneeControl";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -58,13 +60,16 @@ export interface RowProposal {
 export function ProposalRowActions({
   proposal,
   permissions,
+  members = [],
 }: {
   proposal: RowProposal;
   permissions: ProposalPermissions;
+  /** Membros da org pro dialog de atribuição (só usado com permissions.assign). */
+  members?: { id: string; name: string }[];
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const [dialog, setDialog] = useState<null | "cancel" | "delete">(null);
+  const [dialog, setDialog] = useState<null | "cancel" | "delete" | "assign">(null);
   const [reason, setReason] = useState("");
 
   const canRemind =
@@ -102,6 +107,14 @@ export function ProposalRowActions({
 
   return (
     <>
+      {permissions.assign && dialog === "assign" && (
+        <ProposalAssigneeDialog
+          proposalId={proposal.id}
+          members={members}
+          open
+          onOpenChange={(o) => !o && setDialog(null)}
+        />
+      )}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Ações">
@@ -136,6 +149,11 @@ export function ProposalRowActions({
               onClick={() => run(`/api/proposals/${proposal.id}/convert`, jsonPost(), "Convertida em negócio")}
             >
               <CheckCircle2 className="mr-2 h-4 w-4" /> Converter em negócio
+            </DropdownMenuItem>
+          )}
+          {permissions.assign && (
+            <DropdownMenuItem onClick={() => setDialog("assign")}>
+              <UserRound className="mr-2 h-4 w-4" /> Atribuir responsável…
             </DropdownMenuItem>
           )}
 
