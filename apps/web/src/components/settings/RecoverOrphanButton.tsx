@@ -241,7 +241,7 @@ export function RecoverOrphanButton() {
             {activationHint && (
               <div className="border border-amber-300 bg-amber-50 rounded p-3 space-y-2 text-sm">
                 <div className="flex items-start gap-2">
-                  <Mail className="h-4 w-4 text-amber-700 mt-0.5 flex-shrink-0" />
+                  <Mail className="h-4 w-4 text-amber-700 mt-0.5 shrink-0" />
                   <div className="space-y-1">
                     <p className="font-medium text-amber-900">
                       Whitelist de IPs bloqueia /accessTokens — link de ativação

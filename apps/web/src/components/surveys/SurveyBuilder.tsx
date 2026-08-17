@@ -381,7 +381,7 @@ export function SurveyBuilder({ initial }: { initial?: SurveyBuilderInitial }) {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="mx-auto max-w-sm space-y-6 rounded-xl border bg-background p-4 shadow-sm">
+            <div className="mx-auto max-w-sm space-y-6 rounded-xl border bg-background p-4 shadow-xs">
               {questions.map((q, i) => (
                 <div key={q.id} className="space-y-2">
                   <p className="text-sm font-medium">

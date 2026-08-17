@@ -49,7 +49,7 @@ export default async function VerificarVistoriaPage({ params }: Params) {
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-muted/40 p-4">
-      <div className="w-full max-w-md rounded-lg border bg-card p-6 shadow-sm">
+      <div className="w-full max-w-md rounded-lg border bg-card p-6 shadow-xs">
         <div className="mb-4 flex items-center gap-2 text-green-600">
           <ShieldCheck className="h-6 w-6" />
           <h1 className="text-lg font-semibold text-foreground">Laudo autêntico</h1>

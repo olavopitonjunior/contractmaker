@@ -392,7 +392,7 @@ export function AIChatDrawer({
         </div>
 
         <div className="shrink-0 px-4 pb-4 pt-2">
-          <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-all focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/15 hover:border-foreground/20">
+          <div className="overflow-hidden rounded-xl border border-border bg-card shadow-xs transition-all focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/15 hover:border-foreground/20">
             <Textarea
               ref={taRef}
               rows={1}

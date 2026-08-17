@@ -199,7 +199,7 @@ export function ImovelStep({ form }: ImovelStepProps) {
                 <FormField label="Tipo do imóvel">
                   <select
                     {...form.register(`${prefix}.tipo_imovel`)}
-                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-hidden focus-visible:ring-[3px] focus-visible:ring-ring/50"
                   >
                     <option value="">Não informado</option>
                     <option value="urbano">Urbano</option>
@@ -219,7 +219,7 @@ export function ImovelStep({ form }: ImovelStepProps) {
                   })}
                   placeholder="Ex: Apartamento com 3 quartos (sendo 1 suíte), 2 banheiros, sala, cozinha, área de serviço, 1 vaga de garagem coberta, área privativa de 85m²."
                   rows={4}
-                  className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50 resize-none"
+                  className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50 resize-none"
                 />
                 <FieldError
                   error={(form.formState.errors?.imoveis as any)?.[index]?.descricao}

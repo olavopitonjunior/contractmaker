@@ -123,7 +123,7 @@ export default async function LocacaoImoveisPage() {
                   <Link
                     key={p.id}
                     href={`/locacao/imoveis/${p.id}`}
-                    className="group block focus:outline-none"
+                    className="group block focus:outline-hidden"
                   >
                     <Card className="h-full transition-shadow group-hover:shadow-md">
                       <CardHeader className="pb-2">

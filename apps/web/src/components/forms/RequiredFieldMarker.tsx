@@ -69,7 +69,7 @@ export function RequiredFieldMarker({
     <div
       role="alert"
       aria-live="polite"
-      className="sticky top-2 z-10 mx-auto mb-3 inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 shadow-sm dark:border-red-900 dark:bg-red-950/60 dark:text-red-300"
+      className="sticky top-2 z-10 mx-auto mb-3 inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 shadow-xs dark:border-red-900 dark:bg-red-950/60 dark:text-red-300"
     >
       <AlertCircle className="h-3.5 w-3.5" />
       {missing} de {total} {total === 1 ? "pendência" : "pendências"} nesta

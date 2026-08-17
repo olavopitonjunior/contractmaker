@@ -116,7 +116,7 @@ function LoginContent() {
               { icon: Sparkles, text: "Contratos gerados e editados com IA" },
             ].map(({ icon: Icon, text }, i) => (
               <div key={i} className="flex items-center gap-4">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/15 backdrop-blur-sm">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/15 backdrop-blur-xs">
                   <Icon className="h-5 w-5" />
                 </div>
                 <span className="text-white/90">{text}</span>

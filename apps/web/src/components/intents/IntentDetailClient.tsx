@@ -121,7 +121,7 @@ export function IntentDetailClient({ intent }: { intent: Intent }) {
 
       {expired && isPending && (
         <div className="border border-amber-300 bg-amber-50 rounded-md p-3 text-sm text-amber-900 flex items-start gap-2">
-          <AlertTriangle className="h-5 w-5 mt-0.5 flex-shrink-0" />
+          <AlertTriangle className="h-5 w-5 mt-0.5 shrink-0" />
           <div>
             Esta intent expirou em{" "}
             {new Date(intent.expiresAt).toLocaleString("pt-BR")}. Não pode mais

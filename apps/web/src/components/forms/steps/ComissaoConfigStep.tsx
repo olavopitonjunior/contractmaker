@@ -795,7 +795,7 @@ export function ComissaoConfigStep({
                   <FormField label="Tipo de Cadastro" className="md:col-span-2">
                     <select
                       {...form.register(tipoPath)}
-                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-hidden focus-visible:ring-[3px] focus-visible:ring-ring/50"
                     >
                       <option value="juridica">Imobiliária (PJ)</option>
                       <option value="fisica">Corretor autônomo (PF)</option>
@@ -886,7 +886,7 @@ export function ComissaoConfigStep({
                       {...form.register(
                         `comissao.comissionados.${index}.papel`
                       )}
-                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-hidden focus-visible:ring-[3px] focus-visible:ring-ring/50"
                     >
                       <option value="imobiliaria_principal">
                         Imobiliária / Corretora principal

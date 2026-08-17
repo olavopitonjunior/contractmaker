@@ -2258,7 +2258,7 @@ function DocumentsTab({
         key={doc.id}
         className="relative rounded-lg ring-2 ring-emerald-500/60 bg-emerald-50/40"
       >
-        <span className="absolute -top-2 left-3 z-10 inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-medium text-white shadow-sm">
+        <span className="absolute -top-2 left-3 z-10 inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-medium text-white shadow-xs">
           <CheckCircle2 className="h-3 w-3" />
           Assinado
         </span>

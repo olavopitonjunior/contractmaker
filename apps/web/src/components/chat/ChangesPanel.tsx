@@ -142,7 +142,7 @@ export function ChangesPanel({
               className={cn(
                 "flex-1 rounded-full px-3 h-6 text-[11px] font-medium transition-colors",
                 !filterAll
-                  ? "bg-background text-foreground shadow-sm"
+                  ? "bg-background text-foreground shadow-xs"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
@@ -156,7 +156,7 @@ export function ChangesPanel({
               className={cn(
                 "flex-1 rounded-full px-3 h-6 text-[11px] font-medium transition-colors",
                 filterAll
-                  ? "bg-background text-foreground shadow-sm"
+                  ? "bg-background text-foreground shadow-xs"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >

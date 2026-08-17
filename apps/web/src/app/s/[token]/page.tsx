@@ -11,7 +11,7 @@ export const metadata = { title: "Pesquisa de satisfação" };
 function CenterCard({ children }: { children: React.ReactNode }) {
   return (
     <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
-      <div className="w-full max-w-md rounded-xl border bg-background p-8 text-center shadow-sm">
+      <div className="w-full max-w-md rounded-xl border bg-background p-8 text-center shadow-xs">
         {children}
       </div>
     </main>

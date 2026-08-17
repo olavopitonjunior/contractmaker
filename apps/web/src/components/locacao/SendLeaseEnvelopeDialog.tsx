@@ -801,7 +801,7 @@ function SignerCard({
             onChange={(e) =>
               onChange(row.rowId, { clicksignRole: e.target.value as ClicksignRole })
             }
-            className="flex h-9 w-full rounded-md border border-input bg-transparent px-2 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="flex h-9 w-full rounded-md border border-input bg-transparent px-2 py-1 text-sm shadow-xs focus-visible:outline-hidden focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
             {ROLE_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
