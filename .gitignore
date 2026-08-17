@@ -51,8 +51,9 @@ apps/web/public/exports/
 *.tsbuildinfo
 next-env.d.ts
 
-# Claude Code / QA tooling
-.claude/
+# Claude Code / QA tooling — skills sao versionadas (conhecimento do time)
+.claude/*
+!.claude/skills/
 .playwright-mcp/
 docs/qa-round-*-prompt.md
 
@@ -60,3 +61,6 @@ docs/qa-round-*-prompt.md
 apps/web/playwright-report/
 apps/web/test-results/
 apps/web/tests/screenshots/
+
+# graphify — grafo local do codigo (rebuild e gratis: graphify extract . --code-only)
+graphify-out/

@@ -1,0 +1,15 @@
+# graphify — exclusoes alem do .gitignore (que ja e respeitado automaticamente)
+# Sintaxe igual a do .gitignore. Avaliado DEPOIS do .gitignore, entao so exclui mais.
+
+# saida do proprio graphify
+graphify-out/
+
+# 141 SQLs de migration viram nos-lixo no grafo; o schema.prisma continua entrando
+apps/web/prisma/migrations/
+
+# assets estaticos
+apps/web/public/
+
+# conteudo juridico (Handlebars), nao estrutura de codigo
+templates/
+files/
