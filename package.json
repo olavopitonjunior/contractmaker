@@ -6,5 +6,6 @@
   "workspaces": [
     "apps/web",
     "apps/mcp-server"
-  ]
+  ],
+  "packageManager": "npm@10.9.3"
 }
