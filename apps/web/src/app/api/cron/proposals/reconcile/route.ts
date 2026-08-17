@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db/prisma";
 import { requireCronAuth } from "@/lib/security/cron-auth";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
 import { syncEnvelopeState } from "@/lib/clicksign/sync";
-import { sendVendedorEnvelope } from "@/lib/proposals/send-execute";
+import { sendVendedorEnvelope, recoverOrphanClaim } from "@/lib/proposals/send-execute";
 import { buildDossier } from "@/lib/proposals/dossier";
 
 export const runtime = "nodejs";
@@ -19,6 +19,10 @@ const PATH = "/api/cron/proposals/reconcile";
  *  2. `aguardando_vendedor` SEM envelope reduzida vivo → redispara o 2º envelope
  *     (idempotente pelo @@unique + guard interno).
  *  3. `completa` sem `dossierUrl` → monta o dossiê.
+ *  4. Claim órfão: `enviada` sem `sentAt` e sem envelope vivo (>30min) → o envio
+ *     foi morto no meio (timeout) depois do claim CAS; sem isto a proposta trava
+ *     pra sempre ("já foi enviada" no /send, "ninguém pendente" no /remind).
+ *     Libera pra `falha_envio` (reenviável) + ProposalEvent.
  */
 export async function GET(req: NextRequest) {
   const authErr = requireCronAuth(req);
@@ -28,7 +32,14 @@ export async function GET(req: NextRequest) {
   }
 
   const cutoff = new Date(Date.now() - 2 * 60 * 60 * 1000);
-  const result = { synced: 0, closedPropagated: 0, chainedRetried: 0, dossiersBuilt: 0, errors: 0 };
+  const result = {
+    synced: 0,
+    closedPropagated: 0,
+    chainedRetried: 0,
+    dossiersBuilt: 0,
+    orphanClaimsReleased: 0,
+    errors: 0,
+  };
 
   // 1. Sincroniza envelopes running defasados.
   const envelopes = await prisma.envelope.findMany({
@@ -94,6 +105,31 @@ export async function GET(req: NextRequest) {
     try {
       const r = await buildDossier(p.id);
       if ("url" in r) result.dossiersBuilt++;
+    } catch {
+      result.errors++;
+    }
+  }
+
+  // 4. Claim órfão de envio. `sentAt: null` discrimina o claim morto no meio do
+  // caminho: os DOIS caminhos felizes (envelope e aceite) gravam sentAt como
+  // último passo. O guard de envelope vivo é cinto-e-suspensório pro caso raro
+  // de envelope running com o update de sentAt perdido — aí o sync (step 1)
+  // é quem reconcilia, não a liberação. 30min >> maxDuration de 60s do /send.
+  const orphanCutoff = new Date(Date.now() - 30 * 60 * 1000);
+  const orphans = await prisma.proposal.findMany({
+    where: {
+      status: "enviada",
+      sentAt: null,
+      updatedAt: { lt: orphanCutoff },
+      envelopes: { none: { status: { in: ["running", "closed"] } } },
+    },
+    select: { id: true },
+    take: 50,
+  });
+  for (const p of orphans) {
+    try {
+      await recoverOrphanClaim(p.id);
+      result.orphanClaimsReleased++;
     } catch {
       result.errors++;
     }
