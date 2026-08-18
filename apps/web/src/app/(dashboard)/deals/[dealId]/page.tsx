@@ -47,6 +47,14 @@ export default async function DealPage({
       },
       certidaoJobs: { orderBy: { createdAt: "desc" }, take: 1 },
       ...DEAL_MILESTONE_INCLUDE,
+      // Proposta de origem (conversão) — chip "Origem: proposta" no header.
+      fromProposal: {
+        select: {
+          id: true,
+          title: true,
+          convertedWithoutSignature: true,
+        },
+      },
     },
   });
 

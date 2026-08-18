@@ -21,6 +21,8 @@ import {
 } from "@/lib/proposals/create-schema";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
+import { summarizeProposalData } from "@/lib/proposals/summarize";
+import { formatDateTimeBR } from "@/lib/format/datetime";
 
 // Schema e default de validade vivem em lib/proposals/create-schema.ts: são a
 // fonte da verdade compartilhada com a tool MCP `create_proposal`, e o teste de
@@ -45,6 +47,47 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const status = url.searchParams.get("status");
   const kind = url.searchParams.get("kind");
+
+  // `?eligible=convert` — modo enxuto pro picker do "Cadastro com proposta":
+  // só assinadas completas ainda não convertidas, resumidas no servidor (o shape
+  // completo carrega dataJson e sentSnapshotHtml, pesado demais pra um select).
+  if (url.searchParams.get("eligible") === "convert") {
+    const rows = await prisma.proposal.findMany({
+      where: {
+        ...scope,
+        status: "completa",
+        convertedDealId: null,
+        ...(kind ? { kind } : {}),
+      },
+      select: {
+        id: true,
+        title: true,
+        kind: true,
+        completedAt: true,
+        dossierUrl: true,
+        dataJson: true,
+      },
+      orderBy: { completedAt: "desc" },
+      take: 100,
+    });
+    return NextResponse.json({
+      proposals: rows.map((p) => {
+        const resumo = summarizeProposalData(p.dataJson);
+        return {
+          id: p.id,
+          title: p.title,
+          kind: p.kind,
+          proponente: resumo.proponente,
+          imovel: resumo.imovel,
+          valorLabel: resumo.valorLabel,
+          completedAtLabel: formatDateTimeBR(p.completedAt),
+          // Sem dossiê = ClickSign ainda processando o PDF assinado — a
+          // conversão responderia `dossier_pending`.
+          dossierReady: !!p.dossierUrl,
+        };
+      }),
+    });
+  }
 
   const proposals = await prisma.proposal.findMany({
     where: {

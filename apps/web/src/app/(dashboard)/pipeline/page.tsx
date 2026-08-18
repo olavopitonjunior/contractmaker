@@ -2,25 +2,9 @@ import { requireFeaturePage } from "@/lib/modules/page-guard";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { FEATURE, MODULE } from "@/lib/modules/catalog";
 import { KanbanBoard } from "@/components/pipeline/KanbanBoard";
-import { Button } from "@/components/ui/button";
+import { NovoNegocioDropdown } from "@/components/pipeline/NovoNegocioDropdown";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import Link from "next/link";
-import {
-  Plus,
-  TrendingUp,
-  DollarSign,
-  BarChart3,
-  FileText,
-  Upload,
-  Sparkles,
-  Building2,
-} from "lucide-react";
+import { TrendingUp, DollarSign, BarChart3 } from "lucide-react";
 import { getIListConnection } from "@/lib/ilist/connection";
 import { getEffectivePermissions, dealScopeWhere } from "@/lib/security/rbac/check";
 import { DEAL_CARD_INCLUDE, toDealCard } from "@/lib/pipeline/deal-dates";
@@ -112,83 +96,7 @@ export default async function PipelinePage({
         <h1 className="font-display text-2xl font-semibold tracking-tight">
           Pipeline de Vendas
         </h1>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              size="sm"
-              className={
-                searchParams?.novo === "1"
-                  ? "ring-2 ring-brand-accent ring-offset-2 animate-pulse"
-                  : undefined
-              }
-            >
-              <Plus className="mr-1.5 h-4 w-4" />
-              Novo negócio
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-72">
-            <DropdownMenuItem asChild>
-              <Link href="/forms/new" className="flex items-start gap-3 py-2">
-                <FileText className="h-4 w-4 mt-0.5 shrink-0" />
-                <div className="flex flex-col gap-0.5">
-                  <span className="font-medium">Novo formulário (link público)</span>
-                  <span className="text-xs text-muted-foreground">
-                    Envia link para o cliente preencher os 7 passos. Contrato é
-                    gerado pelo template padrão.
-                  </span>
-                </div>
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link
-                href="/deals/new-from-proposal"
-                className="flex items-start gap-3 py-2"
-              >
-                <Sparkles className="h-4 w-4 mt-0.5 shrink-0" />
-                <div className="flex flex-col gap-0.5">
-                  <span className="font-medium">Cadastro com proposta</span>
-                  <span className="text-xs text-muted-foreground">
-                    Sobe uma proposta (PDF/DOCX). Sistema lê tudo (partes,
-                    valores, comissão) e abre o formulário pré-preenchido pra
-                    revisar antes de gerar o contrato.
-                  </span>
-                </div>
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link
-                href="/deals/new-from-upload"
-                className="flex items-start gap-3 py-2"
-              >
-                <Upload className="h-4 w-4 mt-0.5 shrink-0" />
-                <div className="flex flex-col gap-0.5">
-                  <span className="font-medium">Cadastro rápido com upload</span>
-                  <span className="text-xs text-muted-foreground">
-                    Sobe um CCV (PDF/DOCX) pronto. Sistema lê os dados e abre o
-                    contrato no editor pra revisar e enviar pra assinatura.
-                  </span>
-                </div>
-              </Link>
-            </DropdownMenuItem>
-            {hasIList && (
-              <DropdownMenuItem asChild>
-                <Link
-                  href="/deals/new-from-ilist"
-                  className="flex items-start gap-3 py-2"
-                >
-                  <Building2 className="h-4 w-4 mt-0.5 shrink-0" />
-                  <div className="flex flex-col gap-0.5">
-                    <span className="font-medium">Novo contrato do iList</span>
-                    <span className="text-xs text-muted-foreground">
-                      Busca o imóvel no catálogo RE/MAX e abre o formulário com
-                      imóvel e comissão pré-preenchidos.
-                    </span>
-                  </div>
-                </Link>
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <NovoNegocioDropdown hasIList={hasIList} />
       </div>
 
       {/* Metrics — KPI cards V1 (ícone em chip + número + microcopy).

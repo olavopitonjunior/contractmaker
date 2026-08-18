@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
-import { ChevronLeft, FileText, Pencil } from "lucide-react";
+import { Briefcase, ChevronLeft, FileText, Pencil } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { proposalStatusView, proposalEventLabel } from "@/lib/proposals/status-view";
 import { EDITABLE_STATUSES } from "@/lib/proposals/status-sets";
+import { dealPathForKind } from "@/lib/proposals/use-convert-proposal";
 import { useProposalPolling } from "@/hooks/useProposalPolling";
 import { ProposalProgressTimeline } from "./ProposalProgressTimeline";
 import { ProposalAssigneeControl } from "./ProposalAssigneeControl";
@@ -247,10 +248,18 @@ export function ProposalDetailClient({
               </Link>
             </Button>
           )}
+          {proposal.convertedDealId && (
+            <Button variant="outline" asChild>
+              <Link href={dealPathForKind(proposal.kind, proposal.convertedDealId)}>
+                <Briefcase className="mr-1.5 h-4 w-4" /> Ver negócio
+              </Link>
+            </Button>
+          )}
           <ProposalActionBar
             proposal={{
               id: proposal.id,
               status: liveStatus,
+              kind: proposal.kind,
               instrument: proposal.instrument,
               convertedDealId: proposal.convertedDealId,
             }}

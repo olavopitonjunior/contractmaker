@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db/prisma";
 import { renderProposalVia } from "@/lib/proposals/render";
 import { selectPropostaTemplate } from "@/lib/proposals/template-select";
+import { SIGNED_OR_LATER_STATUSES } from "@/lib/proposals/status-sets";
 import { ViewBeacon } from "./ViewBeacon";
 
 export const runtime = "nodejs";
@@ -37,6 +38,7 @@ export default async function PublicProposalPage({
       orgId: true,
       comissaoIncluida: true,
       validUntil: true,
+      createdAt: true,
       sentSnapshotHtml: true,
       htmlContent: true,
     },
@@ -50,8 +52,16 @@ export default async function PublicProposalPage({
     notFound();
   }
 
+  // "Expirou" é decidido pelo STATUS, não só pela data: proposta já assinada
+  // (parcial ou completa) foi aceita DENTRO da validade — carimbar "expirou"
+  // nela era falso e ainda suprimia o ViewBeacon. Data vencida só conta
+  // enquanto a proposta espera manifestação; `expirada` (terminal do cron/
+  // caducidade) vale mesmo sem validUntil.
   const expired =
-    proposal.validUntil != null && new Date() > proposal.validUntil;
+    proposal.status === "expirada" ||
+    (!SIGNED_OR_LATER_STATUSES.has(proposal.status) &&
+      proposal.validUntil != null &&
+      new Date() > proposal.validUntil);
 
   // Documento: snapshot congelado (o que a pessoa viu/aceita). Fallback ao
   // render atual só pra propostas antigas sem snapshot.
@@ -73,6 +83,7 @@ export default async function PublicProposalPage({
           via: "completa",
           numero: proposal.id.slice(-8),
           comissaoIncluida: proposal.comissaoIncluida,
+          meta: { emitidaEm: proposal.createdAt, validaAte: proposal.validUntil },
         })
       : (proposal.htmlContent ?? `<h1>${proposal.title}</h1>`);
   }

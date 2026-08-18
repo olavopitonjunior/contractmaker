@@ -93,17 +93,53 @@ export const REMINDABLE_STATUSES = new Set<string>([
   "aguardando_vendedor",
 ]);
 
-/** Convertível em negócio (assinatura concluída o suficiente). */
-export const CONVERTABLE_STATUSES = new Set<string>([
-  "completa",
+/**
+ * Convertível em negócio com 1 clique — SÓ `completa`: é o único status que
+ * `convertProposalToDeal` aceita como assinado (`signed = status === "completa"`,
+ * que exige o dossiê pronto). Incluir os parciais aqui fazia o botão "Converter
+ * em negócio" tomar 400 `not_completa` — eles convertem pelo caminho com motivo
+ * (`CONVERT_UNSIGNED_STATUSES`), que é o que o servidor aceita sem dossiê.
+ */
+export const CONVERTABLE_STATUSES = new Set<string>(["completa"]);
+
+/** Convertível SEM assinatura completa (com motivo obrigatório). */
+export const CONVERT_UNSIGNED_STATUSES = new Set<string>([
+  "rascunho",
+  "enviada",
+  "entregue",
+  "visualizada",
   "assinada_proponente",
   "aguardando_vendedor",
 ]);
 
-/** Convertível SEM assinatura (com motivo). */
-export const CONVERT_UNSIGNED_STATUSES = new Set<string>([
+/**
+ * Statuses que o cron de expiração realmente expira (espelha
+ * `ALLOWED_FROM.expirada`). Base do KPI "Expirando" — prometer expiração de um
+ * status que o cron nunca expira (parciais assinados) era mentira do card.
+ */
+export const EXPIRABLE_STATUSES = new Set<string>([
   "enviada",
   "entregue",
   "visualizada",
-  "rascunho",
+]);
+
+/**
+ * Assinatura iniciada ou concluída — o prazo de aceite deixa de correr: o
+ * proponente já se manifestou dentro da validade, então "vencida" seria falso.
+ * Base do `proposalDeadline` (coluna Prazo, detalhe e landing pública).
+ */
+export const SIGNED_OR_LATER_STATUSES = new Set<string>([
+  "assinada_proponente",
+  "aguardando_vendedor",
+  "completa",
+  "convertida",
+]);
+
+/**
+ * KPI "Assinadas/Convertidas": proposta assinada por todos (`completa`) conta
+ * como conversão mesmo antes do clique "Converter em negócio".
+ */
+export const CONVERSION_KPI_STATUSES = new Set<string>([
+  "completa",
+  "convertida",
 ]);

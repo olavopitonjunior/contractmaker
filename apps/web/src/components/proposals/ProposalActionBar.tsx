@@ -16,6 +16,7 @@ import {
   AlertDialogAction,
 } from "@/components/ui/alert-dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { ManagerSelect } from "@/components/deals/ManagerSelect";
 import type { ProposalPermissions } from "./ProposalRowActions";
 import {
   CANCELLABLE_STATUSES,
@@ -24,20 +25,58 @@ import {
   CONVERTABLE_STATUSES,
   CONVERT_UNSIGNED_STATUSES,
 } from "@/lib/proposals/status-sets";
+import { useConvertProposal } from "@/lib/proposals/use-convert-proposal";
 
 export function ProposalActionBar({
   proposal,
   permissions,
 }: {
-  proposal: { id: string; status: string; instrument: string; convertedDealId: string | null };
+  proposal: {
+    id: string;
+    status: string;
+    kind: string;
+    instrument: string;
+    convertedDealId: string | null;
+  };
   permissions: ProposalPermissions;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const [dialog, setDialog] = useState<null | "cancel" | "delete" | "convertUnsigned">(null);
+  const [dialog, setDialog] = useState<
+    null | "cancel" | "delete" | "convertUnsigned" | "convertManager"
+  >(null);
   const [reason, setReason] = useState("");
+  // Gerente responsável (feature Gerente): só entra em cena quando o servidor
+  // responde 422 `gerente_obrigatorio` — aí o diálogo ganha o ManagerSelect.
+  const [managerUserId, setManagerUserId] = useState<string | null>(null);
+  const [managerRequired, setManagerRequired] = useState(false);
+  const { convert, busy: convertBusy } = useConvertProposal();
 
   const { status, instrument } = proposal;
+  // Parcialmente assinada (proponente ok, falta vendedor) — o diálogo "sem
+  // assinatura" precisa dizer isso, senão parece que NINGUÉM assinou.
+  const partialSigned =
+    status === "assinada_proponente" || status === "aguardando_vendedor";
+
+  function doConvert(opts: { allowUnsigned?: boolean } = {}) {
+    void convert({
+      proposalId: proposal.id,
+      kind: proposal.kind,
+      allowUnsigned: opts.allowUnsigned,
+      unsignedReason: opts.allowUnsigned ? reason : undefined,
+      managerUserId,
+      onManagerRequired: () => {
+        setManagerRequired(true);
+        // Conversão direta não tem diálogo — abre um só pro gerente. A "sem
+        // assinatura" já está aberta e ganha o ManagerSelect inline.
+        if (!opts.allowUnsigned) setDialog("convertManager");
+      },
+      onSuccess: () => {
+        setDialog(null);
+        setReason("");
+      },
+    });
+  }
   const canSend = permissions.send && (status === "rascunho" || status === "falha_envio");
   const canSendVendedor = permissions.send && status === "aguardando_vendedor";
   const canRemind =
@@ -119,13 +158,14 @@ export function ProposalActionBar({
         </Button>
       )}
       {canConvert && (
-        <Button disabled={busy} onClick={() => run(`/api/proposals/${proposal.id}/convert`, jsonPost(), "Convertida em negócio", { dealRedirect: true })}>
+        <Button disabled={busy || convertBusy} onClick={() => doConvert()}>
           <CheckCircle2 className="mr-1.5 h-4 w-4" /> Converter em negócio
         </Button>
       )}
       {canConvertUnsigned && (
-        <Button variant="outline" disabled={busy} onClick={() => setDialog("convertUnsigned")}>
-          <FileSignature className="mr-1.5 h-4 w-4" /> Converter sem assinatura
+        <Button variant="outline" disabled={busy || convertBusy} onClick={() => setDialog("convertUnsigned")}>
+          <FileSignature className="mr-1.5 h-4 w-4" />{" "}
+          {partialSigned ? "Converter sem assinatura completa" : "Converter sem assinatura"}
         </Button>
       )}
       {canCancel && (
@@ -170,28 +210,69 @@ export function ProposalActionBar({
       <AlertDialog open={dialog === "convertUnsigned"} onOpenChange={(o) => !o && setDialog(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Converter sem assinatura</AlertDialogTitle>
+            <AlertDialogTitle>
+              {partialSigned ? "Converter sem assinatura completa" : "Converter sem assinatura"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              A proposta vira negócio mesmo sem a assinatura concluída. Informe o motivo — fica no
-              histórico.
+              {partialSigned
+                ? "O proponente já assinou; o vendedor ainda não. A proposta vira negócio sem esperar a assinatura dele. Informe o motivo — fica no histórico."
+                : "A proposta vira negócio mesmo sem a assinatura concluída. Informe o motivo — fica no histórico."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Motivo" rows={3} />
+          {managerRequired && (
+            <ManagerSelect
+              value={managerUserId}
+              onChange={setManagerUserId}
+              disabled={convertBusy}
+              onContextLoaded={(ctx) => setManagerRequired(ctx.managerRequired)}
+            />
+          )}
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={busy}>Voltar</AlertDialogCancel>
+            <AlertDialogCancel disabled={convertBusy}>Voltar</AlertDialogCancel>
             <AlertDialogAction
-              disabled={busy || reason.trim().length < 3}
+              disabled={
+                convertBusy ||
+                reason.trim().length < 3 ||
+                (managerRequired && !managerUserId)
+              }
               onClick={(e) => {
                 e.preventDefault();
-                run(
-                  `/api/proposals/${proposal.id}/convert`,
-                  jsonPost({ allowUnsigned: true, unsignedReason: reason }),
-                  "Convertida em negócio",
-                  { dealRedirect: true }
-                );
+                doConvert({ allowUnsigned: true });
               }}
             >
               Converter
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Gerente obrigatório na conversão direta (422 do servidor) */}
+      <AlertDialog open={dialog === "convertManager"} onOpenChange={(o) => !o && setDialog(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Gerente responsável</AlertDialogTitle>
+            <AlertDialogDescription>
+              A organização exige um gerente responsável pelo negócio criado. Selecione e confirme
+              a conversão.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <ManagerSelect
+            value={managerUserId}
+            onChange={setManagerUserId}
+            disabled={convertBusy}
+            onContextLoaded={(ctx) => setManagerRequired(ctx.managerRequired)}
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={convertBusy}>Voltar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={convertBusy || !managerUserId}
+              onClick={(e) => {
+                e.preventDefault();
+                doConvert();
+              }}
+            >
+              Converter em negócio
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

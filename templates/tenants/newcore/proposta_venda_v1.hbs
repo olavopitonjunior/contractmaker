@@ -1,0 +1,90 @@
+{{!--
+  ORIGEM: proposta_cv_1pag.docx (Newcore), convertido em 2026-08-18.
+  PROPOSTA DE COMPRA E VENDA — 1 página, prosa. Placeholders flat do DOCX
+  mapeados pros paths do dataJson + helpers BR; campos que o formulário de
+  proposta ainda não coleta (qualificação civil, cônjuge) ficam sob {{#if}} e
+  somem sem quebrar o texto.
+
+  schemaType: compra_venda_v1 · modalidade: proposta_venda
+  Flags do render: numero_proposta · data_emissao · validade_ate · via_reduzida
+  · comissao_incluida. Multa de desistência vem de
+  config.multa_penal_compensatoria (padrão da org, aba Configurações).
+--}}
+<div style="font-family: 'EB Garamond', Georgia, serif; color: #111; max-width: 720px; margin: 0 auto; line-height: 1.5; font-size: 11pt;">
+  <h1 style="text-align: center; font-size: 16pt; margin: 0 0 4px;">PROPOSTA DE COMPRA E VENDA DE IMÓVEL</h1>
+  <p style="text-align: center; font-size: 9.5pt; color: #555; margin: 0 0 18px;">
+    Proposta nº {{numero_proposta}}{{#if (existe data_emissao)}} &nbsp;·&nbsp; Emitida em {{data_emissao}}{{/if}}
+    &nbsp;·&nbsp; {{#if (existe validade_ate)}}Válida para aceite até {{validade_ate}}{{else}}Válida para aceite por 7 (sete) dias corridos{{/if}}
+  </p>
+
+  <h2 style="font-size: 12pt; margin: 16px 0 6px;">PARTES</h2>
+  {{#each compradores}}
+  <p style="margin: 4px 0;"><strong>Proponente comprador.</strong> {{#if (eq this.tipo_pessoa "juridica")}}{{this.razao_social}}{{#if this.cnpj}}, inscrita no CNPJ sob nº {{cnpj this.cnpj}}{{/if}}{{else}}{{this.nome}}{{#if this.nacionalidade}}, {{this.nacionalidade}}{{/if}}{{#if this.estado_civil}}, {{this.estado_civil}}{{/if}}{{#if this.profissao}}, {{this.profissao}}{{/if}}{{#if this.rg}}, RG nº {{this.rg}}{{/if}}{{#if this.cpf}}, CPF nº {{cpf this.cpf}}{{/if}}{{/if}}{{#if this.endereco}}, residente e domiciliado(a) à {{this.endereco}}{{#if this.numero}}, nº {{this.numero}}{{/if}}{{#if this.bairro}}, {{this.bairro}}{{/if}}{{#if this.cidade}}, {{this.cidade}}{{#if this.uf}}/{{this.uf}}{{/if}}{{/if}}{{/if}}{{#if this.telefone}}, telefone {{this.telefone}}{{/if}}{{#if this.email}}, endereço eletrônico {{this.email}}{{/if}}.</p>
+  {{#if this.conjuge}}
+  <p style="margin: 4px 0;"><strong>Cônjuge ou coadquirente.</strong> {{this.conjuge.nome}}{{#if this.conjuge.nacionalidade}}, {{this.conjuge.nacionalidade}}{{/if}}{{#if this.conjuge.profissao}}, {{this.conjuge.profissao}}{{/if}}{{#if this.conjuge.rg}}, RG nº {{this.conjuge.rg}}{{/if}}{{#if this.conjuge.cpf}}, CPF nº {{cpf this.conjuge.cpf}}{{/if}}, residente e domiciliado(a) no mesmo endereço.</p>
+  {{/if}}
+  {{/each}}
+  {{#each vendedores}}
+  <p style="margin: 4px 0;"><strong>Parte vendedora.</strong> {{#if (eq this.tipo_pessoa "juridica")}}{{this.razao_social}}{{#if this.cnpj}}, inscrita no CNPJ sob nº {{cnpj this.cnpj}}{{/if}}{{else}}{{this.nome}}{{#if this.nacionalidade}}, {{this.nacionalidade}}{{/if}}{{#if this.estado_civil}}, {{this.estado_civil}}{{/if}}{{#if this.profissao}}, {{this.profissao}}{{/if}}{{#if this.rg}}, RG nº {{this.rg}}{{/if}}{{#if this.cpf}}, CPF nº {{cpf this.cpf}}{{/if}}{{/if}}{{#if this.endereco}}, residente e domiciliado(a) à {{this.endereco}}{{#if this.numero}}, nº {{this.numero}}{{/if}}{{#if this.bairro}}, {{this.bairro}}{{/if}}{{#if this.cidade}}, {{this.cidade}}{{#if this.uf}}/{{this.uf}}{{/if}}{{/if}}{{/if}}{{#if this.telefone}}, telefone {{this.telefone}}{{/if}}{{#if this.email}}, endereço eletrônico {{this.email}}{{/if}}.</p>
+  {{/each}}
+
+  <h2 style="font-size: 12pt; margin: 16px 0 6px;">IMÓVEL</h2>
+  {{#each imoveis}}
+  {{#if this.tipo}}<p style="margin: 3px 0;"><strong>Tipo:</strong> {{this.tipo}}</p>{{/if}}
+  <p style="margin: 3px 0;"><strong>Endereço:</strong> {{this.endereco}}{{#if this.numero}}, nº {{this.numero}}{{/if}}{{#if this.bairro}}, {{this.bairro}}{{/if}}{{#if this.cidade}}, {{this.cidade}}{{#if this.uf}}/{{this.uf}}{{/if}}{{/if}}</p>
+  {{#if this.matricula}}<p style="margin: 3px 0;"><strong>Matrícula:</strong> {{this.matricula}}{{#if this.cartorio}}, registrada no {{this.cartorio}}{{/if}}</p>{{/if}}
+  {{/each}}
+
+  <h2 style="font-size: 12pt; margin: 16px 0 6px;">CONDIÇÕES COMERCIAIS</h2>
+  {{#if pagamento.valor_total}}
+  <p style="margin: 3px 0;"><strong>Valor:</strong> {{moeda pagamento.valor_total}} ({{extenso pagamento.valor_total}})</p>
+  {{/if}}
+  {{#if pagamento.forma}}
+  <p style="margin: 3px 0;"><strong>Pagamento:</strong> {{pagamento.forma}}{{#if pagamento.sinal}}, com sinal de {{moeda pagamento.sinal}}{{/if}}</p>
+  {{else}}{{#if pagamento.sinal}}
+  <p style="margin: 3px 0;"><strong>Sinal:</strong> {{moeda pagamento.sinal}}</p>
+  {{/if}}{{/if}}
+  {{#if comissao_incluida}}
+  <p style="margin: 3px 0;"><strong>Comissão:</strong> {{#if comissao.valor}}{{moeda comissao.valor}}{{#if comissao.percentual}}, equivalente a {{numero comissao.percentual}}% do valor da proposta{{/if}}{{else}}{{#if comissao.percentual}}{{numero comissao.percentual}}% sobre o valor da proposta{{/if}}{{/if}}{{#if comissao.responsavel_pagamento}}, devida por {{comissao.responsavel_pagamento}}{{/if}}</p>
+  {{/if}}
+  <p style="margin: 3px 0;"><strong>Intermediação:</strong> Newcore{{#if corretor.nome}}, por {{corretor.nome}}{{#if corretor.creci}}, CRECI nº {{corretor.creci}}{{/if}}{{/if}}</p>
+
+  {{#if observacoes}}
+  <h2 style="font-size: 12pt; margin: 16px 0 6px;">OBSERVAÇÕES E CONDIÇÕES</h2>
+  <p style="white-space: pre-wrap; margin: 3px 0;">{{observacoes}}</p>
+  {{/if}}
+
+  <h2 style="font-size: 12pt; margin: 16px 0 6px;">CONDIÇÕES ESSENCIAIS</h2>
+  <p style="margin: 6px 0;"><strong>1. Mediação.</strong> Esta proposta submete-se aos artigos 722 a 729 do Código Civil, cabendo à intermediadora executar a mediação com diligência e prudência e prestar espontaneamente todas as informações sobre o andamento das negociações, os riscos envolvidos e as alterações de valores, nos termos do artigo 723.</p>
+  <p style="margin: 6px 0;"><strong>2. Aceite.</strong> A proposta permanece válida para aceitação pela parte vendedora {{#if (existe validade_ate)}}até {{validade_ate}}{{else}}por 7 (sete) dias corridos contados da emissão{{/if}}. Decorrido o prazo sem manifestação expressa, caduca automaticamente, sem ônus para qualquer das partes. Aceita a proposta, as partes devem assinar o Contrato Particular de Compra e Venda no prazo ajustado entre elas.</p>
+  <p style="margin: 6px 0;"><strong>3. Desistência.</strong> A parte que desistir após a assinatura desta proposta e do respectivo aceite deverá devolver os valores recebidos em até 24 horas, pagar integralmente a comissão devida à intermediação e pagar à outra parte multa{{#if (existe config.multa_penal_compensatoria)}} de {{numero config.multa_penal_compensatoria}}%{{/if}} sobre o valor do negócio. A mesma comissão será devida pelo proponente comprador caso, recusada esta proposta, venha a negociar o imóvel sem a participação da intermediadora, inclusive por meio de familiares, prepostos ou representantes, em condições iguais ou diferentes das ora propostas.</p>
+  <p style="margin: 6px 0;"><strong>4. Demais condições.</strong> As partes reconhecem a validade da assinatura eletrônica deste instrumento, nos termos da Medida Provisória nº 2.200-2/2001 e da Lei nº 14.063/2020. Documentação, despesas, certidões, proteção de dados, foro e demais condições serão tratados no contrato definitivo.</p>
+
+  {{#if via_reduzida}}
+  <p style="margin-top: 20px; font-size: 9pt; color: #555; border-top: 1px solid #ccc; padding-top: 8px;">
+    Este instrumento reproduz as condições essenciais da Proposta nº {{numero_proposta}},
+    arquivada na íntegra junto à intermediadora.
+  </p>
+  {{/if}}
+
+  <h2 style="font-size: 12pt; margin: 20px 0 6px;">ASSINATURAS</h2>
+  <p style="margin: 3px 0;">{{#if imoveis.[0].cidade}}{{imoveis.[0].cidade}}, {{/if}}{{#if (existe data_emissao)}}{{data_emissao}}.{{/if}}</p>
+
+  <div style="margin-top: 36px;">
+    <p style="margin: 0;">_______________________________________</p>
+    <p style="font-size: 10pt; margin: 2px 0 0;">{{#each compradores}}{{#if (eq this.tipo_pessoa "juridica")}}{{this.razao_social}}{{else}}{{this.nome}}{{/if}}{{#unless @last}}; {{/unless}}{{/each}} — Proponente comprador</p>
+  </div>
+  {{#if compradores.[0].conjuge}}
+  <div style="margin-top: 24px;">
+    <p style="margin: 0;">_______________________________________</p>
+    <p style="font-size: 10pt; margin: 2px 0 0;">{{compradores.[0].conjuge.nome}} — Cônjuge ou coadquirente</p>
+  </div>
+  {{/if}}
+  {{#if vendedores.length}}
+  <div style="margin-top: 28px;">
+    <p style="margin: 0 0 6px;"><strong>Aceite.</strong> Declaro ter recebido, lido e aceito integralmente a proposta acima.</p>
+    <p style="margin: 0;">_______________________________________</p>
+    <p style="font-size: 10pt; margin: 2px 0 0;">{{#each vendedores}}{{#if (eq this.tipo_pessoa "juridica")}}{{this.razao_social}}{{else}}{{this.nome}}{{/if}}{{#unless @last}}; {{/unless}}{{/each}} — Parte vendedora</p>
+  </div>
+  {{/if}}
+</div>
