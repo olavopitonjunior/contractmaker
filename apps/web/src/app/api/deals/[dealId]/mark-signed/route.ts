@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
+import { moveDealStage } from "@/lib/pipeline/move-stage";
 import {
   requireApiAuth,
   isAuthFailure,
@@ -81,28 +82,16 @@ export async function POST(
     );
   }
 
-  await prisma.deal.update({
-    where: { id: deal.id },
-    data: {
-      stageId: targetStage.id,
-      stageEnteredAt: new Date(),
-      commissionPaidAt: new Date(),
-    },
+  await moveDealStage({
+    dealId: deal.id,
+    toStageId: targetStage.id,
+    reason: "mark_signed",
+    actorUserId: apiAuth.actor.effectiveUserId,
+    orgId: apiAuth.org.id,
+    dealData: { commissionPaidAt: new Date() },
+    auditCtx: extractAuditContextFromRequest(req, apiAuth.org.id, apiAuth.actor.effectiveUserId),
+    auditMetadata: mergeAuditMetadata({ kind: "commission_paid" }, apiAuth.actor),
   });
-
-  await audit(
-    extractAuditContextFromRequest(req, apiAuth.org.id, apiAuth.actor.effectiveUserId),
-    {
-      action: "DEAL_STAGE_CHANGE",
-      result: "SUCCESS",
-      resource: deal.id,
-      resourceType: "Deal",
-      metadata: mergeAuditMetadata(
-        { kind: "commission_paid", fromStage: deal.stage.id, toStage: targetStage.id },
-        apiAuth.actor
-      ),
-    }
-  );
 
   // Notificação do processo — espelha o gêmeo de sessão em
   // /api/pipeline/deals/[dealId]/mark-signed. A mudança de status importa por

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import { moveDealStage } from "@/lib/pipeline/move-stage";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { LOST_STAGE_NAME, stageConfigForKind } from "@/lib/pipeline/stage-config";
 import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
@@ -109,28 +110,19 @@ export async function POST(
     ? `[${parsed.data.category}] ${parsed.data.reason}`
     : parsed.data.reason;
 
-  await prisma.deal.update({
-    where: { id: deal.id },
-    data: {
-      stageId: targetStage.id,
-      stageEnteredAt: new Date(),
-      lostAt: new Date(),
-      lostReason: formattedReason,
-    },
-  });
-
-  await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
-    action: "DEAL_STAGE_CHANGE",
-    result: "SUCCESS",
-    resource: deal.id,
-    resourceType: "Deal",
-    metadata: {
+  await moveDealStage({
+    dealId: deal.id,
+    toStageId: targetStage.id,
+    reason: "mark_lost",
+    actorUserId: session.user.id,
+    orgId: org.id,
+    dealData: { lostAt: new Date(), lostReason: formattedReason },
+    auditCtx: extractAuditContextFromRequest(req, org.id, session.user.id),
+    auditMetadata: {
+      // `kind: "lost"` preservado — o reopen (pré-3.2) procura exatamente isto.
       kind: "lost",
       reason: parsed.data.reason,
       category: parsed.data.category ?? null,
-      previousStageId: deal.stage.id,
-      previousStageName: deal.stage.name,
-      toStage: targetStage.id,
     },
   });
 

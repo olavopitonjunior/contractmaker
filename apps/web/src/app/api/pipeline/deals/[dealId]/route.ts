@@ -10,6 +10,7 @@ import {
 } from "@/lib/notifications/deal-events";
 import { z } from "zod";
 import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
+import { moveDealStage } from "@/lib/pipeline/move-stage";
 import { getEffectivePermissions, canAccessDeal } from "@/lib/security/rbac/check";
 
 export async function GET(
@@ -125,41 +126,62 @@ export async function PATCH(
     return NextResponse.json({ error: "Deal not found" }, { status: 404 });
   }
 
-  const { contractSignedAt, chargeIssuedAt, commissionPaidAt, ...rest } = parsed.data;
+  const { contractSignedAt, chargeIssuedAt, commissionPaidAt, stageId, ...rest } = parsed.data;
   const data: Record<string, unknown> = { ...rest };
   if (contractSignedAt) data.contractSignedAt = new Date(contractSignedAt);
   if (chargeIssuedAt) data.chargeIssuedAt = new Date(chargeIssuedAt);
   if (commissionPaidAt) data.commissionPaidAt = new Date(commissionPaidAt);
-  // Aging por stage: drag pra outro stage carimba a entrada.
-  if (parsed.data.stageId) data.stageEnteredAt = new Date();
-
-  const deal = await prisma.deal.update({
-    where: { id: params.dealId },
-    data,
-    include: { stage: true },
-  });
 
   const milestoneDate = contractSignedAt || chargeIssuedAt || commissionPaidAt;
-  await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
-    action: "DEAL_STAGE_CHANGE",
-    result: "SUCCESS",
-    resource: deal.id,
-    resourceType: "Deal",
-    metadata: {
-      kind: milestoneDate ? "manual_milestone_date" : "drag",
-      fromStage: existing.stage.name,
-      toStage: deal.stage.name,
-      ...(contractSignedAt ? { contractSignedAt } : {}),
-      ...(chargeIssuedAt ? { chargeIssuedAt } : {}),
-      ...(commissionPaidAt ? { commissionPaidAt } : {}),
-      ...(parsed.data.title !== undefined ? { changedTitle: true } : {}),
-    },
+  if (stageId) {
+    // Mudança de stage passa pelo mutador único (histórico + SLA + audit
+    // padronizado); os campos extras do PATCH vão na MESMA transação.
+    await moveDealStage({
+      dealId: params.dealId,
+      toStageId: stageId,
+      reason: milestoneDate ? "manual_update" : "drag",
+      actorUserId: session.user.id,
+      orgId: org.id,
+      dealData: data,
+      auditCtx: extractAuditContextFromRequest(req, org.id, session.user.id),
+      auditMetadata: {
+        // `kind` legado preservado pros consumidores do AuditLog.
+        kind: milestoneDate ? "manual_milestone_date" : "drag",
+        ...(contractSignedAt ? { contractSignedAt } : {}),
+        ...(chargeIssuedAt ? { chargeIssuedAt } : {}),
+        ...(commissionPaidAt ? { commissionPaidAt } : {}),
+        ...(parsed.data.title !== undefined ? { changedTitle: true } : {}),
+      },
+    });
+  } else if (Object.keys(data).length > 0) {
+    await prisma.deal.update({ where: { id: params.dealId }, data });
+    if (milestoneDate) {
+      await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
+        action: "DEAL_STAGE_CHANGE",
+        result: "SUCCESS",
+        resource: params.dealId,
+        resourceType: "Deal",
+        metadata: {
+          kind: "manual_milestone_date",
+          fromStage: existing.stage.name,
+          toStage: existing.stage.name,
+          ...(contractSignedAt ? { contractSignedAt } : {}),
+          ...(chargeIssuedAt ? { chargeIssuedAt } : {}),
+          ...(commissionPaidAt ? { commissionPaidAt } : {}),
+          ...(parsed.data.title !== undefined ? { changedTitle: true } : {}),
+        },
+      });
+    }
+  }
+  const deal = await prisma.deal.findUniqueOrThrow({
+    where: { id: params.dealId },
+    include: { stage: true },
   });
 
   // Notificação do processo: drag pra stage diferente. Perdido fica fora da
   // v1 (mark-lost tem endpoint próprio, sem hook de propósito). dedupeKey por
   // (stage, dia) — re-drag no mesmo dia não re-envia.
-  if (parsed.data.stageId && parsed.data.stageId !== existing.stageId) {
+  if (stageId && stageId !== existing.stageId) {
     waitUntil(
       notifyDealEvent({
         dealId: deal.id,
@@ -172,7 +194,7 @@ export async function PATCH(
   }
 
   // Pesquisas: só quando o stage realmente mudou (o PATCH também salva título/datas).
-  if (parsed.data.stageId && deal.stage.name !== existing.stage.name) {
+  if (stageId && deal.stage.name !== existing.stage.name) {
     queueSurveyDispatch(deal.id, deal.stage.name);
   }
 

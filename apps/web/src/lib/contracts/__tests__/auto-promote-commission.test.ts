@@ -19,11 +19,19 @@ vi.mock("@/lib/security/audit", () => ({
   audit: vi.fn().mockResolvedValue({}),
 }));
 
+// Mudança de stage passa pelo mutador único (histórico + SLA + audit) — o
+// teste valida a DECISÃO do auto-promote, não a mecânica do move.
+vi.mock("@/lib/pipeline/move-stage", () => ({
+  moveDealStage: vi.fn().mockResolvedValue({ moved: true }),
+}));
+
 import { autoPromoteDealOnCommissionPaid } from "../auto-promote-commission";
 import { prisma } from "@/lib/db/prisma";
+import { moveDealStage } from "@/lib/pipeline/move-stage";
 
 const mockDealFindUnique = vi.mocked(prisma.deal.findUnique);
 const mockDealUpdate = vi.mocked(prisma.deal.update);
+const mockMove = vi.mocked(moveDealStage);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -48,19 +56,18 @@ describe("autoPromoteDealOnCommissionPaid", () => {
       stage: { id: "s-cob", name: "Cobrança emitida" },
       pipeline: pipeline(),
     } as never);
-    mockDealUpdate.mockResolvedValueOnce({} as never);
-
     const result = await autoPromoteDealOnCommissionPaid("deal-1");
 
     expect(result).toEqual({ promoted: true, fromStageId: "s-cob", toStageId: "s-pago" });
-    expect(mockDealUpdate).toHaveBeenCalledWith({
-      where: { id: "deal-1" },
-      data: {
-        stageId: "s-pago",
-        stageEnteredAt: expect.any(Date),
-        commissionPaidAt: expect.any(Date),
-      },
-    });
+    expect(mockMove).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dealId: "deal-1",
+        toStageId: "s-pago",
+        reason: "auto_commission_paid",
+        dealData: { commissionPaidAt: expect.any(Date) },
+      })
+    );
+    expect(mockDealUpdate).not.toHaveBeenCalled();
   });
 
   it("também aceita 'Contrato assinado' como origem", async () => {
@@ -69,10 +76,9 @@ describe("autoPromoteDealOnCommissionPaid", () => {
       stage: { id: "s-sign", name: "Contrato assinado" },
       pipeline: pipeline(),
     } as never);
-    mockDealUpdate.mockResolvedValueOnce({} as never);
-
     const result = await autoPromoteDealOnCommissionPaid("deal-1");
     expect(result).toMatchObject({ promoted: true, toStageId: "s-pago" });
+    expect(mockMove).toHaveBeenCalled();
   });
 
   it("no_deal quando dealId ausente (charge avulsa sem deal)", async () => {
@@ -90,7 +96,7 @@ describe("autoPromoteDealOnCommissionPaid", () => {
 
     const result = await autoPromoteDealOnCommissionPaid("deal-1");
     expect(result).toEqual({ promoted: false, reason: "already_advanced" });
-    expect(mockDealUpdate).not.toHaveBeenCalled();
+    expect(mockMove).not.toHaveBeenCalled();
   });
 
   it("não promove deal em 'Negócio perdido'", async () => {
@@ -102,7 +108,7 @@ describe("autoPromoteDealOnCommissionPaid", () => {
 
     const result = await autoPromoteDealOnCommissionPaid("deal-1");
     expect(result).toEqual({ promoted: false, reason: "already_advanced" });
-    expect(mockDealUpdate).not.toHaveBeenCalled();
+    expect(mockMove).not.toHaveBeenCalled();
   });
 
   it("stage_missing quando o pipeline não tem 'Comissão paga' (ex.: locação)", async () => {

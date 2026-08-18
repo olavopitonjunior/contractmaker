@@ -4,6 +4,12 @@ import { POST } from "../route";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { createMockSession, createMockOrg } from "@/__tests__/helpers";
+import { moveDealStage } from "@/lib/pipeline/move-stage";
+
+vi.mock("@/lib/pipeline/move-stage", () => ({
+  moveDealStage: vi.fn().mockResolvedValue({ moved: true }),
+}));
+const mockMove = vi.mocked(moveDealStage);
 
 const mockAuth = vi.mocked(auth);
 const mockGetUserOrg = vi.mocked(getUserOrg);
@@ -74,16 +80,15 @@ describe("POST /api/deals/[dealId]/mark-signed", () => {
   it("200 happy path: move pra Comissão paga", async () => {
     mockAuth.mockResolvedValue(createMockSession() as never);
     mockPrisma.deal.findUnique.mockResolvedValue(baseDeal as never);
-    mockPrisma.deal.update.mockResolvedValue({} as never);
+
 
     const res = await POST(makeReq(), { params: { dealId: "d1" } });
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.status).toBe("comissao_paga");
     expect(json.stageName).toBe("Comissão paga");
-    expect(mockPrisma.deal.update).toHaveBeenCalledWith({
-      where: { id: "d1" },
-      data: expect.objectContaining({ stageId: "s2" }),
-    });
+    expect(mockMove).toHaveBeenCalledWith(
+      expect.objectContaining({ toStageId: "s2", reason: "mark_signed" })
+    );
   });
 });

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db/prisma";
+import { moveDealStage } from "@/lib/pipeline/move-stage";
 import { WON_STAGE_BY_KIND } from "@/lib/pipeline/stage-config";
 import { audit } from "@/lib/security/audit";
 import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
@@ -71,29 +72,13 @@ export async function autoPromoteDealOnCommissionPaid(
       return { promoted: false, reason: "stage_missing" };
     }
 
-    await prisma.deal.update({
-      where: { id: deal.id },
-      data: {
-        stageId: targetStage.id,
-        stageEnteredAt: new Date(),
-        commissionPaidAt: new Date(),
-      },
+    await moveDealStage({
+      dealId: deal.id,
+      toStageId: targetStage.id,
+      reason: "auto_commission_paid",
+      orgId: deal.pipeline.orgId,
+      dealData: { commissionPaidAt: new Date() },
     });
-
-    await audit(
-      { orgId: deal.pipeline.orgId, userId: null },
-      {
-        action: "DEAL_STAGE_CHANGE",
-        result: "SUCCESS",
-        resource: deal.id,
-        resourceType: "Deal",
-        metadata: {
-          kind: "auto_commission_paid",
-          fromStage: deal.stage.id,
-          toStage: targetStage.id,
-        },
-      }
-    ).catch(() => {});
 
     queueSurveyDispatch(deal.id, targetStage.name);
 
