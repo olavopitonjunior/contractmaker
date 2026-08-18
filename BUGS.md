@@ -53,42 +53,42 @@
 - **Solucao:** Badge "Formulario editado apos a geracao do contrato -- Regenerar" na aba Contratos do `DealDetail` quando ha drift. Regenerar cria uma NOVA versao com os dados atuais (nao-destrutivo, versoes anteriores preservadas). Sem auto-regeneracao -- ela descartaria edicoes manuais ja feitas no Doc.
 
 ### [ALTA] Card do deal de locação na esteira leva a 404 (rota /pipeline em vez de /locacao)
-- **Status:** corrigido no código (pendente deploy staging) — `KanbanDealCard.tsx` `Link` agora aponta `/locacao/deals/${id}`
+- **Status:** resolvido — deploy staging OK; verificado ao vivo 2026-06-06 (href do card = `/locacao/deals/${id}`). `KanbanDealCard.tsx`
 - **Encontrado em:** 2026-06-06 (QA E2E staging)
 - **Descricao:** Em `/locacao/esteira`, clicar em QUALQUER card de deal navega para `/pipeline/deals/[id]` (rota da esteira de VENDA), que retorna "Página não encontrada". A rota correta `/locacao/deals/[id]` funciona quando acessada direto. O href do `KanbanDealCard` da esteira de locação aponta para o caminho errado. Reproduzido nos 2 deals criados (residencial cmq2c7uuj... e comercial cmq2cyzj...).
 - **Impacto:** ALTO — impossível abrir um negócio de locação pelo kanban (principal ponto de entrada). Bloqueia o fluxo inteiro pela UI.
 - **Solucao proposta:** Corrigir o `href`/navegação do card no componente do kanban de locação (KanbanDealCard / esteira) para `/locacao/deals/${dealId}`.
 
 ### [MEDIA] Campo "Foro (comarca)" do formulário é ignorado no contrato gerado
-- **Status:** corrigido no código (pendente deploy + `sync-templates --apply`) — `enrich` expõe `config.foro_texto`; templates usam fallback condicional. Teste-guarda em `render-locacao.test.ts`
+- **Status:** resolvido — deploy + `sync-templates --apply` no staging OK; verificado ao vivo 2026-06-06 (contrato novo com foro="Campinas" rendeu "comarca de Campinas"). `enrich` expõe `config.foro_texto`; templates com fallback condicional. Teste-guarda em `render-locacao.test.ts`
 - **Encontrado em:** 2026-06-06 (QA E2E staging)
 - **Descricao:** No formulário comercial preenchi "Foro (comarca) = São Paulo" na etapa 6, mas a cláusula de foro do contrato renderizou o fallback boilerplate "as partes elegem o foro da comarca de localização do imóvel" — o valor digitado foi descartado. Ambos templates (residencial com foro vazio e comercial com foro="São Paulo") produziram o MESMO texto, confirmando que o campo `foro` não está mapeado no template. (O próprio agente IA passivo sinalizou "Campo 'foro' vazio no JSON de configuração".)
 - **Impacto:** MÉDIO — input do usuário silenciosamente perdido; juridicamente o resultado coincide quando o imóvel está na mesma comarca, mas diverge se o foro eleito for diferente.
 - **Solucao proposta:** Mapear `config.foro` (ou `foro`) no `enrichLocacaoData`/templates de locação para a cláusula de foro, com fallback para a comarca do imóvel só quando vazio.
 
 ### [MEDIA] Tipo do imóvel comercial renderiza o slug do enum no contrato ("comercial_sala")
-- **Status:** corrigido no código (pendente deploy + `sync-templates --apply`) — `enrich` mapeia `imovel.kind`→`imovel.tipo_texto`; templates usam o rótulo. Teste-guarda em `render-locacao.test.ts`
+- **Status:** resolvido — deploy + `sync-templates --apply` no staging OK; verificado ao vivo 2026-06-06 (contrato novo com kind="loja" rendeu "o imóvel de tipo loja"). `enrich` mapeia `imovel.kind`→`imovel.tipo_texto`; templates usam o rótulo. Teste-guarda em `render-locacao.test.ts`
 - **Encontrado em:** 2026-06-06 (QA E2E staging)
 - **Descricao:** No contrato comercial, a Cláusula 1ª renderiza "o imóvel de tipo **comercial_sala**" — o valor cru do enum em vez do rótulo legível "Sala comercial". Falta o mapeamento enum→label do `imovel.kind` no template/enrich de locação comercial.
 - **Impacto:** MÉDIO — qualidade/profissionalismo do contrato comercial (slug técnico visível ao cliente).
 - **Solucao proposta:** Mapear `imovel.kind` para rótulo PT-BR (apartamento→"Apartamento", comercial_sala→"Sala comercial", etc.) no enrich de locação antes do render.
 
 ### [MEDIA] Análise passiva da IA: falsos-positivos severity=error + vazamento de nomes internos config.*
-- **Status:** corrigido no código (pendente deploy) — regras 14.1 (verificar equivalência antes de flagar; não usar "error" em coincidência correta) e 14.2 (não citar `config.*`/JSON ao usuário) adicionadas em `prompts.ts`
+- **Status:** resolvido — deploy staging OK; verificado ao vivo 2026-06-06 (contrato novo: 0 vazamento `config.*`, sem error falso-positivo de prazo/multa; o único error restante é legítimo — foro≠comarca do imóvel). Regras 14.1/14.2 em `prompts.ts`
 - **Encontrado em:** 2026-06-06 (QA E2E staging)
 - **Descricao:** Os comentários `authorType=ai` são bem ancorados e os WARNINGS são úteis (foro não especificado; apólice de seguro-fiança ausente). Porém os comentários de severity=**error** foram falsos-positivos por nitpick de unidade: (res) "30 meses de 01/07/2026 a 31/12/2028 totaliza 30 meses e 1 dia" — está correto, é exatamente 30 meses; (com) "multa 3 aluguéis vs config.multa_rescisoria_meses=3 meses" — coincidem, não há inconsistência. Além disso, os textos expõem nomes internos de campos (`config.foro`, `config.multa_rescisoria_meses`, `config.garantia.provider`) ao usuário final.
 - **Impacto:** MÉDIO — "errors" falsos inflam a contagem e podem bloquear/assustar na aprovação (approve conta errors não-resolvidos); jargão interno reduz a clareza.
 - **Solucao proposta:** Calibrar o prompt da análise passiva para não classificar coincidências numéricas corretas como error e para não citar nomes de campos `config.*` no texto voltado ao usuário.
 
 ### [MEDIA] Plano (chat): add_comment executa mesmo com insert_clause falho → comentário inconsistente
-- **Status:** aberto
+- **Status:** resolvido — deploy staging OK; verificado ao vivo 2026-06-06. `PlanStep.dependsOn` + status "skipped"; propose_plan aceita dependsOn (índices), handler converte→IDs; execute-plan PULA step com dependência não-executada (helper `unmetDependencies`, lib/ai/plan-deps.ts, 6 testes); prompt 11.0.1 orienta o planner; PlanCard renderiza "skipped". E2E: edit falhou → add_comment dependente foi PULADO (comentário falso não gravado).
 - **Encontrado em:** 2026-06-06 (QA E2E staging)
 - **Descricao:** No modo Plano, aprovei 3 ações. `insert_clause` falhou (auto-resolve não achou cláusula "vistoria de entrada" na base) e `propose_suggestion` falhou (trecho-alvo não encontrado no HTML), mas o `add_comment` rodou e gravou "RECOMENDAÇÃO DE PADRONIZAÇÃO: A cláusula de Vistoria de Entrada **inserida neste contrato**..." — afirmando uma inserção que NÃO ocorreu (e que, ademais, já existe na Cláusula 8ª do template). Os passos do plano executam de forma independente, sem checar o sucesso dos anteriores.
 - **Impacto:** MÉDIO — comentários/recomendações confabulados (afirmam alterações inexistentes); erode a confiança no agente.
 - **Solucao proposta:** No `execute-plan`, condicionar/contextualizar passos dependentes ao resultado dos anteriores (ex.: não afirmar "inserida" se o insert falhou); e o agente verificar a base antes (regra 11.0 já prevê query_knowledge_base para IDs dependentes).
 
 ### [BAIXA] insert_clause inoperante para locação (base sem cláusulas de lease) + propose_suggestion falha por anchor mismatch
-- **Status:** aberto
+- **Status:** resolvido — deploy + seed no staging OK; verificado ao vivo 2026-06-06 (insert_clause "vistoria de entrada" → OK + verified). Seed `scripts/seed-locacao-clauses.ts` (10 cláusulas Lei 8.245/91) na base; fallback ILIKE agora tokenizado (casa por palavra+tags, recall p/ query verbosa). Fluxo formal propose_* permanece disponível. (anchor-mismatch do propose_suggestion é limitação separada do LLM, mitigada pelo skip de dependência do #5.)
 - **Encontrado em:** 2026-06-06 (QA E2E staging)
 - **Descricao:** `insert_clause` depende de uma cláusula existente na base de conhecimento; para locação o auto-resolve (Voyage/ILIKE) não encontrou nada para "vistoria de entrada" → falha. `propose_suggestion` falhou porque o `before`/target gerado pelo LLM não bateu exatamente com o HTML do contrato. Consequência: pedir ao agente para "adicionar cláusula nova" via Plano não aplica nada. O fluxo formal de retroalimentação (`propose_new_clause`/`propose_template_change` → ClauseProposal/TemplateSuggestion) NÃO foi acionado — o agente preferiu add_comment (ClauseProposal=0, TemplateSuggestion=0).
 - **Impacto:** BAIXO/MÉDIO — feature de inserção de cláusula e o ciclo de padronização do template ficam efetivamente indisponíveis para contratos de locação.
