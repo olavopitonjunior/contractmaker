@@ -114,6 +114,24 @@ export interface ProposalFormValues {
   prazoMeses: string;
   /** Locação: data pretendida de entrada (input date, YYYY-MM-DD). */
   dataEntrada: string;
+  /** Comissão em números (só quando `comissao` está ligada): percentual. */
+  comissaoPercentual: string;
+  /** Comissão: valor em R$ (money input, mesmo formato de `sinal`). */
+  comissaoValor: string;
+  /** Comissão: quem paga ("" = não informado). */
+  comissaoResponsavel: string;
+  /** Imóvel: tipo (apartamento, casa, sala comercial…). */
+  imovelTipo: string;
+  /** Venda: matrícula do imóvel. */
+  imovelMatricula: string;
+  /** Venda: cartório de registro da matrícula. */
+  imovelCartorio: string;
+  /** Locação: finalidade declarada (texto livre; opcional). */
+  locacaoFinalidade: string;
+  /** Corretor responsável pela intermediação (nome impresso no documento). */
+  corretorNome: string;
+  /** CRECI do corretor. */
+  corretorCreci: string;
 }
 
 export interface SignerInput {
@@ -167,6 +185,15 @@ export function emptyProposalForm(
     bancoFinanciamento: "",
     prazoMeses: "",
     dataEntrada: "",
+    comissaoPercentual: "",
+    comissaoValor: "",
+    comissaoResponsavel: "",
+    imovelTipo: "",
+    imovelMatricula: "",
+    imovelCartorio: "",
+    locacaoFinalidade: "",
+    corretorNome: "",
+    corretorCreci: "",
   };
 }
 
@@ -253,11 +280,42 @@ export function buildProposalDataJson(v: ProposalFormValues): Record<string, unk
       : endereco
         ? { endereco }
         : {};
+  // Detalhes do imóvel (tipo/matrícula/cartório) entram no MESMO entry — os
+  // templates leem `imoveis.[0].*`. Matrícula/cartório são de venda; o tipo
+  // vale pras duas esteiras.
+  if (trim(v.imovelTipo)) imovelEntry.tipo = trim(v.imovelTipo);
+  if (isVenda) {
+    if (trim(v.imovelMatricula)) imovelEntry.matricula = trim(v.imovelMatricula);
+    if (trim(v.imovelCartorio)) imovelEntry.cartorio = trim(v.imovelCartorio);
+  }
 
   const data: Record<string, unknown> = {
     imoveis: Object.keys(imovelEntry).length > 0 ? [imovelEntry] : [],
   };
   if (endereco) data.imovel = { rua: endereco };
+
+  // Comissão em números — só quando o checkbox "incluir comissão" está ligado
+  // (o render já deleta `comissao` do contexto quando `comissaoIncluida` é
+  // false, e a via reduzida esconde via hiddenPaths).
+  if (v.comissao) {
+    const comissao: Record<string, unknown> = {};
+    const pct = Number(String(v.comissaoPercentual).replace(",", "."));
+    if (Number.isFinite(pct) && pct > 0) comissao.percentual = pct;
+    const comValor = v.comissaoValor ? parseMoneyBR(v.comissaoValor) : null;
+    if (comValor != null && comValor > 0) comissao.valor = comValor;
+    if (trim(v.comissaoResponsavel)) {
+      comissao.responsavel_pagamento = trim(v.comissaoResponsavel);
+    }
+    if (Object.keys(comissao).length > 0) data.comissao = comissao;
+  }
+
+  // Corretor da intermediação (nome + CRECI impressos no documento).
+  if (trim(v.corretorNome) || trim(v.corretorCreci)) {
+    const corretor: Record<string, unknown> = {};
+    if (trim(v.corretorNome)) corretor.nome = trim(v.corretorNome);
+    if (trim(v.corretorCreci)) corretor.creci = trim(v.corretorCreci);
+    data.corretor = corretor;
+  }
 
   // Renderiza nas DUAS vias (não está na allowlist de hiddenPaths). Mesmo
   // dot-path do SalesForm — o convert copia o dataJson verbatim.
@@ -314,6 +372,7 @@ export function buildProposalDataJson(v: ProposalFormValues): Record<string, unk
       locacao.data_entrada = entrada;
       aluguel.vigencia_inicio = entrada;
     }
+    if (trim(v.locacaoFinalidade)) locacao.finalidade = trim(v.locacaoFinalidade);
     const garantiaLabel = garantiaHumanLabel(v.garantia);
     if (garantiaLabel) locacao.garantia = garantiaLabel;
     if (Object.keys(locacao).length > 0) data.locacao = locacao;
@@ -494,7 +553,14 @@ export function parseProposalForm(input: {
     valor_aluguel?: unknown;
     prazo_meses?: unknown;
     data_entrada?: unknown;
+    finalidade?: unknown;
   };
+  const com = (d.comissao ?? {}) as {
+    percentual?: unknown;
+    valor?: unknown;
+    responsavel_pagamento?: unknown;
+  };
+  const corretor = (d.corretor ?? {}) as { nome?: unknown; creci?: unknown };
   const alu = (d.aluguel ?? {}) as {
     valor?: unknown;
     vigencia_meses?: unknown;
@@ -561,6 +627,19 @@ export function parseProposalForm(input: {
       typeof pag.banco_financiamento === "string" ? pag.banco_financiamento : "",
     prazoMeses: Number.isFinite(prazoNum) && prazoNum > 0 ? String(prazoNum) : "",
     dataEntrada,
+    comissaoPercentual:
+      Number.isFinite(Number(com.percentual)) && Number(com.percentual) > 0
+        ? String(com.percentual)
+        : "",
+    comissaoValor: formatAmountInput(Number(com.valor ?? 0)),
+    comissaoResponsavel:
+      typeof com.responsavel_pagamento === "string" ? com.responsavel_pagamento : "",
+    imovelTipo: typeof im.tipo === "string" ? im.tipo : "",
+    imovelMatricula: typeof im.matricula === "string" ? im.matricula : "",
+    imovelCartorio: typeof im.cartorio === "string" ? im.cartorio : "",
+    locacaoFinalidade: typeof loc.finalidade === "string" ? loc.finalidade : "",
+    corretorNome: typeof corretor.nome === "string" ? corretor.nome : "",
+    corretorCreci: typeof corretor.creci === "string" ? corretor.creci : "",
     // Testemunhas vivem SÓ nas linhas de signer (não no dataJson). Reidratá-las
     // aqui é obrigatório: o PATCH substitui o conjunto de signatários, então uma
     // edição que voltasse `witnesses: []` apagaria as testemunhas da proposta.

@@ -68,6 +68,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     via: "completa",
     numero: proposal.id.slice(-8),
     comissaoIncluida: proposal.comissaoIncluida,
+    meta: { emitidaEm: proposal.createdAt, validaAte: proposal.validUntil },
   });
 
   return NextResponse.json({

@@ -223,6 +223,7 @@ async function runSend(
         via: "completa",
         numero: proposal.id.slice(-8),
         comissaoIncluida: proposal.comissaoIncluida,
+        meta: { emitidaEm: proposal.createdAt, validaAte: proposal.validUntil },
       })
     : (proposal.htmlContent ?? `<h1>${proposal.title}</h1>`);
 
@@ -768,6 +769,7 @@ async function sendVendedorEnvelopeLocked(
         via: contentVia,
         numero: proposal.id.slice(-8),
         comissaoIncluida: proposal.comissaoIncluida,
+        meta: { emitidaEm: proposal.createdAt, validaAte: proposal.validUntil },
       })
     : (proposal.sentSnapshotHtml ?? `<h1>${proposal.title}</h1>`);
 

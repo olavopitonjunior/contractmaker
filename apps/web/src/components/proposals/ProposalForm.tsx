@@ -58,6 +58,7 @@ import {
   type PartyInput,
   type ProposalFormValues,
 } from "@/lib/proposals/form-data";
+import { parseMoneyBR } from "@/lib/format/money";
 
 export interface SchemaOption {
   label: string;
@@ -459,6 +460,46 @@ export function ProposalForm({
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1">
+                  <Label>Tipo do imóvel (opcional)</Label>
+                  <Input
+                    value={v.imovelTipo}
+                    onChange={(e) => patch({ imovelTipo: e.target.value })}
+                    placeholder="Ex: apartamento, casa, sala comercial"
+                  />
+                </div>
+                {isVenda ? (
+                  <div className="space-y-1">
+                    <Label>Matrícula (opcional)</Label>
+                    <Input
+                      value={v.imovelMatricula}
+                      onChange={(e) => patch({ imovelMatricula: e.target.value })}
+                      placeholder="Nº da matrícula"
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <Label>Finalidade (opcional)</Label>
+                    <Input
+                      value={v.locacaoFinalidade}
+                      onChange={(e) => patch({ locacaoFinalidade: e.target.value })}
+                      placeholder="Ex: residencial, escritório"
+                    />
+                  </div>
+                )}
+              </div>
+              {isVenda && (
+                <div className="space-y-1">
+                  <Label>Cartório de registro (opcional)</Label>
+                  <Input
+                    value={v.imovelCartorio}
+                    onChange={(e) => patch({ imovelCartorio: e.target.value })}
+                    placeholder="Ex: 2º Oficial de Registro de Imóveis de São Paulo/SP"
+                  />
+                </div>
+              )}
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
                   <Label>{isVenda ? "Valor (R$)" : "Aluguel (R$/mês)"}</Label>
                   <Input
                     inputMode="numeric"
@@ -482,9 +523,15 @@ export function ProposalForm({
                   <Label>Responsável</Label>
                   <Select
                     value={responsibleUserId || "none"}
-                    onValueChange={(val) =>
-                      setResponsibleUserId(val === "none" ? "" : val)
-                    }
+                    onValueChange={(val) => {
+                      setResponsibleUserId(val === "none" ? "" : val);
+                      // Conveniência: pré-preenche o corretor da intermediação
+                      // (seção Comissão) com o responsável — segue editável.
+                      if (val !== "none" && !v.corretorNome.trim()) {
+                        const m = members.find((x) => x.id === val);
+                        if (m) patch({ corretorNome: m.name });
+                      }
+                    }}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Eu mesmo" />
@@ -752,6 +799,82 @@ export function ProposalForm({
                 />
                 Incluir comissão da imobiliária no documento
               </label>
+              {v.comissao && (
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="space-y-1">
+                    <Label>Percentual (%)</Label>
+                    <Input
+                      inputMode="decimal"
+                      value={v.comissaoPercentual}
+                      onChange={(e) => {
+                        const pctStr = e.target.value;
+                        const pct = Number(pctStr.replace(",", "."));
+                        const base = v.valor ? parseMoneyBR(v.valor) : null;
+                        // Conveniência: sugere o valor em R$ a partir do
+                        // percentual × valor da proposta (segue editável).
+                        const sugerido =
+                          Number.isFinite(pct) && pct > 0 && base != null && base > 0
+                            ? formatAmountInput((base * pct) / 100)
+                            : v.comissaoValor;
+                        patch({ comissaoPercentual: pctStr, comissaoValor: sugerido });
+                      }}
+                      placeholder="Ex: 6"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Valor (R$)</Label>
+                    <Input
+                      inputMode="numeric"
+                      value={v.comissaoValor}
+                      onChange={(e) => patch({ comissaoValor: e.target.value })}
+                      placeholder="0"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Quem paga</Label>
+                    <Select
+                      value={v.comissaoResponsavel || "none"}
+                      onValueChange={(val) =>
+                        patch({ comissaoResponsavel: val === "none" ? "" : val })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Não informado" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Não informado</SelectItem>
+                        <SelectItem
+                          value={isVenda ? "o proponente comprador" : "o proponente locatário"}
+                        >
+                          {isVenda ? "Proponente comprador" : "Proponente locatário"}
+                        </SelectItem>
+                        <SelectItem value={isVenda ? "a parte vendedora" : "a parte locadora"}>
+                          {vendedorLabel}
+                        </SelectItem>
+                        <SelectItem value="ambas as partes">Ambas as partes</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Corretor da intermediação (opcional)</Label>
+                  <Input
+                    value={v.corretorNome}
+                    onChange={(e) => patch({ corretorNome: e.target.value })}
+                    placeholder="Nome do corretor no documento"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>CRECI (opcional)</Label>
+                  <Input
+                    value={v.corretorCreci}
+                    onChange={(e) => patch({ corretorCreci: e.target.value })}
+                    placeholder="Ex: 123456-F/SP"
+                  />
+                </div>
+              </div>
               {v.comissao && validParties(v.vendedores).length > 0 && (
                 <label className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Checkbox

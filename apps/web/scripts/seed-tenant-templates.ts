@@ -19,6 +19,11 @@
  *                        único manifest registrado, quando só existe um.
  *   --dry-run            default (redundante; explicitar é permitido).
  *   --apply              escreve no banco.
+ *   --make-default       promove cada row do tenant a default ATIVO da
+ *                        modalidade (derruba o default anterior, ex. o template
+ *                        canônico). Sem isso, org que já tem default segue
+ *                        selecionando o antigo — `pickTemplateByFacts` desempata
+ *                        por `isDefault`.
  *
  * Env:
  *   DATABASE_URL — Prisma connection (passe a URL de staging/prod inline).
@@ -81,6 +86,41 @@ export interface TenantManifest {
  */
 export const TENANT_MANIFESTS: TenantManifest[] = [
   {
+    dir: "newcore",
+    tenant: "Newcore",
+    templates: [
+      {
+        filename: "proposta_venda_v1.hbs",
+        name: "Proposta de Compra e Venda - Newcore",
+        description:
+          "Proposta de compra e venda da Newcore (1 página) - partes qualificadas, condições comerciais e cláusulas de mediação/aceite/desistência (CC arts. 722-729)",
+        modalidades: [
+          { modalidade: "proposta_venda", schemaType: "compra_venda_v1" },
+        ],
+        matchCriteria: null,
+        version: "1.0.0",
+      },
+      {
+        filename: "proposta_locacao_v1.hbs",
+        name: "Proposta de Locação - Newcore",
+        description:
+          "Proposta de locação da Newcore (1 página) - cobre residencial e comercial, com aceite condicionado à aprovação cadastral (Lei 8.245/91)",
+        modalidades: [
+          {
+            modalidade: "proposta_locacao_residencial",
+            schemaType: "locacao_residencial_v1",
+          },
+          {
+            modalidade: "proposta_locacao_comercial",
+            schemaType: "locacao_comercial_v1",
+          },
+        ],
+        matchCriteria: null,
+        version: "1.0.0",
+      },
+    ],
+  },
+  {
     dir: "remax-ativa",
     tenant: "RE/MAX Ativa I",
     templates: [
@@ -118,6 +158,7 @@ export interface TenantSeedClient extends CanonicalSeedClient {
   contractTemplate: CanonicalSeedClient["contractTemplate"] & {
     count(args: unknown): Promise<number>;
     update(args: unknown): Promise<unknown>;
+    updateMany(args: unknown): Promise<unknown>;
   };
 }
 
@@ -133,6 +174,12 @@ export interface SeedTenantTemplatesOptions {
   /** De onde vem o `.hbs`. Injetável igual ao seed canônico (CLI lê do disco). */
   loadSource: (entry: TenantTemplateEntry) => string | Promise<string>;
   dryRun?: boolean;
+  /**
+   * Promove cada row do tenant a default ATIVO da modalidade, derrubando o
+   * default anterior (mesma invariante de POST/PATCH /api/templates: um
+   * default por (orgId, modalidade)).
+   */
+  makeDefault?: boolean;
   log?: (line: string) => void;
 }
 
@@ -146,6 +193,21 @@ export async function seedTenantTemplatesForOrg(
   const updated: string[] = [];
   const unchanged: string[] = [];
 
+  // Um default por (orgId, modalidade) — derruba os outros ANTES de setar o
+  // novo, mesma ordem do POST /api/templates.
+  async function promoteToDefault(id: string, modalidade: string, key: string) {
+    log(`  ★ ${key}: promovendo a default da modalidade`);
+    if (opts.dryRun) return;
+    await opts.db.contractTemplate.updateMany({
+      where: { orgId, modalidade, isDefault: true, id: { not: id } },
+      data: { isDefault: false },
+    });
+    await opts.db.contractTemplate.update({
+      where: { id },
+      data: { isDefault: true },
+    });
+  }
+
   for (const entry of manifest.templates) {
     const source = await opts.loadSource(entry);
 
@@ -156,15 +218,25 @@ export async function seedTenantTemplatesForOrg(
       // (engine="google_docs") nunca é sobrescrito por um .hbs.
       const existing = (await opts.db.contractTemplate.findFirst({
         where: { orgId, modalidade, name: entry.name, engine: "handlebars" },
-        select: { id: true, handlebarsSource: true, schemaType: true },
-      })) as { id: string; handlebarsSource: string; schemaType: string } | null;
+        select: { id: true, handlebarsSource: true, schemaType: true, isDefault: true },
+      })) as {
+        id: string;
+        handlebarsSource: string;
+        schemaType: string;
+        isDefault: boolean;
+      } | null;
 
       if (existing) {
         const sourceDiffere = existing.handlebarsSource !== source;
         const schemaDiffere = existing.schemaType !== schemaType;
         if (!sourceDiffere && !schemaDiffere) {
           log(`✓  ${key}: já em dia (id=${existing.id})`);
-          unchanged.push(key);
+          if (opts.makeDefault && !existing.isDefault) {
+            await promoteToDefault(existing.id, modalidade, key);
+            updated.push(key);
+          } else {
+            unchanged.push(key);
+          }
           continue;
         }
         log(
@@ -178,12 +250,15 @@ export async function seedTenantTemplatesForOrg(
           });
           log(`  ✓ atualizado`);
         }
+        if (opts.makeDefault && !existing.isDefault) {
+          await promoteToDefault(existing.id, modalidade, key);
+        }
         updated.push(key);
         continue;
       }
 
       // isDefault só quando a org ainda não tem default ATIVO da modalidade —
-      // inclusive um google_docs, que segura a posição.
+      // inclusive um google_docs, que segura a posição. `--make-default` força.
       const defaults = await opts.db.contractTemplate.count({
         where: { orgId, modalidade, isDefault: true, status: "active" },
       });
@@ -194,7 +269,7 @@ export async function seedTenantTemplatesForOrg(
           `matchCriteria=${entry.matchCriteria === null ? "null" : JSON.stringify(entry.matchCriteria)})`
       );
       if (!opts.dryRun) {
-        await opts.db.contractTemplate.create({
+        const row = (await opts.db.contractTemplate.create({
           data: {
             orgId,
             name: entry.name,
@@ -211,8 +286,13 @@ export async function seedTenantTemplatesForOrg(
             version: entry.version,
             engine: "handlebars",
           },
-        });
+        })) as { id: string };
         log(`  ✓ criado`);
+        if (opts.makeDefault && !isDefault) {
+          await promoteToDefault(row.id, modalidade, key);
+        }
+      } else if (opts.makeDefault && !isDefault) {
+        log(`  ★ ${key}: seria promovido a default da modalidade`);
       }
       created.push(key);
     }
@@ -259,6 +339,7 @@ export function findManifest(dirArg: string): TenantManifest {
 
 async function main() {
   const DRY_RUN = !process.argv.includes("--apply");
+  const MAKE_DEFAULT = process.argv.includes("--make-default");
   const org = argValue("--org");
   if (!org) {
     console.error(
@@ -323,6 +404,7 @@ async function main() {
       db: prisma as unknown as TenantSeedClient,
       loadSource: (entry) => sources.get(entry.filename)!,
       dryRun: DRY_RUN,
+      makeDefault: MAKE_DEFAULT,
       log: (line) => console.log(line),
     });
 
