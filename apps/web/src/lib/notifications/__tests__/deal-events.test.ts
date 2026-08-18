@@ -78,7 +78,7 @@ describe("notifyDealEvent — motor de fan-out", () => {
     await notifyDealEvent({
       dealId: "deal1",
       orgId: "org1",
-      event: "contract_ready",
+      event: "contract_sent",
       dedupeKey: "c1",
     });
     expect(notifCreate).toHaveBeenCalledTimes(1);
@@ -142,7 +142,7 @@ describe("notifyDealEvent — motor de fan-out", () => {
     await notifyDealEvent({
       dealId: "deal1",
       orgId: "org1",
-      event: "contract_ready",
+      event: "contract_sent",
       dedupeKey: "c1",
     });
     expect(notifCreate).not.toHaveBeenCalled();

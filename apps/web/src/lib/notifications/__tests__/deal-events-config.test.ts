@@ -121,7 +121,7 @@ describe("público party — defaults OFF e allowlist de eventos", () => {
       settingsJson: {
         events: {
           stage_change: { party: { email: true, whatsapp: true } },
-          contract_ready: { party: { email: true } },
+          contract_sent: { party: { email: true } },
         },
       },
     });
@@ -132,7 +132,7 @@ describe("público party — defaults OFF e allowlist de eventos", () => {
       email: false,
       whatsapp: false,
     });
-    expect(cfg.events.contract_ready.party.email).toBe(false);
+    expect(cfg.events.contract_sent.party.email).toBe(false);
     expect(cfg.events.form_completed.party.whatsapp).toBe(false);
   });
 
@@ -190,7 +190,7 @@ describe("público manager — default ON e sem allowlist", () => {
     });
     // não contamina os públicos irmãos nem os outros eventos
     expect(cfg.events.stage_change.broker.email).toBe(true);
-    expect(cfg.events.contract_ready.manager.whatsapp).toBe(true);
+    expect(cfg.events.contract_sent.manager.whatsapp).toBe(true);
   });
 
   it("org desliga os dois canais → manager off naquele evento", async () => {
