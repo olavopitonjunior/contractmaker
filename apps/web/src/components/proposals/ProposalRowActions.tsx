@@ -40,11 +40,13 @@ import {
   DELETABLE_STATUSES,
   REMINDABLE_STATUSES,
   CONVERTABLE_STATUSES,
+  AWAITING_DECISION_STATUSES,
 } from "@/lib/proposals/status-sets";
 import {
   useConvertProposal,
   dealPathForKind,
 } from "@/lib/proposals/use-convert-proposal";
+import { parseProposalApiError } from "@/lib/proposals/api-errors";
 
 export interface ProposalPermissions {
   send: boolean;
@@ -58,6 +60,7 @@ export interface ProposalPermissions {
 export interface RowProposal {
   id: string;
   status: string;
+  /** venda | locacao — rota do negócio e copy do proprietário × locador. */
   kind: string;
   instrument: string;
   convertedDealId: string | null;
@@ -79,11 +82,18 @@ export function ProposalRowActions({
   const [reason, setReason] = useState("");
   const { convert, busy: convertBusy } = useConvertProposal();
 
+  const vendedorLabel = proposal.kind === "locacao" ? "locador" : "proprietário";
   const canRemind =
     permissions.resend &&
     REMINDABLE_STATUSES.has(proposal.status) &&
     proposal.instrument === "envelope";
-  const canSendVendedor = permissions.send && proposal.status === "aguardando_vendedor";
+  // Parada de decisão: a lista não decide — leva pro detalhe com o diálogo aberto.
+  const isDecision = AWAITING_DECISION_STATUSES.has(proposal.status);
+  // 2ª via em curso: o lembrete certo é o do proprietário (sourceKind=vendedor).
+  const canRemindVendedor =
+    permissions.resend &&
+    proposal.status === "aguardando_vendedor" &&
+    proposal.instrument === "envelope";
   const canConvert = permissions.convert && CONVERTABLE_STATUSES.has(proposal.status);
   const canCancel = permissions.cancel && CANCELLABLE_STATUSES.has(proposal.status);
   const canDelete =
@@ -94,7 +104,7 @@ export function ProposalRowActions({
     try {
       const res = await fetch(url, init);
       const d = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+      if (!res.ok) throw new Error(parseProposalApiError(d, res.status));
       toast.success(okMsg);
       setDialog(null);
       setReason("");
@@ -142,13 +152,24 @@ export function ProposalRowActions({
               <Bell className="mr-2 h-4 w-4" /> Reenviar / lembrar
             </DropdownMenuItem>
           )}
-          {canSendVendedor && (
+          {isDecision && permissions.send && (
+            <DropdownMenuItem asChild>
+              <Link href={`/pipeline/propostas/${proposal.id}?action=enviar-proprietario`}>
+                <Send className="mr-2 h-4 w-4" /> Decidir: enviar ou concluir
+              </Link>
+            </DropdownMenuItem>
+          )}
+          {canRemindVendedor && (
             <DropdownMenuItem
               onClick={() =>
-                run(`/api/proposals/${proposal.id}/send-vendedor`, jsonPost(), "Enviado ao vendedor")
+                run(
+                  `/api/proposals/${proposal.id}/remind`,
+                  jsonPost({ sourceKind: "vendedor" }),
+                  `Lembrete enviado ao ${vendedorLabel}`
+                )
               }
             >
-              <Send className="mr-2 h-4 w-4" /> Enviar ao vendedor
+              <Bell className="mr-2 h-4 w-4" /> Lembrar {vendedorLabel}
             </DropdownMenuItem>
           )}
           {canConvert && (

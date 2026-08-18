@@ -226,12 +226,12 @@ export function ensureIntentExecutorsRegistered(): void {
     const {
       executeProposalSend,
       blockToResponse,
-      sendVendedorEnvelope,
+      sendVendedorVia,
       vendedorResultToResponse,
     } = await import("@/lib/proposals/send-execute");
     try {
       if (p.via === "vendedor") {
-        const r = await sendVendedorEnvelope(p.proposalId);
+        const r = await sendVendedorVia(p.proposalId, "manual");
         const res = vendedorResultToResponse(r);
         if (res.status < 400) {
           // Espelha o audit específico do caminho session (a rota só audita
@@ -271,6 +271,19 @@ export function ensureIntentExecutorsRegistered(): void {
       reason: p.reason,
       actorUserId: ctx.requestedBy,
       viaNewton: true,
+    });
+  });
+
+  // PROPOSAL_COMPLETE — conclui a proposta sem enviar ao proprietário (parada
+  // de decisão do handoff). Lógica compartilhada com a rota /complete (session).
+  registerIntentExecutor("PROPOSAL_COMPLETE", async (payload, ctx) => {
+    const p = payload as { proposalId: string; reason?: string | null };
+    const { runProposalComplete } = await import("@/lib/proposals/complete-execute");
+    return runProposalComplete({
+      proposalId: p.proposalId,
+      orgId: ctx.orgId,
+      actorUserId: ctx.requestedBy,
+      reason: p.reason ?? null,
     });
   });
 

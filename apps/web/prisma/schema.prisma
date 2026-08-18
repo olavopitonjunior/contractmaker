@@ -3329,6 +3329,10 @@ model Proposal {
   // vizinhos). Este link entrega valor de imóvel, CPF e comissão.
   token           String    @unique
   validUntil      DateTime?
+  // Prazo PRÓPRIO da 2ª via (proprietário), calculado no envio dela:
+  // max(validUntil, agora + proposalOwnerDeadlineDays). A 2ª via herdava
+  // validUntil, que na parada de decisão já podia estar vencido (bug C).
+  vendedorDeadlineAt DateTime?
   sentAt          DateTime?
   // Snapshot CONGELADO no envio: o HTML exato (via completa) que o proponente
   // viu, + hash SHA-256. O comprovante e a página /p/[token] usam ISTO, nunca
@@ -3414,6 +3418,8 @@ model Proposal {
   envelopes      Envelope[]
 
   @@index([orgId, status])
+  // Lista/KPIs filtram sempre por (org, tipo, status) — venda × locação.
+  @@index([orgId, kind, status])
   @@index([orgId, userId])
   @@index([orgId, responsibleUserId])
   @@index([status, validUntil])
@@ -4471,6 +4477,14 @@ model OrgSignatureSettings {
   // {{imovel}} {{titulo}}. Editável em /settings.
   proposalEmailSubject String?
   proposalEmailMessage String?
+  // Handoff comprador→proprietário (2026-08): default é PARAR na decisão humana
+  // (assinada_proponente). Escape hatch por org: true = encadeia a 2ª via
+  // automaticamente como antes do flip.
+  proposalAutoChainVendedor Boolean @default(false)
+  // Prazo próprio (dias) da 2ª via enviada ao proprietário. Null = 7. A 2ª via
+  // nascia com deadline = validUntil da proposta, que na parada de decisão já
+  // podia estar vencido (bug C do plano 2026-08-06).
+  proposalOwnerDeadlineDays Int?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 

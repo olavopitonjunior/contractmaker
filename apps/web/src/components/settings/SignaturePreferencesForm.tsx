@@ -32,6 +32,8 @@ interface Settings {
   defaultSequential: boolean;
   proposalEmailSubject: string | null;
   proposalEmailMessage: string | null;
+  proposalAutoChainVendedor: boolean;
+  proposalOwnerDeadlineDays: number | null;
 }
 
 const reais = (cents: number | null | undefined) =>
@@ -52,6 +54,7 @@ export function SignaturePreferencesForm() {
   const [busy, setBusy] = useState(false);
   const [budget, setBudget] = useState("");
   const [deadline, setDeadline] = useState("");
+  const [ownerDeadline, setOwnerDeadline] = useState("");
   const [overrides, setOverrides] = useState<Record<AuthMethod, string>>({
     email: "",
     whatsapp: "",
@@ -71,6 +74,11 @@ export function SignaturePreferencesForm() {
             settings.defaultDeadlineDays == null
               ? ""
               : String(settings.defaultDeadlineDays)
+          );
+          setOwnerDeadline(
+            settings.proposalOwnerDeadlineDays == null
+              ? ""
+              : String(settings.proposalOwnerDeadlineDays)
           );
           setOverrides({
             email: reais(settings.costOverridesJson?.email),
@@ -128,6 +136,9 @@ export function SignaturePreferencesForm() {
           defaultSequential: s.defaultSequential,
           proposalEmailSubject: s.proposalEmailSubject || null,
           proposalEmailMessage: s.proposalEmailMessage || null,
+          proposalAutoChainVendedor: s.proposalAutoChainVendedor,
+          proposalOwnerDeadlineDays:
+            ownerDeadline.trim() === "" ? null : Math.max(1, Number(ownerDeadline)),
         }),
       });
       const d = await res.json().catch(() => ({}));
@@ -314,6 +325,44 @@ export function SignaturePreferencesForm() {
             />
             <p className="text-xs text-muted-foreground">
               Placeholders: {"{{numero}}"} {"{{proponente}}"} {"{{imovel}}"} {"{{titulo}}"}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Propostas — via do proprietário</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-sm">
+              <p className="font-medium">Enviar ao proprietário automaticamente</p>
+              <p className="text-xs text-muted-foreground">
+                Desligado (padrão): quando o proponente assina, a proposta para e
+                VOCÊ decide — enviar a 2ª via ao proprietário ou concluir sem
+                enviar. Ligado: a 2ª via é enviada na hora, sem parada.
+              </p>
+            </div>
+            <Switch
+              checked={s.proposalAutoChainVendedor}
+              onCheckedChange={(v) => setS({ ...s, proposalAutoChainVendedor: v })}
+            />
+          </div>
+          <div>
+            <Label htmlFor="ownerDeadline" className="text-xs">
+              Prazo da via do proprietário (dias) — vazio = 7
+            </Label>
+            <Input
+              id="ownerDeadline"
+              inputMode="numeric"
+              value={ownerDeadline}
+              onChange={(e) => setOwnerDeadline(e.target.value)}
+              placeholder="7"
+            />
+            <p className="text-xs text-muted-foreground">
+              A via do proprietário ganha prazo próprio: o maior entre a validade
+              da proposta e hoje + este prazo.
             </p>
           </div>
         </CardContent>

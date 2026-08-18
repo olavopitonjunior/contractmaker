@@ -36,6 +36,7 @@ import {
 import {
   onProposalEnvelopeClosed,
   onProposalEnvelopeRefused,
+  onProposalEnvelopeCanceled,
 } from "@/lib/proposals/webhook-hooks";
 import { processProposalAcceptanceEvent } from "@/lib/proposals/acceptance-webhook";
 
@@ -422,6 +423,10 @@ export async function processClickSignWebhookPayload(
         data: { status: "canceled", canceledAt: new Date() },
       });
       await revertInspectionOnEnvelopeCanceled(envelope.id);
+      // Proposta: 2ª via cancelada/expirada devolve à parada de decisão (bug D
+      // — antes ficava presa em aguardando_vendedor pra sempre). No-op p/
+      // envelope de contrato/attachment e pra via completa.
+      await onProposalEnvelopeCanceled(envelope.id);
       break;
     }
     case "add_signer":
