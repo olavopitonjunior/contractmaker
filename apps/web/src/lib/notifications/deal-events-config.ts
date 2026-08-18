@@ -13,6 +13,7 @@ import { prisma } from "@/lib/db/prisma";
 import {
   DEAL_NOTIF_EVENTS,
   DEFAULT_EVENT,
+  DEFAULT_EVENT_OVERRIDES,
   DEFAULT_FORM_REMINDER,
   PARTY_OFF,
   isPartyCapableEvent,
@@ -84,7 +85,12 @@ export async function resolveEffectiveNotificationConfig(
 
   const events = {} as Record<DealNotifEvent, ResolvedEventConfig>;
   for (const ev of DEAL_NOTIF_EVENTS) {
-    const withOrg = mergeEvent(DEFAULT_EVENT, orgJson.events?.[ev]);
+    // Eventos com default divergente (ex.: SLA nasce todo OFF) sobrepõem o
+    // DEFAULT_EVENT; a org continua podendo ligar na matriz.
+    const withOrg = mergeEvent(
+      DEFAULT_EVENT_OVERRIDES[ev] ?? DEFAULT_EVENT,
+      orgJson.events?.[ev]
+    );
     const resolved = mergeEvent(withOrg, dealJson.events?.[ev]);
     // Allowlist de party é a última palavra: config antiga (ou JSON escrito à
     // mão) não liga o cliente final num evento que o produto não aprovou.

@@ -5,6 +5,8 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { getFunnelByChannel, type FunnelRow } from "@/lib/pipeline/funnel";
+import { getEffectivePermissions, can } from "@/lib/security/rbac/check";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -110,12 +112,28 @@ export default async function FunilPage({
   // Gate de entitlement + org resolvida pelo SUBDOMÍNIO (não "primeira
   // membership") — mesmo padrão da página de Propostas. Redireciona quem não
   // tem nenhum dos pipelines habilitados.
-  const { orgId, enabled } = await requireAnyFeaturePage([
+  const { userId, orgId, enabled } = await requireAnyFeaturePage([
     FEATURE.VENDAS_PIPELINE,
     FEATURE.LOCACAO_PIPELINE,
   ]);
   const hasVendas = enabled[FEATURE.VENDAS_PIPELINE] === true;
   const hasLocacao = enabled[FEATURE.LOCACAO_PIPELINE] === true;
+
+  // Retrofit PR 3.7: relatório expõe números da operação inteira — mesma
+  // permissão REPORT_VIEW do painel /relatorios/pipeline (antes o gate era só
+  // de entitlement de módulo).
+  const eff = await getEffectivePermissions(userId, orgId);
+  if (!can(eff, PERMISSION.REPORT_VIEW)) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="Origem dos negócios" description="" />
+        <p className="text-sm text-muted-foreground">
+          Você não tem a permissão &ldquo;Ver relatórios&rdquo;. Peça a um
+          administrador da organização.
+        </p>
+      </div>
+    );
+  }
 
   const period =
     PERIODS.find((p) => p.key === searchParams?.periodo) ?? PERIODS[1]; // default 90d
