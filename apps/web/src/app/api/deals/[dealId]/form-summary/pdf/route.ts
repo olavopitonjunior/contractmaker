@@ -10,8 +10,9 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 /**
- * Gera o PDF consolidado do formulário do deal e persiste como DealAttachment
- * (replace por categoria). Só venda (compra_venda_v1). Retorna a URL.
+ * Gera o PDF consolidado do formulário do deal (venda e locação), persiste
+ * como DealAttachment (update-in-place por dealId+source) e devolve o binário
+ * com Content-Disposition attachment.
  */
 export async function POST(
   _req: NextRequest,
@@ -60,8 +61,16 @@ export async function POST(
 
   try {
     const pdf = await generateFormSummaryPdf(deal.formId);
-    const pdfUrl = await persistFormSummaryPdf(deal.id, deal.formId, pdf.buffer, pdf.filename);
-    return NextResponse.json({ pdfUrl, filename: pdf.filename });
+    await persistFormSummaryPdf(deal.id, deal.formId, pdf.buffer, pdf.filename);
+    // Binário direto, não JSON com a URL do blob: o download no cliente fica
+    // same-origin (sem popup blocker, sem depender de CORS do blob) e com o
+    // nome amigável; a URL pública do blob também deixa de vazar pro browser.
+    return new NextResponse(new Uint8Array(pdf.buffer), {
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${pdf.filename}"`,
+      },
+    });
   } catch (err) {
     console.error("[form-summary/pdf] erro", err);
     return NextResponse.json(
