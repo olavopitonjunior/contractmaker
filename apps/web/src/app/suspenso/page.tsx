@@ -11,7 +11,7 @@ export const metadata = { title: "Conta suspensa — imobpro" };
 export default function SuspensoPage() {
   return (
     <main className="flex min-h-screen items-center justify-center p-6">
-      <div className="max-w-md space-y-4 rounded-xl border bg-card p-8 text-center shadow-sm">
+      <div className="max-w-md space-y-4 rounded-xl border bg-card p-8 text-center shadow-xs">
         <h1 className="font-display text-2xl font-semibold">Conta suspensa</h1>
         <p className="text-sm text-muted-foreground">
           O acesso desta organização foi temporariamente suspenso pela

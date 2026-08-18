@@ -262,7 +262,7 @@ function StepIndicator({
                   onKeyDown={(e) => handleKeyDown(e, index)}
                   className={`
                     flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold border-2 transition-all cursor-pointer
-                    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2
+                    focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2
                     ${bulletClass}
                   `}
                 >
@@ -298,7 +298,7 @@ function StepIndicator({
 
               {index < totalSteps - 1 && (
                 <div
-                  className={`h-0.5 w-8 mt-4 mx-1 flex-shrink-0 transition-all ${
+                  className={`h-0.5 w-8 mt-4 mx-1 shrink-0 transition-all ${
                     isCompleted ? "bg-primary" : "bg-border"
                   }`}
                 />

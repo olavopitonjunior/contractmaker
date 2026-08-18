@@ -976,7 +976,7 @@ export function CertidoesTab({
         {(stats.failed > 0 || stats.skipped > 0) && (
           <DropdownMenu>
             <DropdownMenuTrigger
-              className="inline-flex h-9 items-center justify-center gap-1 whitespace-nowrap rounded-md border border-input bg-background px-3 text-sm font-medium shadow-sm ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
+              className="inline-flex h-9 items-center justify-center gap-1 whitespace-nowrap rounded-md border border-input bg-background px-3 text-sm font-medium shadow-xs ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
             >
               <RefreshCw className="h-4 w-4 mr-1" />
               Retentar em massa
@@ -1084,7 +1084,7 @@ export function CertidoesTab({
           <DropdownMenu>
             <DropdownMenuTrigger
               disabled={bulkDeleting}
-              className="inline-flex h-9 items-center justify-center gap-1 whitespace-nowrap rounded-md border border-input bg-background px-3 text-sm font-medium text-destructive shadow-sm ring-offset-background transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
+              className="inline-flex h-9 items-center justify-center gap-1 whitespace-nowrap rounded-md border border-input bg-background px-3 text-sm font-medium text-destructive shadow-xs ring-offset-background transition-colors hover:bg-destructive/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
             >
               <Trash2 className="h-4 w-4 mr-1" />
               Limpar
@@ -1365,7 +1365,7 @@ export function CertidoesTab({
                   <div key={row.id} className="space-y-2">
                     <div
                       className={cn(
-                        "rounded border p-2.5 flex items-start gap-2.5 text-sm cursor-pointer hover:shadow-sm transition-shadow",
+                        "rounded border p-2.5 flex items-start gap-2.5 text-sm cursor-pointer hover:shadow-xs transition-shadow",
                         statusVariant(row)
                       )}
                       onClick={(e) => {
@@ -1555,7 +1555,7 @@ export function CertidoesTab({
                             <DropdownMenu>
                               <DropdownMenuTrigger
                                 disabled={deletingId === row.id}
-                                className="inline-flex h-7 items-center justify-center rounded-md px-2 text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+                                className="inline-flex h-7 items-center justify-center rounded-md px-2 text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50"
                                 title="Remover"
                               >
                                 <Trash2 className="h-3 w-3" />

@@ -106,7 +106,7 @@ export function ProposalsListClient({
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-3 sm:max-w-xl">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:max-w-xl">
         <Kpi label="Em aberto" value={emAberto} />
         <Kpi label="Convertidas" value={convertidas} tone="success" />
         <Kpi label="Expirando" value={expirando} tone={expirando > 0 ? "warn" : undefined} />
@@ -142,10 +142,14 @@ export function ProposalsListClient({
                   const pz = p.prazo;
                   return (
                     <TableRow key={p.id} className="group">
-                      <TableCell className="max-w-[280px]">
+                      {/* `max-w` em <td> não clampa (CSS 2.1 §10.4) e o TableCell
+                          do registry tem whitespace-nowrap — sem um wrapper block
+                          com truncate o título vaza por cima das colunas vizinhas. */}
+                      <TableCell className="max-w-[280px] overflow-hidden">
                         <Link
                           href={`/pipeline/propostas/${p.id}`}
-                          className="font-medium hover:underline"
+                          className="block max-w-full truncate font-medium hover:underline"
+                          title={p.title}
                         >
                           {p.title}
                         </Link>
@@ -157,13 +161,13 @@ export function ProposalsListClient({
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          <Avatar className="h-6 w-6">
+                          <Avatar data-size="sm">
                             {p.responsible.image && <AvatarImage src={p.responsible.image} />}
                             <AvatarFallback className="text-[10px]">
                               {initials(p.responsible.name)}
                             </AvatarFallback>
                           </Avatar>
-                          <span className="text-sm">{p.responsible.name}</span>
+                          <span className="max-w-[10rem] truncate text-sm">{p.responsible.name}</span>
                           {p.responsible.isNonUser && (
                             <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
                               externo

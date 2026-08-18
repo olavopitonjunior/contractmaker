@@ -119,7 +119,7 @@ export function SurveyPublicClient({
       <main className="flex min-h-screen flex-col bg-muted/30">
         {header}
         <div className="flex flex-1 items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-xl border bg-background p-8 text-center shadow-sm">
+          <div className="w-full max-w-md rounded-xl border bg-background p-8 text-center shadow-xs">
             <CheckCircle2 className="mx-auto mb-3 h-12 w-12 text-green-600" />
             <h1 className="text-xl font-semibold">Obrigado!</h1>
             <p className="mt-2 text-sm text-muted-foreground">{thankYouMessage}</p>
@@ -134,7 +134,7 @@ export function SurveyPublicClient({
       <main className="flex min-h-screen flex-col bg-muted/30">
         {header}
         <div className="flex flex-1 items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-xl border bg-background p-8 text-center shadow-sm">
+          <div className="w-full max-w-md rounded-xl border bg-background p-8 text-center shadow-xs">
             <h1 className="text-xl font-semibold">{surveyName}</h1>
             <p className="mt-2 text-sm text-muted-foreground">
               {recipientName ? `Olá, ${recipientName}! ` : ""}São{" "}
