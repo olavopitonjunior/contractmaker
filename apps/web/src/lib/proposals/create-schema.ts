@@ -55,6 +55,11 @@ export const createSchema = z.object({
   comissaoIncluida: z.boolean().optional(),
   hiddenPaths: z.array(z.string()).optional(),
   signers: z.array(signerSchema).optional(),
+  // Responsável comercial já na criação (admin cria e atribui num passo só).
+  // Mutuamente exclusivos, como no PATCH /assignee: usuário da org OU nome
+  // livre de corretor externo. Exigem PROPOSAL_ASSIGN — a rota valida.
+  responsibleUserId: z.string().min(1).optional(),
+  responsibleName: z.string().min(2).max(120).optional(),
 });
 
 /**

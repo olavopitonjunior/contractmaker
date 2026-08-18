@@ -163,7 +163,7 @@ export function DefaultWitnessesClient({
             className={cn(
               "px-3 py-1.5 text-sm rounded-md transition-colors",
               scope === s
-                ? "bg-background shadow-sm font-medium"
+                ? "bg-background shadow-xs font-medium"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >

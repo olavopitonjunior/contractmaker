@@ -50,16 +50,31 @@ export async function resendSignerAction(
     return { ok: false, status: 429, error: `Aguarde ${wait} min antes de reenviar` };
   }
 
+  // Sem os IDs remotos ou creds NÃO há o que reenviar — antes este caso caía
+  // num no-op silencioso que ainda incrementava resendCount e marcava
+  // "notified": a UI dizia "Lembrete enviado" pra um reenvio que não chamou a
+  // ClickSign (justamente o cenário do envio interrompido, em que o signer
+  // ficou sem clicksignId). Falhar explícito pro operador usar o /sync ou
+  // reenviar a proposta.
   const creds = await resolveClickSignCreds(signer.envelope.orgId);
-  if (signer.envelope.clicksignId && signer.clicksignId && creds) {
-    try {
-      await notifySigner(signer.envelope.clicksignId, signer.clicksignId, creds);
-    } catch (err) {
-      if (err instanceof ClicksignError) {
-        return { ok: false, status: 502, error: `Clicksign: ${err.message}` };
-      }
-      throw err;
+  if (!signer.envelope.clicksignId || !signer.clicksignId) {
+    return {
+      ok: false,
+      status: 409,
+      error:
+        "Signatário sem vínculo na ClickSign (envio incompleto) — sincronize o envelope ou reenvie a proposta",
+    };
+  }
+  if (!creds) {
+    return { ok: false, status: 503, error: "Credenciais ClickSign não configuradas para a organização" };
+  }
+  try {
+    await notifySigner(signer.envelope.clicksignId, signer.clicksignId, creds);
+  } catch (err) {
+    if (err instanceof ClicksignError) {
+      return { ok: false, status: 502, error: `Clicksign: ${err.message}` };
     }
+    throw err;
   }
 
   const updated = await prisma.envelopeSigner.update({

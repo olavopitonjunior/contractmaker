@@ -597,10 +597,14 @@ export function ProposalDetailClient({
 }
 
 function Row({ label, value }: { label: string; value: string }) {
+  // `truncate` num flex child só funciona com min-w-0 (min-width:auto do flex
+  // impede encolher); shrink-0 no label evita o valor longo espremer o rótulo.
   return (
     <div className="flex justify-between gap-2 text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="truncate text-right font-medium">{value}</span>
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <span className="min-w-0 truncate text-right font-medium" title={value}>
+        {value}
+      </span>
     </div>
   );
 }

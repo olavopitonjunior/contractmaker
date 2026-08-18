@@ -102,7 +102,7 @@ export default async function LocacaoPessoasPage() {
         {cards.map((c) => {
           const Icon = c.icon;
           return (
-            <Link key={c.label} href={c.href} className="group block focus:outline-none">
+            <Link key={c.label} href={c.href} className="group block focus:outline-hidden">
               <Card className="h-full transition-shadow group-hover:shadow-md">
                 <CardHeader className="pb-2">
                   <CardTitle className="flex items-center gap-2 text-base">

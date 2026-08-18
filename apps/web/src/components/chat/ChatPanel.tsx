@@ -686,7 +686,7 @@ export function ChatPanel({
             {attachmentError && (
               <p className="text-xs text-destructive px-1 pb-2">{attachmentError}</p>
             )}
-            <div className="rounded-xl border border-border bg-card shadow-sm transition-all duration-150 hover:border-foreground/20 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/15 overflow-hidden">
+            <div className="rounded-xl border border-border bg-card shadow-xs transition-all duration-150 hover:border-foreground/20 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/15 overflow-hidden">
             {attachments.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2.5">
                 {attachments.map((a) => (
@@ -900,10 +900,10 @@ function ModeToggle({
             onClick={() => onChange("fast")}
             className={cn(
               "inline-flex items-center gap-1 rounded-full px-3 h-7 text-xs font-medium transition-colors",
-              "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+              "focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
               "disabled:opacity-50 disabled:cursor-not-allowed",
               mode === "fast"
-                ? "bg-background text-foreground shadow-sm"
+                ? "bg-background text-foreground shadow-xs"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
@@ -930,10 +930,10 @@ function ModeToggle({
             onClick={() => onChange("plan")}
             className={cn(
               "inline-flex items-center gap-1 rounded-full px-3 h-7 text-xs font-medium transition-colors",
-              "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+              "focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
               "disabled:opacity-50 disabled:cursor-not-allowed",
               mode === "plan"
-                ? "bg-background text-foreground shadow-sm"
+                ? "bg-background text-foreground shadow-xs"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >

@@ -558,7 +558,7 @@ export function NovoContratoWizard({
           )}
         </div>
 
-        <DialogFooter className="flex !justify-between gap-2">
+        <DialogFooter className="flex justify-between! gap-2">
           <Button
             variant="outline"
             size="sm"

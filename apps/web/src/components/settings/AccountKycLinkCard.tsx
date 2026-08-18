@@ -165,7 +165,7 @@ export function AccountKycLinkCard({
         </div>
 
         <div className="flex items-start gap-2 text-xs text-muted-foreground bg-muted/40 rounded p-2">
-          <Info className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+          <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
           <div>
             A Asaas só permite <strong>1 reenvio por subconta</strong> via API
             (o primeiro envio é automático na criação). Se o titular perder os

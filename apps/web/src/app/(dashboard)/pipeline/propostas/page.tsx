@@ -8,8 +8,8 @@ import {
   can,
 } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
-import { redirect } from "next/navigation";
 import { ProposalsListClient } from "@/components/proposals/ProposalsListClient";
+import { ProposalsNoAccess } from "@/components/proposals/ProposalsNoAccess";
 import { statusesForFilter } from "@/lib/proposals/list-filters";
 import { OPEN_STATUSES } from "@/lib/proposals/status-sets";
 import { responsibleDisplay } from "@/lib/proposals/status-view";
@@ -46,7 +46,10 @@ export default async function PropostasPage({
 
   const eff = await getEffectivePermissions(userId, orgId);
   const scope = proposalScopeWhere(eff);
-  if (!scope || !eff) redirect("/pipeline");
+  // Sem escopo = papel sem NENHUMA visão de proposta (inclui role fora do
+  // catálogo, que resolve pra zero permissões). Mostrar o porquê em vez do
+  // redirect silencioso que parecia "a página não abre".
+  if (!scope || !eff) return <ProposalsNoAccess />;
 
   const q = searchParams.q?.trim() || undefined;
   const qLower = q?.toLowerCase();

@@ -222,7 +222,7 @@ export function OnboardingWizard({
                 onClick={() => setActive(step.key)}
                 className={cn(
                   "relative grid grid-cols-[26px_1fr] gap-3 rounded-xl border border-transparent p-3 text-left transition-colors",
-                  isActive ? "border-border bg-card shadow-sm" : "hover:bg-card"
+                  isActive ? "border-border bg-card shadow-xs" : "hover:bg-card"
                 )}
               >
                 <span className="relative">

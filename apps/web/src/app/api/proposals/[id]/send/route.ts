@@ -13,6 +13,13 @@ import { requireApproval, approvalResponse } from "@/lib/api/intents";
 import { ensureIntentExecutorsRegistered } from "@/lib/api/intent-executors";
 import { executeProposalSend, blockToResponse } from "@/lib/proposals/send-execute";
 
+// Único endpoint de proposta que roda Chromium (PDF) + 2+3N chamadas ClickSign
+// sequenciais. Sem maxDuration, o default da plataforma matava o envio no meio:
+// claim já em "enviada", envelope draft órfão, ninguém notificado (classe do
+// bug "draft órfão" do BUGS.md).
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
 /**
  * POST /api/proposals/[id]/send — envia pra assinatura (envelope) ou Aceite via
  * WhatsApp, decidido pela capacidade da conta. High-risk (gasta): session

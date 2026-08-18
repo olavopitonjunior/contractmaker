@@ -90,6 +90,38 @@ export async function POST(req: NextRequest) {
     throw e;
   }
 
+  // Responsável na criação — mesmas regras do PATCH /assignee: exige
+  // PROPOSAL_ASSIGN, um só dos dois campos, e usuário-responsável precisa ser
+  // membro da org.
+  if (input.responsibleUserId || input.responsibleName) {
+    if (!can(eff, PERMISSION.PROPOSAL_ASSIGN)) {
+      return NextResponse.json(
+        { error: "Sem permissão para atribuir responsável." },
+        { status: 403 }
+      );
+    }
+    if (input.responsibleUserId && input.responsibleName) {
+      return NextResponse.json(
+        { error: "Informe apenas um: responsibleUserId ou responsibleName." },
+        { status: 400 }
+      );
+    }
+    if (input.responsibleUserId) {
+      const member = await prisma.orgMembership.findUnique({
+        where: {
+          userId_orgId: { userId: input.responsibleUserId, orgId: auth.org.id },
+        },
+        select: { userId: true },
+      });
+      if (!member) {
+        return NextResponse.json(
+          { error: "Usuário não é membro desta organização." },
+          { status: 400 }
+        );
+      }
+    }
+  }
+
   let result;
   try {
     result = await withIdempotency({
@@ -122,6 +154,8 @@ export async function POST(req: NextRequest) {
           propertyId: input.propertyId ?? null,
           leaseClientId: input.leaseClientId ?? null,
           tenantId: input.tenantId ?? null,
+          responsibleUserId: input.responsibleUserId ?? null,
+          responsibleName: input.responsibleName ?? null,
           signers: input.signers?.length
             ? {
                 create: input.signers.map((s) => ({
