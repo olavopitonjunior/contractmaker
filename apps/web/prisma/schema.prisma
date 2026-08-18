@@ -771,6 +771,11 @@ model DealAttachment {
   url           String
   category      String?
   extractedData Json?
+  // ATENÇÃO: existe um UNIQUE parcial fora do schema (Prisma não representa
+  // índice parcial): DealAttachment_dealId_form_summary_key em (dealId)
+  // WHERE source='form_summary' (migration 20260818213000). Quem inserir com
+  // source='form_summary' DEVE tratar P2002 — hoje o único writer é
+  // persistFormSummaryPdf (form-summary-mailer.ts), que faz retry de update.
   source        String   @default("manual")
   // Tamanho do arquivo em bytes — preenchido no upload daqui pra frente (forward
   // only). Anexos antigos ficam null. Alimenta as métricas de storage por tenant.

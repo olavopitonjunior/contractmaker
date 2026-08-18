@@ -65,9 +65,9 @@ const CATEGORY = "resumo_formulario";
  * viva: a mais recente é atualizada e as duplicatas do bug antigo são removidas
  * de passagem. Blobs substituídos são deletados na hora (best-effort) — o
  * blob-gc é report-only e não cobre o prefixo form-summary/, então órfão aqui
- * seria pra sempre. Sem unique constraint em (dealId, source), dois envios
- * simultâneos ainda podem duplicar — janela mínima; a duplicata é saneada na
- * geração seguinte.
+ * seria pra sempre. A corrida create-vs-create é fechada pelo unique parcial
+ * DealAttachment_dealId_form_summary_key (migration 20260818213000): o
+ * perdedor recebe P2002 e degrada pra update da linha vencedora.
  */
 export async function persistFormSummaryPdf(
   dealId: string,
@@ -94,17 +94,41 @@ export async function persistFormSummaryPdf(
       data: { url, filename, byteSize: buffer.byteLength, category: CATEGORY },
     });
   } else {
-    await prisma.dealAttachment.create({
-      data: {
-        dealId,
-        filename,
-        mime: "application/pdf",
-        url,
-        category: CATEGORY,
-        source: "form_summary",
-        byteSize: buffer.byteLength,
-      },
-    });
+    try {
+      await prisma.dealAttachment.create({
+        data: {
+          dealId,
+          filename,
+          mime: "application/pdf",
+          url,
+          category: CATEGORY,
+          source: "form_summary",
+          byteSize: buffer.byteLength,
+        },
+      });
+    } catch (err) {
+      // P2002 = perdemos a corrida pro unique parcial: outra request criou a
+      // linha entre o findMany e o create. Ela vira a linha canônica — só
+      // repontamos pro blob desta geração.
+      if ((err as { code?: string })?.code !== "P2002") throw err;
+      const winner = await prisma.dealAttachment.findFirst({
+        where: { dealId, source: "form_summary" },
+        select: { id: true, url: true },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!winner) throw err;
+      await prisma.dealAttachment.update({
+        where: { id: winner.id },
+        data: { url, filename, byteSize: buffer.byteLength, category: CATEGORY },
+      });
+      if (winner.url && winner.url !== url) {
+        try {
+          await deleteFromStorage(winner.url);
+        } catch (delErr) {
+          console.warn("[form-summary] falha ao deletar blob da corrida", delErr);
+        }
+      }
+    }
   }
   if (extras.length) {
     await prisma.dealAttachment.deleteMany({

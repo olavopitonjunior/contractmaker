@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockFindMany = vi.fn();
+const mockFindFirst = vi.fn();
 const mockUpdate = vi.fn();
 const mockCreate = vi.fn();
 const mockDeleteMany = vi.fn();
@@ -9,6 +10,7 @@ vi.mock("@/lib/db/prisma", () => ({
   prisma: {
     dealAttachment: {
       findMany: (...args: unknown[]) => mockFindMany(...args),
+      findFirst: (...args: unknown[]) => mockFindFirst(...args),
       update: (...args: unknown[]) => mockUpdate(...args),
       create: (...args: unknown[]) => mockCreate(...args),
       deleteMany: (...args: unknown[]) => mockDeleteMany(...args),
@@ -40,6 +42,7 @@ const BUF = Buffer.from("%PDF-fake");
 
 beforeEach(() => {
   mockFindMany.mockReset();
+  mockFindFirst.mockReset();
   mockUpdate.mockReset();
   mockCreate.mockReset();
   mockDeleteMany.mockReset();
@@ -113,6 +116,45 @@ describe("persistFormSummaryPdf — dedup por (dealId, source)", () => {
       "https://blob/resumo-b.pdf",
       "https://blob/resumo-a.pdf",
     ]);
+  });
+
+  it("corrida no create (P2002 do unique parcial) degrada pra update da linha vencedora", async () => {
+    mockUpload.mockResolvedValue("https://blob/resumo-PERDEDOR.pdf");
+    mockFindMany.mockResolvedValue([]);
+    mockCreate.mockRejectedValue(
+      Object.assign(new Error("unique"), { code: "P2002" })
+    );
+    mockFindFirst.mockResolvedValue({
+      id: "att-vencedor",
+      url: "https://blob/resumo-VENCEDOR.pdf",
+    });
+
+    const url = await persistFormSummaryPdf("deal1", "form1", BUF, "resumo.pdf");
+
+    expect(url).toBe("https://blob/resumo-PERDEDOR.pdf");
+    expect(mockUpdate).toHaveBeenCalledWith({
+      where: { id: "att-vencedor" },
+      data: {
+        url: "https://blob/resumo-PERDEDOR.pdf",
+        filename: "resumo.pdf",
+        byteSize: BUF.byteLength,
+        category: "resumo_formulario",
+      },
+    });
+    expect(mockDeleteFromStorage).toHaveBeenCalledWith(
+      "https://blob/resumo-VENCEDOR.pdf"
+    );
+  });
+
+  it("erro de create que NÃO é P2002 propaga", async () => {
+    mockUpload.mockResolvedValue("https://blob/resumo-x.pdf");
+    mockFindMany.mockResolvedValue([]);
+    mockCreate.mockRejectedValue(new Error("db fora"));
+
+    await expect(
+      persistFormSummaryPdf("deal1", "form1", BUF, "resumo.pdf")
+    ).rejects.toThrow("db fora");
+    expect(mockUpdate).not.toHaveBeenCalled();
   });
 
   it("falha ao deletar blob antigo não derruba a persistência", async () => {
