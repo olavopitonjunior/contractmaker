@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
+import { moveDealStage } from "@/lib/pipeline/move-stage";
 import { audit } from "@/lib/security/audit";
 import { notifyDealEvent } from "@/lib/notifications/deal-events";
 import { AsaasError } from "@/lib/asaas/errors";
@@ -380,9 +381,12 @@ export async function runCreateCommissionCharge(
         cobrancaStage &&
         linearOrder.includes(dealWithStage.stage.name)
       ) {
-        await prisma.deal.update({
-          where: { id: dealWithStage.id },
-          data: { stageId: cobrancaStage.id, stageEnteredAt: new Date() },
+        await moveDealStage({
+          dealId: dealWithStage.id,
+          toStageId: cobrancaStage.id,
+          reason: "charge_created",
+          actorUserId: input.userId,
+          orgId: input.orgId,
         });
         stageMovedTo = cobrancaStage.id;
       }

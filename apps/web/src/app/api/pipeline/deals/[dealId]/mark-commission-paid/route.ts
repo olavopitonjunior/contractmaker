@@ -6,6 +6,7 @@ import {
   stageChangeDedupeKey,
 } from "@/lib/notifications/deal-events";
 import { prisma } from "@/lib/db/prisma";
+import { moveDealStage } from "@/lib/pipeline/move-stage";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import {
   COMMISSION_PAID_ALLOWED_FROM,
@@ -83,25 +84,15 @@ export async function POST(
     );
   }
 
-  await prisma.deal.update({
-    where: { id: deal.id },
-    data: {
-      stageId: targetStage.id,
-      stageEnteredAt: new Date(),
-      commissionPaidAt: new Date(),
-    },
-  });
-
-  await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
-    action: "DEAL_STAGE_CHANGE",
-    result: "SUCCESS",
-    resource: deal.id,
-    resourceType: "Deal",
-    metadata: {
-      kind: "commission_paid",
-      fromStage: deal.stage.id,
-      toStage: targetStage.id,
-    },
+  await moveDealStage({
+    dealId: deal.id,
+    toStageId: targetStage.id,
+    reason: "mark_commission_paid",
+    actorUserId: session.user.id,
+    orgId: org.id,
+    dealData: { commissionPaidAt: new Date() },
+    auditCtx: extractAuditContextFromRequest(req, org.id, session.user.id),
+    auditMetadata: { kind: "commission_paid" },
   });
 
   // Notificação do processo (manual — sem webhook Asaas neste caminho, então

@@ -9,6 +9,10 @@ import { FEATURE } from "@/lib/modules/catalog";
 import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { getEffectivePermissions, canAccessDeal } from "@/lib/security/rbac/check";
 import type { AgentEvent } from "@/lib/ai/types";
+import {
+  DEAL_MILESTONE_INCLUDE,
+  serializeDealMilestones,
+} from "@/lib/pipeline/deal-dates";
 
 export const dynamic = "force-dynamic";
 
@@ -37,17 +41,7 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
       pipeline: { select: { orgId: true } },
       attachments: { orderBy: { createdAt: "desc" } },
       stage: { select: { name: true } },
-      envelopes: {
-        where: { source: "contract", status: "closed", contract: { kind: "contract" } },
-        select: { closedAt: true },
-        orderBy: { closedAt: "desc" },
-        take: 1,
-      },
-      commissionCharges: {
-        select: { createdAt: true },
-        orderBy: { createdAt: "asc" },
-        take: 1,
-      },
+      ...DEAL_MILESTONE_INCLUDE,
     },
   });
 
@@ -213,6 +207,9 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
   // (contrato de locação e de administração).
   const orgDefaults = await loadOrgLocacaoDefaults(org.id);
 
+  // Datas-marco do funil — regra canônica em lib/pipeline/deal-dates.ts.
+  const milestones = serializeDealMilestones(deal);
+
   return (
     <LocacaoDealDetail
       surveysEnabled={surveysEnabled}
@@ -230,16 +227,10 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
         lostAt: deal.lostAt?.toISOString() ?? null,
         lostReason: deal.lostReason ?? null,
         archivedAt: deal.archivedAt?.toISOString() ?? null,
-        formOpenedAt: deal.form?.createdAt?.toISOString() ?? null,
-        formCompletedAt: deal.form?.completedAt?.toISOString() ?? null,
-        contractSignedAt:
-          deal.envelopes[0]?.closedAt?.toISOString() ??
-          deal.contractSignedAt?.toISOString() ??
-          null,
-        chargeCreatedAt:
-          deal.commissionCharges[0]?.createdAt.toISOString() ??
-          deal.chargeIssuedAt?.toISOString() ??
-          null,
+        formOpenedAt: milestones.formOpenedAt,
+        formCompletedAt: milestones.formCompletedAt,
+        contractSignedAt: milestones.contractSignedAt,
+        chargeCreatedAt: milestones.chargeCreatedAt,
         attachments: deal.attachments.map((a) => ({
           id: a.id,
           filename: a.filename,

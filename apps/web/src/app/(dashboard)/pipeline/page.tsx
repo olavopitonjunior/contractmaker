@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { getIListConnection } from "@/lib/ilist/connection";
 import { getEffectivePermissions, dealScopeWhere } from "@/lib/security/rbac/check";
+import { DEAL_CARD_INCLUDE, toDealCard } from "@/lib/pipeline/deal-dates";
 
 export default async function PipelinePage({
   searchParams,
@@ -59,37 +60,7 @@ export default async function PipelinePage({
               ...dealScope,
             },
             orderBy: { position: "asc" },
-            include: {
-              // NÃO selecionar form.dataJson aqui: é o payload inteiro do
-              // formulário por deal só pra derivar um nome — o nome vive
-              // denormalizado em Deal.clientName (backfill + write-points).
-              form: {
-                select: {
-                  id: true,
-                  status: true,
-                  token: true,
-                  createdAt: true,
-                  completedAt: true,
-                },
-              },
-              contracts: {
-                where: { isLatest: true, kind: "contract" },
-                select: { id: true, version: true },
-              },
-              envelopes: {
-                where: { source: "contract", status: "closed", contract: { kind: "contract" } },
-                select: { closedAt: true },
-                orderBy: { closedAt: "desc" },
-                take: 1,
-              },
-              commissionCharges: {
-                select: { createdAt: true },
-                orderBy: { createdAt: "asc" },
-                take: 1,
-              },
-              // Gerente responsável — nome no card do kanban.
-              manager: { select: { name: true, email: true } },
-            },
+            include: DEAL_CARD_INCLUDE,
           },
         },
       },
@@ -125,35 +96,13 @@ export default async function PipelinePage({
         ? `R$ ${(v / 1000).toFixed(0)}k`
         : `R$ ${v.toFixed(0)}`;
 
+  // nowMs único pro render — cards e board derivam rótulos/SLA dele (#418).
+  const nowMs = Date.now();
   const stages = pipeline.stages.map((stage) => ({
     id: stage.id,
     name: stage.name,
     color: stage.color || "#6366f1",
-    deals: stage.deals.map((deal) => ({
-      id: deal.id,
-      title: deal.title,
-      value: deal.value,
-      createdAt: deal.createdAt.toISOString(),
-      clientName: deal.clientName,
-      managerName: deal.manager ? deal.manager.name?.trim() || deal.manager.email : null,
-      formStatus: deal.form?.status || null,
-      formToken: deal.form?.token || null,
-      hasContract: deal.contracts.length > 0,
-      formOpenedAt: deal.form?.createdAt?.toISOString() ?? null,
-      formCompletedAt: deal.form?.completedAt?.toISOString() ?? null,
-      contractSignedAt:
-        deal.envelopes[0]?.closedAt?.toISOString() ??
-        deal.contractSignedAt?.toISOString() ??
-        null,
-      chargeCreatedAt:
-        deal.commissionCharges[0]?.createdAt.toISOString() ??
-        deal.chargeIssuedAt?.toISOString() ??
-        null,
-      commissionPaidAt: deal.commissionPaidAt?.toISOString() ?? null,
-      lostAt: deal.lostAt?.toISOString() ?? null,
-      lostReason: deal.lostReason ?? null,
-      stageEnteredAt: deal.stageEnteredAt?.toISOString() ?? null,
-    })),
+    deals: stage.deals.map((deal) => toDealCard(deal, nowMs, stage.name)),
   }));
 
   return (
@@ -305,7 +254,7 @@ export default async function PipelinePage({
       </div>
 
       {/* Kanban — nowMs serializado evita Date.now() no render do client (#418) */}
-      <KanbanBoard stages={stages} nowMs={Date.now()} />
+      <KanbanBoard stages={stages} nowMs={nowMs} />
     </div>
   );
 }

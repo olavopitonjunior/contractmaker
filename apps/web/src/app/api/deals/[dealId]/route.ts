@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
+import { moveDealStage } from "@/lib/pipeline/move-stage";
 import {
   requireApiAuth,
   isAuthFailure,
@@ -152,14 +153,32 @@ export async function PATCH(
     }
   }
 
-  const updated = await prisma.deal.update({
+  const { stageId: nextStageId, ...restData } = parsed.data;
+  if (nextStageId && nextStageId !== deal.stageId) {
+    // Mudança de stage passa pelo mutador único (histórico + SLA + audit
+    // DEAL_STAGE_CHANGE padronizado); os demais campos vão na mesma transação.
+    await moveDealStage({
+      dealId: deal.id,
+      toStageId: nextStageId,
+      reason: "manual_update",
+      actorUserId: apiAuth.actor.effectiveUserId,
+      orgId: apiAuth.org.id,
+      dealData: restData,
+      auditCtx: extractAuditContextFromRequest(
+        req,
+        apiAuth.org.id,
+        apiAuth.actor.effectiveUserId
+      ),
+      auditMetadata: mergeAuditMetadata(
+        { changedTitle: parsed.data.title !== undefined },
+        apiAuth.actor
+      ),
+    });
+  } else if (Object.keys(restData).length > 0) {
+    await prisma.deal.update({ where: { id: deal.id }, data: restData });
+  }
+  const updated = await prisma.deal.findUniqueOrThrow({
     where: { id: deal.id },
-    data: {
-      ...parsed.data,
-      // Aging por stage: qualquer mudança de stage carimba a entrada (mesmo
-      // invariante do PATCH session em /api/pipeline/deals/[dealId]).
-      ...(parsed.data.stageId ? { stageEnteredAt: new Date() } : {}),
-    },
     include: { stage: { select: { id: true, name: true } } },
   });
 
@@ -266,9 +285,12 @@ export async function DELETE(
         { status: 400 }
       );
     }
-    await prisma.deal.update({
-      where: { id: params.dealId },
-      data: { stageId: archived.id, stageEnteredAt: new Date() },
+    await moveDealStage({
+      dealId: params.dealId,
+      toStageId: archived.id,
+      reason: "archive",
+      actorUserId: auth.actor.effectiveUserId,
+      orgId: auth.org.id,
     });
     await audit(
       extractAuditContextFromRequest(
