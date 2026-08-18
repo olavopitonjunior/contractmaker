@@ -11,7 +11,8 @@ import { responsibleDisplay } from "@/lib/proposals/status-view";
 import { clicksignRoleLabel } from "@/lib/clicksign/roles";
 import { ProposalDetailClient } from "@/components/proposals/ProposalDetailClient";
 import { getEffectiveUserId } from "@/lib/auth/impersonation";
-import { formatDateTimeBR, deadlineBR } from "@/lib/format/datetime";
+import { formatDateTimeBR } from "@/lib/format/datetime";
+import { proposalDeadline } from "@/lib/proposals/deadline";
 import { formatMoneyBR } from "@/lib/format/money";
 
 export const dynamic = "force-dynamic";
@@ -137,7 +138,7 @@ export default async function PropostaDetailPage({
   // os dois viram texto diferente no mesmo nó e derrubam a hidratação (React
   // #418/#423, que faz a página re-renderizar do zero e o card "Documento"
   // aparecer vazio). Ver lib/format/datetime.ts.
-  const prazo = deadlineBR(proposal.validUntil);
+  const prazo = proposalDeadline(proposal.validUntil, proposal.status);
 
   const permissions = {
     send: can(eff, PERMISSION.PROPOSAL_SEND),

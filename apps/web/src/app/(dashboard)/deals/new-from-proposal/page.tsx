@@ -1,90 +1,15 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, ClipboardCheck, ListChecks, Sparkles } from "lucide-react";
 import Link from "next/link";
-import { toast } from "sonner";
-import { UploadContractDropzone } from "@/components/pipeline/UploadContractDropzone";
-import { ManagerSelect } from "@/components/deals/ManagerSelect";
+import { ProposalUploadForm } from "@/components/deals/ProposalUploadForm";
 
+// O formulário em si vive em components/deals/ProposalUploadForm.tsx — a mesma
+// via existe dentro do diálogo "Cadastro com proposta" do dropdown Novo negócio
+// (aba "Anexar PDF de fora"). Esta página permanece pra deep-link.
 export default function NewDealFromProposalPage() {
-  const router = useRouter();
-  const [title, setTitle] = useState("");
-  const [file, setFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
-  // Gerente responsável pelo negócio (obrigatório quando a org liga o toggle).
-  const [managerUserId, setManagerUserId] = useState<string | null>(null);
-  const [managerRequired, setManagerRequired] = useState(false);
-
-  async function handleSubmit() {
-    if (!file) {
-      toast.error("Selecione um PDF da proposta.");
-      return;
-    }
-    // Gemini não parseia DOCX nativamente (recebe bytes ZIP brutos).
-    // Bloqueio aqui evita má UX "subi DOCX e nada veio preenchido".
-    // Follow-up: converter DOCX→PDF server-side antes de mandar.
-    if (file.type !== "application/pdf") {
-      toast.error(
-        "Por ora só PDF funciona aqui. Exporte como PDF e tente de novo.",
-      );
-      return;
-    }
-    if (managerRequired && !managerUserId) {
-      toast.error("Selecione o gerente responsável");
-      return;
-    }
-    setUploading(true);
-
-    const formData = new FormData();
-    formData.append("file", file);
-    if (title.trim()) formData.append("title", title.trim());
-    if (managerUserId) formData.append("managerUserId", managerUserId);
-
-    const idempotencyKey =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
-    try {
-      const res = await fetch("/api/deals/new-from-proposal", {
-        method: "POST",
-        headers: { "x-idempotency-key": idempotencyKey },
-        body: formData,
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        // Fallback do gate server-side (org exige gerente e o client não sabia).
-        if (res.status === 422 && data?.error === "gerente_obrigatorio") {
-          setManagerRequired(true);
-          toast.error(data.message || "Selecione o gerente responsável");
-        } else {
-          toast.error(data.error || "Falha ao processar proposta.");
-        }
-        setUploading(false);
-        if (data.formToken) {
-          // Mesmo em erro parcial (storage falhou após criar form), abre o
-          // form pro usuário começar do que foi extraído.
-          router.push(`${data.formUrl ?? `/f/${data.formToken}`}?prefilled=1`);
-        }
-        return;
-      }
-
-      toast.success("Dados extraídos. Revise antes de gerar o contrato.");
-      router.push(`${data.formUrl ?? `/f/${data.formToken}`}?prefilled=1`);
-    } catch (err) {
-      console.error(err);
-      toast.error("Erro de rede ao enviar o arquivo. Tente novamente.");
-      setUploading(false);
-    }
-  }
-
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <div>
@@ -132,46 +57,8 @@ export default function NewDealFromProposalPage() {
         <CardHeader>
           <CardTitle className="text-base">Importar proposta</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="title">Título do negócio (opcional)</Label>
-            <Input
-              id="title"
-              placeholder="Ex: Proposta Apto 302 - Ed. Floresta"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              disabled={uploading}
-            />
-            <p className="text-xs text-muted-foreground">
-              Se deixar em branco, vamos usar o nome do arquivo da proposta.
-            </p>
-          </div>
-
-          <ManagerSelect
-            value={managerUserId}
-            onChange={setManagerUserId}
-            disabled={uploading}
-            onContextLoaded={(ctx) => setManagerRequired(ctx.managerRequired)}
-          />
-
-          <div className="space-y-2">
-            <Label>Proposta</Label>
-            <UploadContractDropzone
-              onFileSelected={setFile}
-              uploading={uploading}
-            />
-          </div>
-
-          <Button
-            onClick={handleSubmit}
-            disabled={!file || uploading}
-            className="w-full"
-            size="lg"
-          >
-            {uploading
-              ? "Extraindo dados da proposta..."
-              : "Extrair dados e abrir formulário"}
-          </Button>
+        <CardContent>
+          <ProposalUploadForm kind="venda" />
         </CardContent>
       </Card>
     </div>

@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { NovoFormularioLocacaoDialog } from "@/components/locacao/NovoFormularioLocacaoDialog";
 import { NovoContratoWizard } from "@/components/locacao/NovoContratoWizard";
+import { NewDealFromProposalDialog } from "@/components/deals/NewDealFromProposalDialog";
 import { FileText, ListChecks, Plus, Sparkles, Upload } from "lucide-react";
 
 interface Option {
@@ -36,6 +37,7 @@ export function NovoNegocioLocacaoDropdown({
   tenants,
 }: NovoNegocioLocacaoDropdownProps) {
   const [formDialogOpen, setFormDialogOpen] = useState(false);
+  const [proposalDialogOpen, setProposalDialogOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   const wizardDisabled = properties.length === 0 || tenants.length === 0;
 
@@ -82,20 +84,21 @@ export function NovoNegocioLocacaoDropdown({
               </span>
             </div>
           </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link
-              href="/locacao/deals/new-from-proposal"
-              className="flex items-start gap-3 py-2"
-            >
-              <Sparkles className="h-4 w-4 mt-0.5 shrink-0" />
-              <div className="flex flex-col gap-0.5">
-                <span className="font-medium">Cadastro com proposta</span>
-                <span className="text-xs text-muted-foreground">
-                  Sobe uma proposta (PDF). Sistema lê tudo (partes, aluguel,
-                  garantia) e abre o formulário pré-preenchido pra revisar.
-                </span>
-              </div>
-            </Link>
+          <DropdownMenuItem
+            className="flex items-start gap-3 py-2"
+            onSelect={(e) => {
+              e.preventDefault();
+              setProposalDialogOpen(true);
+            }}
+          >
+            <Sparkles className="h-4 w-4 mt-0.5 shrink-0" />
+            <div className="flex flex-col gap-0.5">
+              <span className="font-medium">Cadastro com proposta</span>
+              <span className="text-xs text-muted-foreground">
+                Escolha uma proposta assinada do sistema ou anexe o PDF assinado
+                de fora — o negócio nasce com os dados preenchidos.
+              </span>
+            </div>
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
             <Link
@@ -136,6 +139,11 @@ export function NovoNegocioLocacaoDropdown({
       <NovoFormularioLocacaoDialog
         open={formDialogOpen}
         onOpenChange={setFormDialogOpen}
+      />
+      <NewDealFromProposalDialog
+        kind="locacao"
+        open={proposalDialogOpen}
+        onOpenChange={setProposalDialogOpen}
       />
       <NovoContratoWizard
         properties={properties}

@@ -11,10 +11,15 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { ProposalsListClient } from "@/components/proposals/ProposalsListClient";
 import { ProposalsNoAccess } from "@/components/proposals/ProposalsNoAccess";
 import { statusesForFilter } from "@/lib/proposals/list-filters";
-import { OPEN_STATUSES } from "@/lib/proposals/status-sets";
+import {
+  OPEN_STATUSES,
+  EXPIRABLE_STATUSES,
+  CONVERSION_KPI_STATUSES,
+} from "@/lib/proposals/status-sets";
 import { responsibleDisplay } from "@/lib/proposals/status-view";
-import { formatDayMonthBR, deadlineBR } from "@/lib/format/datetime";
-import { formatMoneyBR } from "@/lib/format/money";
+import { proposalDeadline } from "@/lib/proposals/deadline";
+import { summarizeProposalData } from "@/lib/proposals/summarize";
+import { formatDayMonthBR } from "@/lib/format/datetime";
 
 export const dynamic = "force-dynamic";
 
@@ -136,16 +141,24 @@ export default async function PropostasPage({
 
   // KPIs = totais da ORG (escopo + tipo), independentes dos filtros de busca/status
   // da tabela — senão filtrar pra "Concluídas" zerava "Em aberto"/"Expirando", e o
-  // take:200 subcontava. "Expirando" = aberta com validUntil em ≤2 dias (inclui
-  // vencida), espelhando o prazo() do client (tone warn/danger).
+  // take:200 subcontava. "Assinadas/Convertidas" conta `completa` também: assinada
+  // por todos JÁ é conversão, mesmo antes do clique "Converter em negócio".
+  // "Expirando" = validUntil em ≤2 dias (inclui vencida) SÓ nos statuses que o
+  // cron realmente expira — parciais assinados não expiram (nem aqui nem lá).
   const kpiWhere = { ...scope, kind: tipo === "venda" ? "venda" : "locacao" };
   const expiringCutoff = new Date(Date.now() + 2 * 86_400_000);
   const openList = [...OPEN_STATUSES];
   const [openCount, convertedCount, expiringCount] = await Promise.all([
     prisma.proposal.count({ where: { ...kpiWhere, status: { in: openList } } }),
-    prisma.proposal.count({ where: { ...kpiWhere, status: "convertida" } }),
     prisma.proposal.count({
-      where: { ...kpiWhere, status: { in: openList }, validUntil: { not: null, lte: expiringCutoff } },
+      where: { ...kpiWhere, status: { in: [...CONVERSION_KPI_STATUSES] } },
+    }),
+    prisma.proposal.count({
+      where: {
+        ...kpiWhere,
+        status: { in: [...EXPIRABLE_STATUSES] },
+        validUntil: { not: null, lte: expiringCutoff },
+      },
     }),
   ]);
 
@@ -173,11 +186,12 @@ export default async function PropostasPage({
       // pode usar `toLocale*` (padrão de locale difere entre o ICU do Node e o do
       // browser) nem `Date.now()` no render (muda entre SSR e hidratação). Os dois
       // dão hydration mismatch (React #418/#423). Ver lib/format/datetime.ts.
-      const prazo = deadlineBR(p.validUntil);
+      const prazo = proposalDeadline(p.validUntil, p.status);
       return {
         id: p.id,
         title: p.title,
         status: p.status,
+        kind: p.kind,
         instrument: p.instrument,
         createdAtLabel: formatDayMonthBR(p.createdAt),
         sentAtLabel: formatDayMonthBR(p.sentAt, ""),
@@ -185,7 +199,7 @@ export default async function PropostasPage({
         prazo: { label: prazo.shortLabel, tone: prazo.tone },
         convertedDealId: p.convertedDealId,
         responsible: resp,
-        resumo: summarize(p.dataJson),
+        resumo: summarizeProposalData(p.dataJson),
       };
     })
     .filter((r) => {
@@ -214,31 +228,4 @@ export default async function PropostasPage({
       }}
     />
   );
-}
-
-// Resumo leve pra tabela (proponente + imóvel + valor) sem expor o dataJson
-// inteiro. `proponente` também alimenta a busca (post-filter na page).
-function summarize(dataJson: unknown): {
-  proponente: string | null;
-  imovel: string | null;
-  valorLabel: string | null;
-} {
-  const d = (dataJson ?? {}) as Record<string, unknown>;
-  const imoveis = d.imoveis as Array<{ endereco?: string; numero?: string }> | undefined;
-  const im = imoveis?.[0];
-  const imovel = im?.endereco
-    ? `${im.endereco}${im.numero ? `, ${im.numero}` : ""}`
-    : null;
-  // Proponente = 1º comprador (venda) ou 1º locatário (locação).
-  const partes = (d.compradores ?? d.locatarios) as Array<{ nome?: string }> | undefined;
-  const proponente = partes?.[0]?.nome?.trim() || null;
-  const pag = d.pagamento as { valor_total?: number } | undefined;
-  const loc = d.locacao as { valor_aluguel?: number } | undefined;
-  const valor = pag?.valor_total ?? loc?.valor_aluguel ?? null;
-  return {
-    proponente,
-    imovel,
-    // Determinístico (sem ICU), pelo mesmo motivo das datas.
-    valorLabel: typeof valor === "number" ? formatMoneyBR(valor, { decimals: 0 }) : null,
-  };
 }

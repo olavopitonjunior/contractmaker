@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db/prisma";
 import { requireCronAuth } from "@/lib/security/cron-auth";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
 import { advanceProposalStatus } from "@/lib/proposals/status";
+import { EXPIRABLE_STATUSES } from "@/lib/proposals/status-sets";
 import { notifyProposalMilestone } from "@/lib/proposals/notify-proposal";
 
 export const runtime = "nodejs";
@@ -28,7 +29,7 @@ export async function GET(req: NextRequest) {
   const props = await prisma.proposal.findMany({
     where: {
       validUntil: { lt: now },
-      status: { in: ["enviada", "entregue", "visualizada"] },
+      status: { in: [...EXPIRABLE_STATUSES] },
     },
     select: { id: true, orgId: true, userId: true },
     take: 300,

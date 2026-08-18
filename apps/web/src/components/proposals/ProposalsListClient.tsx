@@ -28,6 +28,7 @@ export interface ProposalRow {
   id: string;
   title: string;
   status: string;
+  kind: string;
   instrument: string;
   /** "28/07". */
   createdAtLabel: string;
@@ -108,7 +109,7 @@ export function ProposalsListClient({
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:max-w-xl">
         <Kpi label="Em aberto" value={emAberto} />
-        <Kpi label="Convertidas" value={convertidas} tone="success" />
+        <Kpi label="Assinadas/Convertidas" value={convertidas} tone="success" />
         <Kpi label="Expirando" value={expirando} tone={expirando > 0 ? "warn" : undefined} />
       </div>
 
@@ -208,6 +209,7 @@ export function ProposalsListClient({
                           proposal={{
                             id: p.id,
                             status: p.status,
+                            kind: p.kind,
                             instrument: p.instrument,
                             convertedDealId: p.convertedDealId,
                           }}
