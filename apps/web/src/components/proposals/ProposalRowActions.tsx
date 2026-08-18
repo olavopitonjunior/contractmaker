@@ -13,6 +13,7 @@ import {
   Ban,
   Trash2,
   UserRound,
+  Briefcase,
 } from "lucide-react";
 import { ProposalAssigneeDialog } from "./ProposalAssigneeControl";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,10 @@ import {
   REMINDABLE_STATUSES,
   CONVERTABLE_STATUSES,
 } from "@/lib/proposals/status-sets";
+import {
+  useConvertProposal,
+  dealPathForKind,
+} from "@/lib/proposals/use-convert-proposal";
 
 export interface ProposalPermissions {
   send: boolean;
@@ -53,6 +58,7 @@ export interface ProposalPermissions {
 export interface RowProposal {
   id: string;
   status: string;
+  kind: string;
   instrument: string;
   convertedDealId: string | null;
 }
@@ -71,6 +77,7 @@ export function ProposalRowActions({
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<null | "cancel" | "delete" | "assign">(null);
   const [reason, setReason] = useState("");
+  const { convert, busy: convertBusy } = useConvertProposal();
 
   const canRemind =
     permissions.resend &&
@@ -146,9 +153,21 @@ export function ProposalRowActions({
           )}
           {canConvert && (
             <DropdownMenuItem
-              onClick={() => run(`/api/proposals/${proposal.id}/convert`, jsonPost(), "Convertida em negócio")}
+              disabled={convertBusy}
+              onClick={() =>
+                // Sem diálogo na linha — se a org exigir gerente (422), o hook
+                // avisa; o ManagerSelect vive no detalhe da proposta.
+                void convert({ proposalId: proposal.id, kind: proposal.kind })
+              }
             >
               <CheckCircle2 className="mr-2 h-4 w-4" /> Converter em negócio
+            </DropdownMenuItem>
+          )}
+          {proposal.convertedDealId && (
+            <DropdownMenuItem asChild>
+              <Link href={dealPathForKind(proposal.kind, proposal.convertedDealId)}>
+                <Briefcase className="mr-2 h-4 w-4" /> Ver negócio
+              </Link>
             </DropdownMenuItem>
           )}
           {permissions.assign && (

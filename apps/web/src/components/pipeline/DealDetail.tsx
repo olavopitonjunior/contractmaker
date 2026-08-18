@@ -328,6 +328,12 @@ interface DealDetailProps {
     contracts: { id: string; version: number; status: string; template: { name: string } | null; createdAt: Date }[];
     envelopes: { closedAt: Date | null }[];
     commissionCharges: { createdAt: Date }[];
+    /** Proposta que originou o deal (conversão) — chip "Origem: proposta". */
+    fromProposal?: {
+      id: string;
+      title: string;
+      convertedWithoutSignature: boolean;
+    } | null;
   };
   /**
    * Newton (agente de WhatsApp) habilitado pra este tenant. Feature default OFF —
@@ -863,6 +869,21 @@ export function DealDetail({
               managerUserId={deal.managerUserId}
               managerName={null}
             />
+            {deal.fromProposal && (
+              <Link
+                href={`/pipeline/propostas/${deal.fromProposal.id}`}
+                className="inline-flex max-w-[280px] items-center gap-1 text-sm text-muted-foreground hover:underline"
+                title={deal.fromProposal.title}
+              >
+                <FileSignature className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">
+                  Origem: proposta {deal.fromProposal.title}
+                </span>
+                {deal.fromProposal.convertedWithoutSignature && (
+                  <span className="shrink-0">(sem assinatura)</span>
+                )}
+              </Link>
+            )}
           </div>
         </div>
         <div className="w-full sm:w-auto sm:ml-auto flex gap-2 flex-wrap">

@@ -42,6 +42,14 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
       attachments: { orderBy: { createdAt: "desc" } },
       stage: { select: { name: true } },
       ...DEAL_MILESTONE_INCLUDE,
+      // Proposta de origem (conversão) — chip "Origem: proposta" no header.
+      fromProposal: {
+        select: {
+          id: true,
+          title: true,
+          convertedWithoutSignature: true,
+        },
+      },
     },
   });
 
@@ -218,6 +226,13 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
         id: deal.id,
         title: deal.title,
         stageName: deal.stage?.name ?? null,
+        fromProposal: deal.fromProposal
+          ? {
+              id: deal.fromProposal.id,
+              title: deal.fromProposal.title,
+              convertedWithoutSignature: deal.fromProposal.convertedWithoutSignature,
+            }
+          : null,
         formStatus: deal.form?.status ?? null,
         formToken: deal.form?.token ?? null,
         formLockedAt: deal.form?.lockedAt?.toISOString() ?? null,

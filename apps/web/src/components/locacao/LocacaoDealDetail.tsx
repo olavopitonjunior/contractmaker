@@ -28,6 +28,7 @@ import type { PolicyView } from "@/components/locacao/lease-detail/SegurosTab";
 import type { FiancaConsolidado } from "@/components/locacao/lease-detail/FiancaComparativoCard";
 import type { GuaranteeView } from "@/components/locacao/lease-detail/GarantiasTab";
 import type { InspectionView } from "@/components/locacao/lease-detail/VistoriaTab";
+import Link from "next/link";
 import { FileText, ExternalLink, Receipt, Building2, FileSignature } from "lucide-react";
 import { DealManagerChip } from "@/components/deals/DealManagerChip";
 import { toast } from "sonner";
@@ -142,6 +143,12 @@ interface LocacaoDealDetailProps {
     contractSignedAt: string | null;
     chargeCreatedAt: string | null;
     attachments: LocacaoAttachment[];
+    /** Proposta que originou o deal (conversão) — chip "Origem: proposta". */
+    fromProposal?: {
+      id: string;
+      title: string;
+      convertedWithoutSignature: boolean;
+    } | null;
   };
   contract: ContractProp | null;
   versions: VersionsProp;
@@ -304,6 +311,21 @@ export function LocacaoDealDetail({
               managerUserId={deal.managerUserId}
               managerName={null}
             />
+            {deal.fromProposal && (
+              <Link
+                href={`/pipeline/propostas/${deal.fromProposal.id}`}
+                className="inline-flex max-w-[280px] items-center gap-1 text-sm text-muted-foreground hover:underline"
+                title={deal.fromProposal.title}
+              >
+                <FileSignature className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">
+                  Origem: proposta {deal.fromProposal.title}
+                </span>
+                {deal.fromProposal.convertedWithoutSignature && (
+                  <span className="shrink-0">(sem assinatura)</span>
+                )}
+              </Link>
+            )}
           </div>
           <LocacaoDealHeaderActions
             dealId={deal.id}
