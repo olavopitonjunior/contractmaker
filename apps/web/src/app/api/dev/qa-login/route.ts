@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { encode, decode } from "next-auth/jwt";
+import { encode } from "next-auth/jwt";
 import { prisma } from "@/lib/db/prisma";
 import { STAGING_MODE, VERCEL_ENV } from "@/lib/env/staging";
 
@@ -58,46 +58,18 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Nome do cookie segue a convenção do @auth/core: prefixo `__Secure-` em
-  // https, e o salt do JWE é o próprio nome do cookie. `secure` deriva do
-  // protocolo EXTERNO (x-forwarded-proto na Vercel), não de req.nextUrl que
-  // pode refletir o http interno atrás do proxy.
-  const proto =
-    req.headers.get("x-forwarded-proto") ?? req.nextUrl.protocol.replace(":", "");
-  const secure = proto === "https";
-  const cookieName = `${secure ? "__Secure-" : ""}authjs.session-token`;
+  // O nome do cookie e o salt do JWE têm de casar EXATAMENTE com o que o
+  // `auth()` do NextAuth usa pra ler a sessão — senão o cookie é gravado com um
+  // nome que o servidor nunca procura. O NextAuth deriva `useSecureCookies` do
+  // protocolo do AUTH_URL/NEXTAUTH_URL (NÃO do request), então replicamos isso:
+  // no preview o NEXTAUTH_URL está como http://localhost → cookie NÃO-seguro
+  // `authjs.session-token`; em prod (https) seria `__Secure-…`. (A causa raiz
+  // é o NEXTAUTH_URL de preview apontar pra localhost — mesmo bug do magic link
+  // — mas espelhar a lógica aqui destrava o QA sem mexer no env.)
+  const authUrl = process.env.NEXTAUTH_URL ?? process.env.AUTH_URL ?? "";
+  const useSecureCookies = authUrl.startsWith("https://");
+  const cookieName = `${useSecureCookies ? "__Secure-" : ""}authjs.session-token`;
   const maxAge = 60 * 60 * 24 * 30; // 30 dias — sessão de QA persistente.
-
-  if (req.nextUrl.searchParams.get("debug") === "1") {
-    const t = await encode({
-      token: { id: user.id, sub: user.id, email: user.email, name: user.name },
-      secret,
-      salt: cookieName,
-      maxAge,
-    });
-    let decoded: unknown = null;
-    let decodeErr: string | null = null;
-    try {
-      decoded = await decode({ token: t, secret, salt: cookieName });
-    } catch (e) {
-      decodeErr = e instanceof Error ? e.message : String(e);
-    }
-    const incoming = req.cookies.get(cookieName)?.value ?? null;
-    return NextResponse.json({
-      vercelEnv: VERCEL_ENV ?? null,
-      stagingMode: STAGING_MODE,
-      proto,
-      secure,
-      cookieName,
-      userId: user.id,
-      email: user.email,
-      tokenLen: t.length,
-      secretLen: secret.length,
-      decoded,
-      decodeErr,
-      incomingCookiePresent: incoming !== null,
-    });
-  }
 
   const token = await encode({
     token: { id: user.id, sub: user.id, email: user.email, name: user.name },
@@ -114,7 +86,7 @@ export async function GET(req: NextRequest) {
   const res = NextResponse.redirect(new URL("/pipeline", req.nextUrl.origin));
   res.cookies.set(cookieName, token, {
     httpOnly: true,
-    secure,
+    secure: useSecureCookies,
     sameSite: "lax",
     path: "/",
     maxAge,
