@@ -216,6 +216,7 @@ export default async function PropostaDetailPage({
         reminderCount: proposal.reminderCount,
         validUntilLabel: formatDateTimeBR(proposal.validUntil),
         prazo: { label: prazo.label, danger: prazo.tone === "danger" },
+        updatedAtIso: proposal.updatedAt.toISOString(),
         convertedDealId: proposal.convertedDealId,
         dossierUrl: proposal.dossierUrl,
         resumo: summarize(d, proposal.kind),
