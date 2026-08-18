@@ -135,7 +135,9 @@ export function SendFormSummaryDialog({
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(objectUrl);
+      // Revogar síncrono pode abortar o download em Safari/Firefox (a blob:
+      // URL resolve assíncrono depois do click).
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
       toast.success("PDF baixado");
     } catch {
       toast.error("Erro de conexão");

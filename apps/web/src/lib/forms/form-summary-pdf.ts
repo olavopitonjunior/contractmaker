@@ -55,7 +55,11 @@ export function renderFormSummaryHtml(
   sections: SummarySection[],
   meta: FormSummaryMeta
 ): string {
-  const primary = /^#[0-9a-fA-F]{3,8}$/.test(meta.primaryColor ?? "")
+  // Só comprimentos que o CSS aceita (3/4/6/8) — 5 e 7 dígitos passariam pro
+  // <style> e o Chromium descartaria a declaração inteira, header sem régua.
+  const primary = /^#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(
+    meta.primaryColor ?? ""
+  )
     ? (meta.primaryColor as string)
     : "#1a1a1a";
 
@@ -114,6 +118,36 @@ export interface GeneratedPdf {
   buffer: Buffer;
   filename: string;
   sectionsCount: number;
+  /** Metadados do form já carregados aqui — poupa um findUnique do caller. */
+  title: string;
+  orgId: string;
+  orgName: string;
+}
+
+const LOGO_FETCH_TIMEOUT_MS = 5000;
+const LOGO_MAX_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Baixa o logo e devolve como data URI. O exporter renderiza com
+ * `waitUntil: "networkidle0"` — um `<img>` remoto no HTML faria TODO PDF
+ * brandado bloquear no fetch do blob host (até ~30s de navigation timeout) e
+ * um 404 imprimiria o glifo de imagem quebrada no documento. Inline com
+ * timeout curto: falhou, o header sai limpo sem logo.
+ */
+async function fetchLogoDataUri(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(LOGO_FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const mime = res.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
+    if (!mime.startsWith("image/")) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.byteLength === 0 || buf.byteLength > LOGO_MAX_BYTES) return null;
+    return `data:${mime};base64,${buf.toString("base64")}`;
+  } catch {
+    return null;
+  }
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -215,11 +249,18 @@ export async function generateFormSummaryPdf(formId: string): Promise<GeneratedP
     console.warn("[form-summary] falha ao resolver branding, PDF sem logo:", err);
   }
 
+  const logoDataUri = brand?.logoUrl
+    ? await fetchLogoDataUri(brand.logoUrl)
+    : null;
+
+  const orgName = form.org?.name ?? "Contractmaker";
+  const title = form.title || "Resumo do formulário";
+
   const html = renderFormSummaryHtml(sections, {
-    orgName: form.org?.name ?? "Contractmaker",
-    logoUrl: brand?.logoUrl ?? null,
+    orgName,
+    logoUrl: logoDataUri,
     primaryColor: brand?.primaryColor,
-    formTitle: form.title || "Resumo do formulário",
+    formTitle: title,
     generatedAtLabel: new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }),
     statusLabel: STATUS_LABEL[form.status] ?? undefined,
     dataUpdatedAtLabel: form.updatedAt.toLocaleString("pt-BR", {
@@ -232,5 +273,8 @@ export async function generateFormSummaryPdf(formId: string): Promise<GeneratedP
     buffer,
     filename: `resumo-formulario-${form.id.slice(0, 8)}.pdf`,
     sectionsCount: sections.length,
+    title,
+    orgId: form.orgId,
+    orgName,
   };
 }

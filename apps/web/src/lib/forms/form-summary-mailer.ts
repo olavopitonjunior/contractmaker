@@ -2,16 +2,21 @@
  * Serviço de envio do resumo consolidado do formulário por e-mail.
  *
  * Gera o PDF (form-summary-pdf), opcionalmente persiste como DealAttachment
- * (replace por categoria), baixa os documentos anexados respeitando um cap
- * cumulativo e envia via sendEmail (com anexos). NUNCA lança — herda a
- * semântica de `sendEmail`; devolve `{ ok }` pra quem chama ler.
+ * (update-in-place — ver docstring de persistFormSummaryPdf), baixa os
+ * documentos anexados respeitando um cap cumulativo e envia via sendEmail
+ * (com anexos). NUNCA lança — herda a semântica de `sendEmail`; devolve
+ * `{ ok }` pra quem chama ler.
  */
 
 import { prisma } from "@/lib/db/prisma";
 import { sendEmail, type EmailAttachment } from "@/lib/email/client";
 import { FormSummaryEmail } from "@/lib/email/templates/form-summary";
 import { generateFormSummaryPdf } from "@/lib/forms/form-summary-pdf";
-import { uploadBufferToStorage, downloadBufferFromUrl } from "@/lib/storage/s3";
+import {
+  uploadBufferToStorage,
+  downloadBufferFromUrl,
+  deleteFromStorage,
+} from "@/lib/storage/s3";
 
 const DEFAULT_MAX_ATTACH_BYTES = 15 * 1024 * 1024; // 15MB — conservador p/ relay SMTP
 
@@ -56,10 +61,13 @@ const CATEGORY = "resumo_formulario";
  * com `addRandomSuffix: true` (URL não enumerável, ver s3.ts), então cada
  * upload gera URL nova e um match por URL nunca casa (era isso que criava um
  * anexo duplicado por clique de "Baixar PDF"/"Enviar"). `source` não é editável
- * pelo usuário (categoria é) e deal↔form é 1:1, então há no máximo uma linha.
- * O blob antigo vira órfão e fica por conta do GC de blobs (delete-cleanup
- * conta referências por URL). Sem unique constraint em (dealId, source), dois
- * envios simultâneos ainda podem duplicar — best-effort, janela mínima.
+ * pelo usuário (categoria é) e deal↔form é 1:1, então há no máximo uma linha
+ * viva: a mais recente é atualizada e as duplicatas do bug antigo são removidas
+ * de passagem. Blobs substituídos são deletados na hora (best-effort) — o
+ * blob-gc é report-only e não cobre o prefixo form-summary/, então órfão aqui
+ * seria pra sempre. Sem unique constraint em (dealId, source), dois envios
+ * simultâneos ainda podem duplicar — janela mínima; a duplicata é saneada na
+ * geração seguinte.
  */
 export async function persistFormSummaryPdf(
   dealId: string,
@@ -74,13 +82,15 @@ export async function persistFormSummaryPdf(
     body: buffer,
     contentType: "application/pdf",
   });
-  const existing = await prisma.dealAttachment.findFirst({
+  const existing = await prisma.dealAttachment.findMany({
     where: { dealId, source: "form_summary" },
-    select: { id: true },
+    select: { id: true, url: true },
+    orderBy: { createdAt: "desc" },
   });
-  if (existing) {
+  const [keep, ...extras] = existing;
+  if (keep) {
     await prisma.dealAttachment.update({
-      where: { id: existing.id },
+      where: { id: keep.id },
       data: { url, filename, byteSize: buffer.byteLength, category: CATEGORY },
     });
   } else {
@@ -95,6 +105,21 @@ export async function persistFormSummaryPdf(
         byteSize: buffer.byteLength,
       },
     });
+  }
+  if (extras.length) {
+    await prisma.dealAttachment.deleteMany({
+      where: { id: { in: extras.map((e) => e.id) } },
+    });
+  }
+  const staleUrls = [keep?.url, ...extras.map((e) => e.url)].filter(
+    (u): u is string => Boolean(u) && u !== url
+  );
+  for (const stale of staleUrls) {
+    try {
+      await deleteFromStorage(stale);
+    } catch (err) {
+      console.warn("[form-summary] falha ao deletar blob antigo", stale, err);
+    }
   }
   return url;
 }
@@ -118,15 +143,11 @@ export async function sendFormSummary(
     return { ...base, error: err instanceof Error ? err.message : String(err) };
   }
 
-  // Metadados do form para o corpo do e-mail.
-  const form = await prisma.salesForm.findUnique({
-    where: { id: input.formId },
-    select: { title: true, orgId: true, org: { select: { name: true } } },
-  });
-  const formTitle = form?.title || "Resumo do formulário";
-  const orgName = form?.org?.name || "";
+  // Metadados do form já vêm do próprio GeneratedPdf — sem refazer a query.
+  const formTitle = pdf.title;
+  const orgName = pdf.orgName;
 
-  // 2. Persistir (replace por categoria) — só se houver deal vinculado
+  // 2. Persistir (update-in-place por dealId+source) — só se houver deal vinculado
   let pdfUrl: string | null = null;
   if (input.persist) {
     const deal = await prisma.deal.findFirst({
@@ -196,21 +217,25 @@ export async function sendFormSummary(
     to: input.to,
     bcc: input.bcc,
     subject,
-    orgId: form?.orgId,
+    orgId: pdf.orgId,
     react: renderEmail(attachmentsSkipped, attachedDocs),
     attachments,
   });
 
-  if (!result.ok && attachments.length > 0) {
-    console.warn("[form-summary] envio com anexos falhou, retry sem anexos:", result.error);
+  // Retry só quando havia DOCUMENTOS além do resumo (relay pode recusar pelo
+  // volume) e sempre MANTENDO o PDF do resumo — e-mail de resumo sem o resumo
+  // não serve pra nada. attachments[0] é o resumo por construção (passo 3).
+  if (!result.ok && attachments.length > 1) {
+    console.warn("[form-summary] envio com anexos falhou, retry só com o resumo:", result.error);
     attachmentsSkipped = true;
     attachedDocs = 0;
     result = await sendEmail({
       to: input.to,
       bcc: input.bcc,
       subject,
-      orgId: form?.orgId,
+      orgId: pdf.orgId,
       react: renderEmail(true, 0),
+      attachments: [attachments[0]],
     });
   }
 

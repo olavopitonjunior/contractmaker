@@ -61,7 +61,13 @@ export async function POST(
 
   try {
     const pdf = await generateFormSummaryPdf(deal.formId);
-    await persistFormSummaryPdf(deal.id, deal.formId, pdf.buffer, pdf.filename);
+    // Persistência é best-effort (como no sendFormSummary): o PDF já está em
+    // mãos — outage de storage não pode transformar o download num 500.
+    try {
+      await persistFormSummaryPdf(deal.id, deal.formId, pdf.buffer, pdf.filename);
+    } catch (err) {
+      console.warn("[form-summary/pdf] falha ao persistir, download segue:", err);
+    }
     // Binário direto, não JSON com a URL do blob: o download no cliente fica
     // same-origin (sem popup blocker, sem depender de CORS do blob) e com o
     // nome amigável; a URL pública do blob também deixa de vazar pro browser.
