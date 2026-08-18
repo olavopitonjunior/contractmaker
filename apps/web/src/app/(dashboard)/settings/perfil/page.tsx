@@ -24,8 +24,10 @@ export default async function PerfilImobiliariaPage() {
     getOrgBrand(org.id),
   ]);
 
+  // pb-24: o FAB do assistente (fixed bottom-6 right-6) cobria o "Salvar
+  // identidade" no fim da página em viewport estreita.
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-3xl space-y-6 pb-24">
       <PageHeader
         title="Perfil da imobiliária"
         description="Os dados que identificam a sua imobiliária nos contratos e diante dos seus clientes."
