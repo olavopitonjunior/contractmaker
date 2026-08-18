@@ -17,6 +17,7 @@ import { seedDefaultGarantiaOptions } from "@/lib/forms/garantia-option-repo";
 import { sendOwnerAccessEmail } from "@/lib/org/owner-access";
 import { seedAndEmbedDefaultClauses } from "@/lib/knowledge/seed-clauses";
 import { seedCanonicalTemplatesForOrg } from "@/lib/templates/canonical-seed";
+import { seedDefaultSurveyTemplateForOrg } from "@/lib/surveys/seed";
 import { canonicalModalidadesForModules } from "@/lib/templates/canonical-templates";
 import { waitUntil } from "@vercel/functions";
 
@@ -276,6 +277,20 @@ export async function POST(req: NextRequest) {
       if (embed) waitUntil(embed);
     } catch (err) {
       console.error("[admin/orgs] seed de cláusulas falhou (org já criada):", err);
+    }
+  }
+
+  // Template padrão de pesquisa de satisfação — só se algum módulo com pesquisas
+  // foi habilitado na criação (features VENDAS_PESQUISAS/LOCACAO_PESQUISAS têm
+  // default true dentro do módulo). Best-effort como os vizinhos.
+  if (vendasEnabled || locacaoEnabled) {
+    try {
+      await seedDefaultSurveyTemplateForOrg(result.org.id, {
+        apply: true,
+        createdBy: result.ownerId,
+      });
+    } catch (err) {
+      console.error("[admin/orgs] seed de pesquisa falhou (org já criada):", err);
     }
   }
 

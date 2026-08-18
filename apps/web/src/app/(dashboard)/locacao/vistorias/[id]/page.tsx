@@ -142,6 +142,7 @@ export default async function VistoriaDetailPage({ params }: Params) {
           mobilia: [],
         }}
         laudoPdfUrl={inspection.laudoPdfUrl}
+        laudoOrigem={inspection.laudoOrigem}
         signerSuggestions={signerSuggestions}
         signatureAvailable={Boolean(inspection.leaseContract?.dealId)}
       />
