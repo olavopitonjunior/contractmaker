@@ -103,7 +103,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
     await notifyDealEvent({
       dealId: "deal1",
       orgId: "org1",
-      event: "contract_ready",
+      event: "contract_sent",
       dedupeKey: "c1",
     });
 
@@ -111,7 +111,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
     const emailArgs = (sendEmail as unknown as ReturnType<typeof vi.fn>).mock
       .calls[0][0];
     expect(emailArgs.to).toBe("marcia@imob.com");
-    expect(emailArgs.subject).toBe("Contrato pronto — Venda Apto 302");
+    expect(emailArgs.subject).toBe("Contrato enviado para assinatura — Venda Apto 302");
     expect(emailArgs.tags).toContainEqual({
       name: "kind",
       value: "deal-notify-manager",
@@ -179,7 +179,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
     await notifyDealEvent({
       dealId: "deal1",
       orgId: "org1",
-      event: "contract_ready",
+      event: "contract_sent",
       dedupeKey: "c1",
     });
 
@@ -204,7 +204,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
     await notifyDealEvent({
       dealId: "deal1",
       orgId: "org1",
-      event: "contract_ready",
+      event: "contract_sent",
       dedupeKey: "c1",
     });
 
@@ -218,7 +218,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
     await notifyDealEvent({
       dealId: "deal1",
       orgId: "org1",
-      event: "contract_ready",
+      event: "contract_sent",
       dedupeKey: "c1",
     });
 
@@ -252,7 +252,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
     await notifyDealEvent({
       dealId: "deal1",
       orgId: "org1",
-      event: "contract_ready",
+      event: "contract_sent",
       dedupeKey: "c1",
     });
 
@@ -274,7 +274,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
     await notifyDealEvent({
       dealId: "deal1",
       orgId: "org1",
-      event: "contract_ready",
+      event: "contract_sent",
       dedupeKey: "c1",
     });
 
@@ -295,7 +295,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
     await notifyDealEvent({
       dealId: "deal1",
       orgId: "org1",
-      event: "contract_ready",
+      event: "contract_sent",
       dedupeKey: "c1",
     });
 
@@ -320,7 +320,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
     await notifyDealEvent({
       dealId: "deal1",
       orgId: "org1",
-      event: "contract_ready",
+      event: "contract_sent",
       dedupeKey: "c1",
     });
 
@@ -339,7 +339,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
     orgSettingsFind.mockResolvedValue({
       settingsJson: {
         events: {
-          contract_ready: { manager: { email: false, whatsapp: false } },
+          contract_sent: { manager: { email: false, whatsapp: false } },
         },
       },
     });
@@ -347,7 +347,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
     await notifyDealEvent({
       dealId: "deal1",
       orgId: "org1",
-      event: "contract_ready",
+      event: "contract_sent",
       dedupeKey: "c1",
     });
 
@@ -360,14 +360,14 @@ describe("notifyDealEvent — público manager (v3)", () => {
     dealFind.mockResolvedValue(dealRow());
     orgSettingsFind.mockResolvedValue({
       settingsJson: {
-        events: { contract_ready: { manager: { whatsapp: false } } },
+        events: { contract_sent: { manager: { whatsapp: false } } },
       },
     });
 
     await notifyDealEvent({
       dealId: "deal1",
       orgId: "org1",
-      event: "contract_ready",
+      event: "contract_sent",
       dedupeKey: "c1",
     });
 
@@ -381,7 +381,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
     await notifyDealEvent({
       dealId: "deal1",
       orgId: "org1",
-      event: "contract_ready",
+      event: "contract_sent",
       dedupeKey: "c1",
     });
 
@@ -409,7 +409,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
     await notifyDealEvent({
       dealId: "deal1",
       orgId: "org1",
-      event: "contract_ready",
+      event: "contract_sent",
       dedupeKey: "c1",
     });
 
@@ -424,7 +424,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
     await notifyDealEvent({
       dealId: "deal1",
       orgId: "org1",
-      event: "contract_ready",
+      event: "contract_sent",
       dedupeKey: "c1",
     });
 
@@ -440,7 +440,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
     await notifyDealEvent({
       dealId: "deal1",
       orgId: "org1",
-      event: "contract_ready",
+      event: "contract_sent",
       dedupeKey: "c1",
     });
 
@@ -469,7 +469,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
     await notifyDealEvent({
       dealId: "deal1",
       orgId: "org1",
-      event: "contract_ready",
+      event: "contract_sent",
       dedupeKey: "c1",
     });
 
@@ -486,7 +486,7 @@ describe("notifyDealEvent — público manager (v3)", () => {
       notifyDealEvent({
         dealId: "deal1",
         orgId: "org1",
-        event: "contract_ready",
+        event: "contract_sent",
         dedupeKey: "c1",
       })
     ).resolves.toBeUndefined();

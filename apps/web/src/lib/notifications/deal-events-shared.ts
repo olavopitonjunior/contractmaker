@@ -7,7 +7,6 @@ export const DEAL_NOTIF_EVENTS = [
   "stage_change",
   "form_completed",
   "form_reminder",
-  "contract_ready",
   "contract_sent",
   "contract_signed",
   "charge_created",
@@ -16,7 +15,19 @@ export const DEAL_NOTIF_EVENTS = [
 
 export type DealNotifEvent = (typeof DEAL_NOTIF_EVENTS)[number];
 
-export const DEAL_NOTIF_EVENT_LABEL: Record<DealNotifEvent, string> = {
+/**
+ * `contract_ready` foi APOSENTADO (decisão de produto, 2026-08-17): contrato
+ * recém-gerado é rascunho interno, não marco a comunicar — os marcos vizinhos
+ * são form_completed e contract_sent. O tipo continua no mapa de rótulos
+ * porque o DealNotificationLog tem linhas históricas desse evento e o
+ * histórico do negócio precisa continuar legível.
+ */
+export type RetiredDealNotifEvent = "contract_ready";
+
+export const DEAL_NOTIF_EVENT_LABEL: Record<
+  DealNotifEvent | RetiredDealNotifEvent,
+  string
+> = {
   stage_change: "Mudança de status",
   form_completed: "Formulário concluído",
   form_reminder: "Lembrete de preenchimento",
@@ -43,8 +54,8 @@ export interface EventAudienceToggles {
 /**
  * Eventos que PODEM alcançar as partes. Allowlist deliberadamente curta: o
  * cliente final só recebe marcos que ele entende sem contexto interno —
- * contrato assinado e cobrança emitida. "Contrato pronto", "mudança de status"
- * e afins são vocabulário da esteira, não do cliente.
+ * contrato assinado e cobrança emitida. "Mudança de status" e afins são
+ * vocabulário da esteira, não do cliente.
  *
  * É defesa, não só documentação: o resolver ZERA `party` de qualquer evento
  * fora desta lista, então config antiga (ou escrita à mão no JSON) nunca
@@ -100,7 +111,7 @@ export interface ResolvedNotificationConfig {
  * individual. Quem tem telefone/e-mail cadastrado recebe sem configurar nada;
  * quem não quer desliga na matriz da org (ou por deal, no `muted`).
  * Sem allowlist de eventos: o gerente acompanha a esteira inteira e o
- * vocabulário interno ("contrato pronto", "mudança de status") é o dele.
+ * vocabulário interno ("contrato enviado", "mudança de status") é o dele.
  */
 export const DEFAULT_EVENT: ResolvedEventConfig = {
   broker: { email: true, whatsapp: false },

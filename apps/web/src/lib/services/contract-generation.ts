@@ -1,6 +1,5 @@
 import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
-import { notifyDealEvent } from "@/lib/notifications/deal-events";
 import { renderContratoHTML } from "@/lib/render/handlebars";
 import { isGoogleDocsFeatureEnabled } from "@/lib/google/client";
 import { uploadHtmlAsGoogleDoc } from "@/lib/google/upload-rendered-html";
@@ -53,6 +52,7 @@ interface GenerateResult {
   version: number;
   googleDocUrl?: string;
 }
+
 
 /**
  * Enriches form data with sensible defaults for template variables that
@@ -1192,18 +1192,9 @@ export async function generateContractForDeal(
     })
   );
 
-  // Notificação do processo: contrato pronto (+ o stage mudou pra "Confecção
-  // de Contrato" acima). dedupeKey=contractId — regeração cria contrato novo
-  // e notifica de novo, re-finalize do mesmo contrato não.
-  waitUntil(
-    notifyDealEvent({
-      dealId: deal.id,
-      orgId,
-      event: "contract_ready",
-      dedupeKey: contract.id,
-      context: { extra: { contractId: contract.id } },
-    })
-  );
+  // Sem notificação de "contrato pronto" — decisão de produto (2026-08-17):
+  // o contrato recém-gerado é um rascunho interno; os marcos comunicados são
+  // form_completed (no finalize do form) e contract_sent (no envio).
 
   return { contractId: contract.id, version: contract.version, googleDocUrl };
 }
@@ -1506,16 +1497,8 @@ export async function generateLocacaoContractForDeal(
     })
   );
 
-  // Notificação do processo: contrato de locação pronto (paridade com vendas).
-  waitUntil(
-    notifyDealEvent({
-      dealId: deal.id,
-      orgId,
-      event: "contract_ready",
-      dedupeKey: contract.id,
-      context: { extra: { contractId: contract.id } },
-    })
-  );
+  // Sem notificação de "contrato pronto" (paridade com vendas — ver
+  // generateContractForDeal).
 
   return { contractId: contract.id, version: contract.version, googleDocUrl };
 }

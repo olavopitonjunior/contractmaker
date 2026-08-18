@@ -37,7 +37,8 @@ export const USER_CHANNEL_REGISTRY: Record<string, UserChannelPolicy> = {
   form_completed: { category: "deal_updates", label: "Formulário concluído" },
   deal_stage_change: { category: "deal_updates", label: "Mudança de status do negócio" },
   deal_form_reminder: { category: "deal_updates", label: "Lembrete de preenchimento" },
-  deal_contract_ready: { category: "deal_updates", label: "Contrato pronto" },
+  // `deal_contract_ready` saiu junto com o evento contract_ready (aposentado
+  // em 2026-08-17) — o sino desse tipo não é mais emitido.
   deal_contract_sent: { category: "deal_updates", label: "Contrato enviado para assinatura" },
   participant_completed: { category: "deal_updates", label: "Participante concluiu a parte dele" },
 
