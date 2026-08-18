@@ -4110,6 +4110,9 @@ model Inspection {
   ambientesJson   Json? // [{ambiente,fotos[],audio,descricaoIa,estado}]
   comparacaoJson  Json?
   laudoPdfUrl     String?
+  // "gerado" = PDF renderizado a partir de ambientesJson (rota /laudo);
+  // "externo" = PDF pronto enviado por upload (vistoria feita fora do sistema).
+  laudoOrigem     String   @default("gerado")
   qrToken         String?  @unique
   // Envelope (ClickSign) do laudo — scalar, sem FK.
   envelopeId      String?

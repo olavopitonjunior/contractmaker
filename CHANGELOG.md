@@ -4,6 +4,12 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-18 - Laudo de vistoria externo
+
+### Adicionado
+
+- **Upload de laudo de vistoria pronto**: vistoria feita fora do sistema entra por PDF (≤20MB) e vai direto a `status="laudo_gerado"` com `Inspection.laudoOrigem="externo"` (migration aditiva `20260818120000`) — elegível pro envelope conjunto com o contrato de locação (`collectInspectionExtraDocuments`) e pro envio avulso; a assinatura conjunta já existia, faltava a porta de entrada. Fluxo em duas rotas no padrão dos anexos: handshake `laudo/blob-upload` (upload client-direct pro Vercel Blob, contorna os ~4.5MB de corpo de função) + registro `laudo/upload` (valida propriedade da URL, magic bytes via `sniffFileType`, update condicional ao status editável — corrida com envio pra assinatura vira 409 — e zera `qrToken` pra o QR do laudo substituído não seguir validando). Botão "Anexar laudo pronto" no `LaudoEditor` (vira "Substituir…" quando já há PDF; "Regerar" sobre laudo externo pede confirmação). Regeração interna volta `laudoOrigem="gerado"`. Audit `INSPECTION_LAUDO_UPLOADED`. `docs/locacao/spec.md` §7 atualizado (falava em `Envelope source="attachment"`; o real é `EnvelopeDocument kind="attachment"`).
+
 ## [Unreleased] - 2026-07-30 - Hardening da trava de grupo do Newton
 
 Follow-ups do review do #197, ambos em `apps/mcp-server/src/tools.ts`.

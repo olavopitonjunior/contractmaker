@@ -112,7 +112,7 @@ export async function POST(
 
   const updated = await prisma.inspection.update({
     where: { id },
-    data: { qrToken, laudoPdfUrl, status: "laudo_gerado" },
+    data: { qrToken, laudoPdfUrl, laudoOrigem: "gerado", status: "laudo_gerado" },
   });
 
   await audit(
