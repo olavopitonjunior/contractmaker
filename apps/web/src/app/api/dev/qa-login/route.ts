@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { encode } from "next-auth/jwt";
 import { prisma } from "@/lib/db/prisma";
-import { STAGING_MODE } from "@/lib/env/staging";
+import { STAGING_MODE, VERCEL_ENV } from "@/lib/env/staging";
+
+/**
+ * Habilitada em tudo que NÃO é o deploy de produção. O gate por `VERCEL_ENV`
+ * (que a Vercel injeta sozinha: "production" no master/imobpro.ia.br, "preview"
+ * nos branches como staging) é o discriminador correto — `STAGING_MODE` não
+ * está setado como env var no projeto, então gatear por ele deixaria a rota
+ * 404 até em staging. `STAGING_MODE` fica no OR só para o caso de ligarem a
+ * flag no futuro. Em produção, os dois são falsos e a rota não existe.
+ */
+const QA_LOGIN_ENABLED = STAGING_MODE || VERCEL_ENV !== "production";
 
 /**
  * Auto-login de QA — EXCLUSIVO DE STAGING.
@@ -12,8 +22,9 @@ import { STAGING_MODE } from "@/lib/env/staging";
  * do ambiente de teste.
  *
  * Segurança:
- *  - **404 fora de staging** (`STAGING_MODE !== true`) — a rota simplesmente não
- *    existe em produção, então não há superfície de auto-login em prod.
+ *  - **404 no deploy de produção** (`VERCEL_ENV === "production"`) — a rota
+ *    simplesmente não existe em prod, então não há superfície de auto-login lá.
+ *    Fica ativa nos previews (staging e branches), todos atrás do SSO da Vercel.
  *  - Só loga o e-mail fixo de QA (default `qa.kanban@imobpro.ia.br`, overridável
  *    por `QA_AUTOLOGIN_EMAIL`), que só existe no banco de staging.
  *  - Staging fica atrás da Vercel Deployment Protection (SSO), então nem a rota
@@ -26,7 +37,7 @@ import { STAGING_MODE } from "@/lib/env/staging";
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
-  if (!STAGING_MODE) {
+  if (!QA_LOGIN_ENABLED) {
     return new NextResponse("Not found", { status: 404 });
   }
 
