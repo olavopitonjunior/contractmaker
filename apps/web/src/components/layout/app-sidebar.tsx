@@ -161,6 +161,11 @@ const NAV: NavEntry[] = [
     icon: BarChart3,
     items: [
       {
+        title: "Pipeline",
+        url: "/relatorios/pipeline",
+        requires: [FEATURE.VENDAS_PIPELINE, FEATURE.LOCACAO_PIPELINE],
+      },
+      {
         title: "Origem dos negócios",
         url: "/relatorios/funil",
         requires: [FEATURE.VENDAS_PIPELINE, FEATURE.LOCACAO_PIPELINE],

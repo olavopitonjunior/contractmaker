@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
-import { BellRing, Bot, BookOpen, Palette, Lightbulb, ShieldCheck, Sparkles, KeyRound, Users, UserCog, UsersRound, Split, FileSignature, Wallet, ListChecks, UserRound, Receipt, FileText, Rocket, type LucideIcon } from "lucide-react";
+import { BellRing, Bot, BookOpen, Palette, Lightbulb, ShieldCheck, Sparkles, KeyRound, Users, UserCog, UsersRound, Split, FileSignature, Wallet, ListChecks, UserRound, Receipt, FileText, Rocket, Timer, type LucideIcon } from "lucide-react";
 
 type SettingsLink = { href: string; label: string; icon: LucideIcon };
 const SETTINGS_GROUPS: { title: string; items: SettingsLink[] }[] = [
@@ -25,6 +25,7 @@ const SETTINGS_GROUPS: { title: string; items: SettingsLink[] }[] = [
       { href: "/settings/document-styles", label: "Estilos de documento", icon: Palette },
       { href: "/settings/formulario", label: "Formulário", icon: ListChecks },
       { href: "/settings/notificacoes", label: "Notificações do processo", icon: BellRing },
+      { href: "/settings/sla", label: "SLA do pipeline", icon: Timer },
       { href: "/clauses/proposals", label: "Propostas de cláusulas", icon: Lightbulb },
     ],
   },

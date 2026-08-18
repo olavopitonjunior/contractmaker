@@ -15,6 +15,8 @@ interface KanbanColumnProps {
   name: string;
   color: string;
   deals: DealCard[];
+  /** Total no server (pós-filtro) — badge honesto com o cap 200/stage. */
+  total?: number;
   isLost?: boolean;
   config?: KanbanCardConfig;
   /** Instante do render do server — ver KanbanBoard.nowMs. Obrigatório. */
@@ -28,6 +30,7 @@ export function KanbanColumn({
   name,
   color,
   deals,
+  total,
   isLost,
   config,
   nowMs,
@@ -60,7 +63,7 @@ export function KanbanColumn({
               {name}
             </h3>
             <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-foreground/10 px-1.5 text-[11px] font-medium tabular-nums">
-              {deals.length}
+              {total ?? deals.length}
             </span>
           </div>
         </div>
@@ -82,6 +85,12 @@ export function KanbanColumn({
             nowMs={nowMs}
           />
         ))}
+
+        {total !== undefined && total > deals.length && (
+          <p className="px-1 pb-1 text-center text-[10px] text-muted-foreground">
+            Mostrando {deals.length} de {total} — use os filtros pra ver o resto
+          </p>
+        )}
 
         {deals.length === 0 && (
           <div className="flex flex-col items-center justify-center py-8 text-center">
