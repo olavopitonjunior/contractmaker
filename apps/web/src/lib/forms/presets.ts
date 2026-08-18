@@ -240,10 +240,12 @@ export function resolveAllRequiredFields(
 }
 
 // ===================================================================
-// LOCAÇÃO — presets por step do wizard de locação (6 etapas,
+// LOCAÇÃO — presets por step do wizard de locação (7 etapas,
 // LOCACAO_STEP_LABELS): 0 Documentos, 1 Locador(es), 2 Locatário(s),
-// 3 Imóvel, 4 Aluguel e Reajuste, 5 Garantia. A antiga etapa 6
-// (Confirmação) saiu em 2026-07-30 — ver LOCACAO_STEP_LABELS.
+// 3 Imóvel, 4 Aluguel e Reajuste, 5 Garantia, 6 Comissão (2026-08).
+// A antiga etapa de Confirmação saiu em 2026-07-30. As tabelas abaixo têm 6
+// entradas — o índice 6 (Comissão) cai no `?? []` de resolveRequiredFields,
+// de propósito: comissão nunca é obrigatória pro cliente.
 //
 // Paths batem com `dadosLocacaoSchema` (lib/forms/validation-locacao.ts) —
 // `imovel`/`aluguel`/`garantia` são objetos SINGULARES aqui (em venda são
@@ -629,6 +631,9 @@ const LOCACAO_ALUGUEL_FIELDS = [
   "valor", "encargos", "dia_vencimento", "indice_reajuste", "vigencia_inicio",
   "vigencia_meses", "taxa_admin_percent", "meio_pagamento", "iptu_mensal",
   "condominio_mensal", "outros_encargos",
+  // Administração/despesas no form público (2026-08).
+  "adm_imobiliaria", "encargos_repasse", "contas_consumo_individualizadas",
+  "contas_no_condominio",
 ] as const;
 
 const LOCACAO_GARANTIA_FIELDS = [

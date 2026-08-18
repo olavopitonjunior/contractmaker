@@ -345,11 +345,13 @@ describe("mapExtractedToLocacaoForm — categoria fora do catálogo", () => {
 });
 
 describe("labels do wizard de locação", () => {
-  it("etapa 0 é Documentos nas duas finalidades (6 etapas)", () => {
+  it("etapa 0 é Documentos nas duas finalidades (7 etapas)", () => {
     expect(LOCACAO_STEP_LABELS[0]).toBe("Documentos");
     expect(LOCACAO_COMERCIAL_STEP_LABELS[0]).toBe("Documentos");
-    expect(LOCACAO_STEP_LABELS).toHaveLength(6);
-    expect(LOCACAO_COMERCIAL_STEP_LABELS).toHaveLength(6);
+    // 7ª etapa (Comissão) entrou em 2026-08 — exclusiva do token principal.
+    expect(LOCACAO_STEP_LABELS).toHaveLength(7);
+    expect(LOCACAO_COMERCIAL_STEP_LABELS).toHaveLength(7);
+    expect(LOCACAO_STEP_LABELS[6]).toBe("Comissão");
     // Guard do index-shift do wizard: partes em 1-2, imóvel em 3, aluguel em 4.
     expect(LOCACAO_STEP_LABELS[1]).toBe("Locador(es)");
     expect(LOCACAO_STEP_LABELS[2]).toBe("Locatário(s)");

@@ -342,8 +342,9 @@ export async function PATCH(
       waitUntil(matchDealGroup(deal.id).catch(() => {}));
     }
 
-    // Auto-cadastro de corretores (paridade com vendas): no-op quando o form
-    // de locação não tem comissao.comissionados. Depois da geração do contrato
+    // Auto-cadastro de corretores (paridade com vendas): o helper varre tanto
+    // comissao.comissionados (venda) quanto comissao.angariadores — que desde
+    // 2026-08 vêm também da etapa Comissão do form público. Depois da geração
     // de propósito — o helper reescreve o dataJson do form. Em seguida
     // (encadeado), a notificação de form_completed: sino (mesmo type+batchId=
     // form.id do sino legado) + fan-out pros corretores.

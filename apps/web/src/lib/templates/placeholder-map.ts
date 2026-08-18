@@ -107,6 +107,14 @@ export function buildLocacaoPlaceholderMap(
     foro_texto: str(config.foro_texto) || "localização do imóvel",
     data_local_assinatura: dataLocalAssinatura(enriched),
     garantia_provider: str(garantia.provider),
+    // Administração/despesas do form (2026-08) — textos prontos do enrich; a
+    // engine google_docs é flat, então as condicionais viram string vazia.
+    encargos_repasse_texto: str(config.encargos_repasse_texto),
+    contas_no_condominio_texto: str(config.contas_no_condominio_texto),
+    taxa_admin_percent:
+      config.taxa_admin_percent != null
+        ? `${config.taxa_admin_percent}% (${hbsExpr("numeroExtenso config.taxa_admin_percent", enriched)} por cento)`
+        : "",
   };
 
   return map;

@@ -114,4 +114,32 @@ export const SUPPORT_FAQ: SupportFaq[] = [
       "No módulo Locação, o assistente responde perguntas como 'como está minha inadimplência este mês?' e 'quem são os maiores devedores?'. Nas cobranças você dispara a régua de lembretes por contrato.",
     tags: ["locacao"],
   },
+  {
+    slug: "form-locacao-administracao",
+    title: "Como informo administração, taxa e despesas no formulário de locação?",
+    content:
+      "Na etapa 'Aluguel e Reajuste' do formulário público há o bloco 'Despesas e administração': responda se a locação terá administração pela imobiliária (Sim/Não), a taxa de administração (%) e se a imobiliária paga os encargos e retém no repasse ou repassa integral no boleto do locatário. Quando há condomínio, informe também se as contas de consumo (água, luz, gás) são individualizadas ou somam no boleto do condomínio. Essas respostas mudam as cláusulas 4 e 9 do contrato gerado. Respondendo 'Não' para administração, o contrato não nomeia a imobiliária como administradora.",
+    tags: ["locacao"],
+  },
+  {
+    slug: "form-locacao-clausula-rescisoria",
+    title: "Posso gerar um contrato de locação sem cláusula rescisória?",
+    content:
+      "Sim. Na etapa 'Garantia e Observações' do formulário há o card 'Cláusula rescisória': escolhendo 'Não', o contrato sai sem a cláusula de multa por rescisão antecipada; escolhendo 'Sim', você define o número de aluguéis da multa (padrão 3).",
+    tags: ["locacao"],
+  },
+  {
+    slug: "form-locacao-comissao",
+    title: "Como informo corretores e comissão na locação?",
+    content:
+      "A etapa 'Comissão' do formulário de locação (visível só no link principal, não nos links das partes) funciona como em vendas: informe a taxa de locação e adicione corretores/angariadores. Use 'Selecionar cadastrado' para reaproveitar um corretor já cadastrado (sem duplicar), ou os botões 'Novo corretor (PF)' / 'Nova imobiliária (PJ)'. Membros da imobiliária podem preencher os dados bancários (PIX/conta) na hora ou clicar em 'Pedir dados ao corretor' — ele recebe por e-mail um link seguro para completar o próprio cadastro.",
+    tags: ["locacao"],
+  },
+  {
+    slug: "vistoria-laudo-externo",
+    title: "Fiz a vistoria fora do sistema — como anexo o laudo pronto?",
+    content:
+      "Na vistoria (Locação → Vistorias), use o botão 'Anexar laudo pronto' e suba o PDF (até 20MB). A vistoria vai direto para 'Laudo gerado' e pode ser enviada para assinatura — inclusive junto com o contrato de locação, marcando 'Anexar laudo de vistoria' no envio do envelope (um envelope só, sem custo extra por documento).",
+    tags: ["locacao"],
+  },
 ];

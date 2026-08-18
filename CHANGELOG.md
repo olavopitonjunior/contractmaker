@@ -4,6 +4,16 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-18 - Form de locação: administração, despesas, cláusula rescisória e comissão
+
+### Adicionado
+
+- **Administração e despesas na etapa 4 do form público de locação** (`aluguel.*` em `validation-locacao.ts`, UI no `AluguelStep`): "A locação terá administração pela imobiliária?" (Sim/Não); com "Sim", como os encargos transitam (`encargos_repasse`: paga-e-retém no repasse ou repasse integral no boleto) e a taxa de administração (%); com condomínio, se as contas de consumo são individualizadas ou quais somam no boleto do condomínio (`contas_no_condominio`: água/luz/gás). O finalize exige `encargos_repasse` quando adm=sim e a lista quando não individualizadas. `enrichLocacaoData` materializa `config.*` e — decisão nova — **"Não" explícito impede a nomeação da administradora** no contrato de locação (cláusulas 4.1/9.1.2 caem no fallback direto ao locador); o instrumento de administração re-injeta por conta própria. Templates v3 (residencial+comercial): 9.1.2 ramificada por `encargos_repasse`, 9.3 por individualização (concessionárias ENEL/SABESP/COMGÁS hardcoded viraram texto genérico). Espelho no negócio: `create-lease-contract` já lia `aluguel.taxa_admin_percent` como fallback.
+- **Cláusula rescisória opcional** (`config.clausula_rescisoria`, default true; card na etapa Garantia): "Não" omite a cláusula 7.2 (multa por rescisão antecipada) nos dois templates v3 — a 7.1 (multa por infração) permanece, pois 5.4/6.7 a referenciam. Forms antigos inalterados (default no enrich).
+- **Etapa "Comissão" no form público de locação** (nova etapa 6, token principal apenas — subtokens não a veem): paridade com venda usando `comissao.taxa_locacao_percent` + `comissao.angariadores[]` já existentes. Lookup "Selecionar cadastrado" reusa `GET/POST /api/forms/[token]/commissioners` (a rota resolve `SalesForm.token` e serve as duas esteiras — sem rota gêmea), com anti-duplicação (`findCommissionerMatch`) e autopreenchimento; auto-cadastro no finalize já cobria `angariadores`.
+- **`CadastroRecebimento` compartilhado** (`components/forms/steps/CadastroRecebimento.tsx`, extraído do `ComissaoConfigStep` de venda): título de seção visível e botão outline "Preencher dados bancários" (era ghost text-xs escondido); em cadastro já vinculado, membro ganha **"Pedir dados ao corretor"** — reusa o magic link de completion (`/api/financeiro/split-recipients/[id]/request-completion`), o corretor preenche PIX/banco num link próprio por e-mail. Regra mantida: anônimo nunca envia dado bancário.
+- **Propagação:** semântica dos campos novos no prompt do Analista de locação (`prompts-locacao.ts` regra 9), description de `fill_form` no MCP do Newton, 4 FAQs novas de locação no seed de suporte (`seed-faq.ts` — rodar `seed-support-kb.ts --apply` ou o botão em /admin/support-ai), `docs/locacao/spec.md` §4.1. **Deploy exige `sync-templates.ts --apply`** (v3 mudou) e recriação do container MCP na VPS.
+
 ## [Unreleased] - 2026-08-18 - Laudo de vistoria externo + seed de pesquisa padrão
 
 ### Adicionado
