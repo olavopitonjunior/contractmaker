@@ -260,6 +260,30 @@ Tools MCP: `list_proposals`, `get_proposal`, `get_proposal_status`,
 `create_proposal`, `send_proposal`, `send_proposal_vendedor`, `convert_proposal`,
 `cancel_proposal`, `remind_proposal`, `assign_proposal`, `sync_proposal`.
 
+#### Contrato de `POST /api/proposals` (2026-08-04)
+
+Fonte da verdade: `apps/web/src/lib/proposals/create-schema.ts`, importado pela
+rota **e** comparado com o `inputSchema` da tool pelo teste de paridade
+`lib/proposals/__tests__/mcp-tool-parity.test.ts`. Alterou um lado, o teste
+quebra — foi assim que a divergência abaixo passou meses despercebida, com o
+Newton tomando 400 em toda tentativa de criar proposta.
+
+Cada item de `signers` exige **`role`** (`proponente | vendedor | conjuge |
+testemunha`) além de `name`. O documento é **`cpf`** — não `documentation`, que
+o Zod descarta em silêncio. `notifyChannel` (`email | whatsapp | sms`) define
+por onde a parte é avisada; sem ele todo signatário nasce `email` e o Aceite por
+WhatsApp não sai.
+
+`validUntil` é ISO-8601 **em UTC** (terminando em `Z`); offset (`-03:00`) ou data
+pura reprovam. **Omitir é o caminho normal**: sem prazo informado a proposta
+recebe 7 dias (`DEFAULT_PROPOSAL_VALIDITY_DAYS`), até o fim do 7º dia em horário
+de Brasília. Não peça a validade ao usuário.
+
+O 400 devolve `error` (string crua do Zod, consumida pela UI) **e** `issues[]`
+estruturado. Consumidor de agente traduz `issues` para linguagem humana —
+`apps/mcp-server/src/api-error.ts` — e **nunca** repassa o corpo cru: o texto
+chega no WhatsApp de um corretor.
+
 ### 4.8 Twins de pipeline + certidões por job (2026-07-24)
 
 Twins Bearer das rotas session-only de `/api/pipeline/deals/*` (padrão do

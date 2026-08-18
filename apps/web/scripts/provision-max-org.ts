@@ -31,7 +31,7 @@ import {
   provisionMaxForOrg,
   deprovisionMaxForOrg,
   serviceUserEmail,
-  MAX_SCOPES_FASE2,
+  MAX_SCOPES,
 } from "../src/lib/max/provisioning";
 import { prisma } from "../src/lib/db/prisma";
 
@@ -70,7 +70,7 @@ async function main() {
     return;
   }
 
-  console.log(`Escopos:  ${MAX_SCOPES_FASE2.join(", ")}`);
+  console.log(`Escopos:  ${MAX_SCOPES.join(", ")}`);
 
   if (!has("apply")) {
     console.log(

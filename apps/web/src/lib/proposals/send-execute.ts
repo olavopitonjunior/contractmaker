@@ -16,6 +16,7 @@ import type { ClickSignCreds } from "@/lib/clicksign/account";
 import { getMonthlySpendCents } from "@/lib/clicksign/executor";
 import { getMonthlyBudgetCents } from "@/lib/clicksign/costs";
 import { ClicksignError } from "@/lib/clicksign/client";
+import { normalizeSigningGroups } from "@/lib/clicksign/signing-groups";
 import { STAGING_MODE } from "@/lib/env/staging";
 import { buildAcceptanceMessage } from "./acceptance-proof";
 import { renderProposalVia } from "./render";
@@ -90,8 +91,22 @@ export type SendResult =
 export function blockToResponse(block: PrepareResult): { status: number; body: unknown } {
   if ("ok" in block) return { status: 500, body: { error: "estado inesperado" } };
   switch (block.blocked) {
-    case "preflight":
-      return { status: 422, body: { error: "preflight", issues: block.issues } };
+    case "preflight": {
+      // `error: "preflight"` sozinho é um código, não uma explicação — quem
+      // recebe só isso inventa a causa. `message` diz DE QUEM é cada pendência.
+      const nome = (i: { signerIndex: number }) =>
+        block.signers?.[i.signerIndex]?.name?.trim() || `Signatário ${i.signerIndex + 1}`;
+      const message = block.issues
+        .map((i) => {
+          const texto = `${i.reason}${i.hint ? ` (${i.hint})` : ""}`;
+          // Pendência do documento não pertence a signatário nenhum — prefixar
+          // com "Signatário 0" mandaria o leitor procurar a pessoa errada, que
+          // é exatamente o erro que este bloco existe pra não repetir.
+          return i.signerIndex < 0 ? texto : `${nome(i)}: ${texto}`;
+        })
+        .join(" ");
+      return { status: 422, body: { error: "preflight", message, issues: block.issues } };
+    }
     case "budget":
       return { status: 402, body: { error: "budget", ...block } };
     case "not_configured":
@@ -160,14 +175,31 @@ export async function executeProposalSend(proposalId: string): Promise<SendResul
   }
 }
 
-/** Devolve o status pra "falha_envio" quando o claim foi feito mas o envio não completou. */
-async function releaseClaim(proposalId: string): Promise<void> {
+/**
+ * Devolve o status pra "falha_envio" quando o claim foi feito mas o envio não
+ * completou. Exportado pro cron reconcile recuperar claims ÓRFÃOS: função
+ * morta por timeout depois do claim nunca chega ao catch daqui, e a proposta
+ * fica eterna em "enviada" sem envelope — /send responde "já foi enviada" e
+ * /remind "ninguém pendente".
+ */
+export async function releaseClaim(proposalId: string): Promise<void> {
   await prisma.proposal
     .updateMany({
       where: { id: proposalId, status: "enviada" },
       data: { status: "falha_envio" },
     })
     .catch(() => {});
+}
+
+/**
+ * Recupera um claim órfão (cron reconcile): libera pro estado reenviável e
+ * registra o evento pro operador entender por que a proposta "voltou".
+ */
+export async function recoverOrphanClaim(proposalId: string): Promise<void> {
+  await releaseClaim(proposalId);
+  await logProposalEvent(proposalId, "send_claim_recovered", {
+    reason: "envio interrompido (timeout?) — sem envelope ativo nem aceite; liberado pra reenvio",
+  });
 }
 
 async function runSend(
@@ -403,6 +435,16 @@ async function runClickSignEnvelope(p: {
     include: { signers: true },
   });
 
+  // Normaliza os grupos ENVIADOS à ClickSign pra 1..n contíguos POR ENVELOPE.
+  // O DB mantém a semântica de negócio (1=proponente, 2=vendedor/testemunha),
+  // mas a ClickSign só notifica o grupo N depois que o N-1 assina — um envelope
+  // só com grupo 2 (a via "reduzida" do vendedor) não tem grupo 1 pra destravar
+  // e NINGUÉM é notificado na ativação (só um reenvio manual, que ignora o
+  // gate, alcançava o signatário). Mesmo padrão do executor de contratos.
+  const clicksignGroupFor = normalizeSigningGroups(
+    envelope.signers.map((s) => s.signingGroup)
+  );
+
   let clicksignId: string | null = null;
   try {
     const envResp = await createEnvelope(
@@ -436,7 +478,7 @@ async function runClickSignEnvelope(p: {
           phoneNumber: toClicksignPhone(local.phone),
           hasDocumentation: Boolean(local.documentation),
           refusable: p.settings.refusable,
-          group: local.signingGroup ?? undefined,
+          group: clicksignGroupFor(local.signingGroup),
           notifyChannel: (local.notifyChannel as "email" | "whatsapp" | "sms") ?? "email",
         },
         p.creds

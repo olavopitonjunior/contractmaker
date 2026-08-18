@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import {
@@ -15,41 +14,17 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { generateProposalToken } from "@/lib/proposals/token";
 import { computeDedupeKey } from "@/lib/proposals/signer-dedupe";
 import { sanitizeHiddenPaths } from "@/lib/proposals/hidden-fields";
+import {
+  createSchema,
+  kindForSchema,
+  defaultValidUntil,
+} from "@/lib/proposals/create-schema";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
 
-const SCHEMA_TYPES = [
-  "compra_venda_v1",
-  "locacao_residencial_v1",
-  "locacao_comercial_v1",
-] as const;
-
-function kindForSchema(schemaType: string): "venda" | "locacao" {
-  return schemaType === "compra_venda_v1" ? "venda" : "locacao";
-}
-
-const signerSchema = z.object({
-  role: z.enum(["proponente", "vendedor", "conjuge", "testemunha"]),
-  name: z.string().min(1),
-  email: z.string().optional().nullable(),
-  cpf: z.string().optional().nullable(),
-  phone: z.string().optional().nullable(),
-  notifyChannel: z.enum(["email", "whatsapp", "sms"]).optional(),
-  signingGroup: z.number().int().optional(),
-});
-
-const createSchema = z.object({
-  title: z.string().min(1),
-  schemaType: z.enum(SCHEMA_TYPES),
-  dataJson: z.record(z.unknown()).default({}),
-  propertyId: z.string().optional(),
-  leaseClientId: z.string().optional(),
-  tenantId: z.string().optional(),
-  validUntil: z.string().datetime().optional(),
-  comissaoIncluida: z.boolean().optional(),
-  hiddenPaths: z.array(z.string()).optional(),
-  signers: z.array(signerSchema).optional(),
-});
+// Schema e default de validade vivem em lib/proposals/create-schema.ts: são a
+// fonte da verdade compartilhada com a tool MCP `create_proposal`, e o teste de
+// paridade compara os dois (ver o cabeçalho de lá).
 
 // Gateia pela sub-função (vendas.propostas / locacao.propostas), não só pelo
 // módulo — o toggle "Propostas" precisa segurar a criação no servidor, não só
@@ -95,7 +70,14 @@ export async function POST(req: NextRequest) {
 
   const parsed = createSchema.safeParse(await req.json());
   if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.message }, { status: 400 });
+    // `error` (string crua do Zod) preservado — a UI lê esse campo. `issues` é
+    // aditivo, pra quem consome via API traduzir a falha em linguagem humana em
+    // vez de repassar JSON: é o que a tool MCP faz antes de responder no
+    // WhatsApp (apps/mcp-server/src/api-error.ts).
+    return NextResponse.json(
+      { error: parsed.error.message, issues: parsed.error.issues },
+      { status: 400 }
+    );
   }
   const input = parsed.data;
 
@@ -106,6 +88,38 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: e.code }, { status: e.status });
     }
     throw e;
+  }
+
+  // Responsável na criação — mesmas regras do PATCH /assignee: exige
+  // PROPOSAL_ASSIGN, um só dos dois campos, e usuário-responsável precisa ser
+  // membro da org.
+  if (input.responsibleUserId || input.responsibleName) {
+    if (!can(eff, PERMISSION.PROPOSAL_ASSIGN)) {
+      return NextResponse.json(
+        { error: "Sem permissão para atribuir responsável." },
+        { status: 403 }
+      );
+    }
+    if (input.responsibleUserId && input.responsibleName) {
+      return NextResponse.json(
+        { error: "Informe apenas um: responsibleUserId ou responsibleName." },
+        { status: 400 }
+      );
+    }
+    if (input.responsibleUserId) {
+      const member = await prisma.orgMembership.findUnique({
+        where: {
+          userId_orgId: { userId: input.responsibleUserId, orgId: auth.org.id },
+        },
+        select: { userId: true },
+      });
+      if (!member) {
+        return NextResponse.json(
+          { error: "Usuário não é membro desta organização." },
+          { status: 400 }
+        );
+      }
+    }
   }
 
   let result;
@@ -132,10 +146,16 @@ export async function POST(req: NextRequest) {
           hiddenPaths: input.hiddenPaths
             ? sanitizeHiddenPaths(input.schemaType, input.hiddenPaths)
             : [],
-          validUntil: input.validUntil ? new Date(input.validUntil) : null,
+          // Sem prazo informado → 7 dias. Nunca `null`: proposta sem validade
+          // não expira em canto nenhum (ver create-schema.ts).
+          validUntil: input.validUntil
+            ? new Date(input.validUntil)
+            : defaultValidUntil(),
           propertyId: input.propertyId ?? null,
           leaseClientId: input.leaseClientId ?? null,
           tenantId: input.tenantId ?? null,
+          responsibleUserId: input.responsibleUserId ?? null,
+          responsibleName: input.responsibleName ?? null,
           signers: input.signers?.length
             ? {
                 create: input.signers.map((s) => ({

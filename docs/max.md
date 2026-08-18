@@ -155,21 +155,64 @@ produto: **notificação de sistema por e-mail passa a sair de madrugada**.
 | `POST /api/proposals` e afins | `proposals:rw` | 3 |
 
 **Um service-user + um token por org RE/MAX** — obrigatório: o Bearer deriva a
-org do dono do token (não existe header de org). Escopos por fase: F1
-`agents:r, agents:rw, metrics:r`; F3 soma `documents:rw, locacao:rw,
-proposals:rw, users:delegate`.
+org do dono do token (não existe header de org). Escopos: F1
+`agents:r, agents:rw, metrics:r`; F3 soma `documents:rw` (form de venda) e
+`locacao:rw` (form de locação) — ver `MAX_SCOPES` em `lib/max/provisioning.ts`.
 
-**Escrita sempre com `X-Act-As-User`** (F3): sem isso todo deal criado por
-conversa nasceria no nome do service-user, invisível nos filtros "meus
-negócios", e o audit registraria o bot em vez do humano. Exige
-`DELEGATION_ENABLED=true`. Ressalva: o helper `ensureLocacaoApiAccess` **ignora**
-`X-Act-As-User` por desenho — no caminho de locação o ator é sempre o dono do
-token.
+**`proposals:rw` NÃO entra**, mesmo com o Max criando rascunho de proposta: o
+`POST /api/proposals` é gateado por `PERMISSION.PROPOSAL_CREATE` além do escopo,
+e a sub-função `vendas.propostas` nasce desligada. Quando a proposta por
+conversa for ligada de verdade, o escopo entra junto do reprovision.
+
+**O escopo não basta — o PAPEL também conta.** `locacao:rw` sozinho não abre
+nada: `ensureLocacaoApiAccess` exige `PERMISSION.LEASE_CREATE`, e a membership
+do Max era `viewer`, que não tem. A membership passou a apontar para um
+`CustomRole` por org (`upsertMaxRole`, nome `Max (agente)`) com exatamente
+quatro permissões: `lease.view`, `lease.create`, `property.view`,
+`deal.view_assigned_only`.
+
+Promover a `gestor_locacao` teria sido mais curto e errado: aquele preset dá
+CRUD de imóvel, geração de aluguel, criação de despesa e **rescisão** de
+contrato — poder guardado para o dia em que alguém achasse um jeito de usá-lo. O
+sync reescreve o mapa do papel toda vez, então ampliar pela tela de papéis é
+revertido no próximo reprovision.
+
+**Escopo é congelado na emissão do token.** Mudar `MAX_SCOPES` não altera token
+nenhum já emitido: é preciso reemitir por org, via
+`POST /api/admin/orgs/[orgId]/max/reprovision`. Não desligar e religar a feature
+no painel — aquele caminho passa por revogação e deixa uma janela com o tenant
+sem credencial.
+
+**A escrita NÃO usa `X-Act-As-User`.** O plano original previa delegar para o
+humano; a Fase 3 não faz isso, por dois motivos apurados na implementação:
+
+1. `requireApiAuth` — o helper de `POST /api/forms` e de todo `/api/agents/*` —
+   **ignora** o header. A delegação só existe no `requireAuth` legado
+   (`lib/auth/context.ts`), e `ensureLocacaoApiAccess` a ignora por desenho.
+   Ligar `users:delegate` no token do Max não teria efeito nenhum hoje.
+2. O custo que a delegação evitaria é menor do que este documento afirmava. A
+   versão anterior dizia que o deal ficaria "invisível nos filtros «meus
+   negócios»" — **esse filtro não existe no produto**: o kanban lista por
+   pipeline da org, sem recorte por `Deal.userId`, e o `KanbanCard` nem exibe
+   responsável. O que se perde é atribuição no `Deal.userId` e no audit, não
+   visibilidade.
+
+O corretor entra pelo `corretorIds` do `POST /api/forms`, que semeia
+`dataJson.comissao.comissionados` e `notificationsJson.brokerIds` — ou seja,
+comissão e notificação chegam a ele. Se um dia a atribuição do `Deal.userId`
+passar a doer, o caminho é portar a delegação para o `requireApiAuth`, não ligar
+o escopo.
 
 **Só usuário identificado escreve.** Corretor comissionado (`SplitRecipient`, não
 é `User`) e cliente final não acionam criação de nada: recebem notificação e, se
 responderem, ganham Q&A de processo com o contexto semeado pelo `/notify` —
 nunca dados de negócio.
+
+Com o deal nascendo do service-user, a regra deixou de ser uma restrição técnica
+e passou a ser uma escolha: um `BrokerCandidate` não tem `userId`, então o form
+que ele pedisse nasceria sem dono E sem comissionado — órfão dos dois lados, o
+que é pior que não criar. Quando o Max recusa, ele diz de quem é o caminho, não
+some com o assunto.
 
 ## 6. Envs (lado plataforma)
 

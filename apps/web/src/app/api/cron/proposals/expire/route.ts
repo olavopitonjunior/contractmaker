@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db/prisma";
 import { requireCronAuth } from "@/lib/security/cron-auth";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
 import { advanceProposalStatus } from "@/lib/proposals/status";
+import { notifyProposalMilestone } from "@/lib/proposals/notify-proposal";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,14 +30,25 @@ export async function GET(req: NextRequest) {
       validUntil: { lt: now },
       status: { in: ["enviada", "entregue", "visualizada"] },
     },
-    select: { id: true },
+    select: { id: true, orgId: true, userId: true },
     take: 300,
   });
 
   let expired = 0;
   for (const p of props) {
     const r = await advanceProposalStatus(p.id, "expirada", { expiredAt: now });
-    if (r.moved) expired++;
+    if (!r.moved) continue;
+    expired++;
+    // Sem isto a proposta morria em silêncio: o status virava "expirada" às
+    // 06:30 e o corretor só descobria abrindo a lista. Os caminhos de webhook
+    // já tocavam o mesmo sino; só o cron não tocava. `notifyProposalMilestone`
+    // nunca lança — não precisa de try/catch e não derruba o lote.
+    await notifyProposalMilestone({
+      proposalId: p.id,
+      orgId: p.orgId,
+      userId: p.userId,
+      kind: "expired",
+    });
   }
   return NextResponse.json({ ok: true, checked: props.length, expired });
 }

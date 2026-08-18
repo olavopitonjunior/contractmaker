@@ -1,9 +1,10 @@
-import { redirect } from "next/navigation";
+import { prisma } from "@/lib/db/prisma";
 import { requireAnyFeaturePage } from "@/lib/modules/page-guard";
 import { FEATURE } from "@/lib/modules/catalog";
 import { getEffectivePermissions, can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { ProposalForm } from "@/components/proposals/ProposalForm";
+import { ProposalsNoAccess } from "@/components/proposals/ProposalsNoAccess";
 import { emptyProposalForm, PROPOSAL_SCHEMA_OPTIONS } from "@/lib/proposals/form-data";
 
 export const dynamic = "force-dynamic";
@@ -35,15 +36,39 @@ export default async function NovaPropostaPage({
     requested === "locacao" ? (locacaoOn ? "locacao" : "venda") : vendasOn ? "venda" : "locacao";
 
   const eff = await getEffectivePermissions(userId, orgId);
-  if (!eff || !can(eff, PERMISSION.PROPOSAL_CREATE)) redirect("/pipeline/propostas");
+  if (!eff || !can(eff, PERMISSION.PROPOSAL_CREATE)) {
+    return (
+      <ProposalsNoAccess
+        title="Você não tem permissão para criar propostas"
+        description="Seu papel atual não inclui a criação de propostas. Peça a um administrador da organização para ajustar seu papel em Configurações → Equipe."
+      />
+    );
+  }
 
   const schemaOptions = PROPOSAL_SCHEMA_OPTIONS[tipo];
+
+  // Admin/gestor cria já atribuindo (select "Responsável" no form). Sem
+  // PROPOSAL_ASSIGN o select nem aparece e a lista não é carregada.
+  const canAssign = can(eff, PERMISSION.PROPOSAL_ASSIGN);
+  const members = canAssign
+    ? (
+        await prisma.orgMembership.findMany({
+          where: { orgId },
+          select: { user: { select: { id: true, name: true } } },
+          orderBy: { user: { name: "asc" } },
+        })
+      )
+        .map((m) => ({ id: m.user.id, name: m.user.name ?? "Sem nome" }))
+        .filter((m) => m.id)
+    : [];
 
   return (
     <ProposalForm
       mode="create"
       initial={emptyProposalForm(tipo, schemaOptions[0].value)}
       schemaOptions={schemaOptions}
+      members={members}
+      canAssign={canAssign}
     />
   );
 }

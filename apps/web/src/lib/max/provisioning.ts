@@ -4,6 +4,7 @@ import {
   revokeApiToken,
   type ApiTokenScope,
 } from "@/lib/auth/api-token";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { pushOrgToMax, deactivateOrgInMax } from "@/lib/max/push-org";
 import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
 import { FEATURE } from "@/lib/modules/catalog";
@@ -30,20 +31,93 @@ import { FEATURE } from "@/lib/modules/catalog";
  */
 
 /**
- * Fase 2: ler persona, consultar a base e reportar custo. Nada de escrita.
+ * Ler persona, consultar a base, reportar custo — e criar formulário de venda.
  *
- * `users:delegate` fica de fora **de propósito, e não por enquanto**: enquanto
- * `X-Act-As-User` aceitar delegar para o `owner` (`context.ts:231-239` valida só
- * "o alvo é membro da org do dono do token", sem comparar roles), esse escopo
- * faz o token do bot valer o poder do dono do tenant. Aí tanto "role mínimo"
- * quanto "N tokens contêm o estrago" viram ficção. Travar o alvo da delegação é
- * pré-requisito da Fase 3.
+ * `documents:rw` (form de venda) e `locacao:rw` (form de locação) entraram na
+ * Fase 3, quando o Max passou a criar formulário por conversa. São os escopos
+ * que `POST /api/forms` e `POST /api/locacao/forms` exigem; note que os dois são
+ * mais largos que o uso, porque o catálogo de escopos não tem granularidade
+ * menor. O que contém o estrago é o resto: um token por org, um `CustomRole`
+ * mínimo na membership (ver `upsertMaxRole` — `locacao:rw` sem `LEASE_CREATE`
+ * não abre nada), e a confirmação humana do lado do Max — o modelo não tem
+ * ferramenta que executa, só que PROPÕE.
+ *
+ * `users:delegate` segue de fora, mas o motivo MUDOU. Era pré-requisito: com
+ * `X-Act-As-User` aceitando delegar para o `owner`, o token do bot valia o poder
+ * do dono do tenant. Isso foi resolvido (#249, `lib/security/rbac/delegation.ts`
+ * ligado em `context.ts`). Hoje ele fica de fora porque **não precisamos dele**:
+ * o Deal nasce do usuário de serviço e o corretor entra por `corretorIds`, que o
+ * `/api/forms` já usa para semear comissionados e destinatários de notificação.
+ * Some a isso que `requireApiAuth` — o helper de TODAS as rotas que o Max chama —
+ * ignora `X-Act-As-User`; a delegação só existe no `requireAuth` legado. Ligar o
+ * escopo aqui não teria efeito nenhum, só superfície.
+ *
+ * **Escopo é congelado na emissão.** Mudar esta lista não altera token nenhum já
+ * existente: é preciso reemitir por org, via
+ * `POST /api/admin/orgs/[orgId]/max/reprovision`. Não desligue e religue a
+ * feature no painel — aquele caminho passa por revogação e deixa uma janela com
+ * o tenant sem credencial.
  */
-export const MAX_SCOPES_FASE2: ApiTokenScope[] = [
+export const MAX_SCOPES: ApiTokenScope[] = [
   "agents:r",
   "agents:rw",
   "metrics:r",
+  "documents:rw",
+  "locacao:rw",
 ];
+
+/**
+ * O papel do Max dentro do tenant — exatamente o que ele usa, nada além.
+ *
+ * Antes a membership era `viewer`, o que bastava porque nenhuma rota que o Max
+ * chamava consultava permissão: `POST /api/forms` e `/api/agents/*` só olham
+ * ESCOPO. A locação quebrou essa comodidade — `ensureLocacaoApiAccess` exige
+ * `PERMISSION.LEASE_CREATE`, e `viewer` não tem.
+ *
+ * O caminho óbvio seria promover a `gestor_locacao`. Seria errado: aquele preset
+ * dá CRUD de imóvel, geração de aluguel, criação de despesa e RESCISÃO de
+ * contrato. O Max cria um formulário em branco; o resto seria poder guardado
+ * para o dia em que alguém achasse um jeito de usá-lo.
+ *
+ * Daí um `CustomRole` por org, com um mapa que cabe em dez linhas e que dá para
+ * ler inteiro numa revisão. As leituras estão aqui porque criar um formulário
+ * que o próprio agente não pode consultar depois é meia funcionalidade.
+ */
+async function upsertMaxRole(
+  orgId: string,
+  createdBy: string
+): Promise<{ id: string }> {
+  const permissions = {
+    // Vendas: o `/api/forms` não checa permissão, mas o dia em que checar não
+    // pode ser o dia em que o Max para sem ninguém entender por quê.
+    [PERMISSION.DEAL_VIEW_ASSIGNED_ONLY]: true,
+    // Locação: só a criação. Sem editar, renovar ou rescindir.
+    [PERMISSION.LEASE_VIEW]: true,
+    [PERMISSION.LEASE_CREATE]: true,
+    [PERMISSION.PROPERTY_VIEW]: true,
+  };
+
+  return prisma.customRole.upsert({
+    where: { orgId_name: { orgId, name: MAX_ROLE_NAME } },
+    create: {
+      orgId,
+      name: MAX_ROLE_NAME,
+      description:
+        "Papel do agente Max. Gerado pelo provisionamento — editar à mão " +
+        "é sobrescrito no próximo sync.",
+      permissions,
+      createdBy,
+    },
+    // Reescreve sempre: o mapa é código, não configuração. Se alguém ampliar
+    // pela tela de papéis, o sync devolve ao mínimo — que é o ponto de o papel
+    // existir.
+    update: { permissions },
+    select: { id: true },
+  });
+}
+
+/** Nome do `CustomRole` do Max. Único por org (`@@unique([orgId, name])`). */
+export const MAX_ROLE_NAME = "Max (agente)";
 
 /** Domínio dos usuários de serviço. Não recebe e-mail — é identificador. */
 const SERVICE_EMAIL_DOMAIN = "agents.imobpro.local";
@@ -80,7 +154,7 @@ export async function provisionMaxForOrg(params: {
   scopes?: ApiTokenScope[];
 }): Promise<ProvisionResult> {
   const { orgId } = params;
-  const scopes = params.scopes ?? MAX_SCOPES_FASE2;
+  const scopes = params.scopes ?? MAX_SCOPES;
 
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
@@ -109,13 +183,27 @@ export async function provisionMaxForOrg(params: {
     select: { id: true },
   });
 
+  const papel = await upsertMaxRole(orgId, serviceUser.id);
+
   // `isSystem` marca a membership para que a tela de membros recuse removê-la.
   // No `update` também, e não só no `create`: as memberships provisionadas
   // antes deste campo existir precisam ganhá-lo no primeiro sync.
+  //
+  // O papel entra no `update` pelo mesmo motivo: as memberships criadas como
+  // `viewer` (antes da locação) precisam migrar no primeiro sync, senão o Max
+  // continua sem `LEASE_CREATE` e a criação de formulário de locação dá 403 —
+  // com o token novo já emitido e o escopo já concedido, que é o pior lugar
+  // pra descobrir que falta uma permissão.
   await prisma.orgMembership.upsert({
     where: { userId_orgId: { userId: serviceUser.id, orgId } },
-    create: { userId: serviceUser.id, orgId, role: "viewer", isSystem: true },
-    update: { isSystem: true },
+    create: {
+      userId: serviceUser.id,
+      orgId,
+      role: "custom",
+      customRoleId: papel.id,
+      isSystem: true,
+    },
+    update: { role: "custom", customRoleId: papel.id, isSystem: true },
     select: { id: true },
   });
 

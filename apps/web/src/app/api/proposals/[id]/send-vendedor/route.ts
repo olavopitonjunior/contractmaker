@@ -50,6 +50,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     },
     req,
     idempotencyKey: req.headers.get("x-idempotency-key"),
+    // Mesma razão do /send: pedir o envio já é a autorização, e travar a 2ª via
+    // atrás de aprovação deixaria a proposta parada em `aguardando_vendedor`
+    // esperando um passo que quem pediu não consegue dar pelo WhatsApp.
+    autoApprove: true,
     run: async () => {
       // Resultado ESTRUTURADO: distingue o motivo real em vez de inferir por
       // presença de envelope (que escondia budget/lock atrás de um 422).

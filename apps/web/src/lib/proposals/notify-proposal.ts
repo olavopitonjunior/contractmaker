@@ -14,6 +14,10 @@ import { emitNotification } from "@/lib/notifications/emit";
  * quebraria pra quem não pode ver.
  *
  * Kinds:
+ *   - delivered:      a proposta CHEGOU numa das partes (Aceite: a ClickSign
+ *                     confirma a entrega) — por-signatário, suffix obrigatório
+ *   - signed_proponente: o proponente assinou e a proposta seguiu pro
+ *                     proprietário — o intervalo em que o corretor ficava cego
  *   - completed:      proponente aceitou / todas as vias assinadas → proposta
  *                     completa (o marco que pede ação: converter em negócio)
  *   - accepted_party: um TERCEIRO (proprietário) aceitou o termo dele —
@@ -27,8 +31,15 @@ import { emitNotification } from "@/lib/notifications/emit";
  * Dedupe pela `@@unique([type, batchId])` do Notification:
  * batchId = `proposal:{proposalId}:{kind}[:{suffix}]`. `emitNotification`
  * nunca lança (engole P2002 e erros) — sino nunca quebra webhook/sync.
+ *
+ * O texto chega no WhatsApp do corretor como `${title}: ${body}`
+ * (user-channels-registry.ts) — sem o `linkUrl`. Por isso os marcos de
+ * acompanhamento carregam o caminho da proposta no próprio body: quem pediu a
+ * proposta pelo WhatsApp não tem outra porta de entrada pra ela.
  */
 export type ProposalNotifKind =
+  | "delivered"
+  | "signed_proponente"
   | "completed"
   | "accepted_party"
   | "refused"
@@ -36,6 +47,16 @@ export type ProposalNotifKind =
   | "email_failed";
 
 const TEXT: Record<ProposalNotifKind, { type: string; title: string; body: string }> = {
+  delivered: {
+    type: "proposal_delivered",
+    title: "Proposta entregue",
+    body: "A proposta chegou ao destinatário. Aviso aqui quando ele assinar.",
+  },
+  signed_proponente: {
+    type: "proposal_signed_proponente",
+    title: "Proponente assinou",
+    body: "O proponente assinou. A proposta seguiu para o proprietário assinar.",
+  },
   completed: {
     type: "proposal_completed",
     title: "Proposta aceita",
@@ -63,6 +84,13 @@ const TEXT: Record<ProposalNotifKind, { type: string; title: string; body: strin
   },
 };
 
+/** Marcos de andamento — os que pedem um link clicável no WhatsApp. */
+const TRACKING_KINDS = new Set<ProposalNotifKind>(["delivered", "signed_proponente"]);
+
+function appUrl(): string {
+  return process.env.NEXTAUTH_URL ?? "https://imobpro.ia.br";
+}
+
 const REFUSED_BODY: Record<"proponente" | "vendedor", string> = {
   proponente: "O proponente recusou a proposta.",
   // Copy válida ANTES e DEPOIS da assinatura do proponente (com o alargamento
@@ -87,8 +115,14 @@ export async function notifyProposalMilestone(params: {
 }): Promise<void> {
   const { proposalId, orgId, userId, kind, refusedBy, dedupeSuffix, bodyOverride } = params;
   const t = TEXT[kind];
-  const body =
+  const baseBody =
     bodyOverride ?? (kind === "refused" && refusedBy ? REFUSED_BODY[refusedBy] : t.body);
+  // Marcos de acompanhamento levam o link ABSOLUTO no corpo: quem pediu a
+  // proposta pelo WhatsApp recebe só `${title}: ${body}`, sem o linkUrl do sino,
+  // e não tem outra porta de entrada pra ela.
+  const body = TRACKING_KINDS.has(kind)
+    ? `${baseBody} ${appUrl()}/pipeline/propostas/${proposalId}`
+    : baseBody;
   const batchId = `proposal:${proposalId}:${kind}${dedupeSuffix ? `:${dedupeSuffix}` : ""}`;
 
   // Dono que SAIU da org: o sino escopado iria pra alguém que não vê mais

@@ -22,12 +22,16 @@ export interface ProposalSignerInput {
 }
 
 export interface ReadinessIssue {
+  /** `-1` = pendência do DOCUMENTO, não de um signatário (ver `checkProposalContent`). */
   signerIndex: number;
-  field: "name" | "email" | "cpf" | "phone";
+  field: "name" | "email" | "cpf" | "phone" | "documento";
   reason: string;
   /** Sugestão de correção (ex.: domínio de e-mail provável). */
   hint?: string;
 }
+
+/** Índice sentinela das pendências que não pertencem a nenhum signatário. */
+export const DOC_ISSUE_INDEX = -1;
 
 /**
  * Normaliza telefone BR para E.164 (+55DDDNUMERO).
@@ -122,4 +126,70 @@ export function checkProposalReadiness(
   signers: ProposalSignerInput[]
 ): ReadinessIssue[] {
   return signers.flatMap((s, i) => checkSignerReadiness(s, i));
+}
+
+function primeiroNome(lista: unknown): string {
+  if (!Array.isArray(lista)) return "";
+  const p = lista[0];
+  if (!p || typeof p !== "object") return "";
+  const nome = (p as { nome?: unknown }).nome;
+  return typeof nome === "string" ? nome.trim() : "";
+}
+
+function enderecoDoPrimeiroImovel(lista: unknown): string {
+  if (!Array.isArray(lista)) return "";
+  const im = lista[0];
+  if (!im || typeof im !== "object") return "";
+  const e = (im as { endereco?: unknown }).endereco;
+  return typeof e === "string" ? e.trim() : "";
+}
+
+function numeroPositivo(v: unknown): boolean {
+  return typeof v === "number" && Number.isFinite(v) && v > 0;
+}
+
+/**
+ * O documento tem conteúdo? — preflight do CORPO, não dos signatários.
+ *
+ * Existe porque o template lê caminhos FIXOS (`compradores[].nome`,
+ * `imoveis[].endereco`, `pagamento.valor_total`) enquanto `dataJson` é forma
+ * livre no Zod. Em 2026-08-04 um agente gravou `partes.proponente.nome` e
+ * `imovel.endereco.logradouro`: a API aceitou, o envio não olhou o corpo, e duas
+ * propostas foram para pessoas reais como um PDF sem proponente, sem imóvel e
+ * sem valor. Nada no caminho detectava — este é o detector.
+ *
+ * Fica no ENVIO (e não só na criação) de propósito: vale para qualquer produtor,
+ * inclusive um que ainda não existe, e é o último ponto antes de gastar
+ * ClickSign e falar com um terceiro.
+ */
+export function checkProposalContent(
+  schemaType: string,
+  dataJson: unknown
+): ReadinessIssue[] {
+  const d = (dataJson ?? {}) as Record<string, unknown>;
+  const issues: ReadinessIssue[] = [];
+  const add = (reason: string) =>
+    issues.push({ signerIndex: DOC_ISSUE_INDEX, field: "documento", reason });
+
+  const isVenda = schemaType === "compra_venda_v1";
+  const parte = isVenda ? "compradores" : "locatarios";
+
+  // Frases secas, uma por pendência: a remediação ("refaça com os dados
+  // completos") repetida a cada item vira ruído quando as três faltam juntas —
+  // e é justamente o caso comum. Quem monta a resposta ao usuário compõe.
+  if (!primeiroNome(d[parte])) {
+    add("O documento sairia sem o nome do proponente.");
+  }
+  if (!enderecoDoPrimeiroImovel(d.imoveis)) {
+    add("O documento sairia sem o endereço do imóvel.");
+  }
+
+  const valorOk = isVenda
+    ? numeroPositivo((d.pagamento as Record<string, unknown> | undefined)?.valor_total)
+    : numeroPositivo((d.locacao as Record<string, unknown> | undefined)?.valor_aluguel);
+  if (!valorOk) {
+    add("O documento sairia sem o valor.");
+  }
+
+  return issues;
 }

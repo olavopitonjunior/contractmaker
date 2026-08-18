@@ -13,6 +13,13 @@ import { requireApproval, approvalResponse } from "@/lib/api/intents";
 import { ensureIntentExecutorsRegistered } from "@/lib/api/intent-executors";
 import { executeProposalSend, blockToResponse } from "@/lib/proposals/send-execute";
 
+// Único endpoint de proposta que roda Chromium (PDF) + 2+3N chamadas ClickSign
+// sequenciais. Sem maxDuration, o default da plataforma matava o envio no meio:
+// claim já em "enviada", envelope draft órfão, ninguém notificado (classe do
+// bug "draft órfão" do BUGS.md).
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
 /**
  * POST /api/proposals/[id]/send — envia pra assinatura (envelope) ou Aceite via
  * WhatsApp, decidido pela capacidade da conta. High-risk (gasta): session
@@ -59,6 +66,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     },
     req,
     idempotencyKey: req.headers.get("x-idempotency-key"),
+    // Pedir o envio JÁ É a autorização. O corretor que diz "manda a proposta"
+    // pelo WhatsApp não tem como aprovar uma ActionIntent — a aprovação vive na
+    // tela do app —, então o pedido dele ficava `pending` e expirava em 24h sem
+    // nada acontecer, o que ele lê como "o Newton não faz". A intent continua
+    // gravada (quem pediu, payload, resultado) e a idempotencyKey segue
+    // impedindo envio duplicado; some só o segundo humano.
+    autoApprove: true,
     run: async () => {
       const r = await executeProposalSend(params.id);
       if (!r.ok) return blockToResponse(r.block);

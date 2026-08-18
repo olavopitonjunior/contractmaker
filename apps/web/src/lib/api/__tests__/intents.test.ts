@@ -58,6 +58,9 @@ describe("requireApproval", () => {
   beforeEach(() => {
     vi.mocked(prisma.actionIntent.create).mockReset();
     vi.mocked(prisma.actionIntent.findUnique).mockReset();
+    // `update` também: sem reset, asserções sobre `mock.calls[0]` leem a
+    // chamada do teste ANTERIOR e passam/falham pelo motivo errado.
+    vi.mocked(prisma.actionIntent.update).mockReset();
   });
 
   it("session: executa run() direto, sem criar intent", async () => {
@@ -74,6 +77,89 @@ describe("requireApproval", () => {
     expect(r.status).toBe(201);
     expect(run).toHaveBeenCalled();
     expect(prisma.actionIntent.create).not.toHaveBeenCalled();
+  });
+
+  it("bearer + autoApprove: executa na hora e grava a intent como executed", async () => {
+    // Sem isto, o corretor que pede "manda a proposta" no WhatsApp gera uma
+    // intent que só a tela do app aprova — o pedido dele expira em 24h.
+    vi.mocked(prisma.actionIntent.create).mockResolvedValue({
+      id: "intent-auto",
+      status: "pending",
+      action: "PROPOSAL_SEND",
+      preview: { summary: "test", details: {} },
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    } as never);
+    vi.mocked(prisma.actionIntent.update).mockResolvedValue({ id: "intent-auto" } as never);
+
+    const run = vi.fn().mockResolvedValue({ status: 200, body: { ok: true } });
+    const r = await requireApproval({
+      ctx: baseAuth,
+      action: "PROPOSAL_SEND",
+      payload: { proposalId: "p-1" },
+      preview: { summary: "test", details: {} },
+      req: makeReq(),
+      autoApprove: true,
+      run,
+    });
+
+    expect(r.via).toBe("executed");
+    expect(r.status).toBe(200);
+    expect(run).toHaveBeenCalled();
+    // A intent continua existindo: é o rastro de quem pediu e o que resultou.
+    expect(prisma.actionIntent.create).toHaveBeenCalled();
+    expect(vi.mocked(prisma.actionIntent.update).mock.calls[0][0]).toMatchObject({
+      data: expect.objectContaining({ status: "executed" }),
+    });
+  });
+
+  it("bearer + autoApprove: run() que falha marca a intent failed, não pending", async () => {
+    // `pending` numa ação que já falhou mentiria que alguém ainda vai aprovar.
+    vi.mocked(prisma.actionIntent.create).mockResolvedValue({
+      id: "intent-fail",
+      status: "pending",
+      action: "PROPOSAL_SEND",
+      preview: { summary: "test", details: {} },
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    } as never);
+    vi.mocked(prisma.actionIntent.update).mockResolvedValue({ id: "intent-fail" } as never);
+
+    const run = vi.fn().mockRejectedValue(new Error("clicksign fora do ar"));
+    await expect(
+      requireApproval({
+        ctx: baseAuth,
+        action: "PROPOSAL_SEND",
+        payload: { proposalId: "p-1" },
+        preview: { summary: "test", details: {} },
+        req: makeReq(),
+        autoApprove: true,
+        run,
+      })
+    ).rejects.toThrow("clicksign fora do ar");
+
+    expect(vi.mocked(prisma.actionIntent.update).mock.calls[0][0]).toMatchObject({
+      data: expect.objectContaining({ status: "failed" }),
+    });
+  });
+
+  it("bearer SEM autoApprove: segue exigindo aprovação (default não mudou)", async () => {
+    vi.mocked(prisma.actionIntent.create).mockResolvedValue({
+      id: "intent-gated",
+      status: "pending",
+      action: "PROPOSAL_CANCEL",
+      preview: { summary: "test", details: {} },
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    } as never);
+    const run = vi.fn();
+    const r = await requireApproval({
+      ctx: baseAuth,
+      action: "PROPOSAL_CANCEL",
+      payload: { proposalId: "p-1" },
+      preview: { summary: "test", details: {} },
+      req: makeReq(),
+      run,
+    });
+    expect(r.via).toBe("pending");
+    expect(run).not.toHaveBeenCalled();
   });
 
   it("bearer: cria intent pending e retorna 202", async () => {

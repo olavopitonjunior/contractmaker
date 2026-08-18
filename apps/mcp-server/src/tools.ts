@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import { callApi, callBridge, logProactiveOutbound } from "./index.js";
 import { validateInWindow } from "./cron-window.js";
+import { explainApiError } from "./api-error.js";
+import { buildProposalPayload } from "./proposal-payload.js";
 
 /**
  * Reconhece JID de grupo. Cobre três formatos, de propósito:
@@ -687,7 +689,7 @@ export const tools: Tool[] = [
   {
     name: "create_form",
     description:
-      "Cria um novo SalesForm (schema compra_venda_v1) e automaticamente cria um Deal vinculado no primeiro stage do pipeline (Formulário). Retorna { id, token, url, dealId }. Idempotente via idempotencyKey.",
+      "Abre um NEGÓCIO: cria um SalesForm (schema compra_venda_v1) + um Deal no primeiro stage do pipeline, e devolve um link de formulário pro cliente PREENCHER DADOS. Retorna { id, token, url, dealId }. Idempotente via idempotencyKey. **NÃO é proposta.** Se pediram proposta, oferta, contraproposta ou 'mandar a proposta pro proprietário/comprador', a tool é `create_proposal` (e depois `send_proposal`) — esta aqui não gera documento nenhum pra ninguém assinar.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1857,7 +1859,7 @@ export const tools: Tool[] = [
   {
     name: "list_proposals",
     description:
-      "Lista propostas da org (escopo RBAC: corretor vê só as próprias/atribuídas). Filtros opcionais por status e kind.",
+      "**A tool pra consultar PROPOSTAS do sistema** — 'quais propostas eu tenho', 'como está a proposta da Patrícia', 'a última que mandei'. Escopo RBAC: corretor vê só as próprias/atribuídas. Filtros opcionais por status e kind. Não confundir com `nc_propostas`/`prop_*`, que são a ficha de acompanhamento do grupo Negócios NC e não enxergam o que existe no ImobPro.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1917,47 +1919,126 @@ export const tools: Tool[] = [
   {
     name: "create_proposal",
     description:
-      "Cria proposta em rascunho. schemaType decide venda (compra_venda_v1) ou locação (locacao_residencial_v1 | locacao_comercial_v1). NÃO envia — usar send_proposal depois.",
+      "**A tool de PROPOSTA.** Use sempre que pedirem proposta, oferta ou contraproposta de compra/locação de um imóvel — inclusive 'envie uma proposta': cria-se aqui em rascunho e só então `send_proposal` manda pra assinatura. NÃO use `create_form` pra isso: aquilo abre negócio e pede dados, não gera documento assinável. Também não confundir com as tools `prop_*`, que são a ficha de acompanhamento do grupo e não criam nada no sistema. O MÍNIMO pra proposta existir: proponente com nome completo, endereço do imóvel, valor, e o canal (whatsapp ou e-mail) com o contato correspondente. Sem um desses eu recuso e digo o que falta — colete e chame de novo.",
     inputSchema: {
       type: "object",
       properties: {
-        title: { type: "string" },
         schemaType: {
           type: "string",
           enum: ["compra_venda_v1", "locacao_residencial_v1", "locacao_comercial_v1"],
+          description: "compra_venda_v1 para venda; os locacao_* para aluguel.",
+        },
+        proponente: {
+          type: "object",
+          description: "Quem está fazendo a oferta. OBRIGATÓRIO.",
+          properties: {
+            nome: { type: "string", description: "Nome COMPLETO (nome e sobrenome)" },
+            telefone: { type: "string", description: "Com DDD. Obrigatório se canal=whatsapp" },
+            email: { type: "string", description: "Obrigatório se canal=email" },
+            cpf: { type: "string" },
+          },
+          required: ["nome"],
+        },
+        imovel: {
+          type: "object",
+          description: "O imóvel da proposta. `endereco` é OBRIGATÓRIO.",
+          properties: {
+            endereco: { type: "string", description: "Rua e número, como o corretor falou" },
+            numero: { type: "string" },
+            bairro: { type: "string" },
+            cidade: { type: "string" },
+            uf: { type: "string" },
+            matricula: { type: "string" },
+          },
+          required: ["endereco"],
+        },
+        valor: {
+          type: "number",
+          description: "Valor da proposta em reais. OBRIGATÓRIO.",
+        },
+        canal: {
+          type: "string",
+          enum: ["whatsapp", "email"],
+          description:
+            "Por onde a proposta vai pro proponente. OBRIGATÓRIO — whatsapp exige telefone, email exige e-mail.",
+        },
+        vendedor: {
+          type: "object",
+          description:
+            "OPCIONAL — o proprietário, SÓ quando o corretor informar o contato dele. Sem telefone nem e-mail eu recuso: signatário sem contato trava o envio. Na dúvida, omita: a proposta vai só pro proponente.",
+          properties: {
+            nome: { type: "string", description: "Nome completo" },
+            telefone: { type: "string" },
+            email: { type: "string" },
+          },
+          required: ["nome"],
+        },
+        comissao: {
+          type: "object",
+          description: "Opcional. Só entra no documento com número.",
+          properties: {
+            percentual: { type: "number", description: "Ex.: 6 para 6%" },
+            valor: { type: "number" },
+          },
+        },
+        pagamento: {
+          type: "object",
+          properties: {
+            sinal: { type: "number", description: "Entrada/sinal, se houver" },
+            forma: { type: "string", description: "Ex.: 'à vista' ou 'entrada + financiamento'" },
+          },
+        },
+        title: {
+          type: "string",
+          description: "Opcional — sem isto eu monto com proponente + imóvel.",
+        },
+        validUntil: {
+          type: "string",
+          description:
+            "ISO 8601 em UTC (terminando em Z). OPCIONAL — omita: sem prazo informado a proposta vale 7 dias. Não pergunte a validade ao usuário.",
+        },
+        propertyId: { type: "string", description: "Imóvel do cadastro, opcional" },
+        hiddenPaths: {
+          type: "array",
+          description:
+            "Campos a esconder da via do proprietário (ex.: comissão). Não-vazio faz a 2ª via sair reduzida.",
+          items: { type: "string" },
         },
         dataJson: {
           type: "object",
-          description: "Campos da proposta (livre, validado pelo schema do form)",
-        },
-        validUntil: { type: "string", description: "ISO 8601, opcional" },
-        signers: {
-          type: "array",
-          description: "Signatários [{name,email,phone?,documentation?}]",
-          items: { type: "object" },
+          description:
+            "Escape hatch pra campos fora do mínimo. Complementa, nunca sobrescreve — o corpo do documento é montado dos campos acima.",
         },
       },
-      required: ["title", "schemaType"],
+      required: ["schemaType", "proponente", "imovel", "valor", "canal"],
     },
     handler: async (args) => {
+      // O corpo é MONTADO aqui, não copiado do que o modelo mandou: o template
+      // lê caminhos fixos e forma inventada gera PDF vazio (ver proposal-payload.ts).
+      const built = buildProposalPayload(args as Record<string, unknown>);
+      if (!built.ok) {
+        return { _error: true, status: 400, message: built.message };
+      }
+      // A rota exige ISO-8601 estrito em UTC; data com offset (-03:00) ou só
+      // "AAAA-MM-DD" reprovaria no Zod. Normaliza o que dá pra normalizar e
+      // deixa o resto seguir, pra falha virar mensagem traduzida e não crash.
+      let validUntil = args.validUntil as string | undefined;
+      if (typeof validUntil === "string") {
+        const d = new Date(validUntil);
+        if (!Number.isNaN(d.getTime())) validUntil = d.toISOString();
+      }
       const r = await callApi({
         method: "POST",
         path: "/api/proposals",
-        body: {
-          title: args.title,
-          schemaType: args.schemaType,
-          dataJson: args.dataJson ?? {},
-          validUntil: args.validUntil,
-          signers: args.signers,
-        },
+        body: { ...built.body, validUntil },
       });
-      return r.body;
+      return explainApiError(r) ?? r.body;
     },
   },
   {
     name: "send_proposal",
     description:
-      "Envia proposta pra assinatura (envelope ClickSign) ou Aceite WhatsApp. **Cria ActionIntent** que precisa de aprovação humana (gasta orçamento ClickSign). SEMPRE confirma verbalmente com user antes.",
+      "Envia uma proposta JÁ CRIADA pra assinatura (envelope ClickSign) ou Aceite WhatsApp. Se travar, o motivo mais comum é signatário SEM telefone e SEM e-mail — não dá pra avisar quem não tem contato; confira os signatários da proposta antes de culpar outro campo. Exige o `proposalId` devolvido por `create_proposal` — quando pedirem 'envie uma proposta' que ainda não existe, chame `create_proposal` primeiro e use o id DELA (não o id de outra coisa que a API tenha devolvido). Executa na hora: quem pediu já autorizou, não peça uma segunda confirmação. Gasta orçamento ClickSign e a mensagem chega de verdade ao destinatário, então confira os dados ANTES de chamar — não depois.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1979,7 +2060,7 @@ export const tools: Tool[] = [
   {
     name: "send_proposal_vendedor",
     description:
-      "Dispara a 2ª via (envelope do vendedor/proprietário) de proposta em `aguardando_vendedor`. **Cria ActionIntent** que precisa de aprovação humana (gasta orçamento ClickSign).",
+      "Dispara a 2ª via (envelope do vendedor/proprietário) de proposta em `aguardando_vendedor`. Executa na hora, sem segunda confirmação. Gasta orçamento ClickSign.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2031,7 +2112,7 @@ export const tools: Tool[] = [
   {
     name: "cancel_proposal",
     description:
-      "HITL. Cancela a proposta (destrói envelopes ClickSign em curso — re-enviar gasta orçamento de novo). **Cria ActionIntent** que precisa de aprovação humana. SEMPRE confirma verbalmente com user antes.",
+      "Cancela a proposta inteira. Executa na hora quando o corretor pede. IRREVERSÍVEL: destrói os envelopes ClickSign em curso e reenviar gasta orçamento de novo — por isso não é o remédio pra contato errado (aí é `update_proposal_signer` + `resend_proposal_signer`) nem pra dado errado (aí é `update_proposal`). Use quando o negócio caiu ou a proposta não deve mais existir.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2121,6 +2202,142 @@ export const tools: Tool[] = [
         body: {},
       });
       return r.body;
+    },
+  },
+  {
+    name: "update_proposal",
+    description:
+      "Corrige uma proposta JÁ CRIADA (título, dados, validade). Use isto em vez de criar outra quando algo saiu errado — duas propostas do mesmo negócio confundem todo mundo. Para trocar o contato de quem assina, é `update_proposal_signer`.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        title: { type: "string" },
+        dataJson: { type: "object", description: "Substitui os dados da proposta" },
+        validUntil: { type: "string", description: "ISO 8601 em UTC (terminando em Z)" },
+        comissaoIncluida: { type: "boolean" },
+      },
+      required: ["proposalId"],
+    },
+    handler: async (args) => {
+      const body: Record<string, unknown> = {};
+      if (args.title !== undefined) body.title = args.title;
+      if (args.dataJson !== undefined) body.dataJson = args.dataJson;
+      if (args.comissaoIncluida !== undefined) body.comissaoIncluida = args.comissaoIncluida;
+      if (typeof args.validUntil === "string") {
+        const d = new Date(args.validUntil);
+        body.validUntil = Number.isNaN(d.getTime()) ? args.validUntil : d.toISOString();
+      }
+      const r = await callApi({
+        method: "PATCH",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}`,
+        body,
+      });
+      return explainApiError(r) ?? r.body;
+    },
+  },
+  {
+    name: "update_proposal_signer",
+    description:
+      "Corrige o CONTATO de quem assina (telefone, e-mail, nome, CPF) **enquanto a proposta ainda NÃO foi enviada** (status rascunho/falha_envio); aí é só chamar e seguir. **Depois de enviada a ClickSign recusa** e isto responde 409 — nesse caso NÃO cancele: use `remove_proposal_signer` no errado e `add_proposal_signer` com o contato certo, que a pessoa é notificada na hora e a proposta continua de pé. O `signerId` NÃO é o do array `signers` de `get_proposal`: é o de `envelopes[].signers[]`, do envelope da proposta.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        signerId: { type: "string", description: "id do signatário, vindo de get_proposal" },
+        name: { type: "string" },
+        email: { type: "string" },
+        phone: { type: "string", description: "Telefone do signatário, com DDD" },
+        documentation: { type: "string", description: "CPF" },
+      },
+      required: ["proposalId", "signerId"],
+    },
+    handler: async (args) => {
+      const body: Record<string, unknown> = {};
+      for (const k of ["name", "email", "phone", "documentation"] as const) {
+        if (args[k] !== undefined) body[k] = args[k];
+      }
+      const r = await callApi({
+        method: "PATCH",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/signers/${encodeURIComponent(args.signerId as string)}`,
+        body,
+      });
+      return explainApiError(r) ?? r.body;
+    },
+  },
+  {
+    name: "resend_proposal_signer",
+    description:
+      "Reenvia o convite de assinatura pra UM signatário — quando a pessoa diz que não recebeu, ou depois de corrigir o contato de uma proposta ainda não enviada. Não cria proposta nova. O `signerId` vem de `envelopes[].signers[]` em `get_proposal`.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        signerId: { type: "string" },
+      },
+      required: ["proposalId", "signerId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/signers/${encodeURIComponent(args.signerId as string)}/resend`,
+        body: {},
+      });
+      return explainApiError(r) ?? r.body;
+    },
+  },
+  {
+    name: "add_proposal_signer",
+    description:
+      "Acrescenta um signatário à proposta JÁ ENVIADA (envelope em curso) — a pessoa é notificada na hora. É a segunda metade do conserto de contato errado: `remove_proposal_signer` tira o errado, esta põe o certo, SEM cancelar a proposta nem gastar tudo de novo. Exige telefone OU e-mail.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        name: { type: "string", description: "Nome completo" },
+        phone: { type: "string", description: "Com DDD" },
+        email: { type: "string" },
+        documentation: { type: "string", description: "CPF" },
+        role: {
+          type: "string",
+          enum: ["proponente", "vendedor", "conjuge", "testemunha"],
+        },
+      },
+      required: ["proposalId", "name"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/signers`,
+        body: {
+          name: args.name,
+          phone: args.phone,
+          email: args.email,
+          documentation: args.documentation,
+          role: args.role ?? "proponente",
+        },
+      });
+      return explainApiError(r) ?? r.body;
+    },
+  },
+  {
+    name: "remove_proposal_signer",
+    description:
+      "Tira UM signatário da proposta (pessoa errada foi incluída), enquanto ela não assinou. Não cancela a proposta inteira — pra isso é `cancel_proposal`. Se removeu o proponente, ponha outro com `add_proposal_signer`: proposta sem quem assine não fecha. O `signerId` vem de `envelopes[].signers[]` em `get_proposal`.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        signerId: { type: "string" },
+      },
+      required: ["proposalId", "signerId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "DELETE",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/signers/${encodeURIComponent(args.signerId as string)}`,
+      });
+      return explainApiError(r) ?? r.body;
     },
   },
 

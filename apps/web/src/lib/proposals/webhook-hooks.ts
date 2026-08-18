@@ -91,7 +91,20 @@ export async function onProposalEnvelopeClosed(
 
   // Encadeia: aguarda o vendedor e DISPARA o 2º envelope (idempotente pelo
   // @@unique([proposalId, via]) + guard de existência dentro de sendVendedorEnvelope).
-  await advanceProposalStatus(proposalId, "aguardando_vendedor");
+  const advAguardando = await advanceProposalStatus(proposalId, "aguardando_vendedor");
+  // Único ponto do fluxo em que o corretor ficava CEGO: o comprador assina, a
+  // proposta vai pro proprietário, e podiam passar dias sem nenhum aviso — o
+  // sino só tocava quando a 2ª via fechasse.
+  if (advAguardando.moved) {
+    waitUntil(
+      notifyProposalMilestone({
+        proposalId,
+        orgId: proposal.orgId,
+        userId: proposal.userId,
+        kind: "signed_proponente",
+      })
+    );
+  }
   waitUntil(
     sendVendedorEnvelope(proposalId).catch((err) => {
       console.error("[proposals] sendVendedorEnvelope falhou:", err);

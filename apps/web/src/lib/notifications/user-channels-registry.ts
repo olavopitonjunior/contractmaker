@@ -64,8 +64,10 @@ export const USER_CHANNEL_REGISTRY: Record<string, UserChannelPolicy> = {
   transfer_failed: { category: "financeiro", label: "Repasse falhou" },
 
   // ── Propostas (lib/proposals/notify-proposal.ts) ───────────────────────
+  proposal_delivered: { category: "propostas", label: "Proposta entregue ao destinatário" },
+  proposal_signed_proponente: { category: "propostas", label: "Proponente assinou a proposta" },
   proposal_completed: { category: "propostas", label: "Proposta aceita por todos" },
-  proposal_accepted_party: { category: "propostas", label: "Proposta aceita por uma parte" },
+  proposal_accepted_party: { category: "propostas", label: "Proprietário assinou a proposta" },
   proposal_refused: { category: "propostas", label: "Proposta recusada" },
   proposal_expired: { category: "propostas", label: "Proposta expirada" },
   proposal_email_failed: { category: "propostas", label: "E-mail de proposta não chegou" },

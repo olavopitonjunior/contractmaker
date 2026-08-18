@@ -215,7 +215,9 @@ export function ManagerSettingsClient() {
               Exigir gerente responsável em todo negócio novo (vendas e locação)
               <span className="mt-0.5 block text-xs text-muted-foreground">
                 Quando ligado, os fluxos de criação de negócio pedem um gerente
-                antes de concluir.
+                antes de concluir. Não impede remover o gerente de um negócio já
+                criado — sem gerente, o negócio sai do kanban dos gerentes e
+                fica só com quem enxerga todos os negócios.
               </span>
             </Label>
             <Switch
