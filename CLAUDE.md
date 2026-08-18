@@ -68,7 +68,7 @@ Auto-transições têm guard `linearOrder.includes(currentStageName)` — webhoo
 
 ## DadosContrato
 
-TS: vendedores, compradores, imóveis, pagamento, comissão, config. Mudanças aditivas só. Fontes: form público (7 etapas) ou OCR de CCV via Gemini. `modalidade: "a_vista" | "financiamento"` decide o template.
+TS: vendedores, compradores, imóveis, pagamento, comissão, config. Mudanças aditivas só. Fontes: form público (7 etapas) ou OCR de CCV via Gemini. Template decidido por `deriveCategory` (`lib/contracts/template-category.ts`): heurística `parcelas[].tipo` + `modalidade` declarada como prior (financiamento puxa o grupo com alienação; a_vista NÃO rebaixa). `modalidade` também alimenta due-date-resolver, planner de certidões e negotiation-summary.
 
 ## Templates v2 (CCV Zimmermann)
 

@@ -71,6 +71,58 @@ describe("dadosContratoSchema — soma parcelas vs valor_total", () => {
     }
   });
 
+  it("modalidade a_vista com parcela de financiamento gera issue de consistência", () => {
+    const result = dadosContratoSchema.safeParse({
+      ...BASE,
+      modalidade: "a_vista",
+      pagamento: {
+        valor_total: 500_000,
+        parcelas: [
+          { tipo: "sinal_arras", valor: 100_000, momento: "assinatura" },
+          { tipo: "financiamento", valor: 400_000, momento: "contrato_financiamento" },
+        ],
+      },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((i) => i.path.join(".") === "modalidade");
+      expect(issue?.message).toMatch(/modalidade/i);
+    }
+  });
+
+  it("modalidade a_vista com banco_financiamento preenchido também é inconsistente", () => {
+    const result = dadosContratoSchema.safeParse({
+      ...BASE,
+      modalidade: "a_vista",
+      pagamento: {
+        valor_total: 500_000,
+        banco_financiamento: "caixa",
+        parcelas: [{ tipo: "sinal_arras", valor: 500_000, momento: "assinatura" }],
+      },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((i) => i.path.join(".") === "modalidade")
+      ).toBe(true);
+    }
+  });
+
+  it("modalidade financiamento coerente com parcela financiada passa", () => {
+    const result = dadosContratoSchema.safeParse({
+      ...BASE,
+      modalidade: "financiamento",
+      pagamento: {
+        valor_total: 500_000,
+        parcelas: [
+          { tipo: "sinal_arras", valor: 100_000, momento: "assinatura" },
+          { tipo: "financiamento", valor: 400_000, momento: "contrato_financiamento" },
+        ],
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("tolera diferença ≤ 0.01 (centavos de arredondamento)", () => {
     const result = dadosContratoSchema.safeParse({
       ...BASE,

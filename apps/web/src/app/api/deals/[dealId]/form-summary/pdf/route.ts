@@ -48,9 +48,9 @@ export async function POST(
   });
   if (denied) return denied;
 
-  if (deal.kind !== "venda") {
+  if (deal.kind !== "venda" && deal.kind !== "locacao") {
     return NextResponse.json(
-      { error: "Resumo consolidado disponível apenas para negócios de venda" },
+      { error: "Resumo consolidado disponível apenas para negócios de venda e locação" },
       { status: 400 }
     );
   }
