@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { encode } from "next-auth/jwt";
+import { encode, decode } from "next-auth/jwt";
 import { prisma } from "@/lib/db/prisma";
 import { STAGING_MODE, VERCEL_ENV } from "@/lib/env/staging";
 
@@ -75,6 +75,14 @@ export async function GET(req: NextRequest) {
       salt: cookieName,
       maxAge,
     });
+    let decoded: unknown = null;
+    let decodeErr: string | null = null;
+    try {
+      decoded = await decode({ token: t, secret, salt: cookieName });
+    } catch (e) {
+      decodeErr = e instanceof Error ? e.message : String(e);
+    }
+    const incoming = req.cookies.get(cookieName)?.value ?? null;
     return NextResponse.json({
       vercelEnv: VERCEL_ENV ?? null,
       stagingMode: STAGING_MODE,
@@ -85,6 +93,9 @@ export async function GET(req: NextRequest) {
       email: user.email,
       tokenLen: t.length,
       secretLen: secret.length,
+      decoded,
+      decodeErr,
+      incomingCookiePresent: incoming !== null,
     });
   }
 
