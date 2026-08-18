@@ -3,9 +3,10 @@ import { can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { loadScopedProposal, proposalFeatureGuard } from "@/lib/proposals/route-helpers";
 import {
-  sendVendedorEnvelope,
+  sendVendedorVia,
   vendedorResultToResponse,
 } from "@/lib/proposals/send-execute";
+import { SEND_VENDEDOR_STATUSES } from "@/lib/proposals/status-sets";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { requireApproval, approvalResponse } from "@/lib/api/intents";
 
@@ -33,9 +34,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const feat = await proposalFeatureGuard(auth.org.id, proposal.kind);
   if (feat) return feat;
 
-  if (proposal.status !== "aguardando_vendedor") {
+  // Parada de decisão (assinada_proponente) é o caminho feliz; aguardando_
+  // vendedor cobre o retry manual quando a 2ª via falhou em criar envelope.
+  if (!SEND_VENDEDOR_STATUSES.has(proposal.status)) {
     return NextResponse.json(
-      { error: "Proposta não está aguardando o vendedor." },
+      { error: "A proposta não está no ponto de enviar a via do proprietário." },
       { status: 409 }
     );
   }
@@ -57,8 +60,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     run: async () => {
       // Resultado ESTRUTURADO: distingue o motivo real em vez de inferir por
       // presença de envelope (que escondia budget/lock atrás de um 422).
-      const sendResult = await sendVendedorEnvelope(proposal.id).catch(
-        (err): Awaited<ReturnType<typeof sendVendedorEnvelope>> => ({
+      const sendResult = await sendVendedorVia(proposal.id, "manual").catch(
+        (err): Awaited<ReturnType<typeof sendVendedorVia>> => ({
           ok: false,
           reason: "error",
           detail: err instanceof Error ? err.message : String(err),

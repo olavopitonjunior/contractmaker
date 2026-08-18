@@ -60,3 +60,66 @@ export async function loadScopedProposalSigner(
   }
   return { auth: auth as ApiAuthOk, signer };
 }
+
+type PlanSigner = Prisma.ProposalSignerGetPayload<object>;
+
+export type ScopedPlanSignerResult =
+  | { fail: NextResponse }
+  | { auth: ApiAuthOk; kind: "envelope"; signer: ScopedSigner }
+  | { auth: ApiAuthOk; kind: "plan"; signer: PlanSigner };
+
+/**
+ * Variante com FALLBACK EnvelopeSigner → ProposalSigner (2026-08): as linhas
+ * de plano (pré-envio e as adicionadas na parada de decisão) não têm envelope,
+ * então o loader original 404-ava PATCH/DELETE nelas. Tenta o EnvelopeSigner
+ * (caminho original, ações na ClickSign); não achou → resolve a linha de
+ * ProposalSigner com o MESMO escopo anti-IDOR (proposta da org + acessível +
+ * PROPOSAL_SEND).
+ */
+export async function loadScopedPlanSigner(
+  req: NextRequest,
+  proposalId: string,
+  signerId: string
+): Promise<ScopedPlanSignerResult> {
+  const auth = await requireApiAuth(req, { scope: "proposals:rw" });
+  if (isAuthFailure(auth)) return { fail: authFailureResponse(auth) };
+
+  const proposal = await prisma.proposal.findUnique({
+    where: { id: proposalId },
+    select: { orgId: true, userId: true, responsibleUserId: true },
+  });
+  if (!proposal || proposal.orgId !== auth.org.id) {
+    return { fail: NextResponse.json({ error: "Não encontrado" }, { status: 404 }) };
+  }
+  const eff = await getEffectivePermissions(auth.actor.effectiveUserId, auth.org.id);
+  if (
+    !eff ||
+    !canAccessProposal({
+      effective: eff,
+      ownerUserId: proposal.userId,
+      responsibleUserId: proposal.responsibleUserId,
+    }) ||
+    !can(eff, PERMISSION.PROPOSAL_SEND)
+  ) {
+    return { fail: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  }
+
+  const envelopeSigner = await prisma.envelopeSigner.findUnique({
+    where: { id: signerId },
+    include: { envelope: true },
+  });
+  if (
+    envelopeSigner &&
+    envelopeSigner.envelope.proposalId === proposalId &&
+    envelopeSigner.envelope.orgId === auth.org.id &&
+    envelopeSigner.envelope.source === "proposal"
+  ) {
+    return { auth: auth as ApiAuthOk, kind: "envelope", signer: envelopeSigner };
+  }
+
+  const planSigner = await prisma.proposalSigner.findUnique({ where: { id: signerId } });
+  if (!planSigner || planSigner.proposalId !== proposalId) {
+    return { fail: NextResponse.json({ error: "Não encontrado" }, { status: 404 }) };
+  }
+  return { auth: auth as ApiAuthOk, kind: "plan", signer: planSigner };
+}

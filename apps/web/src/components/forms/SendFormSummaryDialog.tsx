@@ -115,13 +115,30 @@ export function SendFormSummaryDialog({
       const res = await fetch(`/api/deals/${dealId}/form-summary/pdf`, {
         method: "POST",
       });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.pdfUrl) {
-        window.open(data.pdfUrl, "_blank");
-        toast.success("PDF gerado");
-      } else {
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
         toast.error(data.error || "Falha ao gerar o PDF");
+        return;
       }
+      // Download via blob same-origin: window.open(url) depois de um fetch
+      // assíncrono caía no popup blocker (1º clique "sumia") e abria o blob
+      // público com nome feio em vez de baixar.
+      const blob = await res.blob();
+      const filename =
+        res.headers
+          .get("Content-Disposition")
+          ?.match(/filename="([^"]+)"/)?.[1] ?? "resumo-formulario.pdf";
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Revogar síncrono pode abortar o download em Safari/Firefox (a blob:
+      // URL resolve assíncrono depois do click).
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
+      toast.success("PDF baixado");
     } catch {
       toast.error("Erro de conexão");
     } finally {

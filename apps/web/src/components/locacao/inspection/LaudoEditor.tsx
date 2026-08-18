@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { upload } from "@vercel/blob/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, FileText, Check, Loader2, Trash2 } from "lucide-react";
+import { Plus, FileText, Check, Loader2, Trash2, Upload } from "lucide-react";
 import {
   AMBIENTES_SUGERIDOS,
   INSPECTION_STATUS_LABELS,
@@ -35,6 +36,8 @@ interface Props {
   initialAmbientes: LaudoAmbiente[];
   initialMeta: LaudoMeta;
   laudoPdfUrl: string | null;
+  /** "gerado" (renderizado de ambientesJson) ou "externo" (PDF anexado pronto). */
+  laudoOrigem: string;
   /** Sugestões de signatários (locatários + proprietários) pro envio ClickSign. */
   signerSuggestions: SignerSuggestion[];
   /** false quando o contrato de origem não tem deal — assinatura indisponível. */
@@ -57,19 +60,23 @@ export function LaudoEditor({
   initialAmbientes,
   initialMeta,
   laudoPdfUrl,
+  laudoOrigem,
   signerSuggestions,
   signatureAvailable,
 }: Props) {
   const router = useRouter();
   const [status, setStatus] = useState(initialStatus);
+  const [origem, setOrigem] = useState(laudoOrigem);
   const [ambientes, setAmbientes] = useState<LaudoAmbiente[]>(initialAmbientes);
   const [meta, setMeta] = useState<LaudoMeta>({ ...META_DEFAULT, ...initialMeta });
   const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving">("saved");
   const [gerandoLaudo, setGerandoLaudo] = useState(false);
+  const [enviandoLaudo, setEnviandoLaudo] = useState(false);
   const [novoAmbiente, setNovoAmbiente] = useState("");
 
   const editable = isInspectionContentEditable(status);
   const dirtyRef = useRef(false);
+  const laudoFileRef = useRef<HTMLInputElement>(null);
 
   // Autosave com debounce ~1,5s. dirtyRef evita perder edição feita durante um save.
   const save = useCallback(
@@ -121,6 +128,17 @@ export function LaudoEditor({
   }
 
   async function gerarLaudo() {
+    // Laudo vigente é um PDF externo: regerar a partir dos ambientes (possivelmente
+    // parciais/abandonados) substituiria o documento oficial sem aviso.
+    if (
+      origem === "externo" &&
+      laudoPdfUrl &&
+      !window.confirm(
+        "O laudo atual é um PDF anexado pronto. Gerar o laudo a partir dos ambientes preenchidos vai SUBSTITUÍ-LO. Continuar?"
+      )
+    ) {
+      return;
+    }
     // Garante o conteúdo persistido antes do PDF.
     await save(ambientes, meta);
     setGerandoLaudo(true);
@@ -132,11 +150,46 @@ export function LaudoEditor({
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
       toast.success("Laudo PDF gerado");
       setStatus("laudo_gerado");
+      setOrigem("gerado");
       router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro ao gerar laudo");
     } finally {
       setGerandoLaudo(false);
+    }
+  }
+
+  async function uploadLaudoPronto(file: File) {
+    setEnviandoLaudo(true);
+    try {
+      // Upload client-direct pro Blob (contorna os ~4.5MB de corpo de função),
+      // depois registro server-side que valida conteúdo e muta a vistoria.
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const blob = await upload(
+        `inspections/${inspectionId}/laudo-externo/${safeName}`,
+        file,
+        {
+          access: "public",
+          contentType: "application/pdf",
+          handleUploadUrl: `/api/locacao/inspections/${inspectionId}/laudo/blob-upload`,
+        }
+      );
+      const res = await fetch(`/api/locacao/inspections/${inspectionId}/laudo/upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: blob.url, filename: file.name }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      toast.success("Laudo anexado — vistoria pronta pra assinatura");
+      setStatus("laudo_gerado");
+      setOrigem("externo");
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao anexar laudo");
+    } finally {
+      setEnviandoLaudo(false);
+      if (laudoFileRef.current) laudoFileRef.current.value = "";
     }
   }
 
@@ -176,18 +229,48 @@ export function LaudoEditor({
             </Button>
           )}
           {editable && (
-            <Button size="sm" onClick={gerarLaudo} disabled={gerandoLaudo}>
-              {gerandoLaudo ? (
-                <>
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Gerando…
-                </>
-              ) : (
-                <>
-                  <FileText className="mr-1.5 h-3.5 w-3.5" />
-                  {laudoPdfUrl ? "Regerar laudo PDF" : "Gerar laudo PDF"}
-                </>
-              )}
-            </Button>
+            <>
+              <input
+                ref={laudoFileRef}
+                type="file"
+                accept="application/pdf"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void uploadLaudoPronto(f);
+                }}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => laudoFileRef.current?.click()}
+                disabled={enviandoLaudo || gerandoLaudo}
+                title="Suba o PDF de uma vistoria já feita fora do sistema"
+              >
+                {enviandoLaudo ? (
+                  <>
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Enviando…
+                  </>
+                ) : (
+                  <>
+                    <Upload className="mr-1.5 h-3.5 w-3.5" />
+                    {laudoPdfUrl ? "Substituir por laudo pronto" : "Anexar laudo pronto"}
+                  </>
+                )}
+              </Button>
+              <Button size="sm" onClick={gerarLaudo} disabled={gerandoLaudo || enviandoLaudo}>
+                {gerandoLaudo ? (
+                  <>
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Gerando…
+                  </>
+                ) : (
+                  <>
+                    <FileText className="mr-1.5 h-3.5 w-3.5" />
+                    {laudoPdfUrl ? "Regerar laudo PDF" : "Gerar laudo PDF"}
+                  </>
+                )}
+              </Button>
+            </>
           )}
           {status === "laudo_gerado" && (
             <EnviarAssinaturaDialog

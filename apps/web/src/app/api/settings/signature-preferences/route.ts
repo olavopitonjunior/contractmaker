@@ -26,6 +26,8 @@ const patchSchema = z
     defaultSequential: z.boolean().optional(),
     proposalEmailSubject: z.string().max(200).nullable().optional(),
     proposalEmailMessage: z.string().max(2000).nullable().optional(),
+    proposalAutoChainVendedor: z.boolean().optional(),
+    proposalOwnerDeadlineDays: z.number().int().positive().max(365).nullable().optional(),
   })
   .refine(
     (d) =>
@@ -104,6 +106,12 @@ export async function PATCH(req: NextRequest) {
         : {}),
       ...(d.proposalEmailMessage !== undefined
         ? { proposalEmailMessage: d.proposalEmailMessage || null }
+        : {}),
+      ...(d.proposalAutoChainVendedor !== undefined
+        ? { proposalAutoChainVendedor: d.proposalAutoChainVendedor }
+        : {}),
+      ...(d.proposalOwnerDeadlineDays !== undefined
+        ? { proposalOwnerDeadlineDays: d.proposalOwnerDeadlineDays }
         : {}),
     },
   });

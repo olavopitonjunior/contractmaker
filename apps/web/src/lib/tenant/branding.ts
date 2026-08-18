@@ -65,6 +65,17 @@ export async function getTenantBranding(
 /** Cor da casa quando o tenant não escolheu uma. */
 export const DEFAULT_BRAND_COLOR = "#0f172a";
 
+// Só os comprimentos que o CSS aceita (3/4/6/8 dígitos). As rotas de escrita
+// validam, mas linha legada/seed/script admin pode ter qualquer coisa — e os
+// consumidores (e-mail, PDF do resumo, página pública) interpolam a cor direto
+// em <style>/inline style, onde um hex inválido descarta a declaração inteira.
+const HEX_COLOR_RE = /^#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+
+function normalizeHexColor(raw: string | null | undefined): string | null {
+  const v = raw?.trim();
+  return v && HEX_COLOR_RE.test(v) ? v : null;
+}
+
 /**
  * A marca da imobiliária como o cliente final a vê — nome, logo, cor e contato.
  * FONTE ÚNICA: BrandingSettings (1:1 com a org). Antes disso, o branding vivia
@@ -115,7 +126,7 @@ export async function getOrgBrand(orgId: string): Promise<OrgBrand> {
       org?.legalName?.trim() ||
       "Imobiliária",
     logoUrl: b?.logoUrl?.trim() || null,
-    primaryColor: b?.primaryColor?.trim() || DEFAULT_BRAND_COLOR,
+    primaryColor: normalizeHexColor(b?.primaryColor) ?? DEFAULT_BRAND_COLOR,
     supportEmail: b?.supportEmail?.trim() || ownerEmail,
     supportPhone: b?.supportPhone?.trim() || null,
     poweredBy: b?.poweredBy ?? true,

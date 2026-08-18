@@ -3,12 +3,15 @@
  *
  * `generateFormSummaryPdf(formId)` carrega o SalesForm (+ org, attachments),
  * monta as seções via buildConsolidatedFormSummary e gera um PDF em memória
- * (Buffer) com exportPdfToBuffer. Estilo default (style=null) — resumo não
- * precisa do branding do contrato.
+ * (Buffer) com exportPdfToBuffer. O DocumentStyle do CONTRATO continua não se
+ * aplicando (style=null); o branding do tenant (logo + cor primária de
+ * getOrgBrand) entra direto no HTML do corpo — o headerTemplate do Chromium
+ * não tem rede e não carregaria um logo remoto.
  */
 
 import { prisma } from "@/lib/db/prisma";
 import { exportPdfToBuffer } from "@/lib/render/exporter";
+import { getOrgBrand, type OrgBrand } from "@/lib/tenant/branding";
 import {
   buildConsolidatedFormSummary,
   type FormSummaryAttachment,
@@ -37,6 +40,10 @@ export interface FormSummaryMeta {
    * verdade o PDF é que era anterior ao preenchimento.
    */
   dataUpdatedAtLabel?: string;
+  /** Logo do tenant (BrandingSettings.logoUrl). Sem logo, o header fica igual ao de antes. */
+  logoUrl?: string | null;
+  /** Cor primária do tenant em hex; inválida/ausente cai no #1a1a1a original. */
+  primaryColor?: string;
 }
 
 /**
@@ -48,9 +55,18 @@ export function renderFormSummaryHtml(
   sections: SummarySection[],
   meta: FormSummaryMeta
 ): string {
+  // Só comprimentos que o CSS aceita (3/4/6/8) — 5 e 7 dígitos passariam pro
+  // <style> e o Chromium descartaria a declaração inteira, header sem régua.
+  const primary = /^#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(
+    meta.primaryColor ?? ""
+  )
+    ? (meta.primaryColor as string)
+    : "#1a1a1a";
+
   const style = `
     <style>
-      .fs-header { border-bottom: 2px solid #1a1a1a; padding-bottom: 8px; margin-bottom: 18px; }
+      .fs-header { display: flex; align-items: center; gap: 14px; border-bottom: 2px solid ${primary}; padding-bottom: 8px; margin-bottom: 18px; }
+      .fs-logo { height: 44px; width: auto; max-width: 180px; object-fit: contain; flex: none; }
       .fs-header h1 { font-size: 18pt; margin: 0 0 4px; }
       .fs-header .fs-meta { font-size: 9pt; color: #555; }
       .fs-section { margin: 0 0 16px; page-break-inside: avoid; }
@@ -62,16 +78,23 @@ export function renderFormSummaryHtml(
       .fs-empty { font-size: 10pt; color: #888; font-style: italic; }
     </style>`;
 
+  const logo = meta.logoUrl
+    ? `<img class="fs-logo" src="${esc(meta.logoUrl)}" alt="${esc(meta.orgName)}">`
+    : "";
+
   const header = `
     <div class="fs-header">
-      <h1>${esc(meta.formTitle)}</h1>
-      <div class="fs-meta">${esc(meta.orgName)} · Gerado em ${esc(meta.generatedAtLabel)}${
-        meta.statusLabel ? ` · ${esc(meta.statusLabel)}` : ""
-      }${
-        meta.dataUpdatedAtLabel
-          ? ` · Dados de ${esc(meta.dataUpdatedAtLabel)}`
-          : ""
-      }</div>
+      ${logo}
+      <div class="fs-heading">
+        <h1>${esc(meta.formTitle)}</h1>
+        <div class="fs-meta">${esc(meta.orgName)} · Gerado em ${esc(meta.generatedAtLabel)}${
+          meta.statusLabel ? ` · ${esc(meta.statusLabel)}` : ""
+        }${
+          meta.dataUpdatedAtLabel
+            ? ` · Dados de ${esc(meta.dataUpdatedAtLabel)}`
+            : ""
+        }</div>
+      </div>
     </div>`;
 
   const body = sections.length
@@ -95,6 +118,36 @@ export interface GeneratedPdf {
   buffer: Buffer;
   filename: string;
   sectionsCount: number;
+  /** Metadados do form já carregados aqui — poupa um findUnique do caller. */
+  title: string;
+  orgId: string;
+  orgName: string;
+}
+
+const LOGO_FETCH_TIMEOUT_MS = 5000;
+const LOGO_MAX_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Baixa o logo e devolve como data URI. O exporter renderiza com
+ * `waitUntil: "networkidle0"` — um `<img>` remoto no HTML faria TODO PDF
+ * brandado bloquear no fetch do blob host (até ~30s de navigation timeout) e
+ * um 404 imprimiria o glifo de imagem quebrada no documento. Inline com
+ * timeout curto: falhou, o header sai limpo sem logo.
+ */
+async function fetchLogoDataUri(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(LOGO_FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const mime = res.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
+    if (!mime.startsWith("image/")) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.byteLength === 0 || buf.byteLength > LOGO_MAX_BYTES) return null;
+    return `data:${mime};base64,${buf.toString("base64")}`;
+  } catch {
+    return null;
+  }
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -146,6 +199,7 @@ export async function generateFormSummaryPdf(formId: string): Promise<GeneratedP
       dataJson: true,
       createdAt: true,
       updatedAt: true,
+      orgId: true,
       org: { select: { name: true } },
       attachments: {
         select: { filename: true, category: true },
@@ -187,9 +241,26 @@ export async function generateFormSummaryPdf(formId: string): Promise<GeneratedP
     attachments,
   });
 
+  // Branding é best-effort: falha na resolução não pode derrubar o resumo.
+  let brand: OrgBrand | null = null;
+  try {
+    brand = await getOrgBrand(form.orgId);
+  } catch (err) {
+    console.warn("[form-summary] falha ao resolver branding, PDF sem logo:", err);
+  }
+
+  const logoDataUri = brand?.logoUrl
+    ? await fetchLogoDataUri(brand.logoUrl)
+    : null;
+
+  const orgName = form.org?.name ?? "Contractmaker";
+  const title = form.title || "Resumo do formulário";
+
   const html = renderFormSummaryHtml(sections, {
-    orgName: form.org?.name ?? "Contractmaker",
-    formTitle: form.title || "Resumo do formulário",
+    orgName,
+    logoUrl: logoDataUri,
+    primaryColor: brand?.primaryColor,
+    formTitle: title,
     generatedAtLabel: new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }),
     statusLabel: STATUS_LABEL[form.status] ?? undefined,
     dataUpdatedAtLabel: form.updatedAt.toLocaleString("pt-BR", {
@@ -202,5 +273,8 @@ export async function generateFormSummaryPdf(formId: string): Promise<GeneratedP
     buffer,
     filename: `resumo-formulario-${form.id.slice(0, 8)}.pdf`,
     sectionsCount: sections.length,
+    title,
+    orgId: form.orgId,
+    orgName,
   };
 }

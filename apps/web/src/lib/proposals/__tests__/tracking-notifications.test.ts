@@ -23,7 +23,11 @@ vi.mock("../acceptance-proof", () => ({
 }));
 
 vi.mock("../send-execute", () => ({
-  sendVendedorEnvelope: vi.fn().mockResolvedValue(undefined),
+  sendVendedorVia: vi.fn().mockResolvedValue({ ok: true }),
+}));
+
+vi.mock("@/lib/clicksign/account", () => ({
+  getSignatureSettings: vi.fn().mockResolvedValue({ proposalAutoChainVendedor: true }),
 }));
 
 vi.mock("../notify-proposal", () => ({
@@ -122,6 +126,10 @@ describe('"recebeu" — entrega do termo de aceite', () => {
   });
 });
 
+// NB (flip 2026-08): estes casos rodam com `proposalAutoChainVendedor: true`
+// (mock acima) — é o escape hatch que preserva o encadeamento automático e,
+// com ele, o sino signed_proponente. No default (OFF) o sino da parada é
+// awaiting_decision (coberto em webhook-hooks.test.ts).
 describe('"assinou" — proponente assina e a proposta segue pro proprietário', () => {
   beforeEach(() => {
     vi.clearAllMocks();

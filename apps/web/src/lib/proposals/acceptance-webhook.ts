@@ -1,7 +1,9 @@
 import { Prisma } from "@prisma/client";
 import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
+import { getSignatureSettings } from "@/lib/clicksign/account";
 import { advanceProposalStatus } from "./status";
+import { sendVendedorVia } from "./send-execute";
 import { buildAcceptanceProof, buildAcceptanceMessage } from "./acceptance-proof";
 import {
   syncAcceptanceRecord,
@@ -182,6 +184,36 @@ export async function processProposalAcceptanceEvent(
       // (terceiro) é registrado na linha dele, mas não redefine o desfecho —
       // antes, com 1 aceite de qualquer um a proposta virava "completa".
       if (!isProponente) {
+        // Paridade da 2ª rodada (2026-08): quando o aceite do VENDEDOR fecha o
+        // conjunto (todos os vendedores completed) e a proposta está em
+        // `aguardando_vendedor`, ela completa — espelho do close da via
+        // reduzida no envelope.
+        if (signer!.role === "vendedor" && proposal.status === "aguardando_vendedor") {
+          const vendedorPendente = await prisma.proposalSigner.count({
+            where: {
+              proposalId: proposal.id,
+              included: true,
+              role: "vendedor",
+              NOT: { acceptanceStatus: "completed" },
+            },
+          });
+          if (vendedorPendente === 0) {
+            const advCompletaVend = await advanceProposalStatus(proposal.id, "completa", {
+              completedAt: new Date(),
+            });
+            if (advCompletaVend.moved) {
+              waitUntil(
+                notifyProposalMilestone({
+                  proposalId: proposal.id,
+                  orgId: proposal.orgId,
+                  userId: proposal.userId,
+                  kind: "completed",
+                })
+              );
+            }
+            return { ok: true, handled: true, proposalId: proposal.id, phase: input.phase };
+          }
+        }
         // Sino por-signatário: um proprietário aceitou o termo dele. Suffix
         // obrigatório — sem ele o aceite do 2º proprietário seria engolido
         // pelo unique (type, batchId). GATE: bloqueia SÓ terminais NEGATIVOS
@@ -236,21 +268,70 @@ export async function processProposalAcceptanceEvent(
         return { ok: true, handled: true, proposalId: proposal.id, phase: input.phase };
       }
 
-      // O proponente aceitou dentro do prazo: proposta completa. Reusa as
-      // transições existentes em vez de alargar ALLOWED_FROM.
-      await advanceProposalStatus(proposal.id, "assinada_proponente");
-      const advCompleta = await advanceProposalStatus(proposal.id, "completa", {
-        completedAt: new Date(),
-      });
-      if (advCompleta.moved) {
-        waitUntil(
-          notifyProposalMilestone({
-            proposalId: proposal.id,
-            orgId: proposal.orgId,
-            userId: proposal.userId,
-            kind: "completed",
-          })
-        );
+      // O proponente aceitou dentro do prazo. FLIP 2026-08 (paridade com o
+      // envelope): com VENDEDOR cadastrado a proposta PARA na decisão humana
+      // (assinada_proponente) — não fecha completa nem toca o sino completed;
+      // o comprovante do aceite do proponente continua sendo gerado abaixo.
+      // Escape hatch por org (`proposalAutoChainVendedor`) dispara a 2ª rodada
+      // do Aceite automaticamente.
+      {
+        const advAssinada = await advanceProposalStatus(proposal.id, "assinada_proponente");
+        const vendedores = await prisma.proposalSigner.count({
+          where: { proposalId: proposal.id, included: true, role: "vendedor" },
+        });
+        if (vendedores === 0) {
+          const advCompleta = await advanceProposalStatus(proposal.id, "completa", {
+            completedAt: new Date(),
+          });
+          if (advCompleta.moved) {
+            waitUntil(
+              notifyProposalMilestone({
+                proposalId: proposal.id,
+                orgId: proposal.orgId,
+                userId: proposal.userId,
+                kind: "completed",
+              })
+            );
+          }
+        } else {
+          const settings = await getSignatureSettings(proposal.orgId);
+          if (settings.proposalAutoChainVendedor) {
+            if (advAssinada.moved) {
+              waitUntil(
+                notifyProposalMilestone({
+                  proposalId: proposal.id,
+                  orgId: proposal.orgId,
+                  userId: proposal.userId,
+                  kind: "signed_proponente",
+                })
+              );
+            }
+            waitUntil(
+              sendVendedorVia(proposal.id, "webhook").catch((err) => {
+                console.error("[proposals] sendVendedorVia (aceite) falhou:", err);
+              })
+            );
+          } else if (advAssinada.moved) {
+            await prisma.proposalEvent
+              .create({
+                data: {
+                  proposalId: proposal.id,
+                  eventName: "awaiting_owner_decision",
+                  source: "system",
+                  payload: { vendedores, instrument: "aceite" } as Prisma.InputJsonValue,
+                },
+              })
+              .catch(() => {});
+            waitUntil(
+              notifyProposalMilestone({
+                proposalId: proposal.id,
+                orgId: proposal.orgId,
+                userId: proposal.userId,
+                kind: "awaiting_decision",
+              })
+            );
+          }
+        }
       }
 
       // Comprovante durável — o requisito central do modo Aceite. Fire-and-forget

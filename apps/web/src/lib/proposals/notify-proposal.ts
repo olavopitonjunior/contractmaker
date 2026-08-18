@@ -44,7 +44,18 @@ export type ProposalNotifKind =
   | "accepted_party"
   | "refused"
   | "expired"
-  | "email_failed";
+  | "email_failed"
+  // Handoff com decisão humana (2026-08):
+  //   - awaiting_decision: o proponente assinou e a proposta PAROU esperando a
+  //     decisão do corretor (enviar 2ª via ou concluir) — o sino é o CTA.
+  //   - vendedor_sent: a 2ª via foi criada por caminho NÃO-manual (webhook com
+  //     auto-chain ligado, cron) — quem clicou no botão já viu o resultado.
+  //   - vendedor_send_failed: a 2ª via falhou (no_creds/preflight/budget/error/
+  //     cancelada na ClickSign). Era o buraco operacional: a falha só aparecia
+  //     em ProposalEvent que ninguém abria.
+  | "awaiting_decision"
+  | "vendedor_sent"
+  | "vendedor_send_failed";
 
 const TEXT: Record<ProposalNotifKind, { type: string; title: string; body: string }> = {
   delivered: {
@@ -82,10 +93,30 @@ const TEXT: Record<ProposalNotifKind, { type: string; title: string; body: strin
     title: "Falha no e-mail da proposta",
     body: "O e-mail do envelope da proposta não chegou (bounce). Confira o endereço e reenvie.",
   },
+  awaiting_decision: {
+    type: "proposal_awaiting_decision",
+    title: "Proponente assinou — sua vez",
+    body: "O proponente assinou. Decida: enviar a 2ª via ao proprietário ou concluir sem enviar.",
+  },
+  vendedor_sent: {
+    type: "proposal_vendedor_sent",
+    title: "2ª via enviada ao proprietário",
+    body: "A via do proprietário foi enviada para assinatura. Aviso aqui quando ele assinar.",
+  },
+  vendedor_send_failed: {
+    type: "proposal_vendedor_send_failed",
+    title: "Falha na 2ª via ao proprietário",
+    body: "A via do proprietário não pôde ser enviada. Abra a proposta para ver o motivo e corrigir.",
+  },
 };
 
 /** Marcos de andamento — os que pedem um link clicável no WhatsApp. */
-const TRACKING_KINDS = new Set<ProposalNotifKind>(["delivered", "signed_proponente"]);
+const TRACKING_KINDS = new Set<ProposalNotifKind>([
+  "delivered",
+  "signed_proponente",
+  "awaiting_decision",
+  "vendedor_send_failed",
+]);
 
 function appUrl(): string {
   return process.env.NEXTAUTH_URL ?? "https://imobpro.ia.br";
