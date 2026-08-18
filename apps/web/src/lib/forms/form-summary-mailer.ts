@@ -50,9 +50,16 @@ const CATEGORY = "resumo_formulario";
  * Dois problemas: (1) o `category` do PATCH de anexo não tinha whitelist, então
  * quem reclassificasse um documento seu pra "resumo_formulario" o perdia no
  * próximo envio; (2) o form é reabrível e cada re-finalize re-executava o
- * delete. Agora nada é apagado: a chave do blob é determinística por
- * (dealId, formId), então re-envio sobrescreve o MESMO objeto e a linha
- * existente é atualizada no lugar.
+ * delete. Agora nada é apagado: a linha existente é atualizada no lugar.
+ *
+ * O match é por (dealId, source): a URL do blob NÃO é estável — o storage sobe
+ * com `addRandomSuffix: true` (URL não enumerável, ver s3.ts), então cada
+ * upload gera URL nova e um match por URL nunca casa (era isso que criava um
+ * anexo duplicado por clique de "Baixar PDF"/"Enviar"). `source` não é editável
+ * pelo usuário (categoria é) e deal↔form é 1:1, então há no máximo uma linha.
+ * O blob antigo vira órfão e fica por conta do GC de blobs (delete-cleanup
+ * conta referências por URL). Sem unique constraint em (dealId, source), dois
+ * envios simultâneos ainda podem duplicar — best-effort, janela mínima.
  */
 export async function persistFormSummaryPdf(
   dealId: string,
@@ -67,16 +74,14 @@ export async function persistFormSummaryPdf(
     body: buffer,
     contentType: "application/pdf",
   });
-  // Casa por URL (determinística) E por `source`, nunca só por categoria: a
-  // categoria é editável pelo usuário, a origem não.
   const existing = await prisma.dealAttachment.findFirst({
-    where: { dealId, url, source: "form_summary" },
+    where: { dealId, source: "form_summary" },
     select: { id: true },
   });
   if (existing) {
     await prisma.dealAttachment.update({
       where: { id: existing.id },
-      data: { filename, byteSize: buffer.byteLength, category: CATEGORY },
+      data: { url, filename, byteSize: buffer.byteLength, category: CATEGORY },
     });
   } else {
     await prisma.dealAttachment.create({
