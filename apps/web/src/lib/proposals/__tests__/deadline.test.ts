@@ -8,13 +8,13 @@ const IN_1D = new Date(NOW + 1 * 86_400_000);
 describe("proposalDeadline", () => {
   it("proposta assinada (completa) com data vencida mostra 'assinada', não 'vencida'", () => {
     const d = proposalDeadline(PAST, "completa", NOW);
-    expect(d.shortLabel).toBe("assinada");
+    expect(d.shortLabel).toBe("já assinada");
     expect(d.tone).toBe("none");
   });
 
   it("parcialmente assinada e convertida também congelam o prazo", () => {
     for (const status of ["assinada_proponente", "aguardando_vendedor", "convertida"]) {
-      expect(proposalDeadline(PAST, status, NOW).shortLabel).toBe("assinada");
+      expect(proposalDeadline(PAST, status, NOW).shortLabel).toBe("já assinada");
     }
   });
 

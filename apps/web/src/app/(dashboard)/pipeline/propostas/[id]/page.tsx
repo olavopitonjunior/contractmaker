@@ -252,6 +252,11 @@ export default async function PropostaDetailPage({
       planVendedores={planVendedores}
       vendedorCostLabel={vendedorCostLabel}
       vendedorIncluded={vendedorRows.length > 0}
+      // `completed_manually` só nasce em assinada_proponente (guard do
+      // complete) — é o registro direto de que a via do proprietário foi
+      // PULADA, não assinada. O stepper usa pra não dar check em quem não
+      // assinou (achado de QA 2026-08-18).
+      vendedorSkipped={events.some((e) => e.eventName === "completed_manually")}
     />
   );
 }

@@ -8,7 +8,7 @@ import { SIGNED_OR_LATER_STATUSES } from "./status-sets";
  * carimbava "vencida" em proposta assinada com data no passado.
  *
  * Regras:
- *  - assinada (parcial ou completa) ou convertida → "assinada", tom neutro;
+ *  - assinada (parcial ou completa) ou convertida → "já assinada", tom neutro;
  *  - `expirada` → "vencida" (o carimbo terminal, mesmo sem validUntil);
  *  - demais terminais (cancelada/recusadas) → "—" (prazo é irrelevante);
  *  - resto (rascunho, aguardando_aprovacao, falha_envio, enviada, entregue,
@@ -23,7 +23,9 @@ export function proposalDeadline(
   now?: number
 ): DeadlineInfo {
   if (SIGNED_OR_LATER_STATUSES.has(status)) {
-    return { days: null, tone: "none", label: "assinada", shortLabel: "assinada" };
+    // "já assinada" em prosa — só "assinada" na coluna Prazo lia como enum
+    // vazado (achado de QA 2026-08-18).
+    return { days: null, tone: "none", label: "já assinada", shortLabel: "já assinada" };
   }
   if (status === "expirada") {
     return { days: null, tone: "danger", label: "vencida", shortLabel: "vencida" };
