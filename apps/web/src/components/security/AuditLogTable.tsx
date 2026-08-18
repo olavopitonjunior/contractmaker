@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,7 +32,7 @@ export function AuditLogTable() {
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const limit = 50;
-  const [filter, setFilter] = useState({ action: "", result: "" });
+  const [filter, setFilter] = useState({ action: "", result: "", q: "" });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -45,6 +46,7 @@ export function AuditLogTable() {
       params.set("limit", String(limit));
       if (filter.action) params.set("action", filter.action);
       if (filter.result) params.set("result", filter.result);
+      if (filter.q.trim()) params.set("q", filter.q.trim());
 
       const res = await fetch(`/api/security/audit-log?${params}`, {
         credentials: "include",
@@ -67,14 +69,27 @@ export function AuditLogTable() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offset, filter.action, filter.result]);
+  }, [offset, filter.action, filter.result, filter.q]);
+
+  function exportUrl(): string {
+    const params = new URLSearchParams();
+    if (filter.action) params.set("action", filter.action);
+    if (filter.result) params.set("result", filter.result);
+    if (filter.q.trim()) params.set("q", filter.q.trim());
+    return `/api/security/audit-log/export?${params}`;
+  }
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="font-display tracking-tight text-2xl font-semibold">Registro de atividade</h1>
-        <div className="text-sm text-muted-foreground">
-          {total} evento{total !== 1 ? "s" : ""}
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-muted-foreground">
+            {total} evento{total !== 1 ? "s" : ""}
+          </span>
+          <Button variant="outline" size="sm" asChild>
+            <a href={exportUrl()}>Exportar CSV</a>
+          </Button>
         </div>
       </div>
 
@@ -83,6 +98,18 @@ export function AuditLogTable() {
           <CardTitle className="text-sm">Filtros</CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="md:col-span-3">
+            <Label htmlFor="f-q">Busca livre</Label>
+            <Input
+              id="f-q"
+              placeholder="ação, recurso ou tipo de recurso…"
+              value={filter.q}
+              onChange={(e) => {
+                setOffset(0);
+                setFilter((f) => ({ ...f, q: e.target.value }));
+              }}
+            />
+          </div>
           <div>
             <Label htmlFor="f-action">Ação</Label>
             <Input
@@ -115,7 +142,7 @@ export function AuditLogTable() {
               variant="outline"
               size="sm"
               onClick={() => {
-                setFilter({ action: "", result: "" });
+                setFilter({ action: "", result: "", q: "" });
                 setOffset(0);
               }}
             >
@@ -169,7 +196,18 @@ export function AuditLogTable() {
                     {new Date(r.createdAt).toLocaleString("pt-BR")}
                   </td>
                   <td className="px-3 py-2">
-                    {r.user?.name ?? r.user?.email ?? "—"}
+                    {r.user ? (
+                      <Link
+                        href={`/settings/seguranca/audit-log/users/${r.user.id}`}
+                        className="hover:underline"
+                        onClick={(e) => e.stopPropagation()}
+                        title="Ver atividade deste usuário"
+                      >
+                        {r.user.name ?? r.user.email}
+                      </Link>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                   <td className="px-3 py-2 font-mono text-xs">{r.action}</td>
                   <td className="px-3 py-2">

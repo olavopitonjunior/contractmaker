@@ -139,6 +139,8 @@ export type AuditAction =
   | "ORG_SLA_POLICY_RESET"
   // Export CSV do relatório do pipeline (PR 3.7)
   | "REPORT_EXPORTED"
+  // Export CSV do log de auditoria (1f)
+  | "AUDIT_LOG_EXPORTED"
   | "FORM_CREATE"
   | "FORM_UPDATE"
   | "FORM_PATCH_REJECTED_PATH"

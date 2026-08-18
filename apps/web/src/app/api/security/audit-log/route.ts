@@ -1,22 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
 import { requirePermission, PermissionDeniedError, MembershipRequiredError } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
-
-const querySchema = z.object({
-  action: z.string().optional(),
-  userId: z.string().optional(),
-  result: z.enum(["SUCCESS", "FAILURE", "DENIED"]).optional(),
-  from: z.string().optional(),
-  to: z.string().optional(),
-  offset: z.coerce.number().int().min(0).default(0),
-  limit: z.coerce.number().int().min(1).max(200).default(50),
-});
+import { auditQuerySchema, buildAuditWhere, impersonatedByFromMetadata } from "@/lib/security/audit-query";
 
 /**
- * GET /api/security/audit-log — log paginado com filtros.
+ * GET /api/security/audit-log — log paginado com filtros (1f: + busca livre `q`,
+ * `resourceType` e `impersonatedBy`).
  */
 export async function GET(req: NextRequest) {
   const authResult = await requireAuth(req);
@@ -37,21 +28,12 @@ export async function GET(req: NextRequest) {
   }
 
   const url = new URL(req.url);
-  const parsed = querySchema.safeParse(Object.fromEntries(url.searchParams));
+  const parsed = auditQuerySchema.safeParse(Object.fromEntries(url.searchParams));
   if (!parsed.success) {
     return NextResponse.json({ error: "Query inválida" }, { status: 400 });
   }
   const q = parsed.data;
-
-  const where: any = { orgId: ctx.orgId };
-  if (q.action) where.action = q.action;
-  if (q.userId) where.userId = q.userId;
-  if (q.result) where.result = q.result;
-  if (q.from || q.to) {
-    where.createdAt = {};
-    if (q.from) where.createdAt.gte = new Date(q.from);
-    if (q.to) where.createdAt.lte = new Date(q.to);
-  }
+  const where = buildAuditWhere(ctx.orgId, q);
 
   const [total, rows] = await Promise.all([
     prisma.auditLog.count({ where }),
@@ -75,6 +57,7 @@ export async function GET(req: NextRequest) {
       resource: r.resource,
       resourceType: r.resourceType,
       metadata: r.metadata,
+      impersonatedBy: impersonatedByFromMetadata(r.metadata),
       ipAddress: r.ipAddress,
       userAgent: r.userAgent?.slice(0, 120) ?? null,
       createdAt: r.createdAt,
