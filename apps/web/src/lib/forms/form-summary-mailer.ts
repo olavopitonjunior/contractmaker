@@ -116,7 +116,7 @@ export async function sendFormSummary(
   // Metadados do form para o corpo do e-mail.
   const form = await prisma.salesForm.findUnique({
     where: { id: input.formId },
-    select: { title: true, org: { select: { name: true } } },
+    select: { title: true, orgId: true, org: { select: { name: true } } },
   });
   const formTitle = form?.title || "Resumo do formulário";
   const orgName = form?.org?.name || "";
@@ -191,6 +191,7 @@ export async function sendFormSummary(
     to: input.to,
     bcc: input.bcc,
     subject,
+    orgId: form?.orgId,
     react: renderEmail(attachmentsSkipped, attachedDocs),
     attachments,
   });
@@ -203,6 +204,7 @@ export async function sendFormSummary(
       to: input.to,
       bcc: input.bcc,
       subject,
+      orgId: form?.orgId,
       react: renderEmail(true, 0),
     });
   }
