@@ -286,6 +286,9 @@ export async function PATCH(
         }
       } else {
         try {
+          // O marco do finalize é o form_completed ("formulário foi
+          // preenchido"), disparado no fim deste bloco — a geração do contrato
+          // em si não notifica ninguém (paridade com vendas).
           const result = await generateLocacaoContractForDeal(deal.id, deal.userId, form.orgId);
           contractId = result.contractId;
         } catch (error) {

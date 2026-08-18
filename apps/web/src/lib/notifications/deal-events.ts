@@ -81,9 +81,9 @@ export interface NotifyDealEventParams {
   event: DealNotifEvent;
   /**
    * Discriminador de idempotência por evento:
-   * stage_change `${toStageId}:${yyyymmdd}` · contract_ready contractId ·
-   * contract_sent envelopeId · contract_signed envelopeId · charge_* chargeId ·
-   * form_completed formId · form_reminder `d${N}` ou `manual-${ts}`.
+   * stage_change `${toStageId}:${yyyymmdd}` · contract_sent envelopeId ·
+   * contract_signed envelopeId · charge_* chargeId · form_completed formId ·
+   * form_reminder `d${N}` ou `manual-${ts}`.
    */
   dedupeKey: string;
   context?: {
@@ -100,7 +100,6 @@ const OWNS_BELL: Record<DealNotifEvent, boolean> = {
   stage_change: true,
   form_completed: true,
   form_reminder: true,
-  contract_ready: true,
   contract_sent: true,
   contract_signed: false,
   charge_created: false,
@@ -131,11 +130,6 @@ function buildTexts(params: {
       return {
         title: "Lembrete: formulário pendente",
         body: `O formulário do negócio ${t} ainda não foi concluído. Reencaminhe o link às partes se necessário.`,
-      };
-    case "contract_ready":
-      return {
-        title: "Contrato pronto",
-        body: `O contrato do negócio ${t} foi gerado e está em revisão pela imobiliária.`,
       };
     case "contract_sent":
       return {

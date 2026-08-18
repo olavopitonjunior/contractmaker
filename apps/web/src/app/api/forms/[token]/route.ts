@@ -350,6 +350,9 @@ export async function PATCH(
         }
       } else {
         try {
+          // O marco que os destinatários recebem no finalize é o form_completed
+          // ("formulário foi preenchido"), disparado no fim deste bloco — a
+          // geração do contrato em si não notifica ninguém.
           const result = await generateContractForDeal(deal.id, deal.userId, form.orgId);
           contractId = result.contractId;
         } catch (error) {
