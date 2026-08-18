@@ -40,6 +40,21 @@ const SEGURO_VIGENCIA_TEXTO: Record<string, string> = {
   prazo_contrato: "pelo prazo integral da locação",
 };
 
+// Como os encargos transitam quando a imobiliária administra (cláusula de
+// encargos do v3). Escolhido no form (aluguel.encargos_repasse).
+const ENCARGOS_REPASSE_TEXTO: Record<string, string> = {
+  paga_e_retem:
+    "pagos diretamente pela ADMINISTRADORA e deduzidos do repasse mensal devido à PARTE LOCADORA",
+  repasse_integral:
+    "lançados integralmente na cobrança mensal da PARTE LOCATÁRIA, junto com o aluguel",
+};
+
+const CONTA_CONSUMO_TEXTO: Record<string, string> = {
+  agua: "água",
+  luz: "energia elétrica",
+  gas: "gás",
+};
+
 // Parse YYYY-MM-DD âncora ao meio-dia local (estável em UTC-3).
 function parseLocalDate(raw: string): Date | null {
   const s = raw.trim();
@@ -120,7 +135,15 @@ export function enrichLocacaoData(
   }
 
   // Administradora da locação — idempotente: dataJson já preenchido vence.
-  const adm = ctx?.administradora;
+  // Desde 2026-08 o FORM decide se há administração (aluguel.adm_imobiliaria):
+  // com "não" explícito, a org NÃO é nomeada administradora no contrato de
+  // locação (as cláusulas condicionadas a administradora_nome caem no fallback
+  // "diretamente à PARTE LOCADORA"). Ausente = form antigo, comportamento de
+  // sempre. O instrumento de ADMINISTRAÇÃO re-injeta por conta própria.
+  const admFormDecision = (
+    (enriched.aluguel as Record<string, unknown> | undefined) ?? {}
+  ).adm_imobiliaria;
+  const adm = admFormDecision === false ? undefined : ctx?.administradora;
   if (adm?.nome && (config.administradora_nome == null || config.administradora_nome === "")) {
     config.administradora_nome = adm.nome;
     if (adm.creci && (config.administradora_creci == null || config.administradora_creci === "")) {
@@ -212,6 +235,64 @@ export function enrichLocacaoData(
     }
   }
 
+  // ==========================================================================
+  // Administração/despesas decididas no form (etapa 4, 2026-08). Booleans e
+  // textos prontos pras cláusulas de pagamento (4) e encargos (9) do v3.
+  // Idempotente e sem default: form antigo não materializa nada.
+  // ==========================================================================
+  if (config.adm_imobiliaria == null && typeof aluguel.adm_imobiliaria === "boolean") {
+    config.adm_imobiliaria = aluguel.adm_imobiliaria;
+  }
+  // Cláusula rescisória: default TRUE (comportamento histórico do v3) — só o
+  // "Não" explícito do form omite a cláusula 7.2. Materializado aqui pra o
+  // template poder usar {{#if config.clausula_rescisoria}} com dataJson antigo.
+  if (config.clausula_rescisoria == null) {
+    config.clausula_rescisoria = true;
+  }
+  if (aluguel.adm_imobiliaria === true) {
+    if (config.taxa_admin_percent == null) {
+      // 0% explícito é válido (isenção negociada) — só o AUSENTE cai no
+      // default 10. `> 0` aqui viraria 10% num contrato assinado enquanto
+      // LeaseContract.taxaAdminPercent gravaria 0 (divergência financeira).
+      const taxa = Number(aluguel.taxa_admin_percent);
+      config.taxa_admin_percent =
+        aluguel.taxa_admin_percent != null && Number.isFinite(taxa) && taxa >= 0
+          ? taxa
+          : 10;
+    }
+    const repasse =
+      typeof aluguel.encargos_repasse === "string" ? aluguel.encargos_repasse : "";
+    if (repasse && config.encargos_repasse == null) {
+      config.encargos_repasse = repasse;
+    }
+    if (config.encargos_repasse_texto == null || config.encargos_repasse_texto === "") {
+      const txt = ENCARGOS_REPASSE_TEXTO[repasse];
+      if (txt) config.encargos_repasse_texto = txt;
+    }
+  }
+  if (
+    config.contas_consumo_individualizadas == null &&
+    typeof aluguel.contas_consumo_individualizadas === "boolean"
+  ) {
+    config.contas_consumo_individualizadas = aluguel.contas_consumo_individualizadas;
+  }
+  if (
+    aluguel.contas_consumo_individualizadas === false &&
+    (config.contas_no_condominio_texto == null || config.contas_no_condominio_texto === "")
+  ) {
+    const contas = Array.isArray(aluguel.contas_no_condominio)
+      ? (aluguel.contas_no_condominio as unknown[])
+          .map((c) => CONTA_CONSUMO_TEXTO[String(c)])
+          .filter(Boolean)
+      : [];
+    if (contas.length > 0) {
+      config.contas_no_condominio_texto =
+        contas.length === 1
+          ? contas[0]
+          : `${contas.slice(0, -1).join(", ")} e ${contas[contas.length - 1]}`;
+    }
+  }
+
   enriched.config = config;
   return enriched;
 }
@@ -228,10 +309,26 @@ export function enrichAdministracaoData(
   const enriched = enrichLocacaoData(data, ctx);
   const config = ((enriched.config as Record<string, unknown>) || {}) as Record<string, unknown>;
 
-  // CNPJ da administradora — o enrich base só injeta nome/CRECI/endereço
-  // (bloco condicionado a `adm.nome` acima; aqui repetimos o guard pra
-  // administradora sem nome não deixar CNPJ órfão no preâmbulo).
+  // O enrich base PULA a injeção da administradora quando o form diz
+  // aluguel.adm_imobiliaria === false (decisão vale pro contrato de LOCAÇÃO).
+  // Este instrumento é a própria relação imobiliária↔proprietário, então aqui
+  // a administradora entra sempre que a org tiver os dados.
   const adm = ctx?.administradora;
+  if (adm?.nome && (config.administradora_nome == null || config.administradora_nome === "")) {
+    config.administradora_nome = adm.nome;
+    if (adm.creci && (config.administradora_creci == null || config.administradora_creci === "")) {
+      config.administradora_creci = adm.creci;
+    }
+    if (
+      adm.endereco &&
+      (config.administradora_endereco == null || config.administradora_endereco === "")
+    ) {
+      config.administradora_endereco = adm.endereco;
+    }
+  }
+
+  // CNPJ da administradora — guard repetido pra administradora sem nome não
+  // deixar CNPJ órfão no preâmbulo.
   if (
     adm?.nome &&
     adm.cnpj &&
@@ -241,14 +338,19 @@ export function enrichAdministracaoData(
   }
 
   // Taxa de administração — fonte é o bloco fiscal operador-only do form;
-  // fallback aluguel.taxa_admin_percent; default da casa 10%.
+  // fallback aluguel.taxa_admin_percent; default da casa 10%. Nullish-aware:
+  // 0% explícito em qualquer fonte é respeitado (não cai pro próximo).
   if (config.taxa_admin_percent == null) {
     const fiscal = (enriched.fiscal as Record<string, unknown> | undefined) || {};
     const aluguel = (enriched.aluguel as Record<string, unknown> | undefined) || {};
-    const taxa =
-      Number(fiscal.taxa_admin_percent) ||
-      Number(aluguel.taxa_admin_percent) ||
-      10;
+    let taxa = 10;
+    for (const candidate of [fiscal.taxa_admin_percent, aluguel.taxa_admin_percent]) {
+      const n = Number(candidate);
+      if (candidate != null && Number.isFinite(n) && n >= 0) {
+        taxa = n;
+        break;
+      }
+    }
     config.taxa_admin_percent = taxa;
   }
 

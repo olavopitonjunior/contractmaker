@@ -149,6 +149,23 @@ const aluguelSchema = z.object({
   // rateio de obra etc. Também é o destino do valor legado quando um form
   // antigo tinha `encargos` digitado à mão e nenhum item detalhado.
   outros_encargos: z.number().min(0).optional().default(0),
+  // ==========================================================================
+  // Aditivos 2026-08: decisão de ADMINISTRAÇÃO no form público (etapa 4).
+  // Sem default de propósito (ausente = form antigo, cláusulas seguem como
+  // antes). No finalize, espelham em fiscal.*/LeaseContract — o operador segue
+  // podendo sobrescrever no diálogo "Dados da administração".
+  // ==========================================================================
+  // "A locação terá administração pela imobiliária?"
+  adm_imobiliaria: z.boolean().optional(),
+  // Com administração: a imob PAGA os encargos e retém no repasse ao
+  // proprietário, ou repassa integral pro locatário pagar junto do aluguel.
+  // Dirige a cláusula de encargos (9.1.2) do template v3.
+  encargos_repasse: z.enum(["paga_e_retem", "repasse_integral"]).optional(),
+  // Contas de consumo (água/luz/gás), quando há condomínio: individualizadas
+  // (transferem de titularidade — cláusula 9.3 atual) ou somando no boleto do
+  // condomínio (sem transferência; pagas via condomínio).
+  contas_consumo_individualizadas: z.boolean().optional(),
+  contas_no_condominio: z.array(z.enum(["agua", "luz", "gas"])).optional(),
 });
 
 /**
@@ -324,6 +341,10 @@ export const dadosLocacaoSchema = z
         multa_atraso_percent: z.number().default(10),
         juros_mensais_atraso: z.number().default(1),
         multa_rescisoria_meses: z.number().default(3),
+        // "Haverá cláusula rescisória?" (etapa Garantia). false = o contrato
+        // sai SEM a cláusula de multa por rescisão antecipada; default true
+        // preserva forms antigos e o comportamento padrão do template v3.
+        clausula_rescisoria: z.boolean().default(true),
       })
       .default({}),
     // Operador-only (não renderizadas no template): config fiscal + comissão.
@@ -386,6 +407,9 @@ export const LOCACAO_STEP_LABELS = [
   "Imóvel",
   "Aluguel e Reajuste",
   "Garantia e Observações",
+  // 2026-08: paridade com venda — comissão/angariadores no form público
+  // (token principal apenas; subtokens não incluem o índice 6).
+  "Comissão",
 ] as const;
 
 // ============================================================================
@@ -424,6 +448,10 @@ export const dadosLocacaoComercialSchema = z
         multa_atraso_percent: z.number().default(10),
         juros_mensais_atraso: z.number().default(1),
         multa_rescisoria_meses: z.number().default(3),
+        // "Haverá cláusula rescisória?" (etapa Garantia). false = o contrato
+        // sai SEM a cláusula de multa por rescisão antecipada; default true
+        // preserva forms antigos e o comportamento padrão do template v3.
+        clausula_rescisoria: z.boolean().default(true),
       })
       .default({}),
     fiscal: fiscalSchema.optional(),
@@ -471,6 +499,7 @@ export const LOCACAO_COMERCIAL_STEP_LABELS = [
   "Imóvel e Destinação",
   "Aluguel e Reajuste",
   "Garantia e Observações",
+  "Comissão",
 ] as const;
 
 // Discriminadores de locação aceitos no fluxo público + helpers de seleção.
@@ -529,6 +558,27 @@ export function collectLocacaoFinalizeIssues(
     issues.push({
       path: "aluguel.valor",
       message: "Informe o valor do aluguel (maior que zero).",
+    });
+  }
+
+  // Administração pela imobiliária: com "sim", a forma de trânsito dos
+  // encargos é obrigatória (dirige a cláusula de encargos do contrato).
+  if (aluguel.adm_imobiliaria === true && isBlankStr(aluguel.encargos_repasse)) {
+    issues.push({
+      path: "aluguel.encargos_repasse",
+      message:
+        "Com administração pela imobiliária, informe se os encargos são pagos e retidos ou repassados integralmente.",
+    });
+  }
+  // Contas de consumo não individualizadas: precisa dizer QUAIS somam no
+  // boleto do condomínio (a cláusula 9.3 lista).
+  if (
+    aluguel.contas_consumo_individualizadas === false &&
+    !(Array.isArray(aluguel.contas_no_condominio) && aluguel.contas_no_condominio.length > 0)
+  ) {
+    issues.push({
+      path: "aluguel.contas_no_condominio",
+      message: "Informe quais contas de consumo entram no boleto do condomínio.",
     });
   }
 

@@ -84,6 +84,8 @@ Org-scoped, `cuid()`, índices `(orgId, …)`. Campos ilustrativos (refinar na m
 ### 4.1 Discriminadores & DadosContrato
 Novos `schemaType`: `locacao_residencial_v1`, `locacao_comercial_v1`, `locacao_temporada_v1`, `locacao_btr_v1`. Novos Zod schemas em `lib/forms/validation-locacao.ts` (espelhando `validation.ts`): `locador[]`, `locatario[]`, `imovel`(ref `Property`), `aluguel{valor,encargos,reajuste,vigencia,diaVencimento}`, `garantia{tipo,…}`, `vistoria_ref`. **Aditivo** — não toca `dadosContratoSchema` de venda.
 
+Aditivos 2026-08 (form público decide administração/despesas e comissão): `aluguel.adm_imobiliaria` (bool; `false` explícito faz o contrato de locação NÃO nomear administradora), `aluguel.encargos_repasse` (`paga_e_retem|repasse_integral` → cláusula 9.1.2), `aluguel.taxa_admin_percent` (exposto na etapa 4), `aluguel.contas_consumo_individualizadas` + `aluguel.contas_no_condominio[]` (`agua|luz|gas` → cláusula 9.3), `config.clausula_rescisoria` (bool default true; `false` omite a 7.2 de multa por rescisão antecipada). Etapa 7 nova "Comissão" (token principal apenas): `comissao.taxa_locacao_percent` + `comissao.angariadores[]` com lookup/anti-duplicação no registry (`/api/forms/[token]/commissioners` serve as duas esteiras) e `CadastroRecebimento` compartilhado com venda (PIX/banco write-only; magic link "Pedir dados ao corretor" via `request-completion`).
+
 Enums ampliados após achados Superlógica live:
 - **`Guarantee.tipo`** (A3, 7 valores): `caucionante | caucao | cessao_fiduciaria | fiador | seguro_fianca | titulo_capitalizacao | sem_garantia`.
 - **`Guarantee.caucaoSubtipo`** (A4, quando `tipo=caucao`): `valor | veiculo | carta_fianca | imovel | outros`.

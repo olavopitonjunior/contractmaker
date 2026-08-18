@@ -717,7 +717,7 @@ export const tools: Tool[] = [
   {
     name: "fill_form",
     description:
-      "Preenche/atualiza dados de um SalesForm pelo token. Body { dataJson?, status?, title? }. dataJson faz deep-merge com o que já existe (não substitui). ATENÇÃO: setar status='completo' dispara auto-geração de contrato no servidor + dedup de cônjuges + linking de attachments + criação de DiligentedPerson pra sócios PJ. Use status='rascunho' para auto-save sem disparar nada. Endpoint público (token-as-tenancy) — qualquer um com o token edita.",
+      "Preenche/atualiza dados de um SalesForm pelo token. Body { dataJson?, status?, title? }. dataJson faz deep-merge com o que já existe (não substitui). ATENÇÃO: setar status='completo' dispara auto-geração de contrato no servidor + dedup de cônjuges + linking de attachments + criação de DiligentedPerson pra sócios PJ. Use status='rascunho' para auto-save sem disparar nada. Endpoint público (token-as-tenancy) — qualquer um com o token edita. Locação (forms locacao_*) aceita também: aluguel.adm_imobiliaria (bool — administração pela imobiliária), aluguel.encargos_repasse ('paga_e_retem'|'repasse_integral'), aluguel.taxa_admin_percent, aluguel.contas_consumo_individualizadas (bool) + aluguel.contas_no_condominio (['agua'|'luz'|'gas']), config.clausula_rescisoria (bool — false gera contrato sem multa rescisória) e comissao.{taxa_locacao_percent, angariadores[]} — tudo condiciona cláusulas do contrato gerado.",
     inputSchema: {
       type: "object",
       properties: {

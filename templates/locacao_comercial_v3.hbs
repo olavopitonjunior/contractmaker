@@ -49,8 +49,12 @@
 <p>6.8. A PARTE LOCATÁRIA desde já faculta à PARTE LOCADORA examinarem ou vistoriarem o imóvel, sempre que entender necessário, desde que se faça durante o horário comercial e mediante comunicação, com 24 (vinte e quatro) horas de antecedência.</p>
 
 <h2>7. MULTA</h2>
+{{#if config.clausula_rescisoria}}
 <p>7.1. Fica estipulada a multa equivalente a {{config.multa_rescisoria_meses}} ({{numeroExtenso config.multa_rescisoria_meses}}) aluguéis vigentes na oportunidade da infração, para ser aplicada à parte que descumprir qualquer das cláusulas do presente contrato.</p>
 <p>7.2. Em caso de rescisão antecipada, na aplicação da multa prevista nesta cláusula, será observada a proporcionalidade prevista disposto do artigo 4º da Lei nº 8.245, de 18/10/91 (Lei do Inquilinato).</p>
+{{else}}
+<p>7.1. A parte que descumprir qualquer das cláusulas do presente contrato responderá pelas perdas e danos a que der causa. As partes convencionam que não haverá multa pré-fixada por rescisão antecipada, observado, quanto à devolução do imóvel, o disposto no artigo 4º da Lei nº 8.245, de 18/10/91 (Lei do Inquilinato).</p>
+{{/if}}
 
 <h2>8. GARANTIA</h2>
 {{#if (eq garantia.tipo "titulo_capitalizacao")}}
@@ -78,13 +82,22 @@
 <p>9.1. Correrão por conta exclusiva da PARTE LOCATÁRIA, os pagamentos da integralidade dos impostos e taxas que sobre o imóvel recaem ou venham a recair, inclusive taxas de funcionamento e alvarás, respondendo ainda, a PARTE LOCATÁRIA, pela totalidade das despesas decorrentes do consumo de energia, água (se houver), gás (se houver) e IPTU, qualquer que seja a forma da respectiva cobrança.</p>
 <p>9.1.1. Compromete-se a PARTE LOCATÁRIA a entregar à PARTE LOCADORA a "notificação de lançamento" do IPTU.</p>
 {{#if (existe config.administradora_nome)}}
+{{#if (eq config.encargos_repasse "paga_e_retem")}}
+<p>9.1.2. Os valores correspondentes ao IPTU{{#if (gt aluguel.iptu_mensal 0)}} ({{moeda aluguel.iptu_mensal}} por mês – valor de referência){{/if}} e despesas ordinárias de condomínio{{#if (gt aluguel.condominio_mensal 0)}} ({{moeda aluguel.condominio_mensal}} – valor de referência){{/if}}, de responsabilidade final da PARTE LOCATÁRIA, serão pagos diretamente pela ADMINISTRADORA junto aos respectivos credores, sendo os valores correspondentes deduzidos dos repasses mensais devidos à PARTE LOCADORA e cobrados da PARTE LOCATÁRIA juntamente com o aluguel.{{#if (gt aluguel.encargos 0)}} O total dos encargos mensais, na data de assinatura deste contrato, é de {{moeda aluguel.encargos}}, sujeito a alteração conforme os lançamentos do condomínio e do Município.{{/if}}</p>
+{{else}}
 <p>9.1.2. Os valores correspondentes ao IPTU{{#if (gt aluguel.iptu_mensal 0)}} ({{moeda aluguel.iptu_mensal}} por mês – valor de referência){{/if}} e despesas ordinárias de condomínio{{#if (gt aluguel.condominio_mensal 0)}} ({{moeda aluguel.condominio_mensal}} – valor de referência){{/if}}, são de responsabilidade da PARTE LOCATÁRIA e serão lançados pela ADMINISTRADORA, juntamente com o valor do aluguel, no mesmo boleto, devendo ser efetuado o respectivo pagamento na data do vencimento do aluguel.{{#if (gt aluguel.encargos 0)}} O total dos encargos mensais lançados no boleto, na data de assinatura deste contrato, é de {{moeda aluguel.encargos}}, sujeito a alteração conforme os lançamentos do condomínio e do Município.{{/if}}</p>
 <p>9.1.3. A PARTE LOCATÁRIA declara-se ciente de que o IPTU e despesas ordinárias de condomínio são pagos a vencer, ao contrário do aluguel que será pago vencido, declarando-se ciente também que antes do vencimento do primeiro mês de locação haverá a cobrança desse encargo.</p>
 {{/if}}
+{{/if}}
 <p>9.2. A PARTE LOCATÁRIA será responsável ainda pelo pagamento de todas as despesas, multas e demais sanções decorrentes do mau uso do imóvel e ou eventual retenção dos avisos de impostos, taxas e demais encargos públicos que incidem ou vierem incidir sobre o mesmo.</p>
-<p>9.3. A PARTE LOCATÁRIA se compromete, sempre que solicitado e na ocasião da entrega das chaves do imóvel, a apresentar as 03 (três) últimas contas quitadas da ENEL, SABESP (se houver) e COMGÁS (se houver).</p>
+{{#if (eq config.contas_consumo_individualizadas false)}}
+<p>9.3. As contas de consumo de {{config.contas_no_condominio_texto}} não são individualizadas e integram o rateio de despesas do condomínio, sendo pagas pela PARTE LOCATÁRIA juntamente com as despesas condominiais, não havendo transferência de titularidade junto às respectivas concessionárias.</p>
+<p>9.3.1. As demais contas de consumo individualizadas, se houver, deverão ser transferidas para o nome da PARTE LOCATÁRIA, por sua conta e suas expensas, junto às respectivas concessionárias, no prazo de até 30 (trinta) dias da assinatura do presente contrato, obrigando-se a PARTE LOCATÁRIA, ao final da locação e na oportunidade da entrega das chaves, a apresentar as 03 (três) últimas contas quitadas e o comprovante de solicitação de suspensão dos respectivos serviços.</p>
+{{else}}
+<p>9.3. A PARTE LOCATÁRIA se compromete, sempre que solicitado e na ocasião da entrega das chaves do imóvel, a apresentar as 03 (três) últimas contas quitadas junto às concessionárias de energia elétrica, água (se houver) e gás (se houver).</p>
 <p>9.3.1. Compromete-se ainda a PARTE LOCATÁRIA por sua conta e suas expensas, providenciar a transferência para seu nome das contas de consumo de energia, água (se houver) e gás (se houver) junto às respectivas concessionárias no prazo de até 30 (trinta) dias da assinatura do presente contrato.</p>
 <p>9.3.2. Ao final da locação e na oportunidade da entrega das chaves obriga-se a PARTE LOCATÁRIA a apresentar também o comprovante de solicitação de suspensão dos serviços de fornecimento de energia, água (se houver) e gás (se houver) junto às respectivas concessionárias.</p>
+{{/if}}
 <p>9.4. A PARTE LOCATÁRIA se compromete a efetuar seguro contra incêndio de todo do imóvel no valor de 100 (cem) vezes o valor do aluguel, que deverá ser periodicamente reajustado, de sorte a se manter atualizado, emitindo-se a apólice em favor da PARTE LOCADORA, em cujo poder ficará para que, no caso de sinistro, possam os mesmos reconstruir o imóvel, facultado à PARTE LOCATÁRIA reocupá-lo, terminada a obra, pelo tempo que restar a locação.</p>
 
 <h2>10. AÇÃO RENOVATÓRIA</h2>

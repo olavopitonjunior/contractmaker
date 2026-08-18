@@ -107,7 +107,11 @@ describe("template locação residencial v3 + enrich", () => {
     expect(html).toContain("PARTE LOCATÁRIA");
     expect(html).toContain("têm entre si, justo e acertado o seguinte:");
     expect(html).toContain("em 03 (três) vias de igual teor e forma");
-    expect(html).toContain("ENEL, SABESP (se houver) e COMGÁS (se houver)");
+    // 2026-08: concessionárias hardcoded (ENEL/SABESP/COMGÁS, viés SP) viraram
+    // texto genérico — o form agora decide individualização das contas.
+    expect(html).toContain(
+      "concessionárias de energia elétrica, água (se houver) e gás (se houver)"
+    );
     expect(html).toContain("Testemunha");
   });
 
@@ -431,5 +435,109 @@ describe("enrichLocacaoData — seguro-fiança: tomador e vigência (D4)", () =>
         config: { seguro_tomador_texto: "a IMOBILIÁRIA" },
       }).seguro_tomador_texto
     ).toBe("a IMOBILIÁRIA");
+  });
+});
+
+describe("template v3 — administração e despesas decididas no form (2026-08)", () => {
+  const ADMINISTRADORA = {
+    nome: "Imobiliária Exemplo Ltda",
+    creci: "24.342-J/SP",
+    endereco: "Rua Roque Petrella, 188, São Paulo/SP",
+  };
+
+  it("adm=sim com paga_e_retem troca a 9.1.2 e omite a 9.1.3 de boleto a vencer", () => {
+    const data = dadosLocacaoSchema.parse({
+      ...sample,
+      aluguel: {
+        ...(sample.aluguel as Record<string, unknown>),
+        adm_imobiliaria: true,
+        encargos_repasse: "paga_e_retem",
+        taxa_admin_percent: 8,
+      },
+    });
+    const html = renderContratoHTML(
+      loadTemplate(),
+      enrichLocacaoData(data as Record<string, unknown>, { administradora: ADMINISTRADORA })
+    );
+    expect(html).not.toMatch(/\{\{/);
+    expect(html).toContain("deduzidos dos repasses mensais devidos à PARTE LOCADORA");
+    expect(html).not.toContain("no mesmo boleto");
+    expect(html).not.toContain("pagos a vencer");
+  });
+
+  it("adm=não explícito vence a org: administradora não é nomeada", () => {
+    const data = dadosLocacaoSchema.parse({
+      ...sample,
+      aluguel: {
+        ...(sample.aluguel as Record<string, unknown>),
+        adm_imobiliaria: false,
+      },
+    });
+    const html = renderContratoHTML(
+      loadTemplate(),
+      enrichLocacaoData(data as Record<string, unknown>, { administradora: ADMINISTRADORA })
+    );
+    expect(html).toContain("diretamente à PARTE LOCADORA ou a quem esta indicar");
+    expect(html).not.toContain("Imobiliária Exemplo Ltda");
+  });
+
+  it("clausula_rescisoria=false troca a cláusula 7 inteira: sem multa pré-fixada", () => {
+    const data = dadosLocacaoSchema.parse({
+      ...sample,
+      config: { clausula_rescisoria: false },
+    });
+    const html = renderContratoHTML(
+      loadTemplate(),
+      enrichLocacaoData(data as Record<string, unknown>)
+    );
+    // Nenhuma multa estipulada em aluguéis — nem a 7.1 antiga nem a 7.2.
+    expect(html).not.toContain("Fica estipulada a multa equivalente");
+    expect(html).not.toContain("na oportunidade da infração");
+    // A âncora "item 7.1" referenciada por 5.4/6.7 continua existindo,
+    // como perdas e danos + convenção expressa de ausência de multa.
+    expect(html).toContain("não haverá multa pré-fixada por rescisão antecipada");
+    expect(html).toContain("perdas e danos");
+  });
+
+  it("taxa de administração 0% explícita é respeitada (não vira 10%)", () => {
+    const data = dadosLocacaoSchema.parse({
+      ...sample,
+      aluguel: {
+        ...(sample.aluguel as Record<string, unknown>),
+        adm_imobiliaria: true,
+        encargos_repasse: "repasse_integral",
+        taxa_admin_percent: 0,
+      },
+    });
+    const enriched = enrichLocacaoData(data as Record<string, unknown>, {
+      administradora: ADMINISTRADORA,
+    });
+    expect((enriched.config as Record<string, unknown>).taxa_admin_percent).toBe(0);
+  });
+
+  it("default (sem escolha) mantém a 7.2 — comportamento histórico", () => {
+    const html = renderContratoHTML(
+      loadTemplate(),
+      enrichLocacaoData(sample as Record<string, unknown>)
+    );
+    expect(html).toContain("rescisão antecipada");
+  });
+
+  it("contas de consumo no boleto do condomínio trocam a 9.3 e listam as contas", () => {
+    const data = dadosLocacaoSchema.parse({
+      ...sample,
+      aluguel: {
+        ...(sample.aluguel as Record<string, unknown>),
+        contas_consumo_individualizadas: false,
+        contas_no_condominio: ["agua", "gas"],
+      },
+    });
+    const html = renderContratoHTML(
+      loadTemplate(),
+      enrichLocacaoData(data as Record<string, unknown>)
+    );
+    expect(html).toContain("integram o rateio de despesas do condomínio");
+    expect(html).toContain("água e gás");
+    expect(html).not.toContain("transferência para seu nome das contas de consumo de energia");
   });
 });
