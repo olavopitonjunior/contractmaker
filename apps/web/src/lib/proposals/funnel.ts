@@ -93,7 +93,7 @@ export async function getProposalFunnel(opts: {
       )::float8 AS "p90ViewSign"
     FROM "Proposal" p
     LEFT JOIN LATERAL (
-      SELECT MIN(e."createdAt") AS "signedAt"
+      SELECT MIN(e."receivedAt") AS "signedAt"
       FROM "ProposalEvent" e
       WHERE e."proposalId" = p.id
         AND e."eventName" IN (${Prisma.join(SIGNED_EVENTS)})
