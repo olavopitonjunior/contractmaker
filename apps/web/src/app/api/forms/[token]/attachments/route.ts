@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { put } from "@vercel/blob";
 import { prisma } from "@/lib/db/prisma";
 import { resolveFormScope, formLockedResponse } from "@/lib/forms/resolve-form-scope";
+import { resolveParticipantScope } from "@/lib/forms/participant-scope";
 import { formClosedResponse, viewerIsOrgMember } from "@/lib/forms/form-gate";
 import { audit } from "@/lib/security/audit";
 import { archiveAttachment } from "@/lib/attachments/archive";
@@ -307,19 +308,24 @@ export async function PATCH(
   // um slot de outra parte (`{kind:"vendedor"}` num link de comprador) que o
   // auto-apply gravaria em dados alheios sem revisão. `filterAssignmentOptions`
   // no cliente é só UX; esta é a invariante de verdade.
-  if (
-    scope.participantId &&
-    scope.role &&
-    !assignmentAllowedForRole(
-      assignment.kind,
-      scope.role,
-      esteiraFromSchemaType(scope.schemaType),
-    )
-  ) {
-    return NextResponse.json(
-      { error: "assignment fora do escopo do papel" },
-      { status: 403 },
-    );
+  if (scope.participantId && scope.role) {
+    // Escopo EFETIVO (config de visibilidade da org, não os defaults): uma
+    // org que tirou uma etapa do link não pode seguir aceitando assignment
+    // naquela seção só porque o default de código a incluía.
+    const effective = await resolveParticipantScope(scope.role, scope.orgId);
+    if (
+      !assignmentAllowedForRole(
+        assignment.kind,
+        scope.role,
+        esteiraFromSchemaType(scope.schemaType),
+        effective.paths,
+      )
+    ) {
+      return NextResponse.json(
+        { error: "assignment fora do escopo do papel" },
+        { status: 403 },
+      );
+    }
   }
 
   const current = (attachment.extractedData as Record<string, unknown>) || {};

@@ -41,8 +41,13 @@ describe("ROLE_PATHS shape", () => {
     expect(ROLE_PATHS.vendedor).not.toContain("comissao");
   });
 
-  it("comprador só inclui compradores", () => {
-    expect(ROLE_PATHS.comprador).toEqual(["compradores"]);
+  it("comprador inclui compradores + pagamento (default 2026-08)", () => {
+    expect(ROLE_PATHS.comprador).toEqual([
+      "compradores",
+      "modalidade",
+      "pagamento",
+      "incluso_no_preco",
+    ]);
   });
 });
 
@@ -61,13 +66,12 @@ describe("filterDataJsonByRole", () => {
     expect(r).not.toHaveProperty("testemunhas");
   });
 
-  it("comprador: mantém só compradores", () => {
+  it("comprador: mantém compradores (+ pagamento quando houver), nunca vendedores", () => {
     const r = filterDataJsonByRole(FULL_DATA, "comprador");
-    expect(r).toEqual({
-      compradores: [{ nome: "Maria", cpf: "222" }],
-    });
+    expect(r.compradores).toEqual([{ nome: "Maria", cpf: "222" }]);
     expect(r).not.toHaveProperty("vendedores");
     expect(r).not.toHaveProperty("imoveis");
+    expect(r).not.toHaveProperty("comissao");
   });
 
   it("dataJson vazio → {}", () => {

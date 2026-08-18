@@ -51,11 +51,20 @@ const VIGENCIA_OPTIONS = [
 export function GarantiaStep({
   form,
   garantiaOptions,
+  pathScope,
 }: {
   form: UseFormReturn<any>;
   /** Catálogo da org; ausente = defaults + modalidades sem garantidor. */
   garantiaOptions?: readonly GarantiaOptionLike[];
+  /**
+   * Escopo do subtoken (ROLE paths). Ausente = token principal (tudo).
+   * Cards cujo path está fora do escopo NÃO renderizam — sem isso o
+   * locatário/fiador veria campos que o auto-save descarta em silêncio.
+   */
+  pathScope?: readonly string[];
 }) {
+  const canConfig = !pathScope || pathScope.includes("config");
+  const canObservacoes = !pathScope || pathScope.includes("observacoes");
   const tipo = form.watch("garantia.tipo") || "caucao";
   const provider = form.watch("garantia.provider") || "";
   const fiadorTipoPessoa = form.watch("garantia.fiador.tipo_pessoa");
@@ -210,7 +219,9 @@ export function GarantiaStep({
 
       {/* Cláusula rescisória — "Não" tira do contrato a cláusula de multa por
           rescisão antecipada (condicional no template v3 via
-          config.clausula_rescisoria). Default true = comportamento histórico. */}
+          config.clausula_rescisoria). Default true = comportamento histórico.
+          Só no token principal: `config` nunca entra no escopo de subtoken. */}
+      {canConfig && (
       <Card className="border border-border">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-semibold">Cláusula rescisória</CardTitle>
@@ -251,10 +262,12 @@ export function GarantiaStep({
           )}
         </CardContent>
       </Card>
+      )}
 
       {/* Observações gerais — paridade com venda (ComissaoConfigStep). Vai pro
           resumo da imobiliária e é lido pela IA como DADO cercado em
           <observacoes_form>, nunca instrução. Não vira texto do contrato. */}
+      {canObservacoes && (
       <Card className="border border-border">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-semibold">
@@ -276,6 +289,7 @@ export function GarantiaStep({
           </p>
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }

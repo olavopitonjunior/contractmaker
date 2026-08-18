@@ -6,7 +6,7 @@ import {
 } from "@/lib/ai/voice-extract";
 import { formClosedResponse } from "@/lib/forms/form-gate";
 import { resolveParticipantToken } from "@/lib/forms/participant-token";
-import { resolveRolePaths } from "@/lib/forms/role-paths";
+import { resolveParticipantScope } from "@/lib/forms/participant-scope";
 import { RateLimits } from "@/lib/security/ratelimit";
 
 export const runtime = "nodejs";
@@ -95,8 +95,11 @@ export async function POST(
 
   // Ditado por voz é mapeado por STEP do wizard (`stepIndex`) — o link de
   // terceiro não tem step, é um formulário genérico montado das field defs da
-  // categoria. Sem escopo de papel nativo, não há o que extrair.
-  const pathScope = resolveRolePaths(participant.role);
+  // categoria. Sem escopo de papel nativo, não há o que extrair. Escopo vem da
+  // config de visibilidade da org (participant-scope), não do mapa estático.
+  const pathScope = (
+    await resolveParticipantScope(participant.role, participant.form.orgId)
+  ).paths;
   if (pathScope.length === 0 || pathScope.some((p) => p.includes("."))) {
     return NextResponse.json(
       { error: "Ditado por voz não disponível neste link" },

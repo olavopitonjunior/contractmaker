@@ -121,9 +121,18 @@ export function assignmentAllowedForRole(
   kind: string,
   role: ParticipantRole | string,
   esteira: Esteira,
+  /**
+   * Escopo EFETIVO do subtoken (resolveParticipantScope — inclui a config de
+   * visibilidade da org). Sem ele, cai nos defaults estáticos: correto pra
+   * chamadas client-side de UX, mas o PATCH server-side deve passar o escopo
+   * real — senão uma org que TIROU uma etapa do link ainda aceitaria
+   * assignment naquela seção.
+   */
+  allowedPaths?: readonly string[],
 ): boolean {
   const topKey = topKeyForKind(kind, esteira);
   if (topKey === null) return true;
+  if (allowedPaths) return allowedPaths.includes(topKey);
   // `resolveRolePaths` em vez de `ROLE_PATHS[role]`: role de terceiro
   // (`terceiro:<slug>`) devolve `["terceiros.<slug>"]`, que nunca casa um
   // topKey de parte — logo o terceiro só consegue anexar como `outro`. Com o
