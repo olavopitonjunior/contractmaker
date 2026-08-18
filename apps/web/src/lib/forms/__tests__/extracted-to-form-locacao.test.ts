@@ -357,9 +357,9 @@ describe("labels do wizard de locação", () => {
     expect(LOCACAO_STEP_LABELS[4]).toBe("Aluguel e Reajuste");
   });
 
-  it("a Garantia é a última etapa (a Confirmação saiu em 2026-07-30)", () => {
-    expect(LOCACAO_STEP_LABELS[5]).toBe("Garantia");
-    expect(LOCACAO_COMERCIAL_STEP_LABELS[5]).toBe("Garantia");
+  it("a Garantia é a última etapa (a Confirmação saiu em 2026-07-30; observações entraram em 2026-08)", () => {
+    expect(LOCACAO_STEP_LABELS[5]).toBe("Garantia e Observações");
+    expect(LOCACAO_COMERCIAL_STEP_LABELS[5]).toBe("Garantia e Observações");
     expect(LOCACAO_STEP_LABELS).not.toContain("Confirmação e Assinatura");
     expect(LOCACAO_COMERCIAL_STEP_LABELS).not.toContain("Confirmação e Assinatura");
   });

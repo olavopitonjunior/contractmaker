@@ -4,6 +4,7 @@ import {
   isValidBirthdate,
 } from "@/lib/forms/field-formats";
 import { isMarried } from "@/lib/forms/estado-civil";
+import { OBSERVACOES_MAX } from "@/lib/forms/validation";
 
 // ============================================================================
 // Locação — schema Zod (schemaType "locacao_residencial_v1").
@@ -328,6 +329,11 @@ export const dadosLocacaoSchema = z
     // Operador-only (não renderizadas no template): config fiscal + comissão.
     fiscal: fiscalSchema.optional(),
     comissao: comissaoLocacaoSchema.optional(),
+    // Campo livre no fim do wizard (etapa Garantia) — paridade com venda.
+    // Mesmo contrato de leitura: resumo pra imobiliária + IA como DADO cercado
+    // em <observacoes_form> (nunca instrução; o form público é anônimo). Cap
+    // compartilhado com venda (o dataJson entra inteiro no prompt da análise).
+    observacoes: z.string().max(OBSERVACOES_MAX).optional().default(""),
   })
   .superRefine((data, ctx) => {
     // Caução limitada a 3 aluguéis (art. 38 §2º Lei 8.245/91).
@@ -379,7 +385,7 @@ export const LOCACAO_STEP_LABELS = [
   "Locatário(s)",
   "Imóvel",
   "Aluguel e Reajuste",
-  "Garantia",
+  "Garantia e Observações",
 ] as const;
 
 // ============================================================================
@@ -422,6 +428,8 @@ export const dadosLocacaoComercialSchema = z
       .default({}),
     fiscal: fiscalSchema.optional(),
     comissao: comissaoLocacaoSchema.optional(),
+    // Espelha o residencial — ver comentário em dadosLocacaoSchema.
+    observacoes: z.string().max(OBSERVACOES_MAX).optional().default(""),
   })
   .superRefine((data, ctx) => {
     if (data.garantia?.tipo === "caucao") {
@@ -462,7 +470,7 @@ export const LOCACAO_COMERCIAL_STEP_LABELS = [
   "Locatário(s)",
   "Imóvel e Destinação",
   "Aluguel e Reajuste",
-  "Garantia",
+  "Garantia e Observações",
 ] as const;
 
 // Discriminadores de locação aceitos no fluxo público + helpers de seleção.

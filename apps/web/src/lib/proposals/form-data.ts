@@ -16,7 +16,14 @@
  */
 
 import { parseMoneyBR } from "@/lib/format/money";
-import { GARANTIA_TIPOS, type GarantiaTipo } from "@/lib/contracts/template-category";
+import {
+  GARANTIA_TIPOS,
+  GARANTIA_LABELS,
+  type GarantiaTipo,
+} from "@/lib/contracts/template-category";
+import { OBSERVACOES_MAX } from "@/lib/forms/validation";
+
+export { OBSERVACOES_MAX };
 import { computeDedupeKey } from "./signer-dedupe";
 import { DEFAULT_PROPOSAL_VALIDITY_DAYS } from "./create-schema";
 
@@ -89,6 +96,24 @@ export interface ProposalFormValues {
   /** Só usada em locação (o schema de venda não tem garantia). */
   garantia: GarantiaInput;
   witnesses: WitnessInput[];
+  /**
+   * Observações/condições da proposta — campo livre que renderiza nas DUAS
+   * vias (não ocultável; `config.condicoes_internas`, ocultável, segue
+   * existindo pra uso interno). Vai na raiz do dataJson (`observacoes`), o
+   * MESMO dot-path do SalesForm — o convert copia verbatim e o texto chega ao
+   * form sem redigitação. Não entra no contrato automaticamente.
+   */
+  observacoes: string;
+  /** Venda: modalidade declarada da oferta ("" = não informada). */
+  modalidade: "" | "a_vista" | "financiamento";
+  /** Venda: sinal ofertado (money input, mesmo formato de `valor`). */
+  sinal: string;
+  /** Venda + modalidade financiamento: banco pretendido (texto livre). */
+  bancoFinanciamento: string;
+  /** Locação: prazo pretendido em meses (input numérico). */
+  prazoMeses: string;
+  /** Locação: data pretendida de entrada (input date, YYYY-MM-DD). */
+  dataEntrada: string;
 }
 
 export interface SignerInput {
@@ -136,6 +161,12 @@ export function emptyProposalForm(
     esconderComissao: false,
     garantia: emptyGarantia(),
     witnesses: [],
+    observacoes: "",
+    modalidade: "",
+    sinal: "",
+    bancoFinanciamento: "",
+    prazoMeses: "",
+    dataEntrada: "",
   };
 }
 
@@ -228,20 +259,90 @@ export function buildProposalDataJson(v: ProposalFormValues): Record<string, unk
   };
   if (endereco) data.imovel = { rua: endereco };
 
+  // Renderiza nas DUAS vias (não está na allowlist de hiddenPaths). Mesmo
+  // dot-path do SalesForm — o convert copia o dataJson verbatim.
+  if (trim(v.observacoes)) {
+    data.observacoes = trim(v.observacoes).slice(0, OBSERVACOES_MAX);
+  }
+
   if (isVenda) {
     data.compradores = proponentes;
     data.vendedores = vendedores;
-    if (valorNum != null) data.pagamento = { valor_total: valorNum };
+    // `pagamento` escreve os dois shapes: os canônicos do SalesForm
+    // (valor_total/sinal_arras/banco_financiamento — o convert copia sem
+    // traduzir) e os do template de proposta (sinal/forma, que
+    // proposta_venda_v1.hbs já imprime).
+    const sinalNum = v.sinal ? parseMoneyBR(v.sinal) : null;
+    const banco = trim(v.bancoFinanciamento);
+    const pagamento: Record<string, unknown> = {};
+    if (valorNum != null) pagamento.valor_total = valorNum;
+    if (sinalNum != null && sinalNum > 0) {
+      pagamento.sinal_arras = sinalNum;
+      pagamento.sinal = sinalNum;
+    }
+    if (v.modalidade === "financiamento" && banco) {
+      pagamento.banco_financiamento = banco;
+    }
+    if (v.modalidade) {
+      data.modalidade = v.modalidade;
+      pagamento.forma =
+        v.modalidade === "financiamento"
+          ? `Financiamento bancário${banco ? ` (${banco})` : ""}`
+          : "À vista (recursos próprios)";
+    }
+    if (Object.keys(pagamento).length > 0) data.pagamento = pagamento;
   } else {
     data.locatarios = proponentes;
     data.locadores = vendedores;
+    const prazoNum = Number(v.prazoMeses);
+    const prazo = Number.isFinite(prazoNum) && prazoNum > 0 ? prazoNum : null;
+    const entrada = trim(v.dataEntrada);
+    // `locacao.*` é o shape que os templates de proposta imprimem
+    // ({{locacao.garantia}}/{{locacao.prazo_meses}}/{{locacao.data_entrada}});
+    // `aluguel.*` é o canônico do form de locação (o convert copia verbatim).
+    const locacao: Record<string, unknown> = {};
+    const aluguel: Record<string, unknown> = {};
     if (valorNum != null) {
-      data.locacao = { valor_aluguel: valorNum };
-      data.aluguel = { valor: valorNum };
+      locacao.valor_aluguel = valorNum;
+      aluguel.valor = valorNum;
     }
+    if (prazo != null) {
+      locacao.prazo_meses = prazo;
+      aluguel.vigencia_meses = prazo;
+    }
+    if (entrada) {
+      locacao.data_entrada = entrada;
+      aluguel.vigencia_inicio = entrada;
+    }
+    const garantiaLabel = garantiaHumanLabel(v.garantia);
+    if (garantiaLabel) locacao.garantia = garantiaLabel;
+    if (Object.keys(locacao).length > 0) data.locacao = locacao;
+    if (Object.keys(aluguel).length > 0) data.aluguel = aluguel;
     data.garantia = buildGarantia(v.garantia);
   }
   return data;
+}
+
+/**
+ * String humana da garantia pro template ({{locacao.garantia}} — placeholder
+ * que os .hbs de proposta de locação sempre tiveram e nunca recebia valor).
+ * Deriva do shape canônico; propostas antigas com a string legada seguem
+ * funcionando porque o template não mudou.
+ */
+export function garantiaHumanLabel(g: GarantiaInput): string {
+  const label = GARANTIA_LABELS[g.tipo] ?? "";
+  if (!label) return "";
+  if (g.tipo === "caucao") {
+    const meses = Number(g.caucaoMeses);
+    return Number.isFinite(meses) && meses > 0
+      ? `${label} (${meses} ${meses === 1 ? "aluguel" : "aluguéis"})`
+      : label;
+  }
+  if (g.tipo === "fiador" && trim(g.fiador.nome)) {
+    return `${label} — ${trim(g.fiador.nome)} (${g.fiador.tipoPessoa === "juridica" ? "PJ" : "PF"})`;
+  }
+  if (trim(g.provider)) return `${label} — ${trim(g.provider)}`;
+  return label;
 }
 
 function buildGarantia(g: GarantiaInput): Record<string, unknown> {
@@ -383,13 +484,31 @@ export function parseProposalForm(input: {
     (typeof im.endereco === "string" ? im.endereco : "") ||
     (typeof imovelObj.rua === "string" ? imovelObj.rua : "");
 
-  const pag = (d.pagamento ?? {}) as { valor_total?: unknown };
-  const loc = (d.locacao ?? {}) as { valor_aluguel?: unknown };
-  const alu = (d.aluguel ?? {}) as { valor?: unknown };
+  const pag = (d.pagamento ?? {}) as {
+    valor_total?: unknown;
+    sinal_arras?: unknown;
+    sinal?: unknown;
+    banco_financiamento?: unknown;
+  };
+  const loc = (d.locacao ?? {}) as {
+    valor_aluguel?: unknown;
+    prazo_meses?: unknown;
+    data_entrada?: unknown;
+  };
+  const alu = (d.aluguel ?? {}) as {
+    valor?: unknown;
+    vigencia_meses?: unknown;
+    vigencia_inicio?: unknown;
+  };
   const valorNum =
     kind === "venda"
       ? Number(pag.valor_total ?? 0)
       : Number(loc.valor_aluguel ?? alu.valor ?? 0);
+  const sinalNum = Number(pag.sinal_arras ?? pag.sinal ?? 0);
+  const prazoNum = Number(loc.prazo_meses ?? alu.vigencia_meses ?? 0);
+  const dataEntrada =
+    (typeof loc.data_entrada === "string" ? loc.data_entrada : "") ||
+    (typeof alu.vigencia_inicio === "string" ? alu.vigencia_inicio : "");
 
   const g = (d.garantia ?? {}) as Record<string, unknown>;
   const garantia: GarantiaInput = {
@@ -432,6 +551,16 @@ export function parseProposalForm(input: {
     comissao: input.comissaoIncluida === true,
     esconderComissao: (input.hiddenPaths ?? []).includes("comissao"),
     garantia,
+    observacoes: typeof d.observacoes === "string" ? d.observacoes : "",
+    modalidade:
+      d.modalidade === "a_vista" || d.modalidade === "financiamento"
+        ? d.modalidade
+        : "",
+    sinal: formatAmountInput(sinalNum),
+    bancoFinanciamento:
+      typeof pag.banco_financiamento === "string" ? pag.banco_financiamento : "",
+    prazoMeses: Number.isFinite(prazoNum) && prazoNum > 0 ? String(prazoNum) : "",
+    dataEntrada,
     // Testemunhas vivem SÓ nas linhas de signer (não no dataJson). Reidratá-las
     // aqui é obrigatório: o PATCH substitui o conjunto de signatários, então uma
     // edição que voltasse `witnesses: []` apagaria as testemunhas da proposta.

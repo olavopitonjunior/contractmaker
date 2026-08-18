@@ -4,7 +4,9 @@ import { useMemo } from "react";
 import { UseFormReturn } from "react-hook-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
+import { OBSERVACOES_MAX } from "@/lib/forms/validation";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 import {
   FormField,
@@ -81,6 +83,7 @@ export function GarantiaStep({
   };
 
   return (
+    <div className="space-y-4">
     <Card className="border border-border">
       <CardHeader className="pb-3">
         <CardTitle className="text-base font-semibold">Garantia locatícia</CardTitle>
@@ -204,5 +207,31 @@ export function GarantiaStep({
         )}
       </CardContent>
     </Card>
+
+      {/* Observações gerais — paridade com venda (ComissaoConfigStep). Vai pro
+          resumo da imobiliária e é lido pela IA como DADO cercado em
+          <observacoes_form>, nunca instrução. Não vira texto do contrato. */}
+      <Card className="border border-border">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base font-semibold">
+            Observações Gerais
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <FormField label="Algo mais que a imobiliária precise saber? (opcional)">
+            <Textarea
+              {...form.register("observacoes")}
+              rows={5}
+              maxLength={OBSERVACOES_MAX}
+              placeholder="Combinados, prazos, condições especiais ou qualquer detalhe da negociação que não coube nos campos acima."
+            />
+          </FormField>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Entra no resumo enviado à imobiliária e é considerado na análise do
+            contrato. Não vira texto do contrato automaticamente.
+          </p>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
