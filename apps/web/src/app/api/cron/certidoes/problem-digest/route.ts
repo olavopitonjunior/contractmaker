@@ -3,6 +3,7 @@ import { requireCronAuth } from "@/lib/security/cron-auth";
 import { prisma } from "@/lib/db/prisma";
 import { sendEmail } from "@/lib/email/client";
 import { classifyJobBucket, type HealthBucket } from "@/lib/certidoes/health-monitor";
+import { buildServiceHealth } from "@/lib/certidoes/service-health";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
 
 // Rótulos PT-BR + ordem de prioridade dos buckets no resumo do digest.
@@ -112,14 +113,18 @@ export async function GET(req: NextRequest) {
           `• ${j.label} — ${j.endpoint} (cód ${j.resultCode ?? "-"}, ${j.retryCount}/${j.maxRetries} tentativas): ${j.errorMessage ?? "falha"}\n  ${jobLink(j)}`
       );
       const resumo = bucketSummary(orgJobs);
-      const text = `${orgJobs.length} certidão(ões) com problema não resolvido.\nResumo: ${resumo}\n\n${lines.join("\n\n")}\n\nPainel: ${baseUrl}/settings/certidoes`;
+      // Bloco de saúde do serviço (5c): orçamento Infosimples/Serasa + taxa de
+      // sucesso + estado do guard de custo. Best-effort — nunca derruba o aviso
+      // de problema (que é o essencial deste e-mail).
+      const health = await buildServiceHealth(orgId).catch(() => null);
+      const text = `${orgJobs.length} certidão(ões) com problema não resolvido.\nResumo: ${resumo}\n\n${lines.join("\n\n")}\n\n${health ? `${health.text}\n\n` : ""}Painel: ${baseUrl}/settings/certidoes`;
       const html = `<p><strong>${orgJobs.length} certidão(ões) com problema não resolvido.</strong></p><p>Resumo: ${resumo}</p><ul>${orgJobs
         .slice(0, 50)
         .map(
           (j) =>
             `<li>${j.label} — <code>${j.endpoint}</code> (cód ${j.resultCode ?? "-"}, ${j.retryCount}/${j.maxRetries} tentativas): ${j.errorMessage ?? "falha"} — <a href="${jobLink(j)}">abrir</a></li>`
         )
-        .join("")}</ul><p><a href="${baseUrl}/settings/certidoes">Abrir painel de certidões</a></p>`;
+        .join("")}</ul>${health ? health.html : ""}<p><a href="${baseUrl}/settings/certidoes">Abrir painel de certidões</a></p>`;
       const res = await sendEmail({
         to: emails,
         subject: `⚠️ ${orgJobs.length} certidão(ões) com problema`,
