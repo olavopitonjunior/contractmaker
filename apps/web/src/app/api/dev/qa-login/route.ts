@@ -58,10 +58,17 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Nome do cookie segue a convenção do @auth/core: prefixo `__Secure-` em
-  // https (staging é https), e o salt do JWE é o próprio nome do cookie.
-  const secure = req.nextUrl.protocol === "https:";
-  const cookieName = `${secure ? "__Secure-" : ""}authjs.session-token`;
+  // O nome do cookie e o salt do JWE têm de casar EXATAMENTE com o que o
+  // `auth()` do NextAuth usa pra ler a sessão — senão o cookie é gravado com um
+  // nome que o servidor nunca procura. O NextAuth deriva `useSecureCookies` do
+  // protocolo do AUTH_URL/NEXTAUTH_URL (NÃO do request), então replicamos isso:
+  // no preview o NEXTAUTH_URL está como http://localhost → cookie NÃO-seguro
+  // `authjs.session-token`; em prod (https) seria `__Secure-…`. (A causa raiz
+  // é o NEXTAUTH_URL de preview apontar pra localhost — mesmo bug do magic link
+  // — mas espelhar a lógica aqui destrava o QA sem mexer no env.)
+  const authUrl = process.env.NEXTAUTH_URL ?? process.env.AUTH_URL ?? "";
+  const useSecureCookies = authUrl.startsWith("https://");
+  const cookieName = `${useSecureCookies ? "__Secure-" : ""}authjs.session-token`;
   const maxAge = 60 * 60 * 24 * 30; // 30 dias — sessão de QA persistente.
 
   const token = await encode({
@@ -79,7 +86,7 @@ export async function GET(req: NextRequest) {
   const res = NextResponse.redirect(new URL("/pipeline", req.nextUrl.origin));
   res.cookies.set(cookieName, token, {
     httpOnly: true,
-    secure,
+    secure: useSecureCookies,
     sameSite: "lax",
     path: "/",
     maxAge,

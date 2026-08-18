@@ -60,3 +60,4 @@ docs/qa-round-*-prompt.md
 apps/web/playwright-report/
 apps/web/test-results/
 apps/web/tests/screenshots/
+.env*
