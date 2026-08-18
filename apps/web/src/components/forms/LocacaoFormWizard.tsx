@@ -470,7 +470,7 @@ export function LocacaoFormWizard({
         <LocacaoParteStep key="s2" form={form} listKey="locatarios" singular="Locatário" />,
         <ImovelLocacaoStep key="s3" form={form} comercial />,
         <AluguelStep key="s4" form={form} />,
-        <GarantiaStep key="s5" form={form} garantiaOptions={garantiaOptions} />,
+        <GarantiaStep key="s5" form={form} garantiaOptions={garantiaOptions} pathScope={pathScope} />,
         <ComissaoLocacaoStep key="s6" form={form} token={token} viewerIsMember={viewerIsMember} />,
       ]
     : [
@@ -479,7 +479,7 @@ export function LocacaoFormWizard({
         <LocacaoParteStep key="s2" form={form} listKey="locatarios" singular="Locatário" />,
         <ImovelLocacaoStep key="s3" form={form} />,
         <AluguelStep key="s4" form={form} />,
-        <GarantiaStep key="s5" form={form} garantiaOptions={garantiaOptions} />,
+        <GarantiaStep key="s5" form={form} garantiaOptions={garantiaOptions} pathScope={pathScope} />,
         <ComissaoLocacaoStep key="s6" form={form} token={token} viewerIsMember={viewerIsMember} />,
       ];
 
