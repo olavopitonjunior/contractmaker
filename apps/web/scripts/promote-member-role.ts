@@ -35,8 +35,29 @@ function arg(name: string): string | undefined {
 async function main() {
   const email = arg("email");
   const search = arg("search");
+  const diagnoseOrg = arg("diagnose-proposals");
   const role = arg("role") ?? "admin";
   const apply = process.argv.includes("--apply");
+
+  // Diagnóstico read-only do "admin não vê propostas": papel é só UMA das
+  // causas — o gate de feature (OrgModule.featureFlags) roda ANTES do RBAC e
+  // redireciona em silêncio, e uma org sem propostas mostra lista vazia.
+  if (diagnoseOrg) {
+    const mods = await prisma.orgModule.findMany({
+      where: { orgId: diagnoseOrg },
+      select: { module: true, enabled: true, featureFlags: true },
+    });
+    console.log("OrgModule:", JSON.stringify(mods));
+    const props = await prisma.proposal.groupBy({
+      by: ["kind", "status"],
+      where: { orgId: diagnoseOrg },
+      _count: true,
+    });
+    console.log("Proposals (kind/status):", JSON.stringify(props));
+    const total = await prisma.proposal.count({ where: { orgId: diagnoseOrg } });
+    console.log("Total proposals na org:", total);
+    return;
+  }
 
   // Modo busca (read-only): lista membros por nome/e-mail parcial.
   if (search) {
@@ -60,7 +81,7 @@ async function main() {
     }
     for (const m of rows) {
       console.log(
-        `${m.user.email}  nome="${m.user.name ?? ""}"  role="${m.role}"  org=${m.org.name} (${m.org.id})`
+        `${m.user.email}  nome="${m.user.name ?? ""}"  role="${m.role}"  org=${m.org.name} (${m.org.id})  lastActiveAt=${m.lastActiveAt?.toISOString() ?? "nunca"}`
       );
     }
     return;
