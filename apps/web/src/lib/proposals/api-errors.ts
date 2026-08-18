@@ -32,6 +32,12 @@ export function parseProposalApiError(
     return "Corrija os dados dos signatários antes de enviar.";
   }
   if (d.error === "budget") return "Orçamento de assinaturas excedido.";
+  // 5xx nunca carrega texto acionável pro corretor — o `error` aí é o
+  // `err.message` interno (inglês, jargão de lib). Mostrá-lo cru assusta e não
+  // orienta; engolimos e damos o próximo passo.
+  if (httpStatus && httpStatus >= 500) {
+    return "Erro interno ao processar. Tente de novo em instantes; se persistir, avise o suporte.";
+  }
   if (typeof d.error === "string" && d.error) {
     return d.detail ? `${d.error} (${d.detail})` : d.error;
   }

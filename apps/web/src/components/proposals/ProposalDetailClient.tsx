@@ -79,6 +79,8 @@ interface Proposal {
   reminderCount: number;
   validUntilLabel: string;
   prazo: { label: string; danger: boolean };
+  /** ISO do updatedAt do servidor — desempata prop fresco × polling parado. */
+  updatedAtIso: string;
   convertedDealId: string | null;
   dossierUrl: string | null;
   resumo: { proponente: string | null; imovel: string | null; valorLabel: string | null };
@@ -155,7 +157,15 @@ export function ProposalDetailClient({
     enabled: isLive,
     onStatusChange: () => router.refresh(),
   });
-  const liveStatus = live?.status ?? proposal.status;
+  // O payload do polling pode estar PARADO (active=false — terminais e a parada
+  // de decisão ficam fora do LIVE_POLL de propósito). Depois de uma ação na
+  // própria tela (concluir/enviar → router.refresh()), o prop do servidor chega
+  // mais novo que o retrato congelado do poller — sem este desempate por
+  // updatedAt, o card de decisão continuava na tela após "Concluir sem enviar".
+  const liveStatus =
+    live && Date.parse(live.updatedAt) > Date.parse(proposal.updatedAtIso)
+      ? live.status
+      : proposal.status;
   const sv = proposalStatusView(liveStatus);
   const pz = proposal.prazo;
   // Derivado do status AO VIVO (não do prop do servidor): se a proposta for
