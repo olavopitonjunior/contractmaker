@@ -37,6 +37,7 @@ export default async function PublicProposalPage({
       orgId: true,
       comissaoIncluida: true,
       validUntil: true,
+      createdAt: true,
       sentSnapshotHtml: true,
       htmlContent: true,
     },
@@ -73,6 +74,7 @@ export default async function PublicProposalPage({
           via: "completa",
           numero: proposal.id.slice(-8),
           comissaoIncluida: proposal.comissaoIncluida,
+          meta: { emitidaEm: proposal.createdAt, validaAte: proposal.validUntil },
         })
       : (proposal.htmlContent ?? `<h1>${proposal.title}</h1>`);
   }

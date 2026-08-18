@@ -188,6 +188,7 @@ export async function buildAcceptanceProof(
           via: "completa",
           numero: proposal.id.slice(-8),
           comissaoIncluida: proposal.comissaoIncluida,
+          meta: { emitidaEm: proposal.createdAt, validaAte: proposal.validUntil },
         })
       : (proposal.htmlContent ?? "<p>Proposta</p>");
   }

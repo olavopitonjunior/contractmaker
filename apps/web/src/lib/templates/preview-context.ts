@@ -66,6 +66,8 @@ export function buildTemplatePreviewContext(
       via: "completa",
       numero: "0001",
       comissaoIncluida: true,
+      // Datas fixas de amostra — o preview precisa ser determinístico.
+      meta: { emitidaEm: "2026-08-01T12:00:00-03:00", validaAte: "2026-08-08T23:59:59-03:00" },
     });
   }
 

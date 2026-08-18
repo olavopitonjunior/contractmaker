@@ -2,6 +2,7 @@ import { renderContratoHTML } from "@/lib/render/handlebars";
 import { enrichContractData } from "@/lib/services/contract-generation";
 import { enrichLocacaoData } from "@/lib/locacao/enrich";
 import { sanitizeHiddenPaths } from "./hidden-fields";
+import { formatDateBR } from "@/lib/format/datetime";
 
 export type ProposalVia = "completa" | "reduzida";
 
@@ -73,9 +74,24 @@ export function buildViaContext(input: {
   numero: string | number;
   /** Comissão é opcional na proposta. Só entra no documento quando true. */
   comissaoIncluida?: boolean;
+  /**
+   * Metadados da proposta que templates podem imprimir: `data_emissao`
+   * (createdAt) e `validade_ate` (validUntil) — sem eles o texto de validade
+   * era fixo ("7 dias") e divergia do prazo real escolhido no form. Entram no
+   * contexto já FORMATADOS "dd/mm/aaaa" no fuso de São Paulo (formatDateBR):
+   * `{{dataExtenso}}` no template usaria o fuso do PROCESSO e o validUntil
+   * (23:59 BRT) deslizaria pro dia seguinte na Vercel (UTC). Opcionais:
+   * templates testam com `{{#if}}`.
+   */
+  meta?: {
+    emitidaEm?: Date | string | null;
+    validaAte?: Date | string | null;
+  };
 }): Record<string, unknown> {
   let ctx = enrichForSchema(input.schemaType, input.dataJson);
   ctx.numero_proposta = input.numero;
+  if (input.meta?.emitidaEm) ctx.data_emissao = formatDateBR(input.meta.emitidaEm, "");
+  if (input.meta?.validaAte) ctx.validade_ate = formatDateBR(input.meta.validaAte, "");
 
   // `enrichContractData` sempre materializa `comissao` (mesmo vazia). Se a
   // comissão não foi incluída, tira o bloco do contexto.
@@ -110,6 +126,10 @@ export function renderProposalVia(input: {
   via: ProposalVia;
   numero: string | number;
   comissaoIncluida?: boolean;
+  meta?: {
+    emitidaEm?: Date | string | null;
+    validaAte?: Date | string | null;
+  };
 }): string {
   const ctx = buildViaContext(input);
   return renderContratoHTML(input.templateSource, ctx);

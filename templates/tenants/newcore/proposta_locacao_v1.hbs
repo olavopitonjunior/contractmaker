@@ -1,0 +1,93 @@
+{{!--
+  ORIGEM: loc_fix.docx (Newcore), convertido em 2026-08-18.
+  PROPOSTA DE LOCAÇÃO — 1 página, prosa. Um arquivo cobre as DUAS modalidades
+  (residencial e comercial), como o template da RE/MAX Ativa. Placeholders flat
+  do DOCX mapeados pros paths do dataJson + helpers BR; campos que o formulário
+  ainda não coleta (qualificação civil, cônjuge/colocatário) ficam sob {{#if}}.
+
+  schemaType: locacao_residencial_v1 / locacao_comercial_v1
+  modalidade: proposta_locacao_residencial / proposta_locacao_comercial
+  Flags do render: numero_proposta · data_emissao · validade_ate · via_reduzida
+  · comissao_incluida.
+--}}
+<div style="font-family: 'EB Garamond', Georgia, serif; color: #111; max-width: 720px; margin: 0 auto; line-height: 1.5; font-size: 11pt;">
+  <h1 style="text-align: center; font-size: 16pt; margin: 0 0 4px;">PROPOSTA DE LOCAÇÃO DE IMÓVEL</h1>
+  <p style="text-align: center; font-size: 9.5pt; color: #555; margin: 0 0 18px;">
+    Proposta nº {{numero_proposta}}{{#if (existe data_emissao)}} &nbsp;·&nbsp; Emitida em {{data_emissao}}{{/if}}
+    &nbsp;·&nbsp; {{#if (existe validade_ate)}}Válida para aceite até {{validade_ate}}{{else}}Válida para aceite por 7 (sete) dias corridos{{/if}}
+  </p>
+
+  <h2 style="font-size: 12pt; margin: 16px 0 6px;">PARTES</h2>
+  {{#each locatarios}}
+  <p style="margin: 4px 0;"><strong>Proponente locatário.</strong> {{#if (eq this.tipo_pessoa "juridica")}}{{this.razao_social}}{{#if this.cnpj}}, inscrita no CNPJ sob nº {{cnpj this.cnpj}}{{/if}}{{else}}{{this.nome}}{{#if this.nacionalidade}}, {{this.nacionalidade}}{{/if}}{{#if this.estado_civil}}, {{this.estado_civil}}{{/if}}{{#if this.profissao}}, {{this.profissao}}{{/if}}{{#if this.rg}}, RG nº {{this.rg}}{{/if}}{{#if this.cpf}}, CPF nº {{cpf this.cpf}}{{/if}}{{/if}}{{#if this.endereco}}, residente e domiciliado(a) à {{this.endereco}}{{#if this.numero}}, nº {{this.numero}}{{/if}}{{#if this.bairro}}, {{this.bairro}}{{/if}}{{#if this.cidade}}, {{this.cidade}}{{#if this.uf}}/{{this.uf}}{{/if}}{{/if}}{{/if}}{{#if this.telefone}}, telefone {{this.telefone}}{{/if}}{{#if this.email}}, endereço eletrônico {{this.email}}{{/if}}.</p>
+  {{#if this.conjuge}}
+  <p style="margin: 4px 0;"><strong>Cônjuge ou colocatário.</strong> {{this.conjuge.nome}}{{#if this.conjuge.nacionalidade}}, {{this.conjuge.nacionalidade}}{{/if}}{{#if this.conjuge.profissao}}, {{this.conjuge.profissao}}{{/if}}{{#if this.conjuge.rg}}, RG nº {{this.conjuge.rg}}{{/if}}{{#if this.conjuge.cpf}}, CPF nº {{cpf this.conjuge.cpf}}{{/if}}, residente e domiciliado(a) no mesmo endereço.</p>
+  {{/if}}
+  {{/each}}
+  {{#each locadores}}
+  <p style="margin: 4px 0;"><strong>Parte locadora.</strong> {{#if (eq this.tipo_pessoa "juridica")}}{{this.razao_social}}{{#if this.cnpj}}, inscrita no CNPJ sob nº {{cnpj this.cnpj}}{{/if}}{{else}}{{this.nome}}{{#if this.nacionalidade}}, {{this.nacionalidade}}{{/if}}{{#if this.estado_civil}}, {{this.estado_civil}}{{/if}}{{#if this.profissao}}, {{this.profissao}}{{/if}}{{#if this.rg}}, RG nº {{this.rg}}{{/if}}{{#if this.cpf}}, CPF nº {{cpf this.cpf}}{{/if}}{{/if}}{{#if this.endereco}}, residente e domiciliado(a) à {{this.endereco}}{{#if this.numero}}, nº {{this.numero}}{{/if}}{{#if this.bairro}}, {{this.bairro}}{{/if}}{{#if this.cidade}}, {{this.cidade}}{{#if this.uf}}/{{this.uf}}{{/if}}{{/if}}{{/if}}{{#if this.telefone}}, telefone {{this.telefone}}{{/if}}{{#if this.email}}, endereço eletrônico {{this.email}}{{/if}}.</p>
+  {{/each}}
+
+  <h2 style="font-size: 12pt; margin: 16px 0 6px;">IMÓVEL</h2>
+  {{#each imoveis}}
+  {{#if this.tipo}}<p style="margin: 3px 0;"><strong>Tipo:</strong> {{this.tipo}}</p>{{/if}}
+  <p style="margin: 3px 0;"><strong>Endereço:</strong> {{this.endereco}}{{#if this.numero}}, nº {{this.numero}}{{/if}}{{#if this.bairro}}, {{this.bairro}}{{/if}}{{#if this.cidade}}, {{this.cidade}}{{#if this.uf}}/{{this.uf}}{{/if}}{{/if}}</p>
+  {{/each}}
+  {{#if locacao.finalidade}}<p style="margin: 3px 0;"><strong>Finalidade:</strong> {{locacao.finalidade}}</p>{{/if}}
+
+  <h2 style="font-size: 12pt; margin: 16px 0 6px;">CONDIÇÕES COMERCIAIS</h2>
+  {{#if locacao.valor_aluguel}}
+  <p style="margin: 3px 0;"><strong>Aluguel:</strong> {{moeda locacao.valor_aluguel}} ({{extenso locacao.valor_aluguel}}) por mês</p>
+  {{/if}}
+  {{#if locacao.prazo_meses}}
+  <p style="margin: 3px 0;"><strong>Condições:</strong> prazo pretendido de {{locacao.prazo_meses}} meses{{#if locacao.data_entrada}}, com entrada pretendida em {{dataExtenso locacao.data_entrada}}{{/if}}</p>
+  {{else}}{{#if locacao.data_entrada}}
+  <p style="margin: 3px 0;"><strong>Condições:</strong> entrada pretendida em {{dataExtenso locacao.data_entrada}}</p>
+  {{/if}}{{/if}}
+  {{#if locacao.garantia}}
+  <p style="margin: 3px 0;"><strong>Garantia:</strong> {{locacao.garantia}}</p>
+  {{/if}}
+  {{#if comissao_incluida}}
+  <p style="margin: 3px 0;"><strong>Remuneração:</strong> {{#if comissao.valor}}{{moeda comissao.valor}}{{#if comissao.percentual}}, equivalente a {{numero comissao.percentual}}% do valor da locação{{/if}}{{else}}{{#if comissao.percentual}}{{numero comissao.percentual}}% sobre o valor da locação{{/if}}{{/if}}{{#if comissao.responsavel_pagamento}}, devida por {{comissao.responsavel_pagamento}}{{/if}}</p>
+  {{/if}}
+  <p style="margin: 3px 0;"><strong>Intermediação:</strong> Newcore{{#if corretor.nome}}, por {{corretor.nome}}{{#if corretor.creci}}, CRECI nº {{corretor.creci}}{{/if}}{{/if}}</p>
+
+  {{#if observacoes}}
+  <h2 style="font-size: 12pt; margin: 16px 0 6px;">OBSERVAÇÕES E CONDIÇÕES</h2>
+  <p style="white-space: pre-wrap; margin: 3px 0;">{{observacoes}}</p>
+  {{/if}}
+
+  <h2 style="font-size: 12pt; margin: 16px 0 6px;">CONDIÇÕES ESSENCIAIS</h2>
+  <p style="margin: 6px 0;"><strong>1. Mediação.</strong> Esta proposta submete-se aos artigos 722 a 729 do Código Civil, cabendo à intermediadora executar a mediação com diligência e prudência e prestar espontaneamente todas as informações sobre o andamento das negociações, os riscos envolvidos e as alterações de valores, nos termos do artigo 723.</p>
+  <p style="margin: 6px 0;"><strong>2. Aceite e análise cadastral.</strong> A proposta permanece válida para aceitação pela parte locadora {{#if (existe validade_ate)}}até {{validade_ate}}{{else}}por 7 (sete) dias corridos contados da emissão{{/if}} e tem eficácia condicionada à aprovação cadastral do proponente locatário e de seus garantidores. A reprovação cadastral desfaz a proposta sem multa, com devolução integral dos valores pagos em até 24 horas. Aceita a proposta e aprovado o cadastro, as partes devem assinar o contrato de locação no prazo ajustado entre elas.</p>
+  <p style="margin: 6px 0;"><strong>3. Desistência.</strong> A parte que desistir após a assinatura desta proposta e do respectivo aceite deverá devolver os valores recebidos em até 24 horas, pagar integralmente a remuneração devida à intermediação e pagar à outra parte a multa compensatória equivalente a 1 (um) mês de aluguel. A mesma remuneração será devida pelo proponente locatário caso, recusada esta proposta, venha a locar o imóvel sem a participação da intermediadora, inclusive por meio de familiares, prepostos ou representantes, em condições iguais ou diferentes das ora propostas.</p>
+  <p style="margin: 6px 0;"><strong>4. Demais condições.</strong> A locação rege-se pela Lei nº 8.245/91. As partes reconhecem a validade da assinatura eletrônica deste instrumento, nos termos da Medida Provisória nº 2.200-2/2001 e da Lei nº 14.063/2020. Vistoria, entrega de chaves, documentação, despesas, proteção de dados, foro e demais condições serão tratados no contrato de locação.</p>
+
+  {{#if via_reduzida}}
+  <p style="margin-top: 20px; font-size: 9pt; color: #555; border-top: 1px solid #ccc; padding-top: 8px;">
+    Este instrumento reproduz as condições essenciais da Proposta nº {{numero_proposta}},
+    arquivada na íntegra junto à intermediadora.
+  </p>
+  {{/if}}
+
+  <h2 style="font-size: 12pt; margin: 20px 0 6px;">ASSINATURAS</h2>
+  <p style="margin: 3px 0;">{{#if imoveis.[0].cidade}}{{imoveis.[0].cidade}}, {{/if}}{{#if (existe data_emissao)}}{{data_emissao}}.{{/if}}</p>
+
+  <div style="margin-top: 36px;">
+    <p style="margin: 0;">_______________________________________</p>
+    <p style="font-size: 10pt; margin: 2px 0 0;">{{#each locatarios}}{{#if (eq this.tipo_pessoa "juridica")}}{{this.razao_social}}{{else}}{{this.nome}}{{/if}}{{#unless @last}}; {{/unless}}{{/each}} — Proponente locatário</p>
+  </div>
+  {{#if locatarios.[0].conjuge}}
+  <div style="margin-top: 24px;">
+    <p style="margin: 0;">_______________________________________</p>
+    <p style="font-size: 10pt; margin: 2px 0 0;">{{locatarios.[0].conjuge.nome}} — Cônjuge ou colocatário</p>
+  </div>
+  {{/if}}
+  {{#if locadores.length}}
+  <div style="margin-top: 28px;">
+    <p style="margin: 0 0 6px;"><strong>Aceite.</strong> Declaro ter recebido, lido e aceito integralmente a proposta acima, ressalvada a aprovação cadastral.</p>
+    <p style="margin: 0;">_______________________________________</p>
+    <p style="font-size: 10pt; margin: 2px 0 0;">{{#each locadores}}{{#if (eq this.tipo_pessoa "juridica")}}{{this.razao_social}}{{else}}{{this.nome}}{{/if}}{{#unless @last}}; {{/unless}}{{/each}} — Parte locadora</p>
+  </div>
+  {{/if}}
+</div>
