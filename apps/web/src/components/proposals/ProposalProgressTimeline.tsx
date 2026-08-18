@@ -17,9 +17,16 @@ import { PROPOSAL_TIMELINE, proposalTimelineStage } from "@/lib/proposals/status
 export function ProposalProgressTimeline({
   status,
   vendedorIncluded = true,
+  vendedorSkipped = false,
 }: {
   status: string;
   vendedorIncluded?: boolean;
+  /**
+   * Concluída SEM enviar a via do proprietário (caminho B da decisão) — o nó
+   * "Proprietário" vira "Não enviada" apagado em vez de check: ele nunca
+   * assinou, e o check sugeria que sim (achado de QA 2026-08-18).
+   */
+  vendedorSkipped?: boolean;
 }) {
   const { reachedIndex, negative } = proposalTimelineStage(status);
   const awaitingDecision = status === "assinada_proponente" && vendedorIncluded;
@@ -32,7 +39,8 @@ export function ProposalProgressTimeline({
   return (
     <div className="flex items-start gap-0 overflow-x-auto pb-1">
       {nodes.map((node, i) => {
-        const reached = node.originalIndex <= reachedIndex;
+        const skippedNode = vendedorSkipped && node.key === "vendedor";
+        const reached = node.originalIndex <= reachedIndex && !skippedNode;
         const isCurrent = node.originalIndex === reachedIndex;
         const deadHead = negative && isCurrent;
         const decisionNode = awaitingDecision && node.key === "vendedor";
@@ -56,10 +64,17 @@ export function ProposalProgressTimeline({
                   isCurrent && !deadHead && "ring-4 ring-primary/15",
                   deadHead && "border-destructive bg-destructive text-destructive-foreground ring-4 ring-destructive/15",
                   decisionNode &&
-                    "border-dashed border-warning text-warning ring-4 ring-warning/15"
+                    "border-dashed border-warning text-warning ring-4 ring-warning/15",
+                  skippedNode && "border-dashed"
                 )}
               >
-                {reached && !deadHead ? <Check className="h-3 w-3" /> : node.originalIndex + 1}
+                {reached && !deadHead ? (
+                  <Check className="h-3 w-3" />
+                ) : skippedNode ? (
+                  "—"
+                ) : (
+                  node.originalIndex + 1
+                )}
               </div>
               <span
                 className={cn(
@@ -68,7 +83,7 @@ export function ProposalProgressTimeline({
                   decisionNode && "font-medium text-warning"
                 )}
               >
-                {decisionNode ? "Sua vez" : node.label}
+                {skippedNode ? "Não enviada" : decisionNode ? "Sua vez" : node.label}
               </span>
             </div>
           </div>

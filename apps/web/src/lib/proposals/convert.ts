@@ -72,7 +72,7 @@ export async function convertProposalToDeal(input: {
   // waitUntil de persistSignedPdf) ainda não existem e o Deal sairia sem eles.
   if (signed && !proposal.dossierUrl) {
     throw new ProposalConvertError(
-      "O documento assinado ainda está sendo processado. Tente novamente em instantes.",
+      "O documento assinado ainda está sendo processado. Tente novamente em instantes — se demorar, o sistema refaz o processamento automaticamente e você também pode conferir o envelope na aba Assinaturas.",
       "dossier_pending"
     );
   }
