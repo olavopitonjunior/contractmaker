@@ -254,7 +254,6 @@ export function ProposalsListClient({
                             kind: p.kind,
                             instrument: p.instrument,
                             convertedDealId: p.convertedDealId,
-                            kind: tipo,
                           }}
                           permissions={permissions}
                           members={members}

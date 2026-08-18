@@ -59,16 +59,30 @@ export const DELETABLE_STATUSES = new Set<string>([
 ]);
 
 /**
- * Assinatura EM CURSO — o polling em tempo real deve continuar mesmo quando não
- * há envelope `running` naquele instante. Cobre a janela entre o envelope dos
- * proponentes fechar (assinada_proponente/aguardando_vendedor) e o 2º envelope do
- * vendedor ser criado — sem isto o poller parava e a página ficava presa.
+ * Assinatura EM CURSO — alguém de fora ainda precisa assinar.
+ *
+ * `assinada_proponente` SAIU (2026-08): ele virou a PARADA DURÁVEL da decisão
+ * humana (enviar 2ª via ao proprietário ou concluir sem enviar) — não há
+ * assinatura pendente ali, há decisão do corretor. `aguardando_vendedor` fica:
+ * cobre a janela entre criar e ativar o 2º envelope.
  */
 export const AWAITING_SIGNATURE_STATUSES = new Set<string>([
   "enviada",
   "entregue",
   "visualizada",
-  "assinada_proponente",
+  "aguardando_vendedor",
+]);
+
+/**
+ * Polling em TEMPO REAL (3-10s) — só onde um evento externo (cliente/
+ * proprietário assinando) pode chegar a qualquer momento. A parada de decisão
+ * (`assinada_proponente`) fica de fora de propósito: é durável (pode ficar dias)
+ * e mantê-la no poller vira carga eterna no Neon sem informação nova.
+ */
+export const LIVE_POLL_STATUSES = new Set<string>([
+  "enviada",
+  "entregue",
+  "visualizada",
   "aguardando_vendedor",
 ]);
 
