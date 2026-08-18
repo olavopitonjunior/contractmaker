@@ -58,7 +58,10 @@ export function proposalStatusView(status: string): StatusView {
     case "aguardando_vendedor":
       return view("Com o proprietário", "proprietario", WARNING);
     case "completa":
-      return view("Completa", "sua_vez", SUCCESS);
+      // Bucket continua "sua_vez" (a bola É do corretor), mas o texto diz QUAL
+      // ação — "Completa · Sua vez" seco parecia pendência numa proposta
+      // encerrada (achado de QA 2026-08-18).
+      return { ...view("Completa", "sua_vez", SUCCESS), turn: "Sua vez — converter em negócio" };
     case "convertida":
       return view("Virou negócio", "encerrada", SUCCESS);
     case "recusada_proponente":

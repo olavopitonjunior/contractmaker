@@ -268,7 +268,12 @@ export function ProposalDetailClient({
             <Badge variant="outline" className={`${sv.className} px-2.5 py-0.5`}>
               {sv.label}
             </Badge>
-            <span className="text-muted-foreground">· {sv.turn}</span>
+            {/* "De quem é a bola" só quando acrescenta algo — em
+                aguardando_vendedor label e turn são a MESMA frase e o header
+                ecoava "Com o proprietário · Com o proprietário". */}
+            {sv.turn !== sv.label && (
+              <span className="text-muted-foreground">· {sv.turn}</span>
+            )}
             <span className="text-muted-foreground">
               · {proposal.kind === "venda" ? "Venda" : "Locação"}
             </span>
