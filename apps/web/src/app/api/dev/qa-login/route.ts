@@ -59,10 +59,34 @@ export async function GET(req: NextRequest) {
   }
 
   // Nome do cookie segue a convenção do @auth/core: prefixo `__Secure-` em
-  // https (staging é https), e o salt do JWE é o próprio nome do cookie.
-  const secure = req.nextUrl.protocol === "https:";
+  // https, e o salt do JWE é o próprio nome do cookie. `secure` deriva do
+  // protocolo EXTERNO (x-forwarded-proto na Vercel), não de req.nextUrl que
+  // pode refletir o http interno atrás do proxy.
+  const proto =
+    req.headers.get("x-forwarded-proto") ?? req.nextUrl.protocol.replace(":", "");
+  const secure = proto === "https";
   const cookieName = `${secure ? "__Secure-" : ""}authjs.session-token`;
   const maxAge = 60 * 60 * 24 * 30; // 30 dias — sessão de QA persistente.
+
+  if (req.nextUrl.searchParams.get("debug") === "1") {
+    const t = await encode({
+      token: { id: user.id, sub: user.id, email: user.email, name: user.name },
+      secret,
+      salt: cookieName,
+      maxAge,
+    });
+    return NextResponse.json({
+      vercelEnv: VERCEL_ENV ?? null,
+      stagingMode: STAGING_MODE,
+      proto,
+      secure,
+      cookieName,
+      userId: user.id,
+      email: user.email,
+      tokenLen: t.length,
+      secretLen: secret.length,
+    });
+  }
 
   const token = await encode({
     token: { id: user.id, sub: user.id, email: user.email, name: user.name },
