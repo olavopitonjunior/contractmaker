@@ -10,6 +10,7 @@ import { MODULE } from "@/lib/modules/catalog";
 import { FormSettingsClient } from "./FormSettingsClient";
 import { ContractDefaultsCard } from "./ContractDefaultsCard";
 import { ParticipantCategoriesCard } from "./ParticipantCategoriesCard";
+import { ParticipantVisibilityCard } from "./ParticipantVisibilityCard";
 import { GarantiaOptionsCard } from "./GarantiaOptionsCard";
 import { listOrgParticipantCategories } from "@/lib/forms/participant-category-repo";
 import { listGarantiaOptions } from "@/lib/forms/garantia-option-repo";
@@ -76,6 +77,11 @@ export default async function FormularioSettingsPage() {
           autoSendSummaryOnComplete: settings.autoSendSummaryOnComplete,
           summaryIncludeAttachments: settings.summaryIncludeAttachments,
         }}
+      />
+
+      <ParticipantVisibilityCard
+        initial={settings.participantVisibilityJson}
+        locacaoEnabled={locacaoEnabled}
       />
 
       <ParticipantCategoriesCard

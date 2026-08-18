@@ -4,6 +4,18 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-18 - Visibilidade de seções por link de parte, configurável
+
+### Adicionado
+
+- **Card "Seções por link de parte"** em `/settings/formulario` (`ParticipantVisibilityCard`): matriz papel × etapa por esteira (venda/locação) gravada em `OrgFormSettings.participantVisibilityJson` (migration aditiva `20260818190000`), merge por branch e sanitização ANTES de gravar (`parseParticipantVisibilityJson`). Aplica ao vivo em links já emitidos — visibilidade não é obrigatoriedade.
+- **Novo módulo `lib/forms/participant-visibility.ts`** — fonte de verdade: catálogo `STEP_PATHS` (etapas habilitáveis × data-paths), `DEFAULT_ROLE_STEPS` e `resolveRoleVisibility`. **Defaults novos (pedido 2026-08-18):** comprador ganha a etapa Pagamento; locador ganha Aluguel e Reajuste; locatário ganha Garantia (e, coerentemente, a atribuição de docs do fiador); vendedor e fiador mantêm o histórico. `resolveParticipantScope` passa a carregar a config da org; `ROLE_PATHS`/`ROLE_STEP_INDEXES` viraram derivados dos defaults (sem segunda cópia); `voice-extract` idem.
+- **Guard-rail por construção:** a config só escolhe etapas do catálogo — etapa 6 (Comissão) e as chaves `comissao`/`fiscal`/`testemunhas`/`assinatura`/`config` são inalcançáveis por subtoken, mesmo com Json malicioso no banco (testes em `participant-visibility.test.ts`).
+
+### Alterado
+
+- `requiredPathsForRoleScope`/auto-save/finalize acompanham automaticamente (já eram dirigidos por `stepIndexes`/`topKeys` do scope).
+
 ## [Unreleased] - 2026-08-18 - Form de locação: administração, despesas, cláusula rescisória e comissão
 
 ### Adicionado

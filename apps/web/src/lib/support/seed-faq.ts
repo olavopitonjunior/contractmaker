@@ -136,6 +136,13 @@ export const SUPPORT_FAQ: SupportFaq[] = [
     tags: ["locacao"],
   },
   {
+    slug: "visibilidade-links-por-parte",
+    title: "Como escolho o que cada parte vê no link dela (vendedor, comprador, proprietário, inquilino)?",
+    content:
+      "Em Configurações → Formulário público, o card 'Seções por link de parte' tem uma matriz por esteira (venda e locação): marque quais etapas cada link enxerga. Por padrão: vendedor vê Upload, os próprios dados e o Imóvel; comprador vê Upload, os próprios dados e Pagamento; proprietário (locador) vê Upload, os próprios dados, Imóvel e Aluguel/Reajuste; inquilino (locatário) vê Upload, os próprios dados e Garantia; fiador vê Upload e Garantia. Documentos é sempre incluída e a etapa de Comissão é exclusiva do link principal. A mudança vale na hora, inclusive para links já enviados.",
+    tags: ["geral"],
+  },
+  {
     slug: "vistoria-laudo-externo",
     title: "Fiz a vistoria fora do sistema — como anexo o laudo pronto?",
     content:
