@@ -130,4 +130,79 @@ describe("insertPlaceholdersWithAI", () => {
     );
     expect(mockBatchUpdate).not.toHaveBeenCalled();
   });
+
+  // ——— Trecho já tokenizado é intocável ———
+
+  it("REGRESSÃO (Trio): não reescreve o trecho que contém {{slot_garantia}}", async () => {
+    // Este pass roda DEPOIS do applyClauseSlot, então o token já está no doc.
+    // O modelo mapeava o trecho ao redor pro legado {{clausula_garantia}} e
+    // apagava o slot — o template ficava declarando um slot inexistente.
+    const doc =
+      "CLÁUSULA OITAVA - DA GARANTIA\n{{slot_garantia}}\nCLÁUSULA NONA - DO FORO";
+    mockGetDocPlainText.mockResolvedValue(doc);
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([{ trecho_literal: "{{slot_garantia}}", token: "clausula_garantia" }])
+    );
+
+    const report = await insertPlaceholdersWithAI({
+      docId: "d4",
+      modalidade: "locacao",
+      orgId: "org-1",
+    });
+
+    expect(report.inserted).toHaveLength(0);
+    expect(report.skippedAmbiguous[0]).toEqual(
+      expect.objectContaining({
+        token: "clausula_garantia",
+        reason: "already-tokenized",
+      })
+    );
+    expect(mockBatchUpdate).not.toHaveBeenCalled();
+  });
+
+  it("bloco multi-parágrafo que ENGLOBA um token é descartado inteiro", async () => {
+    // O perigo aqui não é só perder o token do 1º parágrafo: os demais seriam
+    // ESVAZIADOS, levando junto a cláusula ao redor.
+    const doc =
+      "CLÁUSULA OITAVA - DA GARANTIA\nA garantia é a seguinte:\n{{slot_garantia}}\nParágrafo final da cláusula.";
+    mockGetDocPlainText.mockResolvedValue(doc);
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([
+        {
+          trecho_literal:
+            "A garantia é a seguinte:\n{{slot_garantia}}\nParágrafo final da cláusula.",
+          token: "clausula_garantia",
+        },
+      ])
+    );
+
+    const report = await insertPlaceholdersWithAI({
+      docId: "d5",
+      modalidade: "locacao",
+      orgId: "org-1",
+    });
+
+    expect(report.skippedAmbiguous[0].reason).toBe("already-tokenized");
+    expect(mockBatchUpdate).not.toHaveBeenCalled();
+  });
+
+  it("mapeamento legítimo segue passando quando o doc tem outros tokens", async () => {
+    const doc =
+      "{{slot_garantia}}\nO valor do aluguel é de R$ 3.500,00 mensais, reajustado anualmente.";
+    mockGetDocPlainText.mockResolvedValue(doc);
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([{ trecho_literal: "R$ 3.500,00", token: "aluguel_valor" }])
+    );
+
+    const report = await insertPlaceholdersWithAI({
+      docId: "d6",
+      modalidade: "locacao",
+      orgId: "org-1",
+    });
+
+    expect(report.inserted).toEqual([
+      expect.objectContaining({ token: "aluguel_valor" }),
+    ]);
+    expect(mockBatchUpdate).toHaveBeenCalled();
+  });
 });

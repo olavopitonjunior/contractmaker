@@ -27,8 +27,21 @@ export interface InsertedToken {
 export interface SkippedToken {
   token: string;
   trecho: string;
-  reason: "ambiguous" | "not-found" | "unknown-token";
+  reason: "ambiguous" | "not-found" | "unknown-token" | "already-tokenized";
 }
+
+/**
+ * Trecho que já contém placeholder é intocável. Este pass roda DEPOIS de
+ * `applyClauseSlotToDoc`, então o `{{slot_garantia}}` já está no documento — e
+ * o modelo, vendo o token solto, devolvia o trecho ao redor mapeado pro legado
+ * `{{clausula_garantia}}`, apagando o slot. Aconteceu nos 4 modelos da RE/MAX
+ * Trio: o template ficava DECLARANDO um slot que não existia mais, e o contrato
+ * saía com a garantia da variante de referência chumbada.
+ *
+ * Vale pra qualquer `{{...}}`, não só pros slots: reescrever texto já
+ * tokenizado nunca é o trabalho deste pass.
+ */
+const HAS_PLACEHOLDER = /\{\{[^{}]+\}\}/;
 
 export interface InsertionReport {
   inserted: InsertedToken[];
@@ -74,6 +87,7 @@ REGRAS:
 5. Pra tokens de qualificação de partes (locadores/locatários, vendedores/compradores), o trecho_literal deve cobrir APENAS a qualificação em si (do nome ao último dado), SEM os rótulos fixos ao redor ("como LOCADORA e doravante nomeada PARTE LOCADORA,"). Se os dois lados usam o MESMO texto de exemplo, mapeie ambos mesmo assim — o sistema substitui o que for unívoco e deixa o ambíguo pra revisão humana.
 6. NÃO mapeie texto fixo do contrato (cláusulas padrão que não variam por negócio).
 7. Se não encontrar correspondência pra um token, simplesmente não o inclua.
+8. O documento pode já conter placeholders no formato {{alguma_coisa}} — eles já estão prontos. NUNCA inclua no trecho_literal um texto que contenha {{...}}, nem pra "corrigir" o nome do token. Trate essas linhas como intocáveis.
 
 DOCUMENTO:
 ${docText.slice(0, 24000)}`;
@@ -146,6 +160,14 @@ export async function insertPlaceholdersWithAI(input: {
     const trecho = (m.trecho_literal ?? "").trim();
     const token = (m.token ?? "").trim();
     if (!trecho || !token) continue;
+    // Trava determinística (ver HAS_PLACEHOLDER). A regra também está no
+    // prompt, mas prompt é pedido — isto é garantia. Checar o trecho INTEIRO
+    // cobre de quebra os parágrafos que seriam esvaziados num bloco
+    // multi-parágrafo.
+    if (HAS_PLACEHOLDER.test(trecho)) {
+      skippedAmbiguous.push({ token, trecho, reason: "already-tokenized" });
+      continue;
+    }
     if (!isKnownToken(token, input.modalidade)) {
       skippedAmbiguous.push({ token, trecho, reason: "unknown-token" });
       continue;
