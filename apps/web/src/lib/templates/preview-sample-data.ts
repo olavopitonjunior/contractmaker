@@ -524,6 +524,9 @@ const SAMPLE_BY_MODALIDADE: Record<string, Record<string, unknown>> = {
   financiamento: previewSampleDataFinanciamento as Record<string, unknown>,
   locacao: previewSampleDataLocacao as Record<string, unknown>,
   locacao_comercial: previewSampleDataLocacaoComercial as Record<string, unknown>,
+  // Mesma amostra da residencial (mesmo schemaType) — sem entrada aqui o
+  // preview renderiza um documento vazio.
+  temporada: previewSampleDataLocacao as Record<string, unknown>,
   administracao_locacao: previewSampleDataAdministracaoLocacao as Record<string, unknown>,
   proposta_venda: previewSampleDataPropostaVenda as Record<string, unknown>,
   proposta_locacao_residencial:

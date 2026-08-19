@@ -17,6 +17,7 @@ import {
   resolveTemplateId,
   resolveTemplateOverride,
   modalidadeForCategory,
+  modalidadeLabel,
   resolveTemplateTaxonomy,
   schemaTypeForModalidade,
   scoreTemplateAgainstFacts,
@@ -599,6 +600,53 @@ describe("selectAdministracaoTemplate", () => {
     mockFindMany.mockResolvedValueOnce([]);
     const result = await selectAdministracaoTemplate("org-1");
     expect(result).toBeNull();
+  });
+});
+
+describe("modalidade temporada (short stay)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("é família locação e tem rótulo e schemaType próprios", () => {
+    expect(templateFamilyForModalidade("temporada")).toBe("locacao");
+    expect(modalidadeLabel("temporada")).toBe("Locação por temporada");
+    // Reusa o schema residencial: sem form próprio, não há o que derivar.
+    expect(schemaTypeForModalidade("temporada")).toBe("locacao_residencial_v1");
+  });
+
+  it("NUNCA é servida ao pareamento automático de uma locação comum", async () => {
+    // O nome sem prefixo "locacao" é o que a mantém fora do fallback
+    // `startsWith("locacao")`. Se alguém renomear pra `locacao_temporada`, este
+    // teste cai — e é pra cair: seria servida por acidente a todo contrato de
+    // locação de uma org que não tenha outro modelo ativo.
+    mockFindMany.mockResolvedValueOnce([
+      { id: "short-stay", modalidade: "temporada", isDefault: true, status: "active", matchCriteria: null },
+    ] as never);
+
+    const result = await selectLocacaoTemplate("org-1", "locacao_residencial_v1", {
+      locatarios: [{ tipo_pessoa: "fisica" }],
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it("é elegível pra ESCOLHA MANUAL num deal de locação", async () => {
+    // O caminho pelo qual ela é de fato usada.
+    expect(eligibleModalidadesForDealKind("locacao")).toContain("temporada");
+
+    mockFindUnique.mockResolvedValueOnce({
+      id: "short-stay",
+      orgId: "org-1",
+      status: "active",
+      modalidade: "temporada",
+    } as never);
+    const r = await resolveTemplateOverride({
+      templateId: "short-stay",
+      orgId: "org-1",
+      dealKind: "locacao",
+    });
+    expect(r.ok).toBe(true);
   });
 });
 

@@ -573,9 +573,23 @@ export async function resolveTemplateOverride(params: {
 // placeholders (que passava a oferecer campos de venda). A família é sempre
 // lida da MODALIDADE persistida, nunca da categoria.
 // ============================================================================
+/**
+ * Locação por temporada (short stay). Modalidade PRÓPRIA pra não disputar o
+ * padrão da locação residencial: o contrato é outro (diária, sem vínculo de
+ * moradia, sem garantia locatícia clássica) e nenhum campo do formulário
+ * declara "isto é uma temporada" — então o pareamento automático não tem como
+ * escolhê-lo, e ele é alcançado pela ESCOLHA MANUAL de modelo.
+ *
+ * Nome sem o prefixo "locacao" de propósito, igual a `administracao_locacao`:
+ * assim fica fora do fallback `startsWith("locacao")` de `selectLocacaoTemplate`
+ * e nunca é servido por acidente a um contrato de locação comum.
+ */
+export const TEMPORADA_MODALIDADE = "temporada";
+
 export const LOCACAO_MODALIDADES = [
   "locacao",
   "locacao_comercial",
+  TEMPORADA_MODALIDADE,
   ADMINISTRACAO_LOCACAO_MODALIDADE,
 ] as const;
 export type LocacaoModalidade = (typeof LOCACAO_MODALIDADES)[number];
@@ -598,6 +612,7 @@ export const MODALIDADE_LABELS: Record<string, string> = {
   financiamento: "Venda com financiamento",
   locacao: "Locação residencial",
   locacao_comercial: "Locação comercial",
+  temporada: "Locação por temporada",
   administracao_locacao: "Administração de locação",
   proposta_venda: "Proposta de compra",
   proposta_locacao_residencial: "Proposta de locação residencial",
@@ -647,6 +662,10 @@ export const SCHEMA_TYPE_BY_MODALIDADE: Record<string, string> = {
   financiamento: "compra_venda_v2",
   locacao: "locacao_residencial_v1",
   locacao_comercial: "locacao_comercial_v1",
+  // Reusa o schema residencial: os campos de temporada (diária, check-in/out)
+  // ficam em [colchetes] no próprio modelo, preenchidos no editor. Sem form
+  // próprio, não há o que derivar.
+  temporada: "locacao_residencial_v1",
   administracao_locacao: "administracao_locacao_v1",
   proposta_venda: "compra_venda_v1",
   proposta_locacao_residencial: "locacao_residencial_v1",
@@ -665,6 +684,7 @@ export function schemaTypeForModalidade(modalidade: string | null | undefined): 
 export const UPLOAD_MODALIDADES = [
   "locacao",
   "locacao_comercial",
+  "temporada",
   "administracao_locacao",
   "a_vista",
   "financiamento",
