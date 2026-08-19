@@ -35,6 +35,12 @@ vi.mock("@/lib/templates/apply-clause-slot", () => ({
   applyClauseSlotToDoc: (...args: unknown[]) => applySlotMock(...args),
 }));
 
+/** Estado FINAL do Doc — é dele que a declaração é derivada (pós pass de IA). */
+const getDocPlainTextMock = vi.fn();
+vi.mock("@/lib/google/docs", () => ({
+  getDocPlainText: (...args: unknown[]) => getDocPlainTextMock(...args),
+}));
+
 import { POST } from "../from-docx/route";
 
 const authMock = auth as unknown as ReturnType<typeof vi.fn>;
@@ -114,6 +120,10 @@ describe("POST /api/templates/from-docx — declaração de slot", () => {
       removed: 0,
       issues: [],
     });
+    // Doc final com o token sobrevivendo ao pass de IA (caminho feliz).
+    getDocPlainTextMock.mockResolvedValue(
+      "CLÁUSULA OITAVA - DA GARANTIA\n{{slot_garantia}}\nCLÁUSULA NONA"
+    );
   });
 
   it("a row NASCE sem declaração de slot (só o cabeçalho)", async () => {
@@ -156,6 +166,46 @@ describe("POST /api/templates/from-docx — declaração de slot", () => {
     expect(report?.slots).toEqual([
       expect.objectContaining({ applied: false, token: null }),
     ]);
+  });
+
+  it("REGRESSÃO (Trio): pass de IA apaga o token → NADA é declarado e o slot é rebaixado", async () => {
+    // applyClauseSlot reportou sucesso, mas a IA rodou depois e reescreveu o
+    // token (era o que acontecia: {{slot_garantia}} virava {{clausula_garantia}}).
+    // A declaração é derivada do doc FINAL, então não pode ser escrita.
+    getDocPlainTextMock.mockResolvedValue(
+      "CLÁUSULA OITAVA - DA GARANTIA\n{{clausula_garantia}}\nCLÁUSULA NONA"
+    );
+
+    const res = await POST(
+      req({ slotBlocks: JSON.stringify({ garantia: [CLAUSULA] }) }) as never
+    );
+
+    expect(res.status).toBe(200);
+    expect(declaredSource()).toBeUndefined();
+    const slots = draftReport()?.slots as Array<Record<string, unknown>>;
+    expect(slots[0]).toMatchObject({ applied: false, token: null });
+    expect((slots[0].issues as Array<{ reason: string }>).at(-1)).toMatchObject({
+      reason: "verify-failed",
+    });
+  });
+
+  it("doc ilegível na conferência final → fail-closed, e o motivo NÃO afirma que o token sumiu", async () => {
+    getDocPlainTextMock.mockRejectedValue(new Error("Rate Limit Exceeded"));
+
+    const res = await POST(
+      req({ slotBlocks: JSON.stringify({ garantia: [CLAUSULA] }) }) as never
+    );
+
+    expect(res.status).toBe(200);
+    // Nada é declarado: não confirmamos, então não afirmamos.
+    expect(declaredSource()).toBeUndefined();
+    const slots = draftReport()?.slots as Array<Record<string, unknown>>;
+    // A ativação segue travada (o operador precisa revalidar)…
+    expect(slots[0].applied).toBe(false);
+    // …mas o motivo é "não consegui conferir", não "conferi e não está lá".
+    expect((slots[0].issues as Array<{ reason: string }>).at(-1)).toMatchObject({
+      reason: "verify-unavailable",
+    });
   });
 
   it("o motivo da falha chega ao draftReport MESMO quando o pass de IA quebra", async () => {
