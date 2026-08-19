@@ -12,8 +12,9 @@ vi.mock("@/lib/security/audit", () => ({
   extractAuditContextFromRequest: vi.fn(() => ({})),
 }));
 
-import { PATCH } from "../route";
+import { PATCH, DELETE } from "../route";
 import { loadScopedProposal } from "@/lib/proposals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { prisma } from "@/lib/db/prisma";
 
 const mockLoad = vi.mocked(loadScopedProposal);
@@ -186,5 +187,46 @@ describe("PATCH /api/proposals/[id] — corrida com o claim de envio", () => {
     expect(mockPrisma.proposalSigner.deleteMany).not.toHaveBeenCalled();
     expect(mockPrisma.proposalSigner.createMany).not.toHaveBeenCalled();
     expect(mockPrisma.proposal.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("DELETE /api/proposals/[id] — proposta que já circulou não se apaga", () => {
+  function scopedForDelete(over: Record<string, unknown>) {
+    mockLoad.mockResolvedValue({
+      auth: { org: { id: "org-1" }, actor: { effectiveUserId: "u1" } },
+      eff: { permissions: { [PERMISSION.PROPOSAL_DELETE]: true } },
+      proposal: {
+        id: "p1",
+        orgId: "org-1",
+        status: "falha_envio",
+        convertedDealId: null,
+        sentAt: null,
+        ...over,
+      },
+    } as never);
+  }
+
+  function req() {
+    return new NextRequest("http://localhost/api/proposals/p1", { method: "DELETE" });
+  }
+
+  it("falha_envio COM sentAt → 409: cancelar em vez de excluir", async () => {
+    // Este é o estado novo: `falha_envio` alcançado por cancelamento de
+    // envelope de uma proposta que o cliente recebeu e abriu. Apagar
+    // cascatearia ProposalEvent, envelopes e signatários.
+    scopedForDelete({ sentAt: new Date("2026-08-19T12:00:00Z") });
+    const res = await DELETE(req(), { params: { id: "p1" } });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/já foi enviada/i);
+  });
+
+  it("falha_envio SEM sentAt → segue (envio que nunca saiu, ninguém viu)", async () => {
+    scopedForDelete({ sentAt: null });
+    mockPrisma.envelope.findMany.mockResolvedValue([] as never);
+    // `proposal.delete` não está no mock global do prisma — stub local.
+    (prisma as unknown as { proposal: { delete: ReturnType<typeof vi.fn> } }).proposal.delete =
+      vi.fn().mockResolvedValue({});
+    const res = await DELETE(req(), { params: { id: "p1" } });
+    expect(res.status).not.toBe(409);
   });
 });

@@ -192,6 +192,23 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       { status: 409 }
     );
   }
+  // `falha_envio` é deletável porque historicamente só se chegava lá por envio
+  // que NUNCA saiu — proposta que ninguém de fora viu. Desde que cancelar o
+  // envelope devolve a 1ª via pra cá, o mesmo status também cobre proposta que
+  // o cliente recebeu e abriu, e essa não se apaga: a exclusão cascateia
+  // ProposalEvent, envelopes e signatários, destruindo o registro de um
+  // documento que circulou. `sentAt` é o discriminador — os dois caminhos
+  // felizes de envio o gravam como último passo. Arquivar (cancelar) continua
+  // disponível: `falha_envio` está em CANCELLABLE_STATUSES.
+  if (proposal.status === "falha_envio" && proposal.sentAt) {
+    return NextResponse.json(
+      {
+        error:
+          "Esta proposta já foi enviada ao cliente e não pode ser excluída. Cancele-a para manter o histórico.",
+      },
+      { status: 409 }
+    );
+  }
   // Invariante da plataforma: não deixar um Envelope ClickSign VIVO órfão — a
   // cascata apagaria a linha local mas o envelope seguiria ativo/cobrável, e
   // assinaturas/webhooks posteriores não resolveriam mais a proposta. Cancela os
