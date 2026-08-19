@@ -4,6 +4,15 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-18 - Ressalvas de QA pós-promo2 (resumo, FAB, /propostas)
+
+### Corrigido
+
+- **Unique parcial do resumo por negócio** (`DealAttachment_dealId_form_summary_key`, migration `20260818213000` com saneamento de duplicatas ANTES do índice): fecha a corrida create-vs-create de "Baixar PDF" + "Enviar" simultâneos; `persistFormSummaryPdf` trata `P2002` degradando pra update da linha vencedora (e deleta o blob substituído). Índice é parcial (`WHERE source='form_summary'`) — anexos manuais seguem ilimitados; documentado no schema, único writer é o próprio persist.
+- **Diálogo do resumo**: "Baixar PDF" mostra "Gerando…" durante a geração (evita clique repetido no ~5-8s de Puppeteer) e "Enviar" fica desabilitado até selecionar destinatário.
+- **FAB do assistente IA** não cobre mais o "Salvar identidade" em `/settings/perfil` em viewport estreita (respiro no fim do container).
+- **`/propostas` redireciona** para `/pipeline/propostas` (antes 404).
+
 ## [Unreleased] - 2026-08-18 - Visibilidade de seções por link de parte, configurável
 
 ### Adicionado

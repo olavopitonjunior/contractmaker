@@ -213,15 +213,19 @@ export function SendFormSummaryDialog({
             ) : (
               <Download className="mr-1 h-4 w-4" />
             )}
-            Baixar PDF
+            {downloading ? "Gerando…" : "Baixar PDF"}
           </Button>
-          <Button type="button" onClick={handleSend} disabled={sending}>
+          <Button
+            type="button"
+            onClick={handleSend}
+            disabled={sending || !email}
+          >
             {sending ? (
               <Loader2 className="mr-1 h-4 w-4 animate-spin" />
             ) : (
               <Mail className="mr-1 h-4 w-4" />
             )}
-            Enviar
+            {sending ? "Enviando…" : "Enviar"}
           </Button>
         </DialogFooter>
       </DialogContent>
