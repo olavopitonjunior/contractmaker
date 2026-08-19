@@ -647,7 +647,12 @@ async function sendEnvelope(
  * Idempotente pelo `@@unique([proposalId, via])` + guard de existência.
  */
 export type SendVendedorResult =
-  | { ok: true }
+  | {
+      ok: true;
+      /** Nada foi enviado: a proposta legada foi fechada em `completa`
+       *  (todos os vendedores já tinham aceitado o termo da 1ª rodada). */
+      reconciled?: "completa";
+    }
   | {
       ok: false;
       reason:
@@ -675,7 +680,11 @@ export type SendVendedorOrigin = "manual" | "cron" | "webhook";
 export function vendedorResultToResponse(
   result: SendVendedorResult
 ): { status: number; body: Record<string, unknown> } {
-  if (result.ok) return { status: 200, body: { ok: true } };
+  if (result.ok) {
+    return result.reconciled
+      ? { status: 200, body: { ok: true, reconciled: result.reconciled } }
+      : { status: 200, body: { ok: true } };
+  }
   switch (result.reason) {
     case "already":
       // Já enviado/em voo — idempotente, trata como sucesso.
@@ -800,9 +809,46 @@ async function sendVendedorAceiteLocked(
   });
   if (rows.length === 0) return { ok: false, reason: "no_vendedor" };
 
-  const pending = rows.filter((r) => !r.acceptanceClicksignId);
+  // "Pendente" = sem termo OU com termo MORTO (expired/canceled): esses precisam
+  // de reemissão — "tem id ⇒ enviado" tratava termo expirado como sucesso e
+  // travava a proposta em aguardando_vendedor pra sempre. `refused` fica fora:
+  // é desfecho legítimo, tratado pelo webhook (recusada_*), nunca reemitido.
+  const DEAD_ACCEPTANCE = new Set(["expired", "canceled"]);
+  const pending = rows.filter(
+    (r) => !r.acceptanceClicksignId || DEAD_ACCEPTANCE.has(r.acceptanceStatus ?? "")
+  );
   if (pending.length === 0) {
-    // Todos já têm termo (retry/replay) — garante o status e sai idempotente.
+    // Reconciliação do legado (pré-de9f441e o vendedor recebia termo já na 1ª
+    // rodada): se TODOS os vendedores já completaram, a proposta está feita —
+    // fechar em `completa` (espelho do fechamento do webhook em
+    // acceptance-webhook.ts), não estacionar em aguardando_vendedor, o que
+    // fechava a escotilha "concluir sem enviar" e alimentava o cron pra sempre.
+    if (rows.every((r) => r.acceptanceStatus === "completed")) {
+      const adv = await advanceProposalStatus(proposalId, "completa", {
+        completedAt: new Date(),
+      });
+      if (adv.moved) {
+        await logProposalEvent(proposalId, "chained_aceite2_reconciled_completa", { origin });
+        await notifyProposalMilestone({
+          proposalId,
+          orgId: proposal.orgId,
+          userId: proposal.userId,
+          kind: "completed",
+        }).catch(() => {});
+        return { ok: true, reconciled: "completa" };
+      }
+      // CAS não moveu: replay (já está completa) é idempotente; qualquer outro
+      // caso é um writer concorrente que levou a proposta pra outro estado —
+      // dizer "reconciliada" aqui mentiria pro operador.
+      if (adv.reason === "replay") return { ok: false, reason: "already" };
+      return {
+        ok: false,
+        reason: "wrong_status",
+        detail: `status atual: ${adv.reason === "illegal" ? adv.from : "desconhecido"}`,
+      };
+    }
+    // Todos os termos vivos (sent) — retry/replay, garante o status e sai
+    // idempotente.
     await advanceProposalStatus(proposalId, "aguardando_vendedor");
     return { ok: false, reason: "already" };
   }
@@ -871,6 +917,15 @@ async function sendVendedorAceiteLocked(
       );
       const acceptanceId = extractId(resp);
       if (acceptanceId) {
+        // Reemissão sobrescreve o id do termo morto — registra o antigo antes,
+        // senão a trilha do termo original some junto.
+        if (row.acceptanceClicksignId) {
+          await logProposalEvent(proposalId, "aceite2_term_reissued", {
+            signerId: row.id,
+            previousAcceptanceId: row.acceptanceClicksignId,
+            previousStatus: row.acceptanceStatus,
+          });
+        }
         await prisma.proposalSigner.update({
           where: { id: row.id },
           data: { acceptanceClicksignId: acceptanceId, acceptanceStatus: "sent" },
