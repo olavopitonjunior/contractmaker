@@ -24,6 +24,11 @@
  *                        canônico). Sem isso, org que já tem default segue
  *                        selecionando o antigo — `pickTemplateByFacts` desempata
  *                        por `isDefault`.
+ *   --archive-others     arquiva (status="archived", isDefault=false) as OUTRAS
+ *                        rows handlebars ativas da mesma (org, modalidade) —
+ *                        deixa UM template ativo por modalidade, o do tenant.
+ *                        O seed canônico não recria (a checagem de existência
+ *                        dele é por (orgId, modalidade), sem filtro de status).
  *
  * Env:
  *   DATABASE_URL — Prisma connection (passe a URL de staging/prod inline).
@@ -147,6 +152,39 @@ export const TENANT_MANIFESTS: TenantManifest[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Guard anti-clobber (consumido pelo sync-templates.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Marcador machine-readable no comentário de abertura dos `.hbs` de tenant.
+ * O `sync-templates.ts` (que sobrescreve TODA row handlebars ativa da
+ * modalidade com o canônico) pula rows cujo source carrega este marcador —
+ * sem ele, um sync de rotina destruía o template do tenant (aconteceu em
+ * prod/staging em 2026-08-18/19 com os templates da Newcore).
+ */
+export const TENANT_TEMPLATE_MARKER = "tenant-template:";
+
+/** Nomes de row gerenciados por manifest — fallback do guard pra rows semeadas
+ *  ANTES do marcador existir no source (ou já clobberadas com o canônico). */
+export const TENANT_TEMPLATE_NAMES: ReadonlySet<string> = new Set(
+  TENANT_MANIFESTS.flatMap((m) => m.templates.map((t) => t.name))
+);
+
+/** Row que pertence a um tenant: marcador no source OU nome de manifest.
+ *  O marcador só conta no INÍCIO do source (1ª linha do comentário de
+ *  abertura) — um canônico que apenas MENCIONE a string num comentário
+ *  qualquer não vira falso positivo. */
+export function isTenantManagedRow(
+  row: { name: string; handlebarsSource: string },
+  tenantNames: ReadonlySet<string> = TENANT_TEMPLATE_NAMES
+): boolean {
+  return (
+    row.handlebarsSource.slice(0, 200).includes(TENANT_TEMPLATE_MARKER) ||
+    tenantNames.has(row.name)
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Seed
 // ---------------------------------------------------------------------------
 
@@ -157,6 +195,7 @@ export const TENANT_MANIFESTS: TenantManifest[] = [
 export interface TenantSeedClient extends CanonicalSeedClient {
   contractTemplate: CanonicalSeedClient["contractTemplate"] & {
     count(args: unknown): Promise<number>;
+    findMany(args: unknown): Promise<unknown[]>;
     update(args: unknown): Promise<unknown>;
     updateMany(args: unknown): Promise<unknown>;
   };
@@ -167,6 +206,8 @@ export interface SeedTenantTemplatesResult {
   created: string[];
   updated: string[];
   unchanged: string[];
+  /** Ids arquivados por `archiveOthers` (vazio sem a flag). */
+  archived: string[];
 }
 
 export interface SeedTenantTemplatesOptions {
@@ -180,6 +221,12 @@ export interface SeedTenantTemplatesOptions {
    * default por (orgId, modalidade)).
    */
   makeDefault?: boolean;
+  /**
+   * Arquiva as OUTRAS rows handlebars ativas da mesma (org, modalidade) —
+   * garante um único template ativo por modalidade (o do tenant). Rows
+   * `engine="google_docs"` não são tocadas (Doc-modelo do tenant no Drive).
+   */
+  archiveOthers?: boolean;
   log?: (line: string) => void;
 }
 
@@ -192,6 +239,7 @@ export async function seedTenantTemplatesForOrg(
   const created: string[] = [];
   const updated: string[] = [];
   const unchanged: string[] = [];
+  const archived: string[] = [];
 
   // Um default por (orgId, modalidade) — derruba os outros ANTES de setar o
   // novo, mesma ordem do POST /api/templates.
@@ -202,6 +250,33 @@ export async function seedTenantTemplatesForOrg(
       where: { orgId, modalidade, isDefault: true, id: { not: id } },
       data: { isDefault: false },
     });
+    await opts.db.contractTemplate.update({
+      where: { id },
+      data: { isDefault: true },
+    });
+  }
+
+  // Um template ATIVO por (org, modalidade): arquiva as outras rows handlebars
+  // ativas. Nunca deleta (histórico/FKs) nem toca engine="google_docs".
+  async function archiveOthersOf(id: string, modalidade: string, key: string) {
+    if (!opts.archiveOthers) return;
+    const others = (await opts.db.contractTemplate.findMany({
+      where: { orgId, modalidade, engine: "handlebars", status: "active", id: { not: id } },
+      select: { id: true, name: true },
+    })) as { id: string; name: string }[];
+    if (others.length === 0) return;
+    for (const o of others) {
+      log(`  🗄 ${key}: ${opts.dryRun ? "arquivaria" : "arquiva"} "${o.name}" (id=${o.id})`);
+    }
+    archived.push(...others.map((o) => o.id));
+    if (opts.dryRun) return;
+    await opts.db.contractTemplate.updateMany({
+      where: { id: { in: others.map((o) => o.id) } },
+      data: { status: "archived", isDefault: false },
+    });
+    // Invariante 1-default-por-(org, modalidade): se o default anterior acabou
+    // de ser arquivado (rodou sem --make-default), a sobrevivente assume —
+    // idempotente quando já é default.
     await opts.db.contractTemplate.update({
       where: { id },
       data: { isDefault: true },
@@ -237,6 +312,7 @@ export async function seedTenantTemplatesForOrg(
           } else {
             unchanged.push(key);
           }
+          await archiveOthersOf(existing.id, modalidade, key);
           continue;
         }
         log(
@@ -253,6 +329,7 @@ export async function seedTenantTemplatesForOrg(
         if (opts.makeDefault && !existing.isDefault) {
           await promoteToDefault(existing.id, modalidade, key);
         }
+        await archiveOthersOf(existing.id, modalidade, key);
         updated.push(key);
         continue;
       }
@@ -291,14 +368,20 @@ export async function seedTenantTemplatesForOrg(
         if (opts.makeDefault && !isDefault) {
           await promoteToDefault(row.id, modalidade, key);
         }
-      } else if (opts.makeDefault && !isDefault) {
-        log(`  ★ ${key}: seria promovido a default da modalidade`);
+        await archiveOthersOf(row.id, modalidade, key);
+      } else {
+        if (opts.makeDefault && !isDefault) {
+          log(`  ★ ${key}: seria promovido a default da modalidade`);
+        }
+        if (opts.archiveOthers) {
+          log(`  🗄 ${key}: arquivaria as demais rows handlebars ativas da modalidade`);
+        }
       }
       created.push(key);
     }
   }
 
-  return { created, updated, unchanged };
+  return { created, updated, unchanged, archived };
 }
 
 // ---------------------------------------------------------------------------
@@ -340,6 +423,7 @@ export function findManifest(dirArg: string): TenantManifest {
 async function main() {
   const DRY_RUN = !process.argv.includes("--apply");
   const MAKE_DEFAULT = process.argv.includes("--make-default");
+  const ARCHIVE_OTHERS = process.argv.includes("--archive-others");
   const org = argValue("--org");
   if (!org) {
     console.error(
@@ -405,6 +489,7 @@ async function main() {
       loadSource: (entry) => sources.get(entry.filename)!,
       dryRun: DRY_RUN,
       makeDefault: MAKE_DEFAULT,
+      archiveOthers: ARCHIVE_OTHERS,
       log: (line) => console.log(line),
     });
 
@@ -412,7 +497,8 @@ async function main() {
     console.log(
       `[seed-tenant-templates] ${DRY_RUN ? "would create" : "created"}: ${result.created.length}, ` +
         `${DRY_RUN ? "would update" : "updated"}: ${result.updated.length}, ` +
-        `unchanged: ${result.unchanged.length}`
+        `unchanged: ${result.unchanged.length}, ` +
+        `${DRY_RUN ? "would archive" : "archived"}: ${result.archived.length}`
     );
     if (DRY_RUN && result.created.length + result.updated.length > 0) {
       console.log(`[seed-tenant-templates] Rode com --apply pra persistir.`);

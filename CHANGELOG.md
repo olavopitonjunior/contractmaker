@@ -4,6 +4,16 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-19 - Guard anti-clobber dos templates de tenant
+
+### Corrigido
+
+- **`sync-templates.ts` não sobrescreve mais template de TENANT** (incidente 2026-08-18/19): o sync atualizava toda row `ContractTemplate` handlebars ativa da modalidade — em todas as orgs, sem olhar o dono — e um `--apply` de rotina clobberou os templates próprios da Newcore e da RE/MAX Ativa (staging e prod) com o source canônico. Guard com duas pernas em `isTenantManagedRow` (`seed-tenant-templates.ts`): marcador `tenant-template: <slug>` na 1ª linha do comentário do `.hbs` (sobrevive a rename na UI) e nome do manifest (cobre row semeada antes do marcador ou já clobberada). Rows restauradas via re-seed nos dois ambientes; dry-run pós-fix: `tenant skipped: 5, would update: 0`.
+
+### Adicionado
+
+- **`seed-tenant-templates.ts --archive-others`**: arquiva (`status="archived"`, `isDefault=false`) as demais rows handlebars ativas da mesma `(org, modalidade)` — um único template ativo por tipo de contrato. Nunca deleta e não toca `engine="google_docs"`. Aplicado na org Newcore (prod e staging Demo); flag opt-in, atrás de `--apply`, não deve entrar em automação.
+
 ## [Unreleased] - 2026-08-19 - Breadcrumb não linka segmento sem rota
 
 ### Corrigido
