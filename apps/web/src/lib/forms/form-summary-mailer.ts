@@ -61,13 +61,16 @@ const CATEGORY = "resumo_formulario";
  * com `addRandomSuffix: true` (URL não enumerável, ver s3.ts), então cada
  * upload gera URL nova e um match por URL nunca casa (era isso que criava um
  * anexo duplicado por clique de "Baixar PDF"/"Enviar"). `source` não é editável
- * pelo usuário (categoria é) e deal↔form é 1:1, então há no máximo uma linha
- * viva: a mais recente é atualizada e as duplicatas do bug antigo são removidas
- * de passagem. Blobs substituídos são deletados na hora (best-effort) — o
- * blob-gc é report-only e não cobre o prefixo form-summary/, então órfão aqui
- * seria pra sempre. Sem unique constraint em (dealId, source), dois envios
- * simultâneos ainda podem duplicar — janela mínima; a duplicata é saneada na
- * geração seguinte.
+ * pelo usuário (categoria é) e o unique parcial
+ * DealAttachment_dealId_form_summary_key (migration 20260818213000) garante no
+ * máximo UMA linha viva por deal.
+ *
+ * Concorrência: quem PERDE uma corrida sempre ADOTA o estado do vencedor
+ * (descarta o próprio blob e devolve a URL vigente) — nunca sobrescreve. O
+ * vencedor pode estar com o e-mail em voo referenciando o blob dele; deletá-lo
+ * nasceria um link 404. Blobs substituídos/descartados são deletados na hora
+ * (best-effort): o blob-gc é report-only e não cobre form-summary/, órfão aqui
+ * seria pra sempre. Retorna a URL canônica pós-persistência.
  */
 export async function persistFormSummaryPdf(
   dealId: string,
@@ -82,18 +85,43 @@ export async function persistFormSummaryPdf(
     body: buffer,
     contentType: "application/pdf",
   });
-  const existing = await prisma.dealAttachment.findMany({
+
+  const dropBlob = async (stale: string) => {
+    try {
+      await deleteFromStorage(stale);
+    } catch (err) {
+      console.warn("[form-summary] falha ao deletar blob substituído", stale, err);
+    }
+  };
+
+  const adoptCurrent = async (): Promise<string> => {
+    await dropBlob(url);
+    const current = await prisma.dealAttachment.findFirst({
+      where: { dealId, source: "form_summary" },
+      select: { url: true },
+    });
+    return current?.url ?? url;
+  };
+
+  const existing = await prisma.dealAttachment.findFirst({
     where: { dealId, source: "form_summary" },
     select: { id: true, url: true },
-    orderBy: { createdAt: "desc" },
   });
-  const [keep, ...extras] = existing;
-  if (keep) {
-    await prisma.dealAttachment.update({
-      where: { id: keep.id },
+
+  if (existing) {
+    // Update OTIMISTA, condicionado à url lida: se outra request atualizou no
+    // meio (count=0), adota o estado dela — um update cego sobrescreveria a
+    // url e órfãria o blob dela sem ninguém pra limpar.
+    const res = await prisma.dealAttachment.updateMany({
+      where: { id: existing.id, url: existing.url },
       data: { url, filename, byteSize: buffer.byteLength, category: CATEGORY },
     });
-  } else {
+    if (res.count === 0) return adoptCurrent();
+    if (existing.url && existing.url !== url) await dropBlob(existing.url);
+    return url;
+  }
+
+  try {
     await prisma.dealAttachment.create({
       data: {
         dealId,
@@ -105,23 +133,12 @@ export async function persistFormSummaryPdf(
         byteSize: buffer.byteLength,
       },
     });
+    return url;
+  } catch (err) {
+    // P2002 = perdemos a corrida create-vs-create pro unique parcial.
+    if ((err as { code?: string })?.code !== "P2002") throw err;
+    return adoptCurrent();
   }
-  if (extras.length) {
-    await prisma.dealAttachment.deleteMany({
-      where: { id: { in: extras.map((e) => e.id) } },
-    });
-  }
-  const staleUrls = [keep?.url, ...extras.map((e) => e.url)].filter(
-    (u): u is string => Boolean(u) && u !== url
-  );
-  for (const stale of staleUrls) {
-    try {
-      await deleteFromStorage(stale);
-    } catch (err) {
-      console.warn("[form-summary] falha ao deletar blob antigo", stale, err);
-    }
-  }
-  return url;
 }
 
 export async function sendFormSummary(

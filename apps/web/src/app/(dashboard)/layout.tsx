@@ -118,7 +118,9 @@ export default async function DashboardLayout({
             <ImpersonationBanner orgId={org.id} orgName={org.name} />
           )}
           <DashboardHeader tenantSwitcher={tenantSwitcher} />
-          <main id="main-content" tabIndex={-1} className="flex-1 p-4 sm:p-6">
+          {/* pb-24: folga pro AIAssistButton (fixed bottom-6 right-6) não
+              cobrir ações no fim da página em viewport estreita. */}
+          <main id="main-content" tabIndex={-1} className="flex-1 p-4 pb-24 sm:p-6 sm:pb-24">
             {children}
           </main>
         </SidebarInset>
