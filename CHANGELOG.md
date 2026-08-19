@@ -4,6 +4,14 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-19 - Administração pela imobiliária vira eixo de pareamento
+
+### Adicionado
+
+- **Eixo `admImobiliaria` no `matchCriteria`** (4º eixo, ao lado de garantia, fiador PF/PJ e locatário PF/PJ): quando a imobiliária tem um modelo próprio para imóvel administrado, a esteira passa a escolher sozinha lendo `aluguel.adm_imobiliaria` do formulário — que o form já grava desde 2026-08. Caso concreto: a RE/MAX Trio tem "Locação Residencial (Trio)" e "Locação Residencial — Administração (Trio)" na mesma modalidade e o operador escolhia à mão. Disponível na Central de ingestão (só no tipo "contrato de locação" — a proposta não coleta o dado) e no editor de template.
+
+  Três cuidados que o eixo booleano exigiu e que os eixos de enum não tinham: o scoring passou a testar `wanted == null` em vez de truthiness (sob `!wanted`, o critério `false` — "modelo para imóvel SEM administração" — era silenciosamente ignorado, e o modelo de administração empatava com o comum em toda locação); `deriveTemplateFacts` mapeia a ausência do campo para `null` e nunca para `false`, senão todo form antigo e toda proposta desclassificariam o modelo de administração; e a coerção `"true"`/`"false"` → boolean vive num `z.preprocess` dentro do próprio `matchCriteriaSchema`, cobrindo de uma vez as três rotas que o consomem, em vez de um call-site por vez (`"false"` é uma string truthy — coerção esquecida em qualquer boundary viraria `true`).
+
 ## [Unreleased] - 2026-08-19 - Slot de garantia: o relatório para de mentir
 
 ### Corrigido
