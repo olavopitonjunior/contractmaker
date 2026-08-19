@@ -29,6 +29,7 @@ vi.mock("@/lib/locacao/inspection-signature", () => ({
 vi.mock("@/lib/proposals/webhook-hooks", () => ({
   onProposalEnvelopeClosed: vi.fn().mockResolvedValue(undefined),
   onProposalEnvelopeRefused: vi.fn().mockResolvedValue(undefined),
+  onProposalEnvelopeCanceled: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@vercel/functions", () => ({ waitUntil: vi.fn() }));
 
@@ -37,12 +38,14 @@ import { getEnvelope, listEnvelopeEvents } from "../envelopes";
 import {
   onProposalEnvelopeClosed,
   onProposalEnvelopeRefused,
+  onProposalEnvelopeCanceled,
 } from "@/lib/proposals/webhook-hooks";
 
 const getEnv = getEnvelope as unknown as ReturnType<typeof vi.fn>;
 const listEvents = listEnvelopeEvents as unknown as ReturnType<typeof vi.fn>;
 const onClosed = onProposalEnvelopeClosed as unknown as ReturnType<typeof vi.fn>;
 const onRefused = onProposalEnvelopeRefused as unknown as ReturnType<typeof vi.fn>;
+const onCanceled = onProposalEnvelopeCanceled as unknown as ReturnType<typeof vi.fn>;
 
 function makeEnvelope(over: Record<string, unknown> = {}) {
   return {
@@ -83,11 +86,143 @@ describe("syncEnvelopeState — propagação pra proposta", () => {
     expect(onRefused).not.toHaveBeenCalled();
   });
 
-  it("proposta cancelada → chama onProposalEnvelopeRefused", async () => {
+  it("cancelada SEM recusa → onProposalEnvelopeCanceled, NUNCA recusa", async () => {
+    // Antes: cancelamento virava `recusada_proponente` (terminal) com sino de
+    // recusa — o histórico afirmava uma recusa que ninguém fez.
     getEnv.mockResolvedValue(remote("canceled"));
     await syncEnvelopeState(makeEnvelope(), { actorVia: "cron" });
-    expect(onRefused).toHaveBeenCalledWith("env-1", { refusedSourceKind: null });
+    expect(onCanceled).toHaveBeenCalledWith("env-1");
+    expect(onRefused).not.toHaveBeenCalled();
     expect(onClosed).not.toHaveBeenCalled();
+  });
+
+  it("canceled SEM feed de eventos → não decide, não fecha o envelope, tenta de novo depois", async () => {
+    // O feed `/events` é a ÚNICA fonte de recusa e é best-effort. Sem ele,
+    // "ninguém recusou" é indistinguível de "não consegui verificar" — e
+    // fechar o envelope aqui perderia a recusa PARA SEMPRE (o cron só varre
+    // `running`).
+    getEnv.mockResolvedValue(remote("canceled"));
+    listEvents.mockRejectedValue(new Error("429 rate limited"));
+    await syncEnvelopeState(makeEnvelope(), { actorVia: "cron" });
+    expect(onCanceled).not.toHaveBeenCalled();
+    expect(onRefused).not.toHaveBeenCalled();
+    expect(onClosed).not.toHaveBeenCalled();
+    // Envelope segue `running` → volta no sweep do próximo cron.
+    expect(prisma.envelope.update).not.toHaveBeenCalled();
+  });
+
+  it("canceled sem feed MAS com recusa já gravada localmente → decide recusa", async () => {
+    // A evidência local basta: o webhook de recusa chegou antes.
+    getEnv.mockResolvedValue(remote("canceled"));
+    listEvents.mockRejectedValue(new Error("429 rate limited"));
+    const env = makeEnvelope({
+      signers: [
+        {
+          id: "sg-1",
+          clicksignId: "sk-1",
+          email: null,
+          status: "refused",
+          sourceKind: "proponente",
+          refusedAt: new Date("2026-07-17T12:00:00Z"),
+          signedAt: null,
+          viewedAt: null,
+        },
+      ],
+    });
+    await syncEnvelopeState(env, { actorVia: "cron" });
+    expect(onRefused).toHaveBeenCalledWith("env-1", { refusedSourceKind: null });
+    expect(onCanceled).not.toHaveBeenCalled();
+  });
+
+  it("envelope RUNNING com recusa antiga → não redispara a cada sync", async () => {
+    // `refusedRemotely` sozinho valia em toda rodada; com dois recusantes de
+    // sourceKind diferente isso gravava um `status_transition_rejected` por
+    // execução do cron, pra sempre.
+    getEnv.mockResolvedValue(remote("running"));
+    const env = makeEnvelope({
+      signers: [
+        {
+          id: "sg-1",
+          clicksignId: "sk-1",
+          email: null,
+          status: "refused",
+          sourceKind: "proponente",
+          refusedAt: new Date("2026-07-17T12:00:00Z"),
+          signedAt: null,
+          viewedAt: null,
+        },
+      ],
+    });
+    await syncEnvelopeState(env, { actorVia: "cron" });
+    expect(onRefused).not.toHaveBeenCalled();
+    expect(onCanceled).not.toHaveBeenCalled();
+  });
+
+  it("cancelada COM recusa → recusa (a ClickSign cancela o envelope na recusa)", async () => {
+    getEnv.mockResolvedValue(remote("canceled"));
+    listEvents.mockResolvedValue({
+      data: [
+        {
+          attributes: {
+            name: "refusal",
+            created: "2026-07-17T12:00:00Z",
+            data: { signer: { key: "sk-1" } },
+          },
+        },
+      ],
+    });
+    const env = makeEnvelope({
+      signers: [
+        {
+          id: "sg-1",
+          clicksignId: "sk-1",
+          email: null,
+          status: "sent",
+          sourceKind: "proponente",
+          refusedAt: null,
+          signedAt: null,
+          viewedAt: null,
+        },
+      ],
+    });
+    await syncEnvelopeState(env, { actorVia: "cron" });
+    expect(onRefused).toHaveBeenCalledWith("env-1", { refusedSourceKind: "proponente" });
+    expect(onCanceled).not.toHaveBeenCalled();
+  });
+
+  it("recusa JÁ conhecida + envelope cancelado → ainda é recusa, não cancelamento", async () => {
+    // O discriminador é `refusedRemotely` (existe signatário com refusedAt no
+    // remoto), não `refusedNewly`: numa reconciliação posterior a recusa já
+    // está gravada localmente e mesmo assim o desfecho continua sendo recusa.
+    getEnv.mockResolvedValue(remote("canceled"));
+    listEvents.mockResolvedValue({
+      data: [
+        {
+          attributes: {
+            name: "refusal",
+            created: "2026-07-17T12:00:00Z",
+            data: { signer: { key: "sk-1" } },
+          },
+        },
+      ],
+    });
+    const env = makeEnvelope({
+      signers: [
+        {
+          id: "sg-1",
+          clicksignId: "sk-1",
+          email: null,
+          status: "refused",
+          sourceKind: "proponente",
+          refusedAt: new Date("2026-07-17T12:00:00Z"),
+          signedAt: null,
+          viewedAt: null,
+        },
+      ],
+    });
+    await syncEnvelopeState(env, { actorVia: "cron" });
+    expect(onRefused).toHaveBeenCalledWith("env-1", { refusedSourceKind: "proponente" });
+    expect(onCanceled).not.toHaveBeenCalled();
   });
 
   it("recusa recém-descoberta na via única → propaga o sourceKind do recusante", async () => {

@@ -20,6 +20,7 @@ import {
 import {
   onProposalEnvelopeClosed,
   onProposalEnvelopeRefused,
+  onProposalEnvelopeCanceled,
 } from "@/lib/proposals/webhook-hooks";
 
 /**
@@ -82,6 +83,25 @@ export async function syncEnvelopeState(
   // proponente). Lido do `local` (o sourceKind é estático) contra o sinal
   // fresco do remote: sem query extra e sem a corrida da leitura pós-sync.
   let refusedSourceKind: string | null = null;
+  // Houve recusa no remoto, RECÉM-descoberta ou já conhecida. Distinto de
+  // `refusedNewly` (que gateia sino/evento e só vale na primeira vez) porque
+  // aqui a pergunta é outra: "este envelope morreu de recusa ou de
+  // cancelamento?". A ClickSign marca o envelope como `canceled` NOS DOIS
+  // casos, então o status remoto sozinho não responde — quem responde é a
+  // existência de um signatário com `refusedAt`.
+  let refusedRemotely = false;
+  // Evidência LOCAL da mesma pergunta: um webhook de recusa que chegou antes já
+  // gravou o signatário. Vale mesmo quando o feed remoto está indisponível.
+  const refusedLocally = envelope.signers.some(
+    (s) => s.status === "refused" || s.refusedAt
+  );
+  // O feed `/events` é a ÚNICA fonte de recusa e é buscado best-effort
+  // (`.catch(() => null)`). Sem ele não dá pra afirmar "ninguém recusou" — só
+  // "não consegui verificar", que é afirmação diferente. Sem esta distinção,
+  // uma falha de rede transformaria recusa em cancelamento silencioso e a
+  // perderia PARA SEMPRE: o envelope viraria `canceled` local e sairia do sweep
+  // do cron, que só varre `running`.
+  const refusalEvidenceUnavailable = eventsResp === null && !refusedLocally;
   for (const local of envelope.signers) {
     const byKey = local.clicksignId
       ? stateBySigner.get(local.clicksignId)
@@ -98,6 +118,7 @@ export async function syncEnvelopeState(
 
     if (remote.refusedAt) {
       refusedSourceKind = local.sourceKind;
+      refusedRemotely = true;
       if (local.status !== "refused") {
         updates.status = "refused";
         refusedNewly = true;
@@ -217,7 +238,15 @@ export async function syncEnvelopeState(
       linkUrl: await resolveDealLink(envelope.dealId),
       kind: "signed",
     });
-  } else if (remoteStatus === "canceled" && envelope.status !== "canceled") {
+  } else if (
+    remoteStatus === "canceled" &&
+    envelope.status !== "canceled" &&
+    !refusalEvidenceUnavailable
+  ) {
+    // Fechar o envelope local é IRREVERSÍVEL na prática: `canceled` sai do
+    // sweep do cron (que só varre `running`), então esta é a última chance de
+    // decidir recusa vs cancelamento. Sem o feed de eventos, não fechamos —
+    // o envelope segue `running` e a próxima rodada do cron tenta de novo.
     await prisma.envelope.update({
       where: { id: envelope.id },
       data: { status: "canceled", canceledAt: new Date() },
@@ -262,8 +291,35 @@ export async function syncEnvelopeState(
     try {
       if (remoteStatus === "closed" || remoteStatus === "finished") {
         await onProposalEnvelopeClosed(envelope.id);
-      } else if (refusedNewly || remoteStatus === "canceled") {
+      } else if (refusalEvidenceUnavailable && remoteStatus === "canceled") {
+        // Envelope morto e sem como saber de quê. Não afirmamos nada: o
+        // envelope continua `running` (acima) e o cron reconcilia depois.
+        console.warn(
+          `[envelope sync] ${envelope.id}: canceled sem feed de eventos — decisão adiada`
+        );
+      } else if (
+        refusedNewly ||
+        ((refusedRemotely || refusedLocally) && remoteStatus === "canceled")
+      ) {
+        // Recusa REAL — alguém se manifestou contra. `refusedNewly` cobre a
+        // recusa recém-descoberta (inclusive com o envelope ainda `running`,
+        // quando um de vários signatários recusa); a segunda perna cobre a
+        // reconciliação de um envelope já morto cuja recusa já era conhecida.
+        // Não basta `refusedRemotely` sozinho: num envelope `running` com
+        // recusa antiga, isso redisparava a cada sync e, com dois recusantes de
+        // sourceKind diferente, gravava um `status_transition_rejected` por
+        // rodada, pra sempre.
         await onProposalEnvelopeRefused(envelope.id, { refusedSourceKind });
+      } else if (remoteStatus === "canceled") {
+        // Cancelado SEM recusa: ninguém recusou, o envelope foi cancelado (ou
+        // expirou) na ClickSign. Antes caía no ramo de cima e a proposta virava
+        // `recusada_proponente` — TERMINAL, com `refusedBy` gravado e sino de
+        // "recusada" — afirmando no histórico uma recusa que não existiu.
+        // O hook de cancelamento é o correto: devolve a 2ª via à parada de
+        // decisão e, na 1ª via, não mexe (não sabemos se foi cancelamento ou
+        // expiração, e o `appInitiated` é exclusivo do cancelamento
+        // deliberado feito na nossa UI).
+        await onProposalEnvelopeCanceled(envelope.id);
       }
     } catch (err) {
       console.error("[envelope sync] propagação de status da proposta falhou:", err);
