@@ -65,7 +65,9 @@ export interface TenantTemplateEntry {
   /** O MESMO arquivo vira uma row por modalidade. */
   modalidades: TenantTemplateModalidade[];
   /**
-   * `ContractTemplate.matchCriteria` — `{ garantia?, fiadorPessoa?, pessoa? }`.
+   * `ContractTemplate.matchCriteria` — `{ garantia?, fiadorPessoa?, pessoa?,
+   * admImobiliaria? }`. A fonte é `TemplateMatchCriteria` em
+   * `lib/contracts/template-category.ts`; eixo novo lá entra aqui também.
    * `null` = template GENÉRICO da modalidade (o seletor não filtra por critério).
    */
   matchCriteria: Record<string, unknown> | null;
