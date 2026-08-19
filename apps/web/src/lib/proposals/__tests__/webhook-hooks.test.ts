@@ -5,7 +5,10 @@ vi.mock("@vercel/functions", () => ({
   waitUntil: (p: Promise<unknown>) => p,
 }));
 
-vi.mock("../status", () => ({
+// `importOriginal`: só `advanceProposalStatus` é stubado. `ALLOWED_FROM` tem de
+// ser o REAL — um teste que afirma a aresta contra um mock não afirma nada.
+vi.mock("../status", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../status")>()),
   advanceProposalStatus: vi.fn().mockResolvedValue({ moved: true }),
 }));
 
@@ -26,7 +29,12 @@ import {
   onProposalEnvelopeRefused,
   onProposalEnvelopeCanceled,
 } from "../webhook-hooks";
-import { advanceProposalStatus } from "../status";
+import { advanceProposalStatus, ALLOWED_FROM } from "../status";
+import {
+  EDITABLE_STATUSES,
+  TERMINAL_STATUSES,
+  CANCELLABLE_STATUSES,
+} from "../status-sets";
 import { sendVendedorVia } from "../send-execute";
 import { notifyProposalMilestone } from "../notify-proposal";
 import { getSignatureSettings } from "@/lib/clicksign/account";
@@ -237,7 +245,7 @@ describe("onProposalEnvelopeCanceled (bug D — 2ª via expirada/cancelada)", ()
     expect(notify).not.toHaveBeenCalled();
   });
 
-  it("via completa cancelada → no-op (cron expire trata)", async () => {
+  it("via completa cancelada pelo WEBHOOK → no-op (cron expire trata)", async () => {
     envFind.mockResolvedValue({
       source: "proposal",
       proposalId: "p1",
@@ -253,5 +261,80 @@ describe("onProposalEnvelopeCanceled (bug D — 2ª via expirada/cancelada)", ()
     envFind.mockResolvedValue({ source: "contract", proposalId: null, via: null });
     await onProposalEnvelopeCanceled("e1");
     expect(propUpdateMany).not.toHaveBeenCalled();
+  });
+
+  describe("appInitiated (cancelamento deliberado, feito na nossa UI)", () => {
+    const firstRoundEnvelope = {
+      source: "proposal",
+      proposalId: "p1",
+      via: "completa",
+      orgId: "org1",
+      clicksignId: "ck-1",
+    };
+
+    it("1ª via em curso → falha_envio (reenviável) + evento, SEM sino", async () => {
+      envFind.mockResolvedValue(firstRoundEnvelope);
+      await onProposalEnvelopeCanceled("e1", { appInitiated: true });
+      expect(propUpdateMany).toHaveBeenCalledWith({
+        where: { id: "p1", status: { in: ["enviada", "entregue", "visualizada"] } },
+        data: { status: "falha_envio" },
+      });
+      expect(eventCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ eventName: "primeira_via_canceled" }),
+        })
+      );
+      // O corretor cancelou na própria UI — sino aqui seria eco da ação dele.
+      expect(notify).not.toHaveBeenCalled();
+      // A aresta é exclusiva do hook, como no caso reduzida.
+      expect(advance).not.toHaveBeenCalled();
+    });
+
+    it("proposta fora da 1ª via (CAS não moveu) → sem evento", async () => {
+      envFind.mockResolvedValue(firstRoundEnvelope);
+      propUpdateMany.mockResolvedValue({ count: 0 });
+      await onProposalEnvelopeCanceled("e1", { appInitiated: true });
+      expect(eventCreate).not.toHaveBeenCalled();
+      expect(notify).not.toHaveBeenCalled();
+    });
+
+    it("via reduzida mantém a devolução à parada de decisão, mas SEM sino", async () => {
+      envFind.mockResolvedValue({ ...firstRoundEnvelope, via: "reduzida" });
+      await onProposalEnvelopeCanceled("e1", { appInitiated: true });
+      expect(propUpdateMany).toHaveBeenCalledWith({
+        where: { id: "p1", status: "aguardando_vendedor" },
+        data: { status: "assinada_proponente" },
+      });
+      // O sino diz "cancelada ou expirou na ClickSign" — descreveria um evento
+      // externo que não houve, e seria eco da ação do próprio corretor.
+      expect(notify).not.toHaveBeenCalled();
+      expect(eventCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            eventName: "vendedor_via_canceled",
+            source: "api",
+          }),
+        })
+      );
+    });
+
+    it("envelope de contrato ignora a flag", async () => {
+      envFind.mockResolvedValue({ source: "contract", proposalId: null, via: null });
+      await onProposalEnvelopeCanceled("e1", { appInitiated: true });
+      expect(propUpdateMany).not.toHaveBeenCalled();
+    });
+
+    it("falha_envio é reenviável, editável E cancelável — o ponto da correção", () => {
+      // Trava o invariante de que este destino resolve o bug: se alguém tirar
+      // `falha_envio` de EDITABLE_STATUSES (que espelha o claim de envio em
+      // executeProposalSend), a proposta volta a ficar presa após o cancelamento.
+      expect(EDITABLE_STATUSES.has("falha_envio")).toBe(true);
+      expect(TERMINAL_STATUSES.has("falha_envio")).toBe(false);
+      // E arquivar precisa continuar possível: sem isto, cancelar o envelope
+      // tirava o "Cancelar proposta" que existia em `enviada` e a única saída
+      // terminal virava APAGAR a proposta que o cliente já tinha visto.
+      expect(CANCELLABLE_STATUSES.has("falha_envio")).toBe(true);
+      expect(ALLOWED_FROM.cancelada).toContain("falha_envio");
+    });
   });
 });

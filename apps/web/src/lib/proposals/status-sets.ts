@@ -36,7 +36,16 @@ export const TERMINAL_STATUSES = new Set<string>([
 
 /**
  * De onde `cancelar` é válido — espelha `ALLOWED_FROM.cancelada` em status.ts
- * (NÃO inclui `falha_envio`, que não é predecessor válido, nem os terminais).
+ * (não inclui os terminais).
+ *
+ * `falha_envio` ENTROU (2026-08): antes ficava de fora porque só se chegava lá
+ * por claim de envio que nunca saiu — proposta que ninguém viu, cujo desfecho
+ * natural é excluir (`DELETABLE_STATUSES`). Desde que cancelar o envelope
+ * devolve a 1ª via pra cá, `falha_envio` também cobre proposta REALMENTE
+ * enviada, que o cliente viu, e essa não se exclui: se o negócio morreu, o
+ * corretor precisa ARQUIVAR o registro. Sem isto, cancelar o envelope tirava o
+ * botão "Cancelar proposta" que existia em `enviada`, e a única saída terminal
+ * virava apagar a proposta.
  */
 export const CANCELLABLE_STATUSES = new Set<string>([
   "rascunho",
@@ -46,6 +55,7 @@ export const CANCELLABLE_STATUSES = new Set<string>([
   "visualizada",
   "assinada_proponente",
   "aguardando_vendedor",
+  "falha_envio",
 ]);
 
 /** Estados FRIOS (sem envelope/aceite ativo) onde excluir é seguro. */

@@ -156,16 +156,73 @@ export async function onProposalEnvelopeClosed(
  * `aguardando_vendedor → assinada_proponente` é EXCLUSIVA deste hook — por isso
  * o CAS é local (updateMany) e ela NÃO entra em ALLOWED_FROM, senão qualquer
  * caller ganharia um "voltar status".
- * Via completa → nada aqui: o cron de expire trata a proposta como hoje.
+ *
+ * `appInitiated` diz DE ONDE nasceu o cancelamento, e é o que separa os dois
+ * mundos: `true` só quando veio do DELETE do envelope, isto é, do botão que o
+ * corretor apertou aqui dentro, com intenção inequívoca de desfazer o envio.
+ * O webhook `cancel`/`deadline` e a reconciliação passam `false` (omitem):
+ * lá o fato nasceu na ClickSign e nem sequer distinguimos cancelamento de
+ * expiração — os dois chegam pelo mesmo ramo.
+ *
+ * Via completa (1ª via) → depende disso:
+ *  - sem a flag (cancelamento nasceu FORA daqui): nada, o cron de expire trata
+ *    — comportamento original, preservado;
+ *  - com a flag: o corretor cancelou DELIBERADAMENTE na nossa UI, com a
+ *    intenção de corrigir algo e reenviar. Sem isto a proposta ficava em
+ *    `enviada`/`entregue`/
+ *    `visualizada` com o envelope morto: a tela seguia dizendo "aguardando
+ *    assinatura", o /send recusava ("já foi enviada"), editar era proibido
+ *    (`EDITABLE_STATUSES`) e a única saída era o cancelamento TERMINAL da
+ *    proposta ou esperar o prazo vencer pra cair em `expirada`.
+ *    `falha_envio` é o balde já existente de "envio não vingou, reenvie": está
+ *    em `EDITABLE_STATUSES` e no claim de `executeProposalSend`, então devolve
+ *    edição e reenvio sem alargar nenhum dos dois conjuntos.
+ *
+ * A aresta `enviada|entregue|visualizada → falha_envio` também é exclusiva
+ * daqui (ALLOWED_FROM.falha_envio só admite `enviada`, para o release de claim
+ * órfão), então segue o mesmo padrão de CAS local do caso reduzida.
  */
-export async function onProposalEnvelopeCanceled(envelopeId: string): Promise<void> {
+export async function onProposalEnvelopeCanceled(
+  envelopeId: string,
+  opts: { appInitiated?: boolean } = {}
+): Promise<void> {
   const env = await prisma.envelope.findUnique({
     where: { id: envelopeId },
     select: { source: true, proposalId: true, via: true, orgId: true, clicksignId: true },
   });
   if (env?.source !== "proposal" || !env.proposalId) return;
-  if (env.via !== "reduzida") return;
   const proposalId = env.proposalId;
+
+  if (env.via !== "reduzida") {
+    if (!opts.appInitiated) return;
+    const released = await prisma.proposal.updateMany({
+      where: {
+        id: proposalId,
+        status: { in: ["enviada", "entregue", "visualizada"] },
+      },
+      data: { status: "falha_envio" },
+    });
+    // Fora da 1ª via em curso (parada de decisão, 2ª via, terminal) não há o
+    // que liberar: `assinada_proponente`/`aguardando_vendedor` já têm reenvio
+    // próprio (SEND_VENDEDOR_STATUSES) e terminal é registro histórico.
+    if (released.count === 0) return;
+    await prisma.proposalEvent
+      .create({
+        data: {
+          proposalId,
+          eventName: "primeira_via_canceled",
+          source: "api",
+          payload: {
+            envelopeId,
+            clicksignId: env.clicksignId,
+            to: "falha_envio",
+          } as Prisma.InputJsonValue,
+        },
+      })
+      .catch(() => {});
+    // Sem sino: quem cancelou foi o próprio corretor, na nossa UI — ele já sabe.
+    return;
+  }
 
   const res = await prisma.proposal.updateMany({
     where: { id: proposalId, status: "aguardando_vendedor" },
@@ -178,11 +235,17 @@ export async function onProposalEnvelopeCanceled(envelopeId: string): Promise<vo
       data: {
         proposalId,
         eventName: "vendedor_via_canceled",
-        source: "clicksign",
+        source: opts.appInitiated ? "api" : "clicksign",
         payload: { envelopeId, clicksignId: env.clicksignId } as Prisma.InputJsonValue,
       },
     })
     .catch(() => {});
+
+  // Sino só quando o fato veio de FORA. Cancelamento feito aqui dentro pelo
+  // próprio corretor não vira notificação: seria eco da ação dele, e o texto
+  // ("cancelada ou expirou na ClickSign") descreveria um evento externo que
+  // não houve. A devolução à parada de decisão acontece igual nos dois casos.
+  if (opts.appInitiated) return;
 
   const proposal = await prisma.proposal.findUnique({
     where: { id: proposalId },
