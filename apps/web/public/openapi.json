@@ -2890,6 +2890,23 @@
             "in": "path"
           }
         ],
+        "requestBody": {
+          "required": false,
+          "description": "Opcional. Sem corpo, o modelo é escolhido pelo pareamento automático (modalidade + matchCriteria contra os dados do formulário).",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "templateId": {
+                    "type": "string",
+                    "description": "Escolha manual de modelo. Precisa ser um ContractTemplate ativo da mesma organização e com modalidade compatível com o tipo do negócio; o contrato de administração de locação NÃO é aceito para o contrato do inquilino. Inválido responde 400 — nunca cai no automático."
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "201": {
             "description": "Contrato gerado",
