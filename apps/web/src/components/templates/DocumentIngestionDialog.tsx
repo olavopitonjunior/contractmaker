@@ -118,6 +118,15 @@ const CRITERIA_OPTIONS: Record<
     label: "Locatário/proponente é",
     options: (["pf", "pj"] as const).map((v) => ({ value: v, label: PESSOA_LABELS[v] })),
   },
+  admImobiliaria: {
+    label: "Administração pela imobiliária",
+    // Valores como string porque o estado do diálogo é Record<_, string> (é o
+    // que um <select> produz); `matchCriteriaSchema` coage na fronteira.
+    options: [
+      { value: "true", label: "Sim, a imobiliária administra" },
+      { value: "false", label: "Não, o locador recebe direto" },
+    ],
+  },
 };
 
 /**
