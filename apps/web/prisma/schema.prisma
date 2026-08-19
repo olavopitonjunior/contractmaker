@@ -774,8 +774,11 @@ model DealAttachment {
   // ATENÇÃO: existe um UNIQUE parcial fora do schema (Prisma não representa
   // índice parcial): DealAttachment_dealId_form_summary_key em (dealId)
   // WHERE source='form_summary' (migration 20260818213000). Quem inserir com
-  // source='form_summary' DEVE tratar P2002 — hoje o único writer é
-  // persistFormSummaryPdf (form-summary-mailer.ts), que faz retry de update.
+  // source='form_summary' DEVE tratar o conflito. Writers hoje:
+  // persistFormSummaryPdf (form-summary-mailer.ts — catch P2002 adota o
+  // vencedor) e o restore de anexo (attachments/restore/route.ts — degrada
+  // pra source='manual' quando a vaga está ocupada). `prisma migrate dev`
+  // pode propor DROP deste índice por drift — revisar o SQL de toda migration.
   source        String   @default("manual")
   // Tamanho do arquivo em bytes — preenchido no upload daqui pra frente (forward
   // only). Anexos antigos ficam null. Alimenta as métricas de storage por tenant.

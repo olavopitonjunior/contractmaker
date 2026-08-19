@@ -20,8 +20,8 @@ const nextConfig = {
       {
         // Atalho natural que os usuários digitam; a rota canônica vive sob o
         // pipeline. permanent: false — a hierarquia ainda pode mudar.
-        source: '/propostas',
-        destination: '/pipeline/propostas',
+        source: '/propostas/:path*',
+        destination: '/pipeline/propostas/:path*',
         permanent: false,
       },
     ];

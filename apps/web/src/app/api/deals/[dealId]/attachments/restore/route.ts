@@ -121,6 +121,19 @@ export async function POST(
   const str = (k: string): string | null =>
     typeof payload[k] === "string" ? (payload[k] as string) : null;
 
+  // source='form_summary' tem unique parcial por deal (migration 20260818213000)
+  // e a vaga pode estar ocupada por um resumo regenerado depois da exclusão.
+  // Restaurar como 'manual' nesse caso: o arquivo volta pra pasta do deal sem
+  // disputar a vaga canônica do resumo (create estouraria P2002 → 500).
+  let source = str("source") ?? "manual";
+  if (source === "form_summary") {
+    const liveSummary = await prisma.dealAttachment.findFirst({
+      where: { dealId: params.dealId, source: "form_summary" },
+      select: { id: true },
+    });
+    if (liveSummary) source = "manual";
+  }
+
   const restored = await prisma.dealAttachment.create({
     data: {
       dealId: params.dealId,
@@ -130,7 +143,7 @@ export async function POST(
       mime: str("mime") ?? "application/octet-stream",
       url: archived.url,
       category: archived.category,
-      source: str("source") ?? "manual",
+      source,
       extractedData:
         payload.extractedData && typeof payload.extractedData === "object"
           ? (payload.extractedData as Prisma.InputJsonValue)
