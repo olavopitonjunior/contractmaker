@@ -24,6 +24,20 @@ const nextConfig = {
         destination: '/pipeline/propostas/:path*',
         permanent: false,
       },
+      {
+        // Breadcrumb "Negócios" linka segmento intermediário sem page.tsx
+        // (dashboard-header.tsx gera href de todo segmento). Path EXATO de
+        // propósito: /deals/[id] e as new-from-* existem e renderizam.
+        source: '/deals',
+        destination: '/pipeline',
+        permanent: false,
+      },
+      {
+        // Mesmo caso na esteira de locação.
+        source: '/locacao/deals',
+        destination: '/pipeline',
+        permanent: false,
+      },
     ];
   },
 };
