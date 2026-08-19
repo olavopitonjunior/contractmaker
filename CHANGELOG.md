@@ -4,6 +4,18 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-19 - Escolher o modelo do contrato à mão
+
+### Adicionado
+
+- **Escolha manual de modelo na geração do contrato.** O pareamento automático só sabe decidir com FATOS do formulário — garantia, PF/PJ, administração. Quando o que distingue dois modelos não está no formulário ("este é o de curta temporada"), o modelo empata com o genérico, perde o desempate pro `isDefault` e fica **inalcançável**: até aqui não havia nenhuma forma de usá-lo, nem por UI nem por API (`Contract.templateOverride`, apesar do nome, guarda o *source* Handlebars e nunca foi escrito por ninguém). Agora `POST generate-contract` (sessão e o gêmeo bearer) aceita `templateId` opcional, e as telas de negócio ganham "Escolher outro modelo" ao lado do botão de gerar.
+
+  Caminho secundário de propósito: o botão principal continua no automático, que acerta na esmagadora maioria — cada escolha manual é uma chance de errar o contrato. Sem `templateId` nada muda, e os dois call-sites de formulário público nem mudaram de assinatura.
+
+  Três travas: `templateId` inválido responde **400 e não gera nada** (cair no automático depois de o operador ter escolhido outro modelo seria a troca silenciosa que este produto não pode fazer); o **contrato de administração de locação é recusado** para o contrato do inquilino — é família "locacao" mas outro instrumento, entre imobiliária e proprietário, e geraria um documento que não vincula quem assina; e o `GET template-choices` que alimenta o diálogo usa o **mesmo gate e a mesma regra de elegibilidade** do POST, então a UI nunca oferece o que a rota vai recusar. A escolha entra no metadata do audit — "por que este contrato saiu com aquele modelo" só se responde depois se ficar registrado.
+
+- **Modalidade `temporada` (short stay)**: o contrato de curta temporada é outro contrato (diária, sem vínculo de moradia, sem garantia locatícia clássica) e vinha sendo cadastrado como locação residencial comum, disputando o padrão da modalidade. Nome sem o prefixo `locacao` — igual a `administracao_locacao` — para ficar fora do fallback `startsWith("locacao")` e nunca ser servido por acidente a uma locação comum; há teste negativo travando isso. Como nenhum campo do formulário declara "isto é uma temporada", ela é alcançada pela escolha manual acima, e reusa o schema residencial (os campos de temporada ficam em `[colchetes]` no próprio modelo).
+
 ## [Unreleased] - 2026-08-19 - Administração pela imobiliária vira eixo de pareamento
 
 ### Adicionado
