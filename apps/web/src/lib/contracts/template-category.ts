@@ -537,6 +537,20 @@ export type TemplateOverrideRejection =
   | "wrong-kind";
 
 /**
+ * Mensagem de recusa pro cliente. Mora AQUI, e não em cada rota, porque
+ * `not-found` e `cross-org` TÊM que sair idênticos: são motivos distintos pra
+ * quem escreve o código e a mesma frase pra quem chama, senão o `reason` vira
+ * um oráculo de enumeração — "este id não existe" × "existe, mas é de outra
+ * imobiliária". Rota que monte a mensagem por conta própria desfaz isso.
+ */
+export const TEMPLATE_OVERRIDE_MESSAGE: Record<TemplateOverrideRejection, string> = {
+  "not-found": "Modelo não encontrado.",
+  "cross-org": "Modelo não encontrado.",
+  "not-active": "Esse modelo está arquivado. Ative-o em Modelos antes de usar.",
+  "wrong-kind": "Esse modelo não serve para este tipo de negócio.",
+};
+
+/**
  * Resolve o template escolhido à mão, ou o motivo da recusa. Nunca lança e
  * nunca "corrige" a escolha em silêncio — pedido inválido é 400 pro caller,
  * porque cair no automático depois de o operador escolher outra coisa seria
