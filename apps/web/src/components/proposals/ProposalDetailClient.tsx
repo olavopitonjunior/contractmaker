@@ -19,7 +19,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { proposalStatusView, proposalEventLabel } from "@/lib/proposals/status-view";
-import { EDITABLE_STATUSES, AWAITING_DECISION_STATUSES } from "@/lib/proposals/status-sets";
+import {
+  EDITABLE_STATUSES,
+  AWAITING_DECISION_STATUSES,
+  TERMINAL_STATUSES,
+} from "@/lib/proposals/status-sets";
+import { RenameProposalDialog } from "./RenameProposalDialog";
 import { dealPathForKind } from "@/lib/proposals/use-convert-proposal";
 import { useProposalPolling } from "@/hooks/useProposalPolling";
 import { ProposalProgressTimeline } from "./ProposalProgressTimeline";
@@ -29,6 +34,7 @@ import { ProposalDecisionCard } from "./ProposalDecisionCard";
 import type { PlanVendedor } from "./EnviarProprietarioDialog";
 import { ProposalDocumentCard } from "./ProposalDocumentCard";
 import { ProposalAttachmentUpload } from "./ProposalAttachmentUpload";
+import { ProposalSignaturesSection } from "./ProposalSignaturesSection";
 import type { ProposalPermissions } from "./ProposalRowActions";
 
 // Rótulo/cor por signatário. Duas fontes de vocabulário DISJUNTAS:
@@ -66,10 +72,18 @@ const SIGNER_STATUS_LABEL: Record<string, string> = {
  */
 interface Proposal {
   id: string;
+  /** "PROP-2026-0042". Null só em proposta anterior ao backfill do código. */
+  code: string | null;
   title: string;
   status: string;
   kind: string;
   instrument: string;
+  /**
+   * Há envelope ClickSign (qualquer status, inclusive `failed`). Quando há, a
+   * seção de assinaturas assume o lugar da lista simples de signatários — senão
+   * os mesmos nomes apareceriam duas vezes na mesma tela.
+   */
+  hasEnvelopes: boolean;
   createdAtLabel: string;
   sentAtLabel: string;
   deliveredAtLabel: string;
@@ -134,6 +148,7 @@ export function ProposalDetailClient({
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<null | {
     id: string;
     filename: string;
@@ -175,6 +190,9 @@ export function ProposalDetailClient({
   // enviada em outra aba, o botão de editar some junto com o preview — mesmo
   // conjunto que o PATCH e o /preview aceitam no servidor.
   const canEdit = EDITABLE_STATUSES.has(liveStatus);
+  // Renomear vale além de EDITABLE_STATUSES: título é rótulo interno, não o
+  // documento congelado. Mesmo corte da rota PATCH .../title.
+  const canRename = !TERMINAL_STATUSES.has(liveStatus);
   const isAceite = proposal.instrument === "aceite";
   // Mesma permissão que a rota /attachments/finalize exige (PROPOSAL_SEND):
   // quem envia a proposta pra assinatura é quem cuida da documentação dela.
@@ -264,9 +282,26 @@ export function ProposalDetailClient({
           >
             <ChevronLeft className="h-4 w-4" /> Propostas
           </Link>
-          <h1 className="font-display mt-1 truncate text-2xl font-semibold tracking-tight">
-            {proposal.title}
-          </h1>
+          <div className="mt-1 flex items-center gap-1.5">
+            <h1 className="font-display truncate text-2xl font-semibold tracking-tight">
+              {proposal.title}
+            </h1>
+            {canRename && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0 text-muted-foreground"
+                title="Renomear proposta"
+                aria-label="Renomear proposta"
+                onClick={() => setRenameOpen(true)}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+          {proposal.code && (
+            <div className="font-mono text-xs text-muted-foreground">{proposal.code}</div>
+          )}
           <div className="mt-1.5 flex flex-wrap items-center gap-2 text-sm">
             <Badge variant="outline" className={`${sv.className} px-2.5 py-0.5`}>
               {sv.label}
@@ -380,9 +415,12 @@ export function ProposalDetailClient({
         </Card>
       </div>
 
-      {/* Datas + Assinaturas */}
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card className="space-y-2 p-4">
+      {/* Datas + Assinaturas. Com envelope, a lista simples dá lugar à seção
+          completa (abaixo) e "Datas" ocupa a linha inteira. */}
+      <div className={`grid gap-4 ${proposal.hasEnvelopes ? "" : "md:grid-cols-2"}`}>
+        {/* Sozinho no grid, o card viraria full-width e as linhas
+            rótulo/valor (justify-between) abririam um vão enorme no meio. */}
+        <Card className={`space-y-2 p-4 ${proposal.hasEnvelopes ? "md:max-w-xl" : ""}`}>
           <h2 className="font-medium">Datas</h2>
           <Row label="Criada" value={proposal.createdAtLabel} />
           <Row label="Enviada" value={proposal.sentAtLabel} />
@@ -412,6 +450,7 @@ export function ProposalDetailClient({
           )}
         </Card>
 
+        {!proposal.hasEnvelopes && (
         <Card className="space-y-2 p-4">
           <h2 className="font-medium">Assinaturas</h2>
           {(() => {
@@ -501,7 +540,18 @@ export function ProposalDetailClient({
             );
           })()}
         </Card>
+        )}
       </div>
+
+      {/* Gestão de assinaturas (envelope ClickSign) — mesma UI dos contratos.
+          Só rende quando há envelope; no Aceite via WhatsApp não existe um. */}
+      {proposal.hasEnvelopes && (
+        <ProposalSignaturesSection
+          proposalId={proposal.id}
+          canSync={permissions.send}
+          refreshKey={live?.updatedAt ?? ""}
+        />
+      )}
 
       {/* Documento — preview antes do envio, snapshot congelado depois */}
       <ProposalDocumentCard
@@ -668,6 +718,13 @@ export function ProposalDetailClient({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <RenameProposalDialog
+        open={renameOpen}
+        onOpenChange={setRenameOpen}
+        proposalId={proposal.id}
+        currentTitle={proposal.title}
+      />
     </div>
   );
 }

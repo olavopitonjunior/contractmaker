@@ -67,7 +67,8 @@ export default async function PropostaDetailPage({
     notFound();
   }
 
-  const [planSigners, events, attachments, memberRows, envelopes] = await Promise.all([
+  const [planSigners, events, attachments, memberRows, envelopes, envelopeCount] =
+    await Promise.all([
     prisma.proposalSigner.findMany({
       where: { proposalId: params.id },
       orderBy: { signingGroup: "asc" },
@@ -94,6 +95,11 @@ export default async function PropostaDetailPage({
       },
       orderBy: { via: "asc" },
     }),
+    // Conta TODOS os envelopes, inclusive `failed` (que a query acima exclui de
+    // propósito, pra não sujar a lista de status por signatário). É o que decide
+    // se a seção de assinaturas assume o lugar da lista simples — e um envelope
+    // que falhou é justamente o que o corretor precisa ver, com o `lastError`.
+    prisma.envelope.count({ where: { proposalId: params.id, source: "proposal" } }),
   ]);
 
   // Status REAL por signatário vem do EnvelopeSigner (onde vive sign/view/refuse),
@@ -203,10 +209,12 @@ export default async function PropostaDetailPage({
     <ProposalDetailClient
       proposal={{
         id: proposal.id,
+        code: proposal.code,
         title: proposal.title,
         status: proposal.status,
         kind: proposal.kind,
         instrument: proposal.instrument,
+        hasEnvelopes: envelopeCount > 0,
         createdAtLabel: formatDateTimeBR(proposal.createdAt),
         sentAtLabel: formatDateTimeBR(proposal.sentAt),
         deliveredAtLabel: formatDateTimeBR(proposal.deliveredAt),
