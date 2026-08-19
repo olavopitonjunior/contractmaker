@@ -6,22 +6,30 @@ import { isGoogleDocsFeatureEnabled } from "@/lib/google/client";
 import { copyContractGoogleDoc } from "@/lib/google/copy-doc";
 import { reverseMergeDocToTemplate } from "@/lib/templates/reverse-merge";
 import { insertPlaceholdersWithAI } from "@/lib/templates/ai-placeholder-insertion";
+import {
+  UPLOAD_MODALIDADES,
+  schemaTypeForModalidade,
+} from "@/lib/contracts/template-category";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
+/**
+ * Modalidades e schemaType saem das constantes COMPARTILHADAS
+ * (`template-category.ts`). Eram uma cópia local, e a cópia divergiu na hora
+ * em que `temporada` foi criada: o diálogo passou a oferecer a opção e esta
+ * rota respondia 400 pra ela. Derivar do mesmo lugar que o `<select>` deriva
+ * é o que impede a divergência de voltar.
+ */
 const bodySchema = z.object({
   contractId: z.string().min(1),
-  modalidade: z.enum(["locacao", "locacao_comercial", "a_vista", "financiamento"]),
+  modalidade: z
+    .string()
+    .refine((v) => (UPLOAD_MODALIDADES as readonly string[]).includes(v), {
+      message: `modalidade inválida (aceitas: ${UPLOAD_MODALIDADES.join(", ")})`,
+    }),
   name: z.string().trim().min(1).optional(),
 });
-
-const SCHEMA_TYPE_BY_MODALIDADE: Record<string, string> = {
-  locacao: "locacao_residencial_v1",
-  locacao_comercial: "locacao_comercial_v1",
-  a_vista: "compra_venda_v2",
-  financiamento: "compra_venda_v2",
-};
 
 /**
  * POST /api/templates/from-contract — "Tornar modelo da imobiliária":
@@ -103,7 +111,7 @@ export async function POST(req: NextRequest) {
       isDefault: false,
       googleTemplateDocId: copy.docId,
       modalidade,
-      schemaType: SCHEMA_TYPE_BY_MODALIDADE[modalidade],
+      schemaType: schemaTypeForModalidade(modalidade),
       handlebarsSource: "<!-- engine=google_docs: a fonte é o Google Doc -->",
       version: "1.0.0",
     },

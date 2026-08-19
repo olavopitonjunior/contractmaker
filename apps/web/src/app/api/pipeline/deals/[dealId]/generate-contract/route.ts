@@ -7,7 +7,10 @@ import {
 } from "@/lib/services/contract-generation";
 import { guardDealScope } from "@/lib/deals/route-helpers";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
-import { resolveTemplateOverride } from "@/lib/contracts/template-category";
+import {
+  resolveTemplateOverride,
+  TEMPLATE_OVERRIDE_MESSAGE,
+} from "@/lib/contracts/template-category";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { z } from "zod";
 
@@ -20,13 +23,6 @@ export const runtime = "nodejs";
  * 400 pra todo mundo.
  */
 const Body = z.object({ templateId: z.string().min(1).optional() });
-
-const OVERRIDE_ERROR: Record<string, string> = {
-  "not-found": "Modelo não encontrado.",
-  "cross-org": "Modelo não encontrado.",
-  "not-active": "Esse modelo está arquivado. Ative-o em Modelos antes de usar.",
-  "wrong-kind": "Esse modelo não serve para este tipo de negócio.",
-};
 
 export async function POST(
   req: NextRequest,
@@ -78,7 +74,7 @@ export async function POST(
       });
       if (!resolved.ok) {
         return NextResponse.json(
-          { error: OVERRIDE_ERROR[resolved.reason] ?? "Modelo inválido." },
+          { error: TEMPLATE_OVERRIDE_MESSAGE[resolved.reason] },
           { status: 400 }
         );
       }

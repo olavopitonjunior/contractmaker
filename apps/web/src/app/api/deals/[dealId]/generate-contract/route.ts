@@ -13,7 +13,10 @@ import {
 } from "@/lib/services/contract-generation";
 import { guardDealScope } from "@/lib/deals/route-helpers";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
-import { resolveTemplateOverride } from "@/lib/contracts/template-category";
+import {
+  resolveTemplateOverride,
+  TEMPLATE_OVERRIDE_MESSAGE,
+} from "@/lib/contracts/template-category";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -76,8 +79,11 @@ export async function POST(
       dealKind: deal.kind,
     });
     if (!resolved.ok) {
+      // Mensagem do mapa compartilhado: `not-found` e `cross-org` saem
+      // IDÊNTICOS de propósito — interpolar o `reason` aqui daria a um token
+      // bearer um oráculo pra enumerar templates de outras imobiliárias.
       return NextResponse.json(
-        { error: `Modelo inválido (${resolved.reason})` },
+        { error: TEMPLATE_OVERRIDE_MESSAGE[resolved.reason] },
         { status: 400 }
       );
     }
