@@ -19,6 +19,7 @@ import {
   contractSettingsSchema,
   locacaoSettingsSchema,
 } from "@/lib/contracts/default-config";
+import { parseParticipantVisibilityJson } from "@/lib/forms/participant-visibility";
 
 // Aceita os valores LEGADOS de venda (legado/minimo/padrao) além dos canônicos
 // da UI nova (essencial/completo/custom) — o campo é String no banco e não há
@@ -79,6 +80,19 @@ const formSettingsPatchSchema = z.object({
     .object({
       venda: contractSettingsSchema.optional(),
       locacao: locacaoSettingsSchema.optional(),
+    })
+    .optional(),
+  /**
+   * Visibilidade de seções por link de parte, namespaced por esteira. O shape
+   * fino (papéis válidos por esteira, etapas habilitáveis, etapa 0 sempre
+   * presente, etapa 6/Comissão nunca) é imposto por
+   * `parseParticipantVisibilityJson` ANTES de gravar — o Zod aqui só limita o
+   * envelope. Merge por branch, como o contractDefaults.
+   */
+  participantVisibility: z
+    .object({
+      venda: z.record(z.array(z.number().int().min(0).max(6)).max(10)).optional(),
+      locacao: z.record(z.array(z.number().int().min(0).max(6)).max(10)).optional(),
     })
     .optional(),
 });
@@ -149,6 +163,18 @@ export async function PATCH(req: NextRequest) {
     ? { ...currentDefaults, ...parsed.data.contractDefaults }
     : null;
 
+  // Visibilidade por link: merge por branch (a tela salva uma esteira por
+  // vez) e SANITIZA antes de gravar — o que persiste já é o shape canônico
+  // (papéis da esteira certa, etapas do catálogo, etapa 0 garantida).
+  const currentVisibility =
+    (row.participantVisibilityJson as Record<string, unknown> | null) ?? {};
+  const mergedVisibility = parsed.data.participantVisibility
+    ? parseParticipantVisibilityJson({
+        ...currentVisibility,
+        ...parsed.data.participantVisibility,
+      })
+    : null;
+
   const updated = await prisma.orgFormSettings.update({
     where: { orgId: ctx.orgId },
     data: {
@@ -175,6 +201,7 @@ export async function PATCH(req: NextRequest) {
         ? { summaryIncludeAttachments: parsed.data.summaryIncludeAttachments }
         : {}),
       ...(mergedDefaults ? { contractDefaultsJson: mergedDefaults as object } : {}),
+      ...(mergedVisibility ? { participantVisibilityJson: mergedVisibility as object } : {}),
     },
   });
 

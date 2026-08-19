@@ -1,4 +1,5 @@
 import type { ParticipantRole } from "./participant-token";
+import { DEFAULT_ROLE_STEPS } from "./participant-visibility";
 
 /**
  * Mapa role → steps que aquele subtoken deve ver no wizard. Os steps do
@@ -22,18 +23,13 @@ import type { ParticipantRole } from "./participant-token";
  * meio de pagamento sozinho.
  */
 
-export const ROLE_STEP_INDEXES: Record<ParticipantRole, readonly number[]> = {
-  vendedor: [0, 1, 3],
-  comprador: [0, 2],
-  // Locação (LOCACAO_STEP_LABELS, 6 etapas — a Confirmação saiu em 2026-07-30):
-  //   0 Documentos  1 Locador(es)  2 Locatário(s)  3 Imóvel
-  //   4 Aluguel e Reajuste  5 Garantia
-  // Locador vê o imóvel (matrícula/IPTU); fiador vê a Garantia (qualifica-se
-  // dentro dela); o aluguel fica pro token principal.
-  locador: [0, 1, 3],
-  locatario: [0, 2],
-  fiador: [0, 5],
-};
+// Desde 2026-08 a fonte de verdade dos DEFAULTS é
+// lib/forms/participant-visibility.ts (DEFAULT_ROLE_STEPS) — e o valor
+// EFETIVO por org vem de resolveParticipantScope (config em
+// OrgFormSettings.participantVisibilityJson). Este re-export existe pra os
+// consumidores estáticos (testes, docs) não terem uma segunda cópia.
+export const ROLE_STEP_INDEXES: Record<ParticipantRole, readonly number[]> =
+  DEFAULT_ROLE_STEPS;
 
 /**
  * Mapeia STEP_LABELS indexado por role pra reusar com SalesFormWizard via

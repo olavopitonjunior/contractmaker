@@ -1,5 +1,6 @@
 import type { ParticipantRole } from "./participant-token";
 import { categoryPathScope, parseTerceiroRole } from "./participant-category";
+import { ROLE_ESTEIRA, resolveRoleVisibility } from "./participant-visibility";
 
 /**
  * Allowlist de chaves top-level de `DadosContratoForm` que cada role pode
@@ -11,22 +12,25 @@ import { categoryPathScope, parseTerceiroRole } from "./participant-category";
  *     `deepMergeAtPaths(current, incoming, ROLE_PATHS[role])`.
  *   - `useAutoSave({ pathScope: ROLE_PATHS[role] })` no cliente.
  *
- * Decisão: vendedor preenche `imoveis` (é quem tem matrícula/IPTU em mãos).
- * Comprador só preenche `compradores`. Campos comerciais (`pagamento`,
- * `comissao`, `config`, `assinatura`, `testemunhas`) ficam EXCLUSIVOS do
- * admin (token principal) — comprador não negocia comissão.
+ * Decisão (revista em 2026-08): vendedor preenche `imoveis` (é quem tem
+ * matrícula/IPTU em mãos); comprador preenche `compradores` E a etapa
+ * Pagamento; locatário preenche `locatarios` + Garantia (inclusive indicar o
+ * fiador). `comissao`, `fiscal`, `config`, `assinatura` e `testemunhas`
+ * seguem EXCLUSIVOS do token principal — inalcançáveis por subtoken, por
+ * construção (não existem em STEP_PATHS de participant-visibility.ts).
  */
-export const ROLE_PATHS: Record<ParticipantRole, readonly string[]> = {
-  vendedor: ["vendedores", "imoveis"],
-  comprador: ["compradores"],
-  // Locação (dadosLocacaoSchema): locador é quem tem matrícula/IPTU em mãos
-  // (imovel singular); fiador preenche a própria qualificação dentro de
-  // `garantia` (subobjeto fiador). Condições comerciais (aluguel/fiscal/
-  // comissão) ficam EXCLUSIVAS do token principal.
-  locador: ["locadores", "imovel"],
-  locatario: ["locatarios"],
-  fiador: ["garantia"],
-};
+// Desde 2026-08 os DEFAULTS derivam das etapas em
+// lib/forms/participant-visibility.ts (STEP_PATHS × DEFAULT_ROLE_STEPS); o
+// valor EFETIVO por org vem de resolveParticipantScope (config da org).
+// Comissão/fiscal/testemunhas/assinatura/config seguem inalcançáveis por
+// subtoken — não existem em STEP_PATHS.
+export const ROLE_PATHS: Record<ParticipantRole, readonly string[]> =
+  Object.fromEntries(
+    (Object.keys(ROLE_ESTEIRA) as ParticipantRole[]).map((role) => [
+      role,
+      resolveRoleVisibility(role, {}).paths,
+    ])
+  ) as Record<ParticipantRole, readonly string[]>;
 
 /**
  * Escopo de paths de QUALQUER role — nativo ou de terceiro.

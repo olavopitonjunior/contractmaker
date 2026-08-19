@@ -14,9 +14,11 @@ import {
 export const runtime = "nodejs";
 
 /**
- * Endpoint público (sem auth) sob o token do form de vendas. Permite que
- * o usuário preenchendo /f/[token] (corretor OU cliente) escolha um
- * comissionado já cadastrado OU cadastre um novo inline.
+ * Endpoint público (sem auth) sob o token do form — serve as DUAS esteiras:
+ * venda (etapa Comissão, `comissao.comissionados[]`) e locação (etapa
+ * Comissão, `comissao.angariadores[]`), já que ambas são SalesForm e o token
+ * resolve igual. Permite que o usuário preenchendo /f/[token] (corretor OU
+ * cliente) escolha um comissionado já cadastrado OU cadastre um novo inline.
  *
  * Resolve `orgId` via `SalesForm.token` e filtra `SplitRecipient` por
  * `{ orgId, kind:"commissioner", active:true }`. Nunca expõe PII bancária

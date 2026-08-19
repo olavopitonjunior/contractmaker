@@ -532,6 +532,43 @@ function buildLocacaoConsolidatedSummary(
     aluguelRows.push({ label: "Vigência", value: `${vigencia} meses` });
   }
   pushIf(aluguelRows, "Meio de pagamento", str(aluguel.meio_pagamento));
+  // Administração/despesas decididas no form (2026-08). Booleans explícitos —
+  // ausente = form antigo, sem linha.
+  if (typeof aluguel.adm_imobiliaria === "boolean") {
+    aluguelRows.push({
+      label: "Administração pela imobiliária",
+      value: aluguel.adm_imobiliaria ? "Sim" : "Não",
+    });
+  }
+  if (aluguel.adm_imobiliaria === true) {
+    const taxaAdm = Number(aluguel.taxa_admin_percent);
+    if (Number.isFinite(taxaAdm) && taxaAdm > 0) {
+      aluguelRows.push({ label: "Taxa de administração", value: `${taxaAdm}%` });
+    }
+    const repasse = str(aluguel.encargos_repasse);
+    if (repasse) {
+      aluguelRows.push({
+        label: "Encargos",
+        value:
+          repasse === "paga_e_retem"
+            ? "Imobiliária paga e retém no repasse"
+            : "Repassados integralmente no boleto do locatário",
+      });
+    }
+  }
+  if (typeof aluguel.contas_consumo_individualizadas === "boolean") {
+    aluguelRows.push({
+      label: "Contas de consumo",
+      value: aluguel.contas_consumo_individualizadas
+        ? "Individualizadas"
+        : `No boleto do condomínio${
+            Array.isArray(aluguel.contas_no_condominio) &&
+            aluguel.contas_no_condominio.length > 0
+              ? ` (${(aluguel.contas_no_condominio as unknown[]).join(", ")})`
+              : ""
+          }`,
+    });
+  }
   if (aluguelRows.length > 0) {
     sections.push({ title: "Aluguel e reajuste", rows: aluguelRows });
   }
@@ -578,6 +615,19 @@ function buildLocacaoConsolidatedSummary(
 
   // ---- Foro / assinatura ----
   const cfgRows: SummaryRow[] = [];
+  const cfg = obj(data.config);
+  if (cfg.clausula_rescisoria === false) {
+    cfgRows.push({ label: "Cláusula rescisória", value: "Não (contrato sem multa rescisória)" });
+  } else if (cfg.clausula_rescisoria === true) {
+    const mesesMulta = Number(cfg.multa_rescisoria_meses);
+    cfgRows.push({
+      label: "Cláusula rescisória",
+      value:
+        Number.isFinite(mesesMulta) && mesesMulta > 0
+          ? `Sim — multa de ${mesesMulta} ${mesesMulta === 1 ? "aluguel" : "aluguéis"}`
+          : "Sim",
+    });
+  }
   pushIf(cfgRows, "Foro", str(data.foro));
   const assinatura = obj(data.assinatura);
   const local = [str(assinatura.cidade), str(assinatura.uf)].filter(Boolean).join("/");

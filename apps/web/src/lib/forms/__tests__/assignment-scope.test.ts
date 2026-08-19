@@ -135,7 +135,13 @@ describe("assignmentAllowedForRole — escopo cross-role (segurança)", () => {
       false
     );
     expect(assignmentAllowedForRole("conjuge_fiador", "fiador", "locacao")).toBe(true);
+    // 2026-08: o default do locatário passou a incluir a etapa Garantia — ele
+    // preenche `garantia` (inclusive indicar o fiador), então também pode
+    // atribuir os docs do fiador. Locador segue de fora.
     expect(assignmentAllowedForRole("conjuge_fiador", "locatario", "locacao")).toBe(
+      true
+    );
+    expect(assignmentAllowedForRole("conjuge_fiador", "locador", "locacao")).toBe(
       false
     );
   });

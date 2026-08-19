@@ -31,6 +31,7 @@ import { locacaoDocAdapter } from "@/components/forms/steps/locacao/locacao-doc-
 import { ImovelLocacaoStep } from "@/components/forms/steps/locacao/ImovelLocacaoStep";
 import { AluguelStep } from "@/components/forms/steps/locacao/AluguelStep";
 import { GarantiaStep } from "@/components/forms/steps/locacao/GarantiaStep";
+import { ComissaoLocacaoStep } from "@/components/forms/steps/locacao/ComissaoLocacaoStep";
 import type { GarantiaOptionLike } from "@/lib/forms/garantia-catalog";
 
 interface LocacaoFormWizardProps {
@@ -126,6 +127,13 @@ const LOCACAO_FIELD_LABELS: Record<string, string> = {
   valor: "Valor do aluguel",
   vigencia_inicio: "Início da vigência",
   dia_vencimento: "Dia de vencimento",
+  adm_imobiliaria: "Administração pela imobiliária",
+  encargos_repasse: "Tratamento dos encargos (paga e retém / repassa integral)",
+  taxa_admin_percent: "Taxa de administração",
+  contas_consumo_individualizadas: "Contas de consumo individualizadas",
+  contas_no_condominio: "Contas no boleto do condomínio",
+  clausula_rescisoria: "Cláusula rescisória",
+  multa_rescisoria_meses: "Multa rescisória (nº de aluguéis)",
 };
 
 const PARTY_LIST_RE = /^(locadores|locatarios)\.(\d+)\.(.+)$/;
@@ -462,7 +470,8 @@ export function LocacaoFormWizard({
         <LocacaoParteStep key="s2" form={form} listKey="locatarios" singular="Locatário" />,
         <ImovelLocacaoStep key="s3" form={form} comercial />,
         <AluguelStep key="s4" form={form} />,
-        <GarantiaStep key="s5" form={form} garantiaOptions={garantiaOptions} />,
+        <GarantiaStep key="s5" form={form} garantiaOptions={garantiaOptions} pathScope={pathScope} />,
+        <ComissaoLocacaoStep key="s6" form={form} token={token} viewerIsMember={viewerIsMember} />,
       ]
     : [
         <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} allowedTopKeys={pathScope} selfAssignment={selfAssignment} viewerIsMember={viewerIsMember} />,
@@ -470,7 +479,8 @@ export function LocacaoFormWizard({
         <LocacaoParteStep key="s2" form={form} listKey="locatarios" singular="Locatário" />,
         <ImovelLocacaoStep key="s3" form={form} />,
         <AluguelStep key="s4" form={form} />,
-        <GarantiaStep key="s5" form={form} garantiaOptions={garantiaOptions} />,
+        <GarantiaStep key="s5" form={form} garantiaOptions={garantiaOptions} pathScope={pathScope} />,
+        <ComissaoLocacaoStep key="s6" form={form} token={token} viewerIsMember={viewerIsMember} />,
       ];
 
   return (

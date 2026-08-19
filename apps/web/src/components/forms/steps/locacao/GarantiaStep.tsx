@@ -51,11 +51,20 @@ const VIGENCIA_OPTIONS = [
 export function GarantiaStep({
   form,
   garantiaOptions,
+  pathScope,
 }: {
   form: UseFormReturn<any>;
   /** Catálogo da org; ausente = defaults + modalidades sem garantidor. */
   garantiaOptions?: readonly GarantiaOptionLike[];
+  /**
+   * Escopo do subtoken (ROLE paths). Ausente = token principal (tudo).
+   * Cards cujo path está fora do escopo NÃO renderizam — sem isso o
+   * locatário/fiador veria campos que o auto-save descarta em silêncio.
+   */
+  pathScope?: readonly string[];
 }) {
+  const canConfig = !pathScope || pathScope.includes("config");
+  const canObservacoes = !pathScope || pathScope.includes("observacoes");
   const tipo = form.watch("garantia.tipo") || "caucao";
   const provider = form.watch("garantia.provider") || "";
   const fiadorTipoPessoa = form.watch("garantia.fiador.tipo_pessoa");
@@ -208,9 +217,57 @@ export function GarantiaStep({
       </CardContent>
     </Card>
 
+      {/* Cláusula rescisória — "Não" tira do contrato a cláusula de multa por
+          rescisão antecipada (condicional no template v3 via
+          config.clausula_rescisoria). Default true = comportamento histórico.
+          Só no token principal: `config` nunca entra no escopo de subtoken. */}
+      {canConfig && (
+      <Card className="border border-border">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base font-semibold">Cláusula rescisória</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FormField label="O contrato terá cláusula rescisória (multa por rescisão antecipada)?">
+              <NativeSelect
+                value={form.watch("config.clausula_rescisoria") === false ? "nao" : "sim"}
+                onChange={(v) =>
+                  form.setValue("config.clausula_rescisoria", v !== "nao", {
+                    shouldDirty: true,
+                  })
+                }
+                options={[
+                  { value: "sim", label: "Sim" },
+                  { value: "nao", label: "Não" },
+                ]}
+              />
+            </FormField>
+            {form.watch("config.clausula_rescisoria") !== false && (
+              <FormField label="Multa rescisória (nº de aluguéis)">
+                <Input
+                  {...form.register("config.multa_rescisoria_meses", { valueAsNumber: true })}
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={12}
+                  placeholder="3"
+                />
+              </FormField>
+            )}
+          </div>
+          {form.watch("config.clausula_rescisoria") === false && (
+            <p className="text-xs text-muted-foreground">
+              O contrato sairá sem a cláusula de multa por rescisão antecipada.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+      )}
+
       {/* Observações gerais — paridade com venda (ComissaoConfigStep). Vai pro
           resumo da imobiliária e é lido pela IA como DADO cercado em
           <observacoes_form>, nunca instrução. Não vira texto do contrato. */}
+      {canObservacoes && (
       <Card className="border border-border">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-semibold">
@@ -232,6 +289,7 @@ export function GarantiaStep({
           </p>
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }

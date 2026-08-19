@@ -26,6 +26,33 @@ const DIA_OPTIONS = Array.from({ length: 28 }, (_, i) => ({
   label: `Dia ${i + 1}`,
 }));
 
+const SIM_NAO_OPTIONS = [
+  { value: "", label: "Selecione…" },
+  { value: "sim", label: "Sim" },
+  { value: "nao", label: "Não" },
+];
+
+const ENCARGOS_REPASSE_OPTIONS = [
+  { value: "", label: "Selecione…" },
+  {
+    value: "paga_e_retem",
+    label: "A imobiliária paga os encargos e retém no valor do aluguel",
+  },
+  {
+    value: "repasse_integral",
+    label: "Repassa integral para pagamento junto do aluguel",
+  },
+];
+
+const CONTAS_CONSUMO = [
+  { value: "agua", label: "Água" },
+  { value: "luz", label: "Luz" },
+  { value: "gas", label: "Gás" },
+] as const;
+
+/** boolean|undefined ↔ select "sim"/"nao"/"" (ausente = form antigo). */
+const boolToSelect = (v: unknown) => (v === true ? "sim" : v === false ? "nao" : "");
+
 /**
  * Aluguel & reajuste (aluguelSchema). A taxa de administração e os campos
  * fiscais (regime IR, repasse, NFS-e) NÃO aparecem aqui — são definidos pelo
@@ -39,6 +66,11 @@ export function AluguelStep({ form }: { form: UseFormReturn<any> }) {
   const condominio = form.watch("aluguel.condominio_mensal");
   const iptu = form.watch("aluguel.iptu_mensal");
   const outros = form.watch("aluguel.outros_encargos");
+  const admImobiliaria = form.watch("aluguel.adm_imobiliaria");
+  const individualizadas = form.watch("aluguel.contas_consumo_individualizadas");
+  const contasNoCondominio: string[] = form.watch("aluguel.contas_no_condominio") ?? [];
+  const condominioNome = form.watch("imovel.condominio_nome");
+  const temCondominio = Boolean(condominioNome) || (Number(condominio) || 0) > 0;
   const encargosTotal = sumEncargosMensais({
     condominio_mensal: Number(condominio) || 0,
     iptu_mensal: Number(iptu) || 0,
@@ -143,6 +175,98 @@ export function AluguelStep({ form }: { form: UseFormReturn<any> }) {
               {formatMoneyBR(encargosTotal)}
             </span>
           </div>
+        </div>
+
+        <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-4">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Despesas e administração</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Define como as despesas transitam e quais cláusulas entram no contrato.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FormField label="A locação terá administração pela imobiliária?">
+              <NativeSelect
+                value={boolToSelect(admImobiliaria)}
+                onChange={(v) =>
+                  form.setValue(
+                    "aluguel.adm_imobiliaria",
+                    v === "" ? undefined : v === "sim",
+                    { shouldDirty: true }
+                  )
+                }
+                options={SIM_NAO_OPTIONS}
+              />
+            </FormField>
+            {admImobiliaria === true && (
+              <>
+                <FormField label="Como a imobiliária trata os encargos? *">
+                  <NativeSelect
+                    value={form.watch("aluguel.encargos_repasse") || ""}
+                    onChange={(v) =>
+                      form.setValue("aluguel.encargos_repasse", v === "" ? undefined : v, {
+                        shouldDirty: true,
+                      })
+                    }
+                    options={ENCARGOS_REPASSE_OPTIONS}
+                  />
+                </FormField>
+                <FormField label="Taxa de administração (%)">
+                  <Input
+                    {...form.register("aluguel.taxa_admin_percent", { valueAsNumber: true })}
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    max={100}
+                    step="0.5"
+                    placeholder="10"
+                  />
+                </FormField>
+              </>
+            )}
+          </div>
+
+          {temCondominio && (
+            <div className="space-y-3 border-t border-dashed border-border pt-3">
+              <FormField label="As contas de consumo (água, luz, gás) são individualizadas?">
+                <NativeSelect
+                  value={boolToSelect(individualizadas)}
+                  onChange={(v) =>
+                    form.setValue(
+                      "aluguel.contas_consumo_individualizadas",
+                      v === "" ? undefined : v === "sim",
+                      { shouldDirty: true }
+                    )
+                  }
+                  options={SIM_NAO_OPTIONS}
+                />
+              </FormField>
+              {individualizadas === false && (
+                <FormField label="Quais somam no boleto do condomínio? *">
+                  <div className="flex flex-wrap gap-4 pt-1">
+                    {CONTAS_CONSUMO.map((c) => (
+                      <label key={c.value} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-primary"
+                          checked={contasNoCondominio.includes(c.value)}
+                          onChange={(e) => {
+                            const next = e.target.checked
+                              ? [...contasNoCondominio, c.value]
+                              : contasNoCondominio.filter((x) => x !== c.value);
+                            form.setValue("aluguel.contas_no_condominio", next, {
+                              shouldDirty: true,
+                            });
+                          }}
+                        />
+                        {c.label}
+                      </label>
+                    ))}
+                  </div>
+                </FormField>
+              )}
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>

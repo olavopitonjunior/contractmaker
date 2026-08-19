@@ -106,9 +106,9 @@ export function SubtokenFormClient({
           </div>
         ) : (
           <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
-            Este link mostra apenas os campos que pertencem a você como{" "}
-            <strong>{roleLabel.toLowerCase()}</strong>. A outra parte recebeu um
-            link separado e não vê seus dados.
+            Este link mostra apenas as seções que a imobiliária liberou para
+            você como <strong>{roleLabel.toLowerCase()}</strong>. As demais
+            partes recebem links separados, cada um com o próprio escopo.
           </div>
         )}
         {isLocacao ? (

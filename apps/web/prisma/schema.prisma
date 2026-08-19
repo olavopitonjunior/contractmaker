@@ -2780,6 +2780,11 @@ model OrgFormSettings {
   // (arbitragem|justica-publica) e em locação é a comarca em texto livre. Ver
   // lib/contracts/default-config.ts. `{}` = usa o padrão de fábrica.
   contractDefaultsJson      Json    @default("{}")
+  // Visibilidade de seções (etapas do wizard) por link de parte, namespaced
+  // `{ venda: { comprador: [0,2,5] }, locacao: {...} }`. Null = defaults em
+  // código. Sanitização e allowlists (etapa 6/Comissão nunca entra) em
+  // lib/forms/participant-visibility.ts. Merge por branch no PATCH.
+  participantVisibilityJson Json?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
