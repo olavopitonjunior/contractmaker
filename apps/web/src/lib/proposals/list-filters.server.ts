@@ -3,6 +3,7 @@
 // quebraria o build de qualquer jeito.
 import type { Prisma } from "@prisma/client";
 import { statusesForFilter, STATUS_FILTERS } from "./list-filters";
+import { noLiveVendedorViaWhere } from "./live-vendedor-via";
 
 /**
  * Resolve o `where` COMPLETO de um filtro da lista — inclusive os que precisam
@@ -10,10 +11,11 @@ import { statusesForFilter, STATUS_FILTERS } from "./list-filters";
  * aquele é importado por client component ("use client") e um where do Prisma
  * não pode vazar pro bundle do browser.
  *
- * "2ª via falhou" = `aguardando_vendedor` SEM envelope reduzida vivo
- * (running/closed): o envio ao proprietário não materializou envelope (crash,
- * preflight tardio, cancelamento) — são as propostas que o corretor precisa
- * reenviar.
+ * "2ª via falhou" = `aguardando_vendedor` SEM 2ª via viva em NENHUM
+ * instrumento (envelope reduzida OU termo de Aceite do vendedor — o predicado
+ * único vive em live-vendedor-via.ts): o envio ao proprietário não vingou
+ * (crash, preflight tardio, cancelamento, termo expirado) — são as propostas
+ * que o corretor precisa reenviar.
  */
 export function proposalListWhereForFilter(
   id: string | undefined | null
@@ -21,7 +23,7 @@ export function proposalListWhereForFilter(
   if (id === "segunda_via_falhou") {
     return {
       status: "aguardando_vendedor",
-      envelopes: { none: { via: "reduzida", status: { in: ["running", "closed"] } } },
+      ...noLiveVendedorViaWhere(),
     };
   }
   const statuses = statusesForFilter(id);

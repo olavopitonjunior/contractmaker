@@ -20,6 +20,7 @@ import {
 } from "@/lib/proposals/status-sets";
 import { responsibleDisplay } from "@/lib/proposals/status-view";
 import { proposalRoundView } from "@/lib/proposals/round-view";
+import { resolveLiveVendedorVia } from "@/lib/proposals/live-vendedor-via";
 import { proposalDeadline } from "@/lib/proposals/deadline";
 import { summarizeProposalData } from "@/lib/proposals/summarize";
 import { formatDayMonthBR } from "@/lib/format/datetime";
@@ -156,12 +157,13 @@ export default async function PropostasPage({
   const expiringCutoff = new Date(Date.now() + 2 * 86_400_000);
   const openList = [...OPEN_STATUSES];
   const decisionList = [...AWAITING_DECISION_STATUSES];
-  // Round-view da lista SEM N+1: 1 query batch resolve quais das propostas em
-  // aguardando_vendedor têm a 2ª via viva (running/closed).
+  // Round-view da lista SEM N+1: batch resolve quais das propostas em
+  // aguardando_vendedor têm a 2ª via viva — envelope reduzida OU termo de
+  // Aceite do vendedor (o predicado único vive em live-vendedor-via.ts).
   const aguardandoIds = proposals
     .filter((p) => p.status === "aguardando_vendedor")
     .map((p) => p.id);
-  const [openCount, convertedCount, expiringCount, decisionCount, liveReduzidas] =
+  const [openCount, convertedCount, expiringCount, decisionCount, withLiveReduzida] =
     await Promise.all([
       prisma.proposal.count({ where: { ...kpiWhere, status: { in: openList } } }),
       prisma.proposal.count({
@@ -175,20 +177,8 @@ export default async function PropostasPage({
         },
       }),
       prisma.proposal.count({ where: { ...kpiWhere, status: { in: decisionList } } }),
-      aguardandoIds.length > 0
-        ? prisma.envelope.findMany({
-            where: {
-              proposalId: { in: aguardandoIds },
-              via: "reduzida",
-              status: { in: ["running", "closed"] },
-            },
-            select: { proposalId: true },
-          })
-        : Promise.resolve([] as { proposalId: string | null }[]),
+      resolveLiveVendedorVia(aguardandoIds),
     ]);
-  const withLiveReduzida = new Set(
-    liveReduzidas.map((e) => e.proposalId).filter(Boolean) as string[]
-  );
 
   const members = memberRows
     .map((m) => ({ id: m.user.id, name: m.user.name ?? "Sem nome" }))

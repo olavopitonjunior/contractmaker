@@ -7,6 +7,7 @@ import {
 } from "@/lib/api/require-auth";
 import { getEffectivePermissions, canAccessProposal, can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { TERMINAL_STATUSES } from "./status-sets";
 import type { Prisma } from "@prisma/client";
 
 type ScopedSigner = Prisma.EnvelopeSignerGetPayload<{ include: { envelope: true } }>;
@@ -79,14 +80,15 @@ export type ScopedPlanSignerResult =
 export async function loadScopedPlanSigner(
   req: NextRequest,
   proposalId: string,
-  signerId: string
+  signerId: string,
+  action: "edit" | "remove"
 ): Promise<ScopedPlanSignerResult> {
   const auth = await requireApiAuth(req, { scope: "proposals:rw" });
   if (isAuthFailure(auth)) return { fail: authFailureResponse(auth) };
 
   const proposal = await prisma.proposal.findUnique({
     where: { id: proposalId },
-    select: { orgId: true, userId: true, responsibleUserId: true },
+    select: { orgId: true, userId: true, responsibleUserId: true, status: true },
   });
   if (!proposal || proposal.orgId !== auth.org.id) {
     return { fail: NextResponse.json({ error: "Não encontrado" }, { status: 404 }) };
@@ -108,18 +110,58 @@ export async function loadScopedPlanSigner(
     where: { id: signerId },
     include: { envelope: true },
   });
-  if (
-    envelopeSigner &&
-    envelopeSigner.envelope.proposalId === proposalId &&
-    envelopeSigner.envelope.orgId === auth.org.id &&
-    envelopeSigner.envelope.source === "proposal"
-  ) {
-    return { auth: auth as ApiAuthOk, kind: "envelope", signer: envelopeSigner };
+  if (envelopeSigner) {
+    if (
+      envelopeSigner.envelope.proposalId === proposalId &&
+      envelopeSigner.envelope.orgId === auth.org.id &&
+      envelopeSigner.envelope.source === "proposal"
+    ) {
+      return { auth: auth as ApiAuthOk, kind: "envelope", signer: envelopeSigner };
+    }
+    // EnvelopeSigner existe mas está fora do escopo → 404 explícito (paridade
+    // com loadScopedProposalSigner). Cair no lookup de plano mascararia a
+    // tentativa cross-escopo sem deixar rastro do porquê.
+    return { fail: NextResponse.json({ error: "Não encontrado" }, { status: 404 }) };
   }
 
   const planSigner = await prisma.proposalSigner.findUnique({ where: { id: signerId } });
   if (!planSigner || planSigner.proposalId !== proposalId) {
     return { fail: NextResponse.json({ error: "Não encontrado" }, { status: 404 }) };
+  }
+  // Terminal: nada muda mais (paridade com o guard do POST /signers).
+  if (TERMINAL_STATUSES.has(proposal.status)) {
+    return {
+      fail: NextResponse.json(
+        { error: `Signatários não podem ser alterados com a proposta em "${proposal.status}".` },
+        { status: 409 }
+      ),
+    };
+  }
+  // Linha com termo de Aceite emitido é a ÂNCORA do webhook (identidade por
+  // acceptanceClicksignId) e a prova por-signatário (acceptedAt/refusedAt):
+  //  - termo VIVO (sent/completed): nunca editar/apagar — mudar contato não
+  //    reemite nada (falso conserto) e apagar faz o próximo webhook cair no
+  //    fallback isProponente=true (recusa do proprietário viraria
+  //    recusada_proponente; expiração dele expiraria a proposta inteira).
+  //  - termo MORTO (expired/canceled): EDITAR é permitido — é o único jeito de
+  //    corrigir o contato errado antes da reemissão (sendVendedorAceiteLocked
+  //    reemite termo morto com os dados atuais da linha). REMOVER continua
+  //    bloqueado: um webhook tardio desse termo ainda resolve por esta linha.
+  if (planSigner.acceptanceClicksignId) {
+    const dead =
+      planSigner.acceptanceStatus === "expired" || planSigner.acceptanceStatus === "canceled";
+    if (!dead || action === "remove") {
+      return {
+        fail: NextResponse.json(
+          {
+            error: dead
+              ? "Este signatário tem um termo expirado/cancelado — corrija os dados e reenvie a via (o termo é reemitido); a linha não pode ser removida."
+              : "Este signatário já tem termo de aceite em andamento — a linha não pode ser editada nem removida enquanto o termo estiver ativo.",
+          },
+          { status: 409 }
+        ),
+      };
+    }
   }
   return { auth: auth as ApiAuthOk, kind: "plan", signer: planSigner };
 }

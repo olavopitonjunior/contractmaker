@@ -4,6 +4,22 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-19 - Propostas: 2ª via do Aceite sai dos becos sem saída
+
+Seis correções do QA do bloco F2 (issue #314), todas no modo Aceite/2ª via.
+
+### Corrigido
+
+- **Termo do proprietário expirado/cancelado devolve a proposta à decisão** (`acceptance-webhook.ts`): antes era no-op — a proposta ficava presa em `aguardando_vendedor` pra sempre, sem sino e sem reenvio (o caminho de envelope tinha `onProposalEnvelopeCanceled`; o Aceite não tinha equivalente). Agora: CAS de volta a `assinada_proponente` + evento `vendedor_via_canceled` + sino "reenvie ou conclua sem enviar". Aceite de terceiro chegando em proposta MORTA (expirada/cancelada/recusada) deixou de ser engolido em silêncio: evento `acceptance_orphan_after_terminal` + sino — o aceite é juridicamente relevante e o operador precisa vê-lo.
+- **Aceite legado destravado** (`sendVendedorAceiteLocked`): "tem `acceptanceClicksignId` ⇒ enviado" tratava termo morto (expired/canceled) e proposta pré-F2 (vendedor com termo da 1ª rodada) como sucesso — 200 "já enviado" sem nada acontecer, escotilha "concluir sem enviar" fechada, cron redisparando pra sempre. Agora: termo morto é reemitido (com trilha `aceite2_term_reissued` do id antigo) e proposta com TODOS os vendedores `completed` é reconciliada direto em `completa` (+ dossiê + sino), destravando o backlog legado sem custo ClickSign.
+- **"2ª via falhou" ficou instrument-aware** (`live-vendedor-via.ts`, predicado único para lista, filtro e cron): o cálculo olhava só `Envelope via="reduzida"`, então TODA proposta de Aceite em `aguardando_vendedor` aparecia como falha — e o cron `reconcile` re-selecionava todas, todo dia (churn infinito). O termo de Aceite vivo (`sent`/`completed`) do vendedor agora conta como via enviada; o cron ganhou `orderBy` (fairness no take 50) e a métrica separa `chainedRetried` de `chainedNoop` (contava no-op como reconciliação).
+- **Guards no `loadScopedPlanSigner`** (`scoped-signer.ts`): PATCH/DELETE de linha de plano passam a exigir proposta em edição ou na parada de decisão (409 fora disso) e recusam linha com termo de Aceite emitido — apagá-la destruía a prova por-signatário e fazia o webhook cair no fallback `isProponente=true` (recusa do proprietário virava `recusada_proponente`; expiração dele expirava a proposta inteira). EnvelopeSigner fora do escopo agora 404 explícito (sem fallthrough).
+- **Fallback de link vinculante apontava pra staging** (`send-execute.ts` ×2, `acceptance-webhook.ts`): `NEXTAUTH_URL ?? "https://staging.imobpro.ia.br"` no termo de Aceite (WhatsApp) e no comprovante durável — os 3 únicos pontos do codebase com fallback de staging. Novo helper `proposalPublicLink` com fallback de PRODUÇÃO e `||` (cobre env var vazia).
+
+### Adicionado
+
+- **Seletor de canal no diálogo "Enviar ao proprietário"** (`EnviarProprietarioDialog`): o cadastro inline do vendedor não expunha `notifyChannel` — contato só-WhatsApp caía em 422 de preflight sem saída pela UI (default do backend = e-mail). Select E-mail/WhatsApp com default derivado do preenchimento; o envio também passa a mostrar `warnings` de rebaixamento (antes descartados) e o desfecho "reconciliada como completa".
+
 ## [Unreleased] - 2026-08-18 - Ressalvas de QA pós-promo2 (resumo, FAB, /propostas)
 
 ### Corrigido
@@ -12,6 +28,7 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 - **Diálogo do resumo**: "Baixar PDF" mostra "Gerando…" durante a geração (evita clique repetido no ~5-8s de Puppeteer) e "Enviar" fica desabilitado até selecionar destinatário.
 - **FAB do assistente IA** não cobre mais o "Salvar identidade" em `/settings/perfil` em viewport estreita (respiro no fim do container).
 - **`/propostas` redireciona** para `/pipeline/propostas` (antes 404).
+
 
 ## [Unreleased] - 2026-08-18 - Visibilidade de seções por link de parte, configurável
 

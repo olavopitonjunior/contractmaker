@@ -166,3 +166,118 @@ describe("sendVendedorVia — dispatcher por instrumento", () => {
     );
   });
 });
+
+describe("sendVendedorAceiteLocked — termos legados e mortos (2026-08)", () => {
+  const propUpdateMany = prisma.proposal.updateMany as unknown as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (prisma.envelope.findFirst as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    (prisma.proposalEvent.create as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({});
+  });
+
+  const proposalAceite = {
+    id: "p1",
+    orgId: "org1",
+    userId: "u1",
+    status: "assinada_proponente",
+    validUntil: null,
+    title: "T",
+    token: "tok",
+  };
+
+  it("legado com TODOS os vendedores completed → reconcilia em completa (não estaciona em aguardando_vendedor)", async () => {
+    propFind
+      .mockResolvedValueOnce({ instrument: "aceite" }) // dispatcher
+      .mockResolvedValueOnce(proposalAceite) // locked
+      .mockResolvedValueOnce({ status: "assinada_proponente" }); // pre-read do advance
+    propUpdateMany.mockResolvedValue({ count: 1 }); // CAS → completa move
+    signerFindMany.mockResolvedValue([
+      { id: "s1", acceptanceClicksignId: "acc1", acceptanceStatus: "completed" },
+      { id: "s2", acceptanceClicksignId: "acc2", acceptanceStatus: "completed" },
+    ]);
+
+    const r = await sendVendedorVia("p1", "manual");
+    expect(r).toEqual({ ok: true, reconciled: "completa" });
+    // Fechou em completa (CAS), não em aguardando_vendedor.
+    expect(propUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "completa" }),
+      })
+    );
+    expect(eventCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ eventName: "chained_aceite2_reconciled_completa" }),
+      })
+    );
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ kind: "completed" }));
+  });
+
+  it("termos vivos (sent) em todos → already idempotente, status garantido", async () => {
+    propFind
+      .mockResolvedValueOnce({ instrument: "aceite" })
+      .mockResolvedValueOnce({ ...proposalAceite, status: "aguardando_vendedor" })
+      .mockResolvedValueOnce({ status: "aguardando_vendedor" });
+    signerFindMany.mockResolvedValue([
+      { id: "s1", acceptanceClicksignId: "acc1", acceptanceStatus: "sent" },
+    ]);
+
+    const r = await sendVendedorVia("p1", "cron");
+    expect(r).toEqual({ ok: false, reason: "already" });
+  });
+
+  it("termo MORTO (expired) conta como pendente → segue pro fluxo de reemissão (para em no_creds aqui)", async () => {
+    propFind
+      .mockResolvedValueOnce({ instrument: "aceite" })
+      .mockResolvedValueOnce(proposalAceite);
+    signerFindMany.mockResolvedValue([
+      {
+        id: "s1",
+        name: "Dono",
+        email: null,
+        cpf: null,
+        phone: "11999998888",
+        acceptanceClicksignId: "acc-dead",
+        acceptanceStatus: "expired",
+      },
+    ]);
+
+    const r = await sendVendedorVia("p1", "manual");
+    // Não é "already": o termo morto entra em pending e o fluxo avança até
+    // esbarrar nas creds ClickSign (não mockadas) — prova que a reemissão roda.
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("no_creds");
+  });
+
+  it("CAS da reconciliação NÃO move (writer concorrente) → não diz 'reconciliada'", async () => {
+    propFind
+      .mockResolvedValueOnce({ instrument: "aceite" })
+      .mockResolvedValueOnce(proposalAceite)
+      .mockResolvedValueOnce({ status: "cancelada" }) // pre-read do advance
+      .mockResolvedValueOnce({ status: "cancelada" }); // post-read (CAS falhou → por quê)
+    propUpdateMany.mockResolvedValue({ count: 0 }); // CAS falha
+    signerFindMany.mockResolvedValue([
+      { id: "s1", acceptanceClicksignId: "acc1", acceptanceStatus: "completed" },
+    ]);
+
+    const r = await sendVendedorVia("p1", "manual");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("wrong_status");
+    expect(notify).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "completed" }));
+  });
+
+  it("CAS replay (já está completa) → already idempotente", async () => {
+    propFind
+      .mockResolvedValueOnce({ instrument: "aceite" })
+      .mockResolvedValueOnce(proposalAceite)
+      .mockResolvedValueOnce({ status: "completa" }) // pre-read: já no destino
+      .mockResolvedValueOnce({ status: "completa" }); // post-read → replay
+    propUpdateMany.mockResolvedValue({ count: 0 });
+    signerFindMany.mockResolvedValue([
+      { id: "s1", acceptanceClicksignId: "acc1", acceptanceStatus: "completed" },
+    ]);
+
+    const r = await sendVendedorVia("p1", "cron");
+    expect(r).toEqual({ ok: false, reason: "already" });
+  });
+});

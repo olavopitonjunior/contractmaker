@@ -19,10 +19,20 @@ describe("list-filters — split da parada de decisão (2026-08)", () => {
     expect(filterRequiresServer("decisao")).toBe(false);
   });
 
-  it("where do servidor: 2ª via falhou = aguardando_vendedor SEM reduzida viva", () => {
+  it("where do servidor: 2ª via falhou = aguardando_vendedor sem via viva em NENHUM instrumento", () => {
+    // Envelope reduzida vivo OU termo de Aceite vivo do vendedor contam como
+    // "2ª via enviada" — proposta de Aceite com termo sent não pode cair aqui.
     expect(proposalListWhereForFilter("segunda_via_falhou")).toEqual({
       status: "aguardando_vendedor",
       envelopes: { none: { via: "reduzida", status: { in: ["running", "closed"] } } },
+      signers: {
+        none: {
+          role: "vendedor",
+          included: true,
+          acceptanceClicksignId: { not: null },
+          acceptanceStatus: { in: ["sent", "completed"] },
+        },
+      },
     });
   });
 

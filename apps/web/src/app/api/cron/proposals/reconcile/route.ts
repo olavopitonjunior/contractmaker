@@ -4,6 +4,7 @@ import { requireCronAuth } from "@/lib/security/cron-auth";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
 import { syncEnvelopeState } from "@/lib/clicksign/sync";
 import { sendVendedorVia, recoverOrphanClaim } from "@/lib/proposals/send-execute";
+import { noLiveVendedorViaWhere } from "@/lib/proposals/live-vendedor-via";
 import { buildDossier } from "@/lib/proposals/dossier";
 
 export const runtime = "nodejs";
@@ -36,6 +37,8 @@ export async function GET(req: NextRequest) {
     synced: 0,
     closedPropagated: 0,
     chainedRetried: 0,
+    chainedNoop: 0,
+    legacyReconciled: 0,
     dossiersBuilt: 0,
     orphanClaimsReleased: 0,
     errors: 0,
@@ -71,25 +74,63 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // 2. aguardando_vendedor sem reduzida viva → redispara. `none` cobre só
+  // 2. aguardando_vendedor sem 2ª via viva → redispara. O predicado é
+  // instrument-aware (live-vendedor-via.ts): no Aceite a via viva é o termo do
+  // vendedor, não envelope — sem isso o cron re-selecionava TODA proposta de
+  // Aceite todo dia, pra sempre (churn). Pro envelope, `none` cobre só
   // running/closed (NÃO draft): um draft VELHO significa que o envio crashou no
   // meio e PRECISA ser retentado — excluí-lo abandonava a proposta pra sempre.
   // Redisparar é seguro: sendVendedorEnvelope é serializado pelo lock e a guarda
   // interna trata draft recente (em voo) como no-op. Só excluímos as propostas que
   // o step 1 acabou de encadear NESTE run (o waitUntil delas já está a caminho).
+  // orderBy asc: fairness no take 50 — sem ele, um resíduo permanente na frente
+  // pode starvar propostas genuinamente quebradas mais novas.
   const stuck = await prisma.proposal.findMany({
     where: {
       status: "aguardando_vendedor",
-      envelopes: { none: { via: "reduzida", status: { in: ["running", "closed"] } } },
+      ...noLiveVendedorViaWhere(),
       ...(chainedInStep1.size > 0 ? { id: { notIn: [...chainedInStep1] } } : {}),
     },
     select: { id: true },
+    orderBy: { updatedAt: "asc" },
     take: 50,
   });
   for (const p of stuck) {
     try {
-      await sendVendedorVia(p.id, "cron");
-      result.chainedRetried++;
+      const r = await sendVendedorVia(p.id, "cron");
+      // "already"/guards são no-op — contá-los como retried mascarava o churn
+      // (a métrica dizia "reconciliei 50" com zero efeito).
+      if (r.ok) result.chainedRetried++;
+      else result.chainedNoop++;
+    } catch {
+      result.errors++;
+    }
+  }
+
+  // 2b. Reconciliação do legado de Aceite: aguardando_vendedor com TODOS os
+  // vendedores completed. O predicado do step 2 considera essa via VIVA (e
+  // está certo — não é falha de envio), então essas propostas nunca entram no
+  // `stuck`; mas o webhook delas já passou e não volta — sem este passo, só um
+  // clique manual em cada uma fecharia o backlog. sendVendedorVia cai na
+  // reconciliação (pending vazio + all-completed → completa).
+  const legacy = await prisma.proposal.findMany({
+    where: {
+      status: "aguardando_vendedor",
+      instrument: "aceite",
+      signers: {
+        some: { role: "vendedor", included: true, acceptanceStatus: "completed" },
+        none: { role: "vendedor", included: true, NOT: { acceptanceStatus: "completed" } },
+      },
+    },
+    select: { id: true },
+    orderBy: { updatedAt: "asc" },
+    take: 50,
+  });
+  for (const p of legacy) {
+    try {
+      const r = await sendVendedorVia(p.id, "cron");
+      if (r.ok && r.reconciled) result.legacyReconciled++;
+      else result.chainedNoop++;
     } catch {
       result.errors++;
     }
