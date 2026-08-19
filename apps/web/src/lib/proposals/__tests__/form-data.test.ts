@@ -244,6 +244,9 @@ describe("GAP da Fase 1.2 — os fatos de seleção de variante saem do form", (
       garantia: "fiador",
       fiadorPessoa: "pj",
       pessoa: "pf",
+      // Proposta não coleta administração — o fato fica desconhecido, e é isso
+      // que impede o eixo de desclassificar template nesse fluxo.
+      admImobiliaria: null,
     });
   });
 
@@ -255,6 +258,7 @@ describe("GAP da Fase 1.2 — os fatos de seleção de variante saem do form", (
       garantia: "sem_garantia",
       fiadorPessoa: null,
       pessoa: "pj",
+      admImobiliaria: null,
     });
   });
 });

@@ -234,6 +234,14 @@ export interface TemplateMatchCriteria {
   garantia?: GarantiaTipo;
   fiadorPessoa?: PessoaTipo;
   pessoa?: PessoaTipo;
+  /**
+   * O imóvel é administrado pela imobiliária? Espelha `aluguel.adm_imobiliaria`
+   * do formulário. Nome com `adm` (e não `administracao`) de propósito: neste
+   * mesmo módulo `administracao_locacao` é uma MODALIDADE — outro tipo de
+   * contrato, entre imobiliária e proprietário — e confundir os dois num
+   * arquivo que decide qual contrato o cliente assina sairia caro.
+   */
+  admImobiliaria?: boolean;
 }
 
 /** Fatos lidos do form/proposta. `null` = não dá pra saber. */
@@ -241,16 +249,36 @@ export interface TemplateFacts {
   garantia: GarantiaTipo | null;
   fiadorPessoa: PessoaTipo | null;
   pessoa: PessoaTipo | null;
+  admImobiliaria: boolean | null;
 }
 
 /** Campos comparáveis critério × fato. Adicionar campo novo passa por aqui. */
-const MATCH_FIELDS = ["garantia", "fiadorPessoa", "pessoa"] as const;
+const MATCH_FIELDS = [
+  "garantia",
+  "fiadorPessoa",
+  "pessoa",
+  "admImobiliaria",
+] as const;
+
+/**
+ * `<select>` de HTML só produz string, e este schema é a fronteira de TRÊS
+ * rotas (`/templates`, `/templates/[id]`, `/templates/from-docx`). Coagir aqui
+ * — em vez de em cada call-site — mantém `.strict()` e `z.boolean()` intactos
+ * e impede que um `"false"` (string, truthy!) vire `true` em algum caminho
+ * esquecido. Só as duas strings canônicas passam; qualquer outra coisa segue
+ * pro `z.boolean()` e é rejeitada.
+ */
+const booleanFromForm = z.preprocess(
+  (v) => (v === "true" ? true : v === "false" ? false : v),
+  z.boolean().nullish()
+);
 
 export const matchCriteriaSchema = z
   .object({
     garantia: z.enum(GARANTIA_TIPOS).nullish(),
     fiadorPessoa: z.enum(["pf", "pj"]).nullish(),
     pessoa: z.enum(["pf", "pj"]).nullish(),
+    admImobiliaria: booleanFromForm,
   })
   .strict()
   .nullish();
@@ -271,6 +299,11 @@ export function parseMatchCriteria(raw: unknown): TemplateMatchCriteria | null {
     out.fiadorPessoa = obj.fiadorPessoa;
   }
   if (obj.pessoa === "pf" || obj.pessoa === "pj") out.pessoa = obj.pessoa;
+  // `typeof === "boolean"` e não truthiness: `false` é um critério LEGÍTIMO
+  // ("este modelo é pra imóvel SEM administração"), não ausência de critério.
+  if (typeof obj.admImobiliaria === "boolean") {
+    out.admImobiliaria = obj.admImobiliaria;
+  }
   return Object.keys(out).length ? out : null;
 }
 
@@ -282,6 +315,10 @@ export function matchCriteriaSummary(raw: unknown): string[] {
   if (c.garantia) out.push(GARANTIA_LABELS[c.garantia]);
   if (c.fiadorPessoa) out.push(`Fiador ${c.fiadorPessoa.toUpperCase()}`);
   if (c.pessoa) out.push(PESSOA_LABELS[c.pessoa]);
+  // Os DOIS valores viram badge: omitir o `false` faria a etiqueta declarar
+  // menos do que o template de fato exige.
+  if (c.admImobiliaria === true) out.push("Com administração");
+  if (c.admImobiliaria === false) out.push("Sem administração");
   return out;
 }
 
@@ -341,7 +378,15 @@ export function deriveTemplateFacts(dataJson: unknown): TemplateFacts {
     if (tipo === "pf") pessoa = "pf";
   }
 
-  return { garantia, fiadorPessoa, pessoa };
+  // Ausente ⇒ `null` (desconhecido), NUNCA `false`. Form antigo e proposta não
+  // têm `aluguel`; mapear ausência pra "não tem administração" desclassificaria
+  // (-1) todo modelo marcado como administração nesses fluxos, trocando um
+  // template certo por outro sem que ninguém pedisse.
+  const aluguel = data.aluguel as { adm_imobiliaria?: unknown } | undefined;
+  const admImobiliaria =
+    typeof aluguel?.adm_imobiliaria === "boolean" ? aluguel.adm_imobiliaria : null;
+
+  return { garantia, fiadorPessoa, pessoa, admImobiliaria };
 }
 
 /**
@@ -357,7 +402,11 @@ export function scoreTemplateAgainstFacts(criteria: unknown, facts: TemplateFact
   let score = 0;
   for (const key of MATCH_FIELDS) {
     const wanted = c[key];
-    if (!wanted) continue;
+    // `== null` e não `!wanted`: com o eixo booleano, `false` é um critério
+    // marcado ("modelo pra imóvel SEM administração"). Sob truthiness ele seria
+    // ignorado, e o modelo de administração empataria com o comum em TODA
+    // locação — o operador voltaria a escolher à mão, sem saber por quê.
+    if (wanted == null) continue;
     const fact = facts[key];
     if (fact == null) continue;
     if (fact !== wanted) return -1;

@@ -10,6 +10,7 @@ import {
   deriveCategory,
   deriveCategoryFromPayment,
   deriveTemplateFacts,
+  matchCriteriaSchema,
   matchCriteriaSummary,
   parseMatchCriteria,
   resolveTemplateId,
@@ -316,7 +317,12 @@ describe("deriveTemplateFacts", () => {
         garantia: { tipo: "fiador", fiador: { tipo_pessoa: "juridica", cnpj: "1" } },
         locatarios: [{ tipo_pessoa: "fisica", cpf: "1" }],
       })
-    ).toEqual({ garantia: "fiador", fiadorPessoa: "pj", pessoa: "pf" });
+    ).toEqual({
+      garantia: "fiador",
+      fiadorPessoa: "pj",
+      pessoa: "pf",
+      admImobiliaria: null,
+    });
   });
 
   it("QUALQUER locatário jurídico torna o negócio PJ", () => {
@@ -343,7 +349,12 @@ describe("deriveTemplateFacts", () => {
   });
 
   it("dataJson pobre/ausente → tudo desconhecido (nunca desclassifica)", () => {
-    const vazio = { garantia: null, fiadorPessoa: null, pessoa: null };
+    const vazio = {
+      garantia: null,
+      fiadorPessoa: null,
+      pessoa: null,
+      admImobiliaria: null,
+    };
     // Shape das propostas ANTIGAS (pré-página): partes só com nome.
     expect(deriveTemplateFacts({ locatarios: [{ nome: "Fulano" }] })).toEqual(vazio);
     expect(deriveTemplateFacts({})).toEqual(vazio);
@@ -369,6 +380,36 @@ describe("parseMatchCriteria / matchCriteriaSummary", () => {
       matchCriteriaSummary({ garantia: "fiador", fiadorPessoa: "pj", pessoa: "pf" })
     ).toEqual(["Fiador", "Fiador PJ", "Pessoa física"]);
     expect(matchCriteriaSummary(null)).toEqual([]);
+  });
+
+  it("admImobiliaria: `false` é preservado no parse e etiquetado na badge", () => {
+    // Truthiness aqui apagaria o critério e a badge mentiria por omissão.
+    expect(parseMatchCriteria({ admImobiliaria: false })).toEqual({
+      admImobiliaria: false,
+    });
+    expect(parseMatchCriteria({ admImobiliaria: true })).toEqual({
+      admImobiliaria: true,
+    });
+    expect(matchCriteriaSummary({ admImobiliaria: true })).toEqual(["Com administração"]);
+    expect(matchCriteriaSummary({ admImobiliaria: false })).toEqual(["Sem administração"]);
+    // String não vira critério no parse (a coerção é do schema, na fronteira).
+    expect(parseMatchCriteria({ admImobiliaria: "false" })).toBeNull();
+  });
+
+  it("o schema coage o `false` que o <select> manda como string", () => {
+    // Sem isso, "false" (string truthy) viraria `true` em algum boundary.
+    expect(matchCriteriaSchema.parse({ admImobiliaria: "false" })).toEqual({
+      admImobiliaria: false,
+    });
+    expect(matchCriteriaSchema.parse({ admImobiliaria: "true" })).toEqual({
+      admImobiliaria: true,
+    });
+    expect(matchCriteriaSchema.parse({ admImobiliaria: true })).toEqual({
+      admImobiliaria: true,
+    });
+    expect(() => matchCriteriaSchema.parse({ admImobiliaria: "talvez" })).toThrow();
+    // `.strict()` segue valendo pro resto.
+    expect(() => matchCriteriaSchema.parse({ chaveInventada: 1 })).toThrow();
   });
 });
 
@@ -397,6 +438,26 @@ describe("scoreTemplateAgainstFacts", () => {
   it("fato desconhecido não pontua nem desclassifica", () => {
     const cegos = deriveTemplateFacts({});
     expect(scoreTemplateAgainstFacts({ garantia: "fiador", pessoa: "pj" }, cegos)).toBe(0);
+  });
+
+  // ——— Eixo booleano: `false` é critério, não ausência de critério ———
+
+  it("critério admImobiliaria:false PONTUA e DESCLASSIFICA como qualquer outro", () => {
+    const semAdm = deriveTemplateFacts({ aluguel: { adm_imobiliaria: false } });
+    const comAdm = deriveTemplateFacts({ aluguel: { adm_imobiliaria: true } });
+
+    // Sob truthiness (`if (!wanted) continue`) este critério era ignorado e o
+    // modelo de administração empatava com o comum em TODA locação.
+    expect(scoreTemplateAgainstFacts({ admImobiliaria: false }, semAdm)).toBe(1);
+    expect(scoreTemplateAgainstFacts({ admImobiliaria: false }, comAdm)).toBe(-1);
+    expect(scoreTemplateAgainstFacts({ admImobiliaria: true }, comAdm)).toBe(1);
+    expect(scoreTemplateAgainstFacts({ admImobiliaria: true }, semAdm)).toBe(-1);
+  });
+
+  it("form sem o campo de administração não desclassifica nenhum dos dois lados", () => {
+    const antigo = deriveTemplateFacts({ locatarios: [{ tipo_pessoa: "fisica" }] });
+    expect(scoreTemplateAgainstFacts({ admImobiliaria: true }, antigo)).toBe(0);
+    expect(scoreTemplateAgainstFacts({ admImobiliaria: false }, antigo)).toBe(0);
   });
 });
 
@@ -470,6 +531,39 @@ describe("selectLocacaoTemplate × matchCriteria (variantes do form)", () => {
       garantia: { tipo: "caucao" },
     });
     expect(result?.template.id).toBe("fiador-def");
+  });
+
+  it("caso RE/MAX Trio: o form escolhe sozinho entre o modelo comum e o de Administração", async () => {
+    // Os dois modelos são da mesma modalidade e o operador escolhia à mão.
+    const comum = tpl("trio-comum", { admImobiliaria: false }, true);
+    const administracao = tpl("trio-adm", { admImobiliaria: true });
+    const semDeal = { locatarios: [{ tipo_pessoa: "fisica" }] };
+
+    mockFindMany.mockResolvedValueOnce([comum, administracao]);
+    expect(
+      (
+        await selectLocacaoTemplate("org-1", "locacao_residencial_v1", {
+          ...semDeal,
+          aluguel: { adm_imobiliaria: true },
+        })
+      )?.template.id
+    ).toBe("trio-adm");
+
+    mockFindMany.mockResolvedValueOnce([comum, administracao]);
+    expect(
+      (
+        await selectLocacaoTemplate("org-1", "locacao_residencial_v1", {
+          ...semDeal,
+          aluguel: { adm_imobiliaria: false },
+        })
+      )?.template.id
+    ).toBe("trio-comum");
+
+    // Deal antigo, sem o campo: ninguém é desclassificado, vence o isDefault.
+    mockFindMany.mockResolvedValueOnce([comum, administracao]);
+    expect(
+      (await selectLocacaoTemplate("org-1", "locacao_residencial_v1", semDeal))?.template.id
+    ).toBe("trio-comum");
   });
 
   it("o critério também desempata no fallback startsWith('locacao')", async () => {
