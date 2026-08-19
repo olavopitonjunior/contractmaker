@@ -11,7 +11,8 @@ import { proposalStatusView, initials } from "@/lib/proposals/status-view";
 import { LIVE_POLL_STATUSES } from "@/lib/proposals/status-sets";
 import { ROUND_LABELS, type ProposalRound } from "@/lib/proposals/round-view";
 import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
+import { Plus, Mail, MessageCircle, Smartphone } from "lucide-react";
+import type { SendChannelView } from "@/lib/proposals/send-channel";
 import { ProposalFilters, type ListFilters } from "./ProposalFilters";
 import { ProposalRowActions, type ProposalPermissions } from "./ProposalRowActions";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -27,10 +28,14 @@ import { NO_PERMISSION_HINT } from "@/lib/security/rbac/ui";
  */
 export interface ProposalRow {
   id: string;
+  /** "PROP-2026-0042". Null só em proposta anterior ao backfill. */
+  code: string | null;
   title: string;
   status: string;
   kind: string;
   instrument: string;
+  /** Canal de envio já resolvido no servidor (ver lib/proposals/send-channel.ts). */
+  sendChannel: SendChannelView;
   /** "28/07". */
   createdAtLabel: string;
   /** "28/07" ou "" quando não enviada. */
@@ -150,10 +155,12 @@ export function ProposalsListClient({
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>Proposta</TableHead>
                   <TableHead>Proponente</TableHead>
                   <TableHead>Responsável</TableHead>
                   <TableHead>{tipo === "venda" ? "Negócio" : "Condições"}</TableHead>
                   <TableHead className="text-right">{tipo === "venda" ? "Valor" : "Aluguel"}</TableHead>
+                  <TableHead>Envio</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Prazo</TableHead>
                   <TableHead className="w-10" />
@@ -168,7 +175,7 @@ export function ProposalsListClient({
                       {/* `max-w` em <td> não clampa (CSS 2.1 §10.4) e o TableCell
                           do registry tem whitespace-nowrap — sem um wrapper block
                           com truncate o título vaza por cima das colunas vizinhas. */}
-                      <TableCell className="max-w-[280px] overflow-hidden">
+                      <TableCell className="max-w-[260px] overflow-hidden">
                         <Link
                           href={`/pipeline/propostas/${p.id}`}
                           className="block max-w-full truncate font-medium hover:underline"
@@ -176,9 +183,28 @@ export function ProposalsListClient({
                         >
                           {p.title}
                         </Link>
-                        {(p.resumo.proponente || p.resumo.imovel) && (
-                          <div className="truncate text-xs text-muted-foreground">
-                            {[p.resumo.proponente, p.resumo.imovel].filter(Boolean).join(" · ")}
+                        {p.code && (
+                          <div className="truncate font-mono text-[11px] text-muted-foreground">
+                            {p.code}
+                          </div>
+                        )}
+                      </TableCell>
+                      {/* Proponente saiu de baixo do título: com título livre os
+                          dois deixaram de ser a mesma informação. */}
+                      <TableCell className="max-w-[220px] overflow-hidden">
+                        {p.resumo.proponente ? (
+                          <span
+                            className="block max-w-full truncate"
+                            title={p.resumo.proponente}
+                          >
+                            {p.resumo.proponente}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                        {p.resumo.imovel && (
+                          <div className="truncate text-xs text-muted-foreground" title={p.resumo.imovel}>
+                            {p.resumo.imovel}
                           </div>
                         )}
                       </TableCell>
@@ -212,6 +238,9 @@ export function ProposalsListClient({
                         {tipo === "locacao" && p.resumo.valorLabel != null && (
                           <span className="text-xs text-muted-foreground">/mês</span>
                         )}
+                      </TableCell>
+                      <TableCell>
+                        <SendChannelCell channel={p.sendChannel} />
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className={sv.className}>
@@ -254,6 +283,7 @@ export function ProposalsListClient({
                             kind: p.kind,
                             instrument: p.instrument,
                             convertedDealId: p.convertedDealId,
+                            title: p.title,
                           }}
                           permissions={permissions}
                           members={members}
@@ -268,6 +298,36 @@ export function ProposalsListClient({
         </Card>
       )}
     </div>
+  );
+}
+
+/**
+ * Canal de envio. `resolved: false` = ainda é só o plano (proposta não enviada)
+ * — fica esmaecido, senão a lista afirma um canal que ninguém usou ainda. O
+ * `title` explica a diferença sem gastar espaço na célula.
+ */
+function SendChannelCell({ channel }: { channel: SendChannelView }) {
+  if (channel.key === "nenhum") {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  const Icon =
+    channel.key === "whatsapp"
+      ? MessageCircle
+      : channel.key === "sms"
+        ? Smartphone
+        : channel.key === "misto"
+          ? MessageCircle
+          : Mail;
+  return (
+    <span
+      className={`flex items-center gap-1.5 text-sm ${
+        channel.resolved ? "" : "text-muted-foreground"
+      }`}
+      title={channel.resolved ? "Canal usado no envio" : "Canal previsto — ainda não enviada"}
+    >
+      <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      <span className="truncate">{channel.label}</span>
+    </span>
   );
 }
 
