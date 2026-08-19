@@ -6,6 +6,7 @@ import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { EDITABLE_STATUSES } from "@/lib/proposals/status-sets";
 import { ProposalForm } from "@/components/proposals/ProposalForm";
 import { parseProposalForm, PROPOSAL_SCHEMA_OPTIONS } from "@/lib/proposals/form-data";
+import { getIListConnection } from "@/lib/ilist/connection";
 
 export const dynamic = "force-dynamic";
 
@@ -51,10 +52,15 @@ export default async function EditarPropostaPage({
     orderBy: { signingGroup: "asc" },
   });
 
+  // Mesmo gate do dropdown do pipeline: sem conexão provisionada, o botão do
+  // catálogo iList (RE/MAX) não aparece.
+  const hasIList = (await getIListConnection(org.id)) !== null;
+
   const tipo = proposal.kind === "locacao" ? "locacao" : "venda";
   const initial = parseProposalForm({
     kind: proposal.kind,
     schemaType: proposal.schemaType,
+    title: proposal.title,
     dataJson: proposal.dataJson,
     validUntil: proposal.validUntil?.toISOString() ?? null,
     comissaoIncluida: proposal.comissaoIncluida,
@@ -75,6 +81,7 @@ export default async function EditarPropostaPage({
       proposalId={params.id}
       initial={initial}
       schemaOptions={PROPOSAL_SCHEMA_OPTIONS[tipo]}
+      hasIList={hasIList}
     />
   );
 }

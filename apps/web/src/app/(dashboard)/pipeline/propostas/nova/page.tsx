@@ -6,6 +6,7 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { ProposalForm } from "@/components/proposals/ProposalForm";
 import { ProposalsNoAccess } from "@/components/proposals/ProposalsNoAccess";
 import { emptyProposalForm, PROPOSAL_SCHEMA_OPTIONS } from "@/lib/proposals/form-data";
+import { getIListConnection } from "@/lib/ilist/connection";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +48,10 @@ export default async function NovaPropostaPage({
 
   const schemaOptions = PROPOSAL_SCHEMA_OPTIONS[tipo];
 
+  // iList (RE/MAX): botão de busca no catálogo só quando o tenant tem conexão
+  // provisionada pelo super-admin — mesmo gate do dropdown do pipeline.
+  const hasIList = (await getIListConnection(orgId)) !== null;
+
   // Admin/gestor cria já atribuindo (select "Responsável" no form). Sem
   // PROPOSAL_ASSIGN o select nem aparece e a lista não é carregada.
   const canAssign = can(eff, PERMISSION.PROPOSAL_ASSIGN);
@@ -69,6 +74,7 @@ export default async function NovaPropostaPage({
       schemaOptions={schemaOptions}
       members={members}
       canAssign={canAssign}
+      hasIList={hasIList}
     />
   );
 }

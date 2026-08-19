@@ -85,6 +85,14 @@ export interface GarantiaInput {
 export interface ProposalFormValues {
   kind: "venda" | "locacao";
   schemaType: string;
+  /**
+   * Título escolhido pelo corretor. Vazio = usa o derivado
+   * ("proponente — endereço", `derivedProposalTitle`), que era o único
+   * comportamento possível antes. Guardar o campo vazio em vez de já
+   * materializar o derivado é o que mantém o título "seguindo" as partes
+   * enquanto ninguém escreveu um próprio.
+   */
+  title: string;
   proponentes: PartyInput[];
   vendedores: PartyInput[];
   imovelEndereco: string;
@@ -167,6 +175,7 @@ export function emptyProposalForm(
   return {
     kind,
     schemaType,
+    title: "",
     proponentes: [emptyParty()],
     vendedores: [],
     imovelEndereco: "",
@@ -476,10 +485,20 @@ export function buildProposalSigners(v: ProposalFormValues): SignerInput[] {
 }
 
 /** Título derivado (1º proponente — imóvel), igual ao da criação original. */
-export function buildProposalTitle(v: ProposalFormValues): string {
+export function derivedProposalTitle(v: ProposalFormValues): string {
   const first = validParties(v.proponentes)[0];
   const endereco = trim(v.imovelEndereco);
   return `${first ? trim(first.nome) : "Proposta"}${endereco ? ` — ${endereco}` : ""}`;
+}
+
+/**
+ * Título que vai pro banco: o digitado, ou o derivado quando em branco.
+ *
+ * Deixar o derivado como fallback (em vez de exigir o campo) preserva o fluxo
+ * rápido de quem só quer criar a proposta — o título nunca fica vazio.
+ */
+export function buildProposalTitle(v: ProposalFormValues): string {
+  return trim(v.title) || derivedProposalTitle(v);
 }
 
 /**
@@ -508,6 +527,8 @@ export function buildValidUntil(v: ProposalFormValues): string | undefined {
 export function parseProposalForm(input: {
   kind: string;
   schemaType: string;
+  /** Título salvo. Omitido/derivado → o campo abre vazio (usa o derivado). */
+  title?: string | null;
   dataJson: unknown;
   validUntil?: string | null;
   createdAt?: string | null;
@@ -594,9 +615,12 @@ export function parseProposalForm(input: {
     validadeDias = String(dias);
   }
 
-  return {
+  const values: ProposalFormValues = {
     kind,
     schemaType: input.schemaType,
+    // Preenchido logo abaixo — precisa das partes/endereço já parseados pra
+    // saber se o título salvo é próprio ou apenas o derivado.
+    title: "",
     proponentes:
       proponentesRaw.length > 0
         ? proponentesRaw.map((p, i) => partyFromData(p, canaisProp[i] ?? "email"))
@@ -652,4 +676,12 @@ export function parseProposalForm(input: {
         phone: s.phone ?? "",
       })),
   };
+
+  // O campo só recebe o título salvo quando ele DIVERGE do derivado. Materializar
+  // um título que era automático transformaria toda edição num título fixo: trocar
+  // o nome do proponente depois disso deixaria o título velho pra trás.
+  const stored = trim(input.title ?? "");
+  values.title = stored && stored !== derivedProposalTitle(values) ? stored : "";
+
+  return values;
 }

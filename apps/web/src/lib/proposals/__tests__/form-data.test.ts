@@ -4,6 +4,7 @@ import {
   buildProposalDataJson,
   buildProposalSigners,
   buildProposalTitle,
+  derivedProposalTitle,
   emptyProposalForm,
   formatAmountInput,
   parseProposalForm,
@@ -312,6 +313,45 @@ describe("buildProposalSigners", () => {
 describe("título e hiddenPaths", () => {
   it("título = 1º proponente — imóvel", () => {
     expect(buildProposalTitle(locacaoForm())).toBe("Maria Souza — Rua das Flores, 100");
+  });
+
+  it("título digitado vence o derivado", () => {
+    const v = locacaoForm({ title: "Cobertura Jardins — proposta revisada" });
+    expect(buildProposalTitle(v)).toBe("Cobertura Jardins — proposta revisada");
+  });
+
+  it("título só com espaços cai no derivado (não grava título em branco)", () => {
+    expect(buildProposalTitle(locacaoForm({ title: "   " }))).toBe(
+      "Maria Souza — Rua das Flores, 100"
+    );
+  });
+
+  it("derivado continua acompanhando as partes", () => {
+    expect(derivedProposalTitle(locacaoForm({ imovelEndereco: "Rua Nova, 9" }))).toBe(
+      "Maria Souza — Rua Nova, 9"
+    );
+  });
+
+  it("prefill: título AUTOMÁTICO volta como campo vazio", () => {
+    // Materializar o derivado no campo congelaria o título: trocar o nome do
+    // proponente depois disso deixaria o título velho para trás.
+    const v = parseProposalForm({
+      kind: "locacao",
+      schemaType: "locacao_residencial_v1",
+      title: "Maria Souza — Rua das Flores, 100",
+      dataJson: buildProposalDataJson(locacaoForm()),
+    });
+    expect(v.title).toBe("");
+  });
+
+  it("prefill: título PRÓPRIO volta preenchido", () => {
+    const v = parseProposalForm({
+      kind: "locacao",
+      schemaType: "locacao_residencial_v1",
+      title: "Cobertura Jardins",
+      dataJson: buildProposalDataJson(locacaoForm()),
+    });
+    expect(v.title).toBe("Cobertura Jardins");
   });
 
   it("esconder comissão exige comissão incluída E proprietário assinando", () => {
