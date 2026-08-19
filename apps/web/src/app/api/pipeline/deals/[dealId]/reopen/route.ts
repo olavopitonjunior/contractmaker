@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth, getUserOrg } from "@/lib/auth/auth";
+import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
 import { moveDealStage } from "@/lib/pipeline/move-stage";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
@@ -19,15 +19,12 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { dealId: string } }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const org = await getUserOrg(session.user.id);
-  if (!org) {
-    return NextResponse.json({ error: "No organization" }, { status: 400 });
-  }
+  // `requireAuth` (e não `auth()` cru): sob impersonation de tenant,
+  // `ctx.userId` é o DONO do tenant — é ele que tem membership/RBAC na org
+  // impersonada. Com o id cru do super_admin o RBAC negava tudo (404/403).
+  const authResult = await requireAuth(req);
+  if (!authResult.ok) return authResult.response;
+  const { ctx } = authResult;
 
   const deal = await prisma.deal.findUnique({
     where: { id: params.dealId },
@@ -41,15 +38,15 @@ export async function POST(
     return NextResponse.json({ error: "Deal not found" }, { status: 404 });
   }
 
-  if (deal.pipeline.orgId !== org.id) {
+  if (deal.pipeline.orgId !== ctx.orgId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   // Escopo do gerente + DEAL_EDIT.
   const denied = await guardDealScope({
     dealId: params.dealId,
-    userId: session.user.id,
-    orgId: org.id,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
     permission: PERMISSION.DEAL_EDIT,
   });
   if (denied) return denied;
@@ -116,10 +113,10 @@ export async function POST(
     dealId: deal.id,
     toStageId: targetStage.id,
     reason: "reopen",
-    actorUserId: session.user.id,
-    orgId: org.id,
+    actorUserId: ctx.userId,
+    orgId: ctx.orgId,
     dealData: { lostAt: null, lostReason: null },
-    auditCtx: extractAuditContextFromRequest(req, org.id, session.user.id),
+    auditCtx: extractAuditContextFromRequest(req, ctx.orgId, ctx.userId),
     auditMetadata: {
       kind: "reopened",
       restoredFromAuditId: lastLostAudit?.id ?? null,
