@@ -10,6 +10,7 @@ import {
   type AcceptanceRecordSyncResult,
 } from "./acceptance-record-sync";
 import { notifyProposalMilestone } from "./notify-proposal";
+import { proposalPublicLink } from "./public-link";
 
 /**
  * Ponte webhook ClickSign → Proposal para o Aceite via WhatsApp
@@ -337,7 +338,7 @@ export async function processProposalAcceptanceEvent(
       // Comprovante durável — o requisito central do modo Aceite. Fire-and-forget
       // (idempotente por dossierUrl). O texto aceito é reconstruído idêntico ao
       // enviado, pelo helper compartilhado.
-      const link = `${process.env.NEXTAUTH_URL ?? "https://staging.imobpro.ia.br"}/p/${proposal.token}`;
+      const link = proposalPublicLink(proposal.token);
       const acceptedText = buildAcceptanceMessage({
         numero: proposal.id.slice(-8),
         title: proposal.title,

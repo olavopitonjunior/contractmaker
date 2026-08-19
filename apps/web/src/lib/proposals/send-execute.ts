@@ -19,6 +19,7 @@ import { ClicksignError } from "@/lib/clicksign/client";
 import { normalizeSigningGroups } from "@/lib/clicksign/signing-groups";
 import { STAGING_MODE } from "@/lib/env/staging";
 import { buildAcceptanceMessage } from "./acceptance-proof";
+import { proposalPublicLink } from "./public-link";
 import { renderProposalVia } from "./render";
 import { selectPropostaTemplate } from "./template-select";
 import { checkProposalReadiness } from "./clicksign-readiness";
@@ -263,7 +264,7 @@ async function sendAceite(
   decision: Extract<PrepareResult, { ok: true }>,
   _html: string
 ): Promise<SendResult> {
-  const link = `${process.env.NEXTAUTH_URL ?? "https://staging.imobpro.ia.br"}/p/${proposal.token}`;
+  const link = proposalPublicLink(proposal.token);
   const numero = proposal.id.slice(-8);
 
   // Carrega as linhas pra rastrear o acceptance_term POR signatário. Retry-safe:
@@ -855,7 +856,7 @@ async function sendVendedorAceiteLocked(
     return { ok: false, reason: "budget" };
   }
 
-  const link = `${process.env.NEXTAUTH_URL ?? "https://staging.imobpro.ia.br"}/p/${proposal.token}`;
+  const link = proposalPublicLink(proposal.token);
   const numero = proposal.id.slice(-8);
   let created = 0;
   let lastError: string | null = null;
