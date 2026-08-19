@@ -277,6 +277,113 @@ describe("rotas mutadoras de deal passam o ator EFETIVO pro RBAC", () => {
   });
 });
 
+/**
+ * Escolha manual de modelo. O matcher só acerta quando o que distingue dois
+ * modelos é um FATO do formulário; "este é o de curta temporada" não é. Sem
+ * override, esse modelo é inalcançável — pontua 0 como o genérico e perde o
+ * desempate pro `isDefault`.
+ */
+describe("POST generate-contract — escolha manual de modelo", () => {
+  function postWith(body?: unknown) {
+    return generateContract(
+      new NextRequest(
+        `http://localhost/api/pipeline/deals/${DEAL_ID}/generate-contract`,
+        {
+          method: "POST",
+          ...(body
+            ? {
+                body: JSON.stringify(body),
+                headers: { "Content-Type": "application/json" },
+              }
+            : {}),
+        }
+      ),
+      { params: { dealId: DEAL_ID } }
+    );
+  }
+
+  beforeEach(() => {
+    impersonatingTenant();
+    generateLocacaoContractMock.mockResolvedValue({ contractId: "c1" });
+  });
+
+  it("passa o modelo escolhido pro gerador", async () => {
+    const escolhido = {
+      id: "tpl-short-stay",
+      orgId: ORG_ID,
+      status: "active",
+      modalidade: "locacao",
+      name: "Locação Curta Temporada",
+    };
+    mockPrisma.contractTemplate.findUnique.mockResolvedValue(escolhido as never);
+
+    const res = await postWith({ templateId: "tpl-short-stay" });
+
+    expect(res.status).toBe(201);
+    expect(generateLocacaoContractMock).toHaveBeenCalledWith(
+      DEAL_ID,
+      OWNER_ID,
+      ORG_ID,
+      { template: escolhido }
+    );
+  });
+
+  it("chamada SEM body segue funcionando (é como a UI chama hoje)", async () => {
+    const res = await postWith();
+    expect(res.status).toBe(201);
+    expect(generateLocacaoContractMock).toHaveBeenCalledWith(
+      DEAL_ID,
+      OWNER_ID,
+      ORG_ID,
+      { template: undefined }
+    );
+  });
+
+  it("modelo de outra org → 400 e NADA é gerado (não cai no automático)", async () => {
+    mockPrisma.contractTemplate.findUnique.mockResolvedValue({
+      id: "tpl-alheio",
+      orgId: "outra-org",
+      status: "active",
+      modalidade: "locacao",
+    } as never);
+
+    const res = await postWith({ templateId: "tpl-alheio" });
+
+    expect(res.status).toBe(400);
+    // Gerar com o modelo automático depois de o operador ter escolhido outro
+    // seria a troca silenciosa que este produto não pode fazer.
+    expect(generateLocacaoContractMock).not.toHaveBeenCalled();
+  });
+
+  it("modelo de contrato de ADMINISTRAÇÃO é recusado num deal de locação", async () => {
+    // Família "locacao", mas outro instrumento: vincula imobiliária e
+    // proprietário, não o inquilino que vai assinar.
+    mockPrisma.contractTemplate.findUnique.mockResolvedValue({
+      id: "tpl-adm",
+      orgId: ORG_ID,
+      status: "active",
+      modalidade: "administracao_locacao",
+    } as never);
+
+    const res = await postWith({ templateId: "tpl-adm" });
+
+    expect(res.status).toBe(400);
+    expect(generateLocacaoContractMock).not.toHaveBeenCalled();
+  });
+
+  it("modelo arquivado → 400", async () => {
+    mockPrisma.contractTemplate.findUnique.mockResolvedValue({
+      id: "tpl-velho",
+      orgId: ORG_ID,
+      status: "archived",
+      modalidade: "locacao",
+    } as never);
+
+    expect((await postWith({ templateId: "tpl-velho" })).status).toBe(400);
+    expect(generateLocacaoContractMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("POST /api/pipeline/deals/[dealId]/generate-contract sob impersonation", () => {
   it("gera o contrato assinado pelo DONO do tenant", async () => {
     impersonatingTenant();
@@ -293,10 +400,13 @@ describe("POST /api/pipeline/deals/[dealId]/generate-contract sob impersonation"
     expect(res.status).toBe(201);
     // Autoria do contrato: o dono do tenant, nunca o super_admin (que fica no
     // AuditLog via metadata.impersonatedBy).
+    // 4º argumento: sem `templateId` no body, nenhum override — o pareamento
+    // automático segue no comando.
     expect(generateLocacaoContractMock).toHaveBeenCalledWith(
       DEAL_ID,
       OWNER_ID,
-      ORG_ID
+      ORG_ID,
+      { template: undefined }
     );
   });
 });
