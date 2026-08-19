@@ -506,6 +506,64 @@ export async function selectAdministracaoTemplate(
 }
 
 // ============================================================================
+// ESCOLHA MANUAL DE MODELO (override do pareamento automático).
+//
+// O matcher acerta quando o que distingue dois modelos é um FATO do formulário
+// (garantia, PF/PJ, administração). Quando não é — "este é o contrato de curta
+// temporada", que nenhum campo do form declara — o modelo fica inalcançável:
+// pontua 0 como o genérico e perde o desempate pro `isDefault`. Daí o override.
+//
+// A validação NÃO é por família. `administracao_locacao` é família "locacao" e
+// mesmo assim é outro INSTRUMENTO — o contrato entre imobiliária e proprietário,
+// com gerador próprio e `Contract.kind = "administracao"`. Deixá-lo na lista
+// permitiria gerar o contrato do INQUILINO com o modelo de administração: um
+// documento que não vincula quem assina.
+// ============================================================================
+
+/** Modalidades que um contrato daquele `deal.kind` pode legitimamente usar. */
+export function eligibleModalidadesForDealKind(kind: string): string[] {
+  if (kind === "locacao") {
+    return (LOCACAO_MODALIDADES as readonly string[]).filter(
+      (m) => m !== ADMINISTRACAO_LOCACAO_MODALIDADE
+    );
+  }
+  return [...VENDA_MODALIDADES];
+}
+
+export type TemplateOverrideRejection =
+  | "not-found"
+  | "cross-org"
+  | "not-active"
+  | "wrong-kind";
+
+/**
+ * Resolve o template escolhido à mão, ou o motivo da recusa. Nunca lança e
+ * nunca "corrige" a escolha em silêncio — pedido inválido é 400 pro caller,
+ * porque cair no automático depois de o operador escolher outra coisa seria
+ * exatamente o tipo de troca silenciosa que este produto não pode fazer.
+ */
+export async function resolveTemplateOverride(params: {
+  templateId: string;
+  orgId: string;
+  dealKind: string;
+}): Promise<
+  { ok: true; template: ContractTemplate } | { ok: false; reason: TemplateOverrideRejection }
+> {
+  const { prisma } = await import("@/lib/db/prisma");
+  const t = await prisma.contractTemplate.findUnique({
+    where: { id: params.templateId },
+  });
+  if (!t) return { ok: false, reason: "not-found" };
+  // Cross-org antes de qualquer outra coisa: não vaza nem a existência.
+  if (t.orgId !== params.orgId) return { ok: false, reason: "cross-org" };
+  if (t.status !== "active") return { ok: false, reason: "not-active" };
+  if (!eligibleModalidadesForDealKind(params.dealKind).includes(t.modalidade ?? "")) {
+    return { ok: false, reason: "wrong-kind" };
+  }
+  return { ok: true, template: t };
+}
+
+// ============================================================================
 // FAMÍLIA do template (venda | locação | proposta).
 //
 // `category` é a forma de pagamento do negócio — existe SÓ no mundo de venda.
