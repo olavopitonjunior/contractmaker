@@ -29,6 +29,27 @@ function docWith(...parts: string[]): string {
 
 const requestsOf = () => batchUpdateDocMock.mock.calls[0]?.[1] ?? [];
 
+/** Resposta do batchUpdate: uma reply por request, todas casando 1 ocorrência. */
+function batchOk(n: number) {
+  return {
+    data: {
+      replies: Array.from({ length: n }, () => ({
+        replaceAllText: { occurrencesChanged: 1 },
+      })),
+    },
+  };
+}
+
+/**
+ * Simula o doc ANTES (guarda determinística) e DEPOIS (verificação) do batch:
+ * a releitura devolve o texto com o bloco trocado pelo token.
+ */
+function docBeforeAndAfter(before: string, after: string) {
+  getDocPlainTextMock
+    .mockResolvedValueOnce(before)
+    .mockResolvedValueOnce(after);
+}
+
 describe("countOccurrences", () => {
   it("conta ocorrências exatas, inclusive sobrepostas na busca linear", () => {
     expect(countOccurrences("abcabc", "abc")).toBe(2);
@@ -40,11 +61,15 @@ describe("countOccurrences", () => {
 describe("applyClauseSlotToDoc", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    batchUpdateDocMock.mockResolvedValue({});
+    batchUpdateDocMock.mockResolvedValue(batchOk(2));
     getDocPlainTextMock.mockResolvedValue(docWith(CLAUSULA_A, CLAUSULA_B));
   });
 
   it("troca o 1º parágrafo pelo token e esvazia os demais", async () => {
+    docBeforeAndAfter(
+      docWith(CLAUSULA_A, CLAUSULA_B),
+      docWith("{{slot_garantia}}")
+    );
     const report = await applyClauseSlotToDoc({
       docId: "doc1",
       slot: "garantia",
@@ -75,7 +100,8 @@ describe("applyClauseSlotToDoc", () => {
   });
 
   it("bloco de um parágrafo só: token entra, nada é removido", async () => {
-    getDocPlainTextMock.mockResolvedValue(docWith(CLAUSULA_A));
+    batchUpdateDocMock.mockResolvedValue(batchOk(1));
+    docBeforeAndAfter(docWith(CLAUSULA_A), docWith("{{slot_garantia}}"));
     const report = await applyClauseSlotToDoc({
       docId: "doc1",
       slot: "garantia",
@@ -167,6 +193,97 @@ describe("applyClauseSlotToDoc", () => {
     expect(report.applied).toBe(false);
     expect(report.token).toBeNull();
     expect(report.issues[0].reason).toBe("batch-failed");
+  });
+
+  // ——— Trava 3: conferir o resultado em vez de presumi-lo ———
+
+  it("REGRESSÃO (Trio): replaceAllText casa 0 ocorrências → applied:false", async () => {
+    // O parágrafo existe no texto plano (a guarda passa), mas está partido em
+    // vários textRun no Doc, então o replace não casa nada. Antes disso o
+    // relatório dizia applied:true e o slot era DECLARADO sem existir.
+    batchUpdateDocMock.mockResolvedValue({
+      data: { replies: [{ replaceAllText: {} }] }, // occurrencesChanged omitido = 0
+    });
+    getDocPlainTextMock.mockResolvedValue(docWith(CLAUSULA_A));
+
+    const report = await applyClauseSlotToDoc({
+      docId: "doc1",
+      slot: "garantia",
+      paragraphs: [CLAUSULA_A],
+    });
+
+    expect(report.applied).toBe(false);
+    expect(report.token).toBeNull();
+    expect(report.issues[0].reason).toBe("replace-noop");
+  });
+
+  it("token ausente na releitura → applied:false mesmo com o batch reportando troca", async () => {
+    batchUpdateDocMock.mockResolvedValue(batchOk(1));
+    docBeforeAndAfter(docWith(CLAUSULA_A), docWith("outra coisa qualquer"));
+
+    const report = await applyClauseSlotToDoc({
+      docId: "doc1",
+      slot: "garantia",
+      paragraphs: [CLAUSULA_A],
+    });
+
+    expect(report.applied).toBe(false);
+    expect(report.issues[0].reason).toBe("verify-failed");
+  });
+
+  it("parágrafo do bloco sobrando na releitura → applied:false (duas garantias no doc)", async () => {
+    batchUpdateDocMock.mockResolvedValue(batchOk(2));
+    // O token entrou, mas o 2º parágrafo não foi esvaziado: o contrato sairia
+    // com a cláusula injetada E o resto da cláusula antiga logo abaixo.
+    docBeforeAndAfter(
+      docWith(CLAUSULA_A, CLAUSULA_B),
+      docWith("{{slot_garantia}}", CLAUSULA_B)
+    );
+
+    const report = await applyClauseSlotToDoc({
+      docId: "doc1",
+      slot: "garantia",
+      paragraphs: [CLAUSULA_A, CLAUSULA_B],
+    });
+
+    expect(report.applied).toBe(false);
+    expect(report.issues).toEqual([
+      { paragraph: CLAUSULA_B.slice(0, 200), reason: "verify-failed" },
+    ]);
+  });
+
+  it("replaceAllText casando DEMAIS (cabeçalho/rodapé) também reprova", async () => {
+    // A guarda de unicidade só enxerga o texto plano; o replace casa contra o
+    // documento inteiro. 2 ocorrências = editamos um lugar não examinado.
+    batchUpdateDocMock.mockResolvedValue({
+      data: { replies: [{ replaceAllText: { occurrencesChanged: 2 } }] },
+    });
+    getDocPlainTextMock.mockResolvedValue(docWith(CLAUSULA_A));
+
+    const report = await applyClauseSlotToDoc({
+      docId: "doc1",
+      slot: "garantia",
+      paragraphs: [CLAUSULA_A],
+    });
+
+    expect(report.applied).toBe(false);
+    expect(report.issues[0].reason).toBe("over-matched");
+  });
+
+  it("doc ilegível NA RELEITURA: não aplica, e o motivo diz 'não sei' e não 'deu errado'", async () => {
+    batchUpdateDocMock.mockResolvedValue(batchOk(1));
+    getDocPlainTextMock
+      .mockResolvedValueOnce(docWith(CLAUSULA_A))
+      .mockRejectedValueOnce(new Error("500"));
+
+    const report = await applyClauseSlotToDoc({
+      docId: "doc1",
+      slot: "garantia",
+      paragraphs: [CLAUSULA_A],
+    });
+
+    expect(report.applied).toBe(false);
+    expect(report.issues[0].reason).toBe("verify-unavailable");
   });
 
   it("lista vazia é no-op silencioso", async () => {

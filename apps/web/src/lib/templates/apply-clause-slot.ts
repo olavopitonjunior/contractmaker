@@ -20,6 +20,17 @@
  *    modelo fica com a cláusula fixa (o comportamento pré-consolidação), o slot
  *    NÃO é declarado (`from-docx`) e a página de revisão avisa antes de ativar.
  *
+ * 3. CONFERIR O RESULTADO, não presumi-lo. As guardas acima rodam contra o
+ *    texto PLANO (`getDocPlainText`, que concatena os `textRun`), mas quem
+ *    aplica é o `replaceAllText`, que casa contra a estrutura real do Doc. Um
+ *    parágrafo partido em vários runs (herança comum de DOCX com formatação
+ *    invisível) satisfaz a guarda e muda ZERO ocorrências — foi assim que dois
+ *    modelos da RE/MAX Trio foram declarados com slot que não existia no Doc,
+ *    e todo contrato saía com a garantia da variante de referência chumbada.
+ *    Por isso o retorno do batch é inspecionado (`occurrencesChanged`) e o doc
+ *    é RELIDO: `applied: true` só sai quando o token está no documento e nenhum
+ *    parágrafo do bloco sobrou.
+ *
  * Erro de rede não lança: devolve `applied: false` e quem chama decide. O que
  * nunca pode acontecer é declarar um slot que não existe no documento.
  */
@@ -38,7 +49,25 @@ export type SlotBlockIssueReason =
   | "not-found"
   | "ambiguous"
   | "doc-unreadable"
-  | "batch-failed";
+  | "batch-failed"
+  /** O `replaceAllText` casou 0 ocorrências — o texto plano mentiu (ver trava 3). */
+  | "replace-noop"
+  /**
+   * O `replaceAllText` casou MAIS de uma vez. A guarda de unicidade roda contra
+   * o texto plano, que não inclui cabeçalho/rodapé — mas o replace casa contra
+   * a estrutura inteira do Doc. Editamos um lugar que ninguém examinou.
+   */
+  | "over-matched"
+  /** O batch reportou sucesso, mas a releitura do doc CONTRADIZ o resultado. */
+  | "verify-failed"
+  /**
+   * Não deu pra conferir (Drive fora do ar, 429, credencial). Diferente de
+   * `verify-failed`: ali sabemos que deu errado, aqui não sabemos nada — e
+   * "não sei" nunca pode ser tratado como "deu certo".
+   */
+  | "verify-unavailable"
+  /** O token não está mais no Doc (detectado na revalidação, não na ingestão). */
+  | "token-missing";
 
 export interface SlotBlockIssue {
   /** Trecho problemático, truncado pra caber no relatório. */
@@ -124,11 +153,44 @@ export async function applyClauseSlotToDoc(
     },
   }));
 
+  let replies: Array<{ replaceAllText?: { occurrencesChanged?: number | null } }>;
   try {
-    await batchUpdateDoc(input.docId, requests);
+    const res = await batchUpdateDoc(input.docId, requests);
+    replies = res?.data?.replies ?? [];
   } catch (err) {
     console.error("[apply-clause-slot] batchUpdate falhou:", err);
     return fail([issue(blocks[0], "batch-failed")]);
+  }
+
+  // A API omite o campo quando o valor é 0 (default de protobuf), então
+  // `undefined` aqui significa "nenhuma ocorrência trocada", não "não sei".
+  // Reply ausente (lista mais curta que os requests) fica pro verify abaixo.
+  const counted: SlotBlockIssue[] = [];
+  blocks.forEach((b, i) => {
+    if (i >= replies.length) return; // reply ausente fica pro verify abaixo
+    const changed = replies[i]?.replaceAllText?.occurrencesChanged ?? 0;
+    if (changed === 0) counted.push(issue(b, "replace-noop"));
+    // Casou em lugar que a guarda de unicidade não examinou (cabeçalho/rodapé
+    // não entram no texto plano). Editar ali é tão ruim quanto não editar.
+    else if (changed > 1) counted.push(issue(b, "over-matched"));
+  });
+  if (counted.length > 0) return fail(counted);
+
+  // Releitura: o contador acima não pega tudo (reply ausente, edição
+  // concorrente). O estado final do documento pega.
+  let finalText: string;
+  try {
+    finalText = await getDocPlainText(input.docId);
+  } catch (err) {
+    console.error("[apply-clause-slot] não consegui reler o doc:", err);
+    return fail([issue(blocks[0], "verify-unavailable")]);
+  }
+  if (!finalText.includes(token)) {
+    return fail([issue(blocks[0], "verify-failed")]);
+  }
+  const leftover = blocks.filter((b) => finalText.includes(b));
+  if (leftover.length > 0) {
+    return fail(leftover.map((b) => issue(b, "verify-failed")));
   }
 
   return {

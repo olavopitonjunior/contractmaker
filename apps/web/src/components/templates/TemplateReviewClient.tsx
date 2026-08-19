@@ -90,6 +90,15 @@ const SLOT_ISSUE_REASON: Record<string, string> = {
   "too-short": "o trecho é curto demais para ser localizado com segurança",
   "doc-unreadable": "não consegui ler o documento no Drive",
   "batch-failed": "o Google recusou a edição",
+  "replace-noop":
+    "o trecho existe no texto, mas a edição não pegou — costuma ser formatação invisível partindo o parágrafo no meio",
+  "over-matched":
+    "o trecho foi encontrado em mais lugares do que o esperado (possivelmente no cabeçalho ou rodapé)",
+  "verify-failed":
+    "a edição foi enviada, mas a conferência no documento não confirmou o resultado",
+  "verify-unavailable":
+    "não consegui conferir o documento agora (Drive indisponível) — clique em Revalidar",
+  "token-missing": "o campo não está mais no documento",
 };
 
 function parseDraftReport(raw: unknown): DraftReport | null {
