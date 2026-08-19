@@ -4,6 +4,12 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-19 - Rotas de negócio voltam a funcionar sob impersonation
+
+### Corrigido
+
+- **Impersonation de tenant nas rotas de deal** (descoberto ao montar a biblioteca de contratos da RE/MAX Trio em prod): as 9 rotas sob `/api/pipeline/deals/[dealId]/**` resolviam identidade com `auth()` cru e passavam `session.user.id` pro RBAC. Como o super_admin "testando como" um tenant NÃO tem `OrgMembership` na org impersonada, `getEffectivePermissions` voltava `null` e **toda** operação de negócio respondia 404/403 — abrir, editar, apagar, arquivar, gerar contrato, marcar assinado/perdido/comissão paga e reabrir. Migradas pro `requireAuth` (`lib/auth/context.ts`), que já sobrepõe a identidade: `ctx.userId` é o dono do tenant (quem resolve membership/RBAC e assina o que for criado) e o admin real fica em `ctx.impersonatedByUserId`, carimbado em todo `AuditLog` por `audit()` (`metadata.impersonatedBy`). Sem mudança de comportamento fora de impersonation; Bearer continua barrado (rota session-only, sem `scope`).
+
 ## [Unreleased] - 2026-08-19 - Propostas: código sequencial, título editável, canal de envio e gestão de assinaturas
 
 ### Adicionado
