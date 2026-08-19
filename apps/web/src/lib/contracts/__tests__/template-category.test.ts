@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/db/prisma", () => ({
   prisma: {
-    contractTemplate: { findMany: vi.fn() },
+    contractTemplate: { findMany: vi.fn(), findUnique: vi.fn() },
   },
 }));
 
@@ -10,10 +10,12 @@ import {
   deriveCategory,
   deriveCategoryFromPayment,
   deriveTemplateFacts,
+  eligibleModalidadesForDealKind,
   matchCriteriaSchema,
   matchCriteriaSummary,
   parseMatchCriteria,
   resolveTemplateId,
+  resolveTemplateOverride,
   modalidadeForCategory,
   resolveTemplateTaxonomy,
   schemaTypeForModalidade,
@@ -27,6 +29,7 @@ import {
 import { prisma } from "@/lib/db/prisma";
 
 const mockFindMany = vi.mocked(prisma.contractTemplate.findMany);
+const mockFindUnique = vi.mocked(prisma.contractTemplate.findUnique);
 
 describe("deriveCategoryFromPayment", () => {
   it("classifica o caso do deal 20486 (sinal + financiamento + banco) como financiamento", () => {
@@ -596,6 +599,79 @@ describe("selectAdministracaoTemplate", () => {
     mockFindMany.mockResolvedValueOnce([]);
     const result = await selectAdministracaoTemplate("org-1");
     expect(result).toBeNull();
+  });
+});
+
+describe("escolha manual de modelo (override)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("locação NÃO oferece o contrato de administração", () => {
+    const elegiveis = eligibleModalidadesForDealKind("locacao");
+    expect(elegiveis).toContain("locacao");
+    expect(elegiveis).toContain("locacao_comercial");
+    // É outro INSTRUMENTO (imobiliária↔proprietário), apesar de família
+    // "locacao": gerar o contrato do inquilino com ele produziria um documento
+    // que não vincula quem assina.
+    expect(elegiveis).not.toContain("administracao_locacao");
+  });
+
+  it("venda oferece só as modalidades de venda", () => {
+    expect(eligibleModalidadesForDealKind("venda")).toEqual([
+      "a_vista",
+      "financiamento",
+    ]);
+  });
+
+  const tplRow = (over: Record<string, unknown> = {}) => ({
+    id: "t1",
+    orgId: "org-1",
+    status: "active",
+    modalidade: "locacao",
+    ...over,
+  });
+
+  it("aceita o modelo válido da própria org", async () => {
+    mockFindUnique.mockResolvedValueOnce(tplRow() as never);
+    const r = await resolveTemplateOverride({
+      templateId: "t1",
+      orgId: "org-1",
+      dealKind: "locacao",
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it("recusa template de outra org, arquivado, inexistente e de kind errado", async () => {
+    mockFindUnique.mockResolvedValueOnce(tplRow({ orgId: "outra" }) as never);
+    expect(
+      await resolveTemplateOverride({ templateId: "t1", orgId: "org-1", dealKind: "locacao" })
+    ).toEqual({ ok: false, reason: "cross-org" });
+
+    mockFindUnique.mockResolvedValueOnce(tplRow({ status: "archived" }) as never);
+    expect(
+      await resolveTemplateOverride({ templateId: "t1", orgId: "org-1", dealKind: "locacao" })
+    ).toEqual({ ok: false, reason: "not-active" });
+
+    mockFindUnique.mockResolvedValueOnce(null as never);
+    expect(
+      await resolveTemplateOverride({ templateId: "t1", orgId: "org-1", dealKind: "locacao" })
+    ).toEqual({ ok: false, reason: "not-found" });
+
+    // Modelo de VENDA num deal de locação.
+    mockFindUnique.mockResolvedValueOnce(tplRow({ modalidade: "a_vista" }) as never);
+    expect(
+      await resolveTemplateOverride({ templateId: "t1", orgId: "org-1", dealKind: "locacao" })
+    ).toEqual({ ok: false, reason: "wrong-kind" });
+  });
+
+  it("REGRESSÃO: o contrato de administração é recusado como modelo de um deal de locação", async () => {
+    mockFindUnique.mockResolvedValueOnce(
+      tplRow({ modalidade: "administracao_locacao" }) as never
+    );
+    expect(
+      await resolveTemplateOverride({ templateId: "t1", orgId: "org-1", dealKind: "locacao" })
+    ).toEqual({ ok: false, reason: "wrong-kind" });
   });
 });
 
