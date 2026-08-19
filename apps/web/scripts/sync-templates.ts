@@ -31,6 +31,7 @@ import {
   seedCanonicalTemplatesForOrg,
   type CanonicalSeedClient,
 } from "../src/lib/templates/canonical-seed";
+import { isTenantManagedRow } from "./seed-tenant-templates";
 
 const prisma = new PrismaClient();
 
@@ -68,6 +69,7 @@ async function main() {
   let notFound = 0;
   let seeded = 0;
   let renamed = 0;
+  let tenantSkipped = 0;
 
   // Pass de seed por ORG — roda SEMPRE que --seed é passado. Antes vivia dentro
   // do `if (dbRows.length === 0)` do loop de templates, então só disparava
@@ -147,6 +149,18 @@ async function main() {
     }
 
     for (const row of dbRows) {
+      // Guard multitenant 2: rows gerenciadas por seed-tenant-templates.ts
+      // (marcador `tenant-template:` no source OU nome de manifest de tenant)
+      // NUNCA recebem o canônico — o documento é da imobiliária. Sem isso, um
+      // sync de rotina sobrescrevia o template do tenant (incidente Newcore,
+      // 2026-08-18/19).
+      if (isTenantManagedRow(row)) {
+        console.log(
+          `↷  ${t.filename} [org=${row.orgId}] skip: template de tenant ("${row.name}")`
+        );
+        tenantSkipped++;
+        continue;
+      }
       const dbHash = sha(row.handlebarsSource);
 
       // 1) Atualiza handlebarsSource se hash difere
@@ -194,7 +208,7 @@ async function main() {
 
   console.log();
   console.log(
-    `[sync-templates] ${DRY_RUN ? "would update" : "updated"}: ${updated}, unchanged: ${skipped}, not found: ${notFound}, seeded: ${seeded}, renamed: ${renamed}`
+    `[sync-templates] ${DRY_RUN ? "would update" : "updated"}: ${updated}, unchanged: ${skipped}, not found: ${notFound}, seeded: ${seeded}, renamed: ${renamed}, tenant skipped: ${tenantSkipped}`
   );
   if (DRY_RUN && (updated > 0 || seeded > 0 || renamed > 0)) {
     console.log(`[sync-templates] Run with --apply to persist changes.`);
