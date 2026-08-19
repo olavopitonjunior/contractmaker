@@ -4,6 +4,23 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-19 - Propostas: código sequencial, título editável, canal de envio e gestão de assinaturas
+
+### Adicionado
+
+- **Código sequencial por proposta** (`Proposal.code`, formato `PROP-<ano BRT>-<seq 4>`): contador atômico por `(org, ano)` na nova tabela `OrgSequence`, alocado dentro da transação do create (`INSERT … ON CONFLICT DO UPDATE … RETURNING` — `MAX+1` teria corrida entre dois creates simultâneos, e o rollback devolve o número em vez de abrir buraco na sequência). Substitui o `id.slice(-8)` que servia de "número" em 8 pontos (assunto de e-mail `{{numero}}`, comprovante de aceite, landing `/p/[token]`, contexto Handlebars `numero_proposta`), agora todos atrás de `proposalNumero()`. Migration faz backfill de todas as propostas por ordem de `createdAt` e semeia o contador; o ano sai do fuso de São Paulo (`AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo'`) — em UTC a virada aconteceria 3h cedo em 31/12.
+- **Título editável**: campo "Título da proposta" na criação/edição (em branco cai no derivado "proponente — imóvel", agora `derivedProposalTitle`) e renomeação por `PATCH /api/proposals/[id]/title`, com diálogo na lista (menu da linha) e no detalhe (lápis). A rota é separada do PATCH de conteúdo de propósito: título é rótulo interno, então vale além de `EDITABLE_STATUSES` e só barra os terminais, com claim atômico contra a corrida com webhook/cron. Audit `PROPOSAL_RENAME` + evento `renamed`.
+- **Coluna "Envio"** na lista de propostas (WhatsApp/E-mail/Misto), resolvida no servidor por `proposalSendChannel`: o canal do `EnvelopeSigner` vence o do plano porque `decideInstrument` rebaixa WhatsApp→e-mail conforme a capacidade da conta ClickSign — mostrar o pedido afirmaria um canal que ninguém usou.
+- **Gestão de assinaturas dentro da proposta**, equivalente à aba dos contratos: `EnvelopeCard` saiu de `pipeline/SignaturesTab` para `components/signatures/` (já era genérico sobre `basePath`) e ganhou a família `/api/proposals/[id]/envelopes/*` — listar, editar nome/prazo, cancelar envelope, adicionar/reenviar/editar/remover signatário, além do botão Atualizar ligado ao `/sync` que existia e nenhuma UI chamava. Escopo por `loadScopedProposal` e permissões do vocabulário de proposta (`PROPOSAL_SEND`/`RESEND`/`CANCEL`), não `ENVELOPE_SEND`.
+
+### Corrigido
+
+- **Botão do catálogo iList (RE/MAX) aparecia para todos os tenants** no formulário de proposta: era o único ponto do produto sem o gate `getIListConnection(orgId)`, então uma org sem conexão (Newcore) via a porta e caía num diálogo "integração não habilitada". As rotas `/api/ilist/*` já eram fail-closed — o vazamento era só de UI.
+- **`EnvelopeSignerRow.email` tipado como `string`** enquanto `EnvelopeSigner.email` é nullable no schema *por causa das propostas* (signatário proprietário costuma vir de `PropertyOwner`, sem e-mail e com WhatsApp como canal). O tipo mentia e o `EditSignerDialog` passava `null` a um input controlado; a linha do signatário agora cai pro telefone em vez de renderizar vazio.
+- **Placeholder `{{imovel}}`** do e-mail da proposta era extraído fatiando o título no `" — "`, o que só valia enquanto o título era sempre derivado. Passa a vir resolvido do `dataJson` — senão um título livre entregaria um pedaço arbitrário do texto do corretor como endereço do imóvel.
+- **Filtros da lista de propostas**: a busca era `flex-1` entre o seletor Vendas/Locação e dois `<select>` crus, então esticava e deixava a barra com cara de centralizada. Passa a ter largura fixa, com os filtros empurrados pra direita (`ml-auto`), `Select` do design system no lugar dos selects artesanais, botão de limpar dentro do campo e `role="group"`/`aria-pressed` no segmentado.
+- **Coluna "Proponente" da lista mostrava o título**, não o proponente — os dois eram a mesma string enquanto o título era derivado. Agora são colunas distintas, com **Título** (mais o código) antes de **Proponente** (mais o imóvel).
+
 ## [Unreleased] - 2026-08-19 - Guard anti-clobber dos templates de tenant
 
 ### Corrigido
