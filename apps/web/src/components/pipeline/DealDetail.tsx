@@ -32,6 +32,7 @@ import { DealManagerChip } from "@/components/deals/DealManagerChip";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { NO_PERMISSION_HINT } from "@/lib/security/rbac/ui";
+import { PickTemplateDialog } from "@/components/contracts/PickTemplateDialog";
 import { toast } from "sonner";
 import Link from "next/link";
 import {
@@ -399,6 +400,7 @@ export function DealDetail({
     : false;
   const [linkBusy, setLinkBusy] = useState<"lock" | "rotate" | "reopen" | null>(null);
   const [confirmDuplicateOpen, setConfirmDuplicateOpen] = useState(false);
+  const [pickTemplateOpen, setPickTemplateOpen] = useState(false);
   const [chargeDialogOpen, setChargeDialogOpen] = useState(false);
   const [chargeDialogMode, setChargeDialogMode] = useState<
     "commission_from_deal" | "avulsa_in_deal"
@@ -554,11 +556,20 @@ export function DealDetail({
     }
   }
 
-  async function doGenerateContract() {
+  async function doGenerateContract(templateId?: string) {
     setGenerating(true);
     const res = await fetch(
       `/api/pipeline/deals/${deal.id}/generate-contract`,
-      { method: "POST" }
+      {
+        method: "POST",
+        // Sem escolha manual, a chamada segue sem corpo — como sempre foi.
+        ...(templateId
+          ? {
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ templateId }),
+            }
+          : {}),
+      }
     );
     const data = await res.json();
     setGenerating(false);
@@ -1003,15 +1014,29 @@ export function DealDetail({
               </Link>
             </Button>
           ) : (
-            <Button
-              size="sm"
-              onClick={handleGenerateContract}
-              disabled={generating || !canCreateContract}
-              title={canCreateContract ? undefined : NO_PERMISSION_HINT}
-            >
-              <FileText className="h-4 w-4 mr-1" />
-              {generating ? "Gerando..." : "Confeccionar Contrato"}
-            </Button>
+            <>
+              <Button
+                size="sm"
+                onClick={handleGenerateContract}
+                disabled={generating || !canCreateContract}
+                title={canCreateContract ? undefined : NO_PERMISSION_HINT}
+              >
+                <FileText className="h-4 w-4 mr-1" />
+                {generating ? "Gerando..." : "Confeccionar Contrato"}
+              </Button>
+              {/* Caminho secundário de propósito: o automático acerta quase
+                  sempre, e cada escolha manual é uma chance de errar. */}
+              {canCreateContract && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setPickTemplateOpen(true)}
+                  disabled={generating}
+                >
+                  Escolher outro modelo
+                </Button>
+              )}
+            </>
           )}
           {stageName === "Cobrança emitida" && (
             <Button
@@ -1680,6 +1705,14 @@ export function DealDetail({
         onOpenChange={setChargeDialogOpen}
         onCreated={() => setChargeRefreshKey((k) => k + 1)}
         mode={chargeDialogMode}
+      />
+
+      <PickTemplateDialog
+        open={pickTemplateOpen}
+        onOpenChange={setPickTemplateOpen}
+        dealId={deal.id}
+        hasContract={deal.contracts.length > 0}
+        onConfirm={(templateId) => doGenerateContract(templateId)}
       />
 
       <AlertDialog open={confirmDuplicateOpen} onOpenChange={setConfirmDuplicateOpen}>
