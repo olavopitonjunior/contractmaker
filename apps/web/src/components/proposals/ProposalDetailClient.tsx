@@ -100,6 +100,7 @@ export function ProposalDetailClient({
   planVendedores = [],
   vendedorCostLabel = null,
   vendedorIncluded = true,
+  vendedorSkipped = false,
 }: {
   proposal: Proposal;
   signers: {
@@ -128,6 +129,8 @@ export function ProposalDetailClient({
   vendedorCostLabel?: string | null;
   /** Há vendedor na jornada? (omite o nó Proprietário da timeline) */
   vendedorIncluded?: boolean;
+  /** Concluída SEM enviar a via do proprietário (caminho B da decisão). */
+  vendedorSkipped?: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -322,7 +325,11 @@ export function ProposalDetailClient({
 
       {/* Linha do tempo */}
       <Card className="p-4">
-        <ProposalProgressTimeline status={liveStatus} vendedorIncluded={vendedorIncluded} />
+        <ProposalProgressTimeline
+          status={liveStatus}
+          vendedorIncluded={vendedorIncluded}
+          vendedorSkipped={vendedorSkipped}
+        />
       </Card>
 
       {/* Resumo + Responsável */}
