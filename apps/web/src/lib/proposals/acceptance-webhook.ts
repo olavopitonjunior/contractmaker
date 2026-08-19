@@ -37,6 +37,49 @@ const DEAD_FOR_TRACKING = new Set([
   "recusada_vendedor",
 ]);
 
+/**
+ * Termo do PROPRIETÁRIO (2ª via do Aceite) morreu na ClickSign (expired/
+ * canceled): devolve a proposta à parada de decisão — espelho do
+ * `onProposalEnvelopeCanceled` do caminho de envelope. Sem isto a proposta
+ * ficava presa em `aguardando_vendedor` pra sempre, sem sino e sem reenvio
+ * (a linha já foi marcada expired/canceled acima, o que torna o termo
+ * reemissível pelo sendVendedorAceiteLocked).
+ */
+async function returnVendedorAceiteToDecision(
+  proposal: { id: string; orgId: string; userId: string },
+  signerId: string,
+  phase: string
+): Promise<void> {
+  const res = await prisma.proposal.updateMany({
+    where: { id: proposal.id, status: "aguardando_vendedor" },
+    data: { status: "assinada_proponente" },
+  });
+  if (res.count === 0) return; // replay ou proposta já seguiu — no-op
+
+  await prisma.proposalEvent
+    .create({
+      data: {
+        proposalId: proposal.id,
+        eventName: "vendedor_via_canceled",
+        source: "clicksign",
+        payload: { instrument: "aceite", signerId, phase } as Prisma.InputJsonValue,
+      },
+    })
+    .catch(() => {});
+
+  waitUntil(
+    notifyProposalMilestone({
+      proposalId: proposal.id,
+      orgId: proposal.orgId,
+      userId: proposal.userId,
+      kind: "vendedor_send_failed",
+      dedupeSuffix: `aceite-${phase}:${signerId}`,
+      bodyOverride:
+        "O termo do proprietário expirou ou foi cancelado na ClickSign. A proposta voltou para a sua decisão — reenvie ou conclua sem enviar.",
+    })
+  );
+}
+
 interface AcceptanceEventInput {
   acceptanceId: string;
   phase: string; // sent | completed | refused | expired | canceled | error | ...
@@ -241,6 +284,35 @@ export async function processProposalAcceptanceEvent(
                 : {}),
             })
           );
+        } else {
+          // Proposta morta (expirada/cancelada/recusada) recebendo um ACEITE de
+          // terceiro: juridicamente relevante e antes invisível — o operador
+          // precisa saber que existe um aceite órfão na ClickSign pra decidir
+          // (reabrir negócio por fora, arquivar, responder ao interessado).
+          await prisma.proposalEvent
+            .create({
+              data: {
+                proposalId: proposal.id,
+                eventName: "acceptance_orphan_after_terminal",
+                source: "webhook",
+                payload: {
+                  signerId: signer!.id,
+                  proposalStatus: proposal.status,
+                } as Prisma.InputJsonValue,
+              },
+            })
+            .catch(() => {});
+          waitUntil(
+            notifyProposalMilestone({
+              proposalId: proposal.id,
+              orgId: proposal.orgId,
+              userId: proposal.userId,
+              kind: "accepted_party",
+              dedupeSuffix: `orphan:${signer!.id}`,
+              bodyOverride:
+                "Um participante aceitou o termo dele, mas a proposta já estava encerrada (expirada/cancelada/recusada). O aceite ficou registrado no histórico — revise se o negócio deve ser retomado.",
+            })
+          );
         }
         return { ok: true, handled: true, proposalId: proposal.id, phase: input.phase };
       }
@@ -426,6 +498,8 @@ export async function processProposalAcceptanceEvent(
             })
           );
         }
+      } else if (signer?.role === "vendedor") {
+        await returnVendedorAceiteToDecision(proposal, signer.id, input.phase);
       }
       break;
 
@@ -433,6 +507,8 @@ export async function processProposalAcceptanceEvent(
       // Idem: só o cancelamento do termo do proponente cancela a proposta.
       if (isProponente) {
         await advanceProposalStatus(proposal.id, "cancelada", { canceledAt: new Date() });
+      } else if (signer?.role === "vendedor") {
+        await returnVendedorAceiteToDecision(proposal, signer.id, input.phase);
       }
       break;
 
