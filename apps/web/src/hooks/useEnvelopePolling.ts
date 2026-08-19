@@ -12,7 +12,13 @@ export interface EnvelopeSignerRow {
   /** Grupo de ordem de assinatura (null = paralelo). */
   signingGroup: number | null;
   name: string;
-  email: string;
+  /**
+   * NULLABLE — o schema já era (`EnvelopeSigner.email String?`), o tipo é que
+   * mentia. Quem produz null é a esteira de PROPOSTAS: o signatário do lado
+   * proprietário costuma vir de `PropertyOwner`, onde e-mail é opcional e o
+   * canal padrão é WhatsApp. Todo consumidor precisa tratar a ausência.
+   */
+  email: string | null;
   documentation: string | null;
   phone: string | null;
   authMethod: string;
@@ -37,6 +43,12 @@ export interface EnvelopeRow {
   clicksignId: string | null;
   name: string;
   status: "draft" | "running" | "closed" | "canceled" | "failed";
+  /**
+   * Só em envelope de PROPOSTA: "completa" (via do proponente) ou "reduzida"
+   * (via do proprietário, sem os campos ocultos). Null nos de contrato/anexo —
+   * o CHECK `envelope_via_check` garante essa exclusividade no banco.
+   */
+  via?: string | null;
   authMethod: string;
   documentUrl: string | null;
   signedDocumentUrl: string | null;
