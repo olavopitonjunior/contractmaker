@@ -308,3 +308,121 @@ describe("processProposalAcceptanceEvent", () => {
     expect(proof).not.toHaveBeenCalled();
   });
 });
+
+describe("2ª via do Aceite — termo do vendedor morto e aceite órfão (2026-08)", () => {
+  const eventCreate = prisma.proposalEvent.create as unknown as ReturnType<typeof vi.fn>;
+  const propUpdateMany = prisma.proposal.updateMany as unknown as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    // Describe separado do principal → precisa do próprio reset (o beforeEach
+    // de lá não roda aqui e o histórico de chamadas do arquivo inteiro vazaria).
+    vi.clearAllMocks();
+    h.pending.length = 0;
+    advance.mockResolvedValue({ moved: true });
+    signerCountMock.mockResolvedValue(0);
+    settings.mockResolvedValue({ proposalAutoChainVendedor: false });
+    eventCreate.mockResolvedValue({});
+    propUpdateMany.mockResolvedValue({ count: 0 });
+  });
+
+  it("expired do termo do VENDEDOR devolve a proposta à parada de decisão (CAS + sino)", async () => {
+    signerFind.mockResolvedValue({ id: "s2", role: "vendedor", proposalId: "p1" });
+    propFindUnique.mockResolvedValue({
+      ...PROPOSAL,
+      orgId: "org1",
+      userId: "u1",
+      status: "aguardando_vendedor",
+      validUntil: null,
+    });
+    propUpdateMany.mockResolvedValue({ count: 1 }); // CAS move
+
+    await processProposalAcceptanceEvent({ acceptanceId: "acc_2", phase: "expired", payload: {} });
+    await flushWaitUntil();
+
+    expect(propUpdateMany).toHaveBeenCalledWith({
+      where: { id: "p1", status: "aguardando_vendedor" },
+      data: { status: "assinada_proponente" },
+    });
+    expect(eventCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ eventName: "vendedor_via_canceled" }),
+      })
+    );
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "vendedor_send_failed",
+        dedupeSuffix: "aceite-expired:s2",
+      })
+    );
+    // E NÃO expira a proposta (isso é só pro termo do proponente).
+    const dests = advance.mock.calls.map((c) => c[1]);
+    expect(dests).not.toContain("expirada");
+  });
+
+  it("canceled do termo do vendedor: mesmo caminho de volta à decisão", async () => {
+    signerFind.mockResolvedValue({ id: "s2", role: "vendedor", proposalId: "p1" });
+    propFindUnique.mockResolvedValue({
+      ...PROPOSAL,
+      orgId: "org1",
+      userId: "u1",
+      status: "aguardando_vendedor",
+      validUntil: null,
+    });
+    propUpdateMany.mockResolvedValue({ count: 1 });
+
+    await processProposalAcceptanceEvent({ acceptanceId: "acc_2", phase: "canceled", payload: {} });
+    await flushWaitUntil();
+
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "vendedor_send_failed", dedupeSuffix: "aceite-canceled:s2" })
+    );
+    const dests = advance.mock.calls.map((c) => c[1]);
+    expect(dests).not.toContain("cancelada");
+  });
+
+  it("replay (proposta já saiu de aguardando_vendedor) → no-op sem sino", async () => {
+    signerFind.mockResolvedValue({ id: "s2", role: "vendedor", proposalId: "p1" });
+    propFindUnique.mockResolvedValue({
+      ...PROPOSAL,
+      orgId: "org1",
+      userId: "u1",
+      status: "assinada_proponente",
+      validUntil: null,
+    });
+    propUpdateMany.mockResolvedValue({ count: 0 }); // CAS não move
+
+    await processProposalAcceptanceEvent({ acceptanceId: "acc_2", phase: "expired", payload: {} });
+    await flushWaitUntil();
+
+    expect(notify).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "vendedor_send_failed" })
+    );
+  });
+
+  it("completed de terceiro em proposta MORTA → evento de aceite órfão + sino (antes era silêncio)", async () => {
+    signerFind.mockResolvedValue({ id: "s2", role: "vendedor", proposalId: "p1" });
+    propFindUnique.mockResolvedValue({
+      ...PROPOSAL,
+      orgId: "org1",
+      userId: "u1",
+      status: "expirada",
+      validUntil: null,
+    });
+
+    await processProposalAcceptanceEvent({
+      acceptanceId: "acc_2",
+      phase: "completed",
+      payload: {},
+    });
+    await flushWaitUntil();
+
+    expect(eventCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ eventName: "acceptance_orphan_after_terminal" }),
+      })
+    );
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "accepted_party", dedupeSuffix: "orphan:s2" })
+    );
+  });
+});

@@ -28,7 +28,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string; signerId: string } }
 ) {
-  const scoped = await loadScopedPlanSigner(req, params.id, params.signerId);
+  const scoped = await loadScopedPlanSigner(req, params.id, params.signerId, "edit");
   if ("fail" in scoped) return scoped.fail;
 
   const parsed = patchSchema.safeParse(await req.json().catch(() => null));
@@ -76,7 +76,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: { id: string; signerId: string } }
 ) {
-  const scoped = await loadScopedPlanSigner(req, params.id, params.signerId);
+  const scoped = await loadScopedPlanSigner(req, params.id, params.signerId, "remove");
   if ("fail" in scoped) return scoped.fail;
 
   if (scoped.kind === "plan") {

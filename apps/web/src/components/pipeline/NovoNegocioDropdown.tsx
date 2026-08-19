@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -22,6 +22,9 @@ import { Building2, FileText, Plus, Sparkles, Upload } from "lucide-react";
  */
 export function NovoNegocioDropdown({ hasIList }: { hasIList: boolean }) {
   const [proposalDialogOpen, setProposalDialogOpen] = useState(false);
+  // Só suprime o restore-focus do menu quando um Dialog está abrindo — em
+  // Esc/clique-fora o foco DEVE voltar ao trigger (a11y de teclado).
+  const suppressCloseFocusRef = useRef(false);
 
   // Vindo do onboarding (?novo=1): realça e abre o menu pra guiar o 1º negócio.
   const highlight = useSearchParams().get("novo") === "1";
@@ -47,7 +50,21 @@ export function NovoNegocioDropdown({ hasIList }: { hasIList: boolean }) {
             Novo negócio
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-72">
+        <DropdownMenuContent
+          align="end"
+          className="w-72"
+          // O restore-focus do fechamento devolvia o foco ao trigger no mesmo
+          // tick e derrubava o Dialog controlado recém-aberto — por isso os
+          // itens usavam preventDefault no onSelect, o que deixava o MENU
+          // aberto por cima do modal. Suprimir o auto-focus SÓ quando um
+          // Dialog abre resolve os dois lados sem quebrar o Esc/clique-fora.
+          onCloseAutoFocus={(e) => {
+            if (suppressCloseFocusRef.current) {
+              e.preventDefault();
+              suppressCloseFocusRef.current = false;
+            }
+          }}
+        >
           <DropdownMenuItem asChild>
             <Link href="/forms/new" className="flex items-start gap-3 py-2">
               <FileText className="h-4 w-4 mt-0.5 shrink-0" />
@@ -62,10 +79,8 @@ export function NovoNegocioDropdown({ hasIList }: { hasIList: boolean }) {
           </DropdownMenuItem>
           <DropdownMenuItem
             className="flex items-start gap-3 py-2"
-            onSelect={(e) => {
-              // preventDefault: o close+restore-focus default do Radix fecha
-              // o Dialog controlado aberto no mesmo tick.
-              e.preventDefault();
+            onSelect={() => {
+              suppressCloseFocusRef.current = true;
               setProposalDialogOpen(true);
             }}
           >

@@ -16,6 +16,7 @@ import {
 import { CommandTrigger } from "@/components/layout/command-palette";
 import { NotificationsBell } from "@/components/layout/NotificationsBell";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { isDeadCrumb } from "@/components/layout/breadcrumb-routes";
 
 // Label custom pra rotas top-level e algumas conhecidas. Slugs (ids cuid) e
 // segmentos não mapeados caem no fallback "capitalizar".
@@ -62,6 +63,8 @@ interface Segment {
   href: string;
   isLast: boolean;
   isId: boolean;
+  /** Segmento sem page.tsx (ver breadcrumb-routes.ts) — vira texto, não link. */
+  dead: boolean;
 }
 
 function isIdLike(s: string): boolean {
@@ -76,8 +79,11 @@ function capitalize(s: string): string {
 function buildSegments(pathname: string): Segment[] {
   const parts = pathname.split("/").filter(Boolean);
   const root = parts[0];
+  // hrefs pré-computados: o parent de idx é hrefs[idx-1] — uma construção só,
+  // sem duplicar o slice/join em dois pontos que teriam que evoluir juntos.
+  const hrefs = parts.map((_, i) => "/" + parts.slice(0, i + 1).join("/"));
   return parts.map((slug, idx) => {
-    const href = "/" + parts.slice(0, idx + 1).join("/");
+    const href = hrefs[idx];
     const isId = isIdLike(slug);
     // O segmento "locacao" é ambíguo: sob /pipeline é a esteira comercial
     // ("Locação"); sob /locacao é o módulo administrativo ("ADM Locação").
@@ -89,7 +95,14 @@ function buildSegments(pathname: string): Segment[] {
     } else {
       label = LABEL_MAP[slug.toLowerCase()] ?? capitalize(slug);
     }
-    return { label, href, isLast: idx === parts.length - 1, isId };
+    const parentHref = hrefs[idx - 1] ?? "/";
+    return {
+      label,
+      href,
+      isLast: idx === parts.length - 1,
+      isId,
+      dead: isDeadCrumb(href, isId, parentHref),
+    };
   });
 }
 
@@ -142,6 +155,14 @@ export function DashboardHeader({
               <BreadcrumbItem className="min-w-0">
                 {seg.isLast ? (
                   <BreadcrumbPage className="truncate">{seg.label}</BreadcrumbPage>
+                ) : seg.dead ? (
+                  // Sem page.tsx nem redirect no segmento: linkar daria 404
+                  // (issue #320). role+aria-disabled seguem o precedente do
+                  // BreadcrumbPage (ui/breadcrumb.tsx), sem aria-current —
+                  // não é a página atual.
+                  <span role="link" aria-disabled="true" className="truncate">
+                    {seg.label}
+                  </span>
                 ) : (
                   <BreadcrumbLink asChild>
                     <Link href={seg.href} className="truncate">

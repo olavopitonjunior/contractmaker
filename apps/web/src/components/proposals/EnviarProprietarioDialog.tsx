@@ -15,6 +15,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { parseProposalApiError } from "@/lib/proposals/api-errors";
 
 export interface PlanVendedor {
@@ -56,7 +63,13 @@ export function EnviarProprietarioDialog({
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", cpf: "", phone: "" });
+  // Canal de notificação do vendedor. `null` = derivar do preenchimento na
+  // hora do submit (só WhatsApp preenchido → whatsapp); escolha explícita vence.
+  const [canal, setCanal] = useState<"email" | "whatsapp" | null>(null);
   const [createdId, setCreatedId] = useState<string | null>(null);
+
+  const canalEfetivo: "email" | "whatsapp" =
+    canal ?? (form.phone.trim() && !form.email.trim() ? "whatsapp" : "email");
 
   const hasVendedores = vendedores.length > 0 || createdId != null;
   const blockedRows = vendedores.filter((v) => v.issue);
@@ -71,7 +84,18 @@ export function EnviarProprietarioDialog({
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(parseProposalApiError(d, res.status));
-      toast.success(`2ª via enviada ao ${vendedorLabel}.`);
+      // Rebaixamento de canal/instrumento vem como warning — mostrar, senão o
+      // corretor promete WhatsApp e o proprietário recebe e-mail sem ninguém saber.
+      if (Array.isArray(d.warnings) && d.warnings.length > 0) {
+        toast.warning(d.warnings.join(" · "), { duration: 10000, closeButton: true });
+      }
+      if (d.reconciled === "completa") {
+        toast.success(
+          "Nada a enviar: todos já tinham aceitado. A proposta foi marcada como completa."
+        );
+      } else {
+        toast.success(`2ª via enviada ao ${vendedorLabel}.`);
+      }
       onOpenChange(false);
       router.refresh();
     } catch (err) {
@@ -93,6 +117,7 @@ export function EnviarProprietarioDialog({
           email: form.email || undefined,
           cpf: form.cpf || undefined,
           phone: form.phone || undefined,
+          notifyChannel: canalEfetivo,
           signingGroup: 2,
         }),
       });
@@ -187,14 +212,31 @@ export function EnviarProprietarioDialog({
                 />
               </div>
             </div>
-            <div className="space-y-1">
-              <Label htmlFor="vend-cpf">CPF/CNPJ (opcional)</Label>
-              <Input
-                id="vend-cpf"
-                inputMode="numeric"
-                value={form.cpf}
-                onChange={(e) => setForm({ ...form, cpf: e.target.value })}
-              />
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label htmlFor="vend-cpf">CPF/CNPJ (opcional)</Label>
+                <Input
+                  id="vend-cpf"
+                  inputMode="numeric"
+                  value={form.cpf}
+                  onChange={(e) => setForm({ ...form, cpf: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="vend-canal">Notificar por</Label>
+                <Select
+                  value={canalEfetivo}
+                  onValueChange={(c) => setCanal(c as "email" | "whatsapp")}
+                >
+                  <SelectTrigger id="vend-canal">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="email">E-mail</SelectItem>
+                    <SelectItem value="whatsapp">WhatsApp</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
         )}
