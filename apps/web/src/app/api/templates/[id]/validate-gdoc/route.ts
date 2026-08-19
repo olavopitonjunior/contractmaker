@@ -97,19 +97,39 @@ export async function POST(
       template.draftReport && typeof template.draftReport === "object"
         ? (template.draftReport as Record<string, unknown>)
         : {};
-    // O aviso de slot só some quando o token aparece no Doc — resolver na mão
-    // limpa a trava da ativação; reingerir mal continua travando.
+    // O `applied` do relatório é ESPELHO do Doc, nos dois sentidos. Promover
+    // (false→true) faz o conserto manual valer sem passo extra: o operador
+    // escreve `{{slot_garantia}}` no Doc, revalida, a trava da ativação some.
+    //
+    // Rebaixar (true→false) é igualmente necessário e faltava: enquanto o mapa
+    // só subia, um `applied: true` gravado por engano — a ingestão presumia a
+    // troca sem conferir, ver `apply-clause-slot.ts` — era PERMANENTE, e a
+    // revalidação (o único lugar que relê o Doc) confirmava a mentira. Modelo
+    // declarado com slot ausente gera contrato com a garantia chumbada da
+    // variante de referência, seja qual for a escolha do formulário.
     const prevSlots = Array.isArray(prevReport.slots)
       ? (prevReport.slots as Array<Record<string, unknown>>)
       : [];
-    const slots = prevSlots.map((s) =>
-      typeof s?.slot === "string" && foundSet.has(slotToken(s.slot as ClauseSlotKey))
-        ? { ...s, applied: true, token: `{{${slotToken(s.slot as ClauseSlotKey)}}}`, issues: [] }
-        : s
-    );
+    const slots = prevSlots.map((s) => {
+      if (typeof s?.slot !== "string") return s;
+      const token = slotToken(s.slot as ClauseSlotKey);
+      if (foundSet.has(token)) {
+        return { ...s, applied: true, token: `{{${token}}}`, issues: [] };
+      }
+      if (s.applied !== true) return s;
+      const prevIssues = Array.isArray(s.issues) ? s.issues : [];
+      return {
+        ...s,
+        applied: false,
+        token: null,
+        issues: [...prevIssues, { paragraph: `{{${token}}}`, reason: "token-missing" }],
+      };
+    });
 
     await prisma.contractTemplate.update({
-      where: { id: template.id },
+      // `orgId` no where além do id: a org já foi checada acima, isto é defesa
+      // em profundidade — o update nunca alcança template de outro tenant.
+      where: { id: template.id, orgId: org.id },
       data: {
         draftReport: {
           ...prevReport,

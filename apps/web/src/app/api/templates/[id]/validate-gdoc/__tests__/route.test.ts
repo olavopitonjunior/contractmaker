@@ -58,3 +58,130 @@ describe("POST /api/templates/[id]/validate-gdoc — erro de credencial Google",
     expect((await res.json()).ok).toBe(true);
   });
 });
+
+/**
+ * A revalidação é o ESPELHO do Doc, nos dois sentidos.
+ *
+ * O mapa de slots do `draftReport` só subia (false→true). Um `applied: true`
+ * gravado por engano — a ingestão presumia a troca sem conferir — virava
+ * permanente, e a revalidação, o único ponto que relê o Doc, confirmava a
+ * mentira. Template declarado com slot ausente gera contrato com a garantia da
+ * variante de referência chumbada, seja qual for a escolha do formulário.
+ * Achado montando a biblioteca da RE/MAX Trio em produção (19/08/2026).
+ */
+describe("POST /api/templates/[id]/validate-gdoc — reconciliação de slots", () => {
+  const HEADER = "<!-- engine=google_docs: a fonte é o Google Doc -->";
+
+  function withSlotReport(
+    slot: Record<string, unknown>,
+    handlebarsSource = [HEADER, "<!-- slots: {{slot_garantia}} -->"].join("\n")
+  ) {
+    p.contractTemplate.findUnique = vi.fn().mockResolvedValue({
+      id: "t1",
+      orgId: "org-1",
+      engine: "google_docs",
+      googleTemplateDocId: "doc-123",
+      modalidade: "locacao",
+      handlebarsSource,
+      draftReport: { slots: [slot] },
+    });
+  }
+
+  const updateArgs = () => p.contractTemplate.update.mock.calls[0]?.[0];
+
+  it("REBAIXA applied true→false quando o token sumiu do Doc", async () => {
+    withSlotReport({
+      slot: "garantia",
+      applied: true,
+      token: "{{slot_garantia}}",
+      issues: [],
+    });
+    // Doc sem o token: o modelo foi editado à mão, ou a ingestão nunca aplicou.
+    mockDocText.mockResolvedValue(
+      "CLÁUSULA OITAVA - DA GARANTIA\nTexto de fiador chumbado no modelo."
+    );
+
+    const res = await POST(new Request("http://localhost"), { params: { id: "t1" } });
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.slots[0]).toMatchObject({ slot: "garantia", applied: false, token: null });
+    // O gate da página de revisão (`failedSlots`) volta a travar a ativação.
+    expect(body.slots[0].issues.at(-1)).toMatchObject({ reason: "token-missing" });
+    expect(updateArgs().data.draftReport.slots[0].applied).toBe(false);
+  });
+
+  it("PROMOVE false→true quando o operador escreve o token à mão", async () => {
+    withSlotReport(
+      {
+        slot: "garantia",
+        applied: false,
+        token: null,
+        issues: [{ paragraph: "…", reason: "not-found" }],
+      },
+      HEADER
+    );
+    mockDocText.mockResolvedValue("CLÁUSULA OITAVA - DA GARANTIA\n{{slot_garantia}}");
+
+    const res = await POST(new Request("http://localhost"), { params: { id: "t1" } });
+    const body = await res.json();
+
+    expect(body.slots[0]).toMatchObject({
+      applied: true,
+      token: "{{slot_garantia}}",
+      issues: [],
+    });
+    expect(updateArgs().data.handlebarsSource).toContain("slot_garantia");
+  });
+
+  it("slot que já estava applied:false não ganha issue duplicada a cada revalidação", async () => {
+    withSlotReport(
+      {
+        slot: "garantia",
+        applied: false,
+        token: null,
+        issues: [{ paragraph: "…", reason: "ambiguous" }],
+      },
+      HEADER
+    );
+    mockDocText.mockResolvedValue("Texto sem token nenhum.");
+
+    const res = await POST(new Request("http://localhost"), { params: { id: "t1" } });
+    const body = await res.json();
+
+    expect(body.slots[0].applied).toBe(false);
+    expect(body.slots[0].issues).toHaveLength(1);
+    expect(body.slots[0].issues[0].reason).toBe("ambiguous");
+  });
+
+  it("Doc inacessível NÃO rebaixa nada — 502 sem tocar no banco", async () => {
+    // Trava contra o modo de falha oposto: 403/429 da API do Google não pode
+    // ser lido como "o token sumiu" e zerar um `applied` legítimo.
+    withSlotReport({
+      slot: "garantia",
+      applied: true,
+      token: "{{slot_garantia}}",
+      issues: [],
+    });
+    mockDocText.mockRejectedValue(new Error("Rate Limit Exceeded"));
+
+    const res = await POST(new Request("http://localhost"), { params: { id: "t1" } });
+
+    expect(res.status).toBe(502);
+    expect(p.contractTemplate.update).not.toHaveBeenCalled();
+  });
+
+  it("o update é escopado por orgId (isolamento de tenant)", async () => {
+    withSlotReport({
+      slot: "garantia",
+      applied: true,
+      token: "{{slot_garantia}}",
+      issues: [],
+    });
+    mockDocText.mockResolvedValue("{{slot_garantia}}");
+
+    await POST(new Request("http://localhost"), { params: { id: "t1" } });
+
+    expect(updateArgs().where).toEqual({ id: "t1", orgId: "org-1" });
+  });
+});
