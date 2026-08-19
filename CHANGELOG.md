@@ -4,6 +4,13 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-19 - Ressalvas de UX do QA de locação (checkboxes e dropdown)
+
+### Corrigido
+
+- **Checkboxes do `StatusDebitosStep` agora persistem** (`tem_debitos`, `debitos.*.selecionado`, `debitos_assumidos.assume`, `regularizacoes.tem`): os `setValue` rodavam sem `{ shouldDirty: true }`, então o campo nunca entrava em `dirtyFields` e o auto-save (que recorta o PATCH pelo escopo sujo, `use-dirty-scope`) o descartava em silêncio — marcado na UI, ausente do dataJson salvo, mesmo quando outro campo disparava o save. Só persistia por acidente se o usuário digitasse na textarea vizinha (o `register` sujava a chave top-level) ou no finalize completo. Mesma classe corrigida nos toggles `tipo_pessoa` (Vendedor/Comprador/_PartyFields/fiador da Garantia), que escapavam pelo mesmo acidente.
+- **Dropdown "Novo negócio" não fica mais aberto sobre o modal** (vendas e locação): o `e.preventDefault()` no `onSelect` — posto ali pra impedir que o restore-focus do Radix derrubasse o Dialog controlado — também cancelava o fechamento do menu, que ficava encavalado com o modal (ambos `z-50`). Trocado pelo par canônico: `onSelect` default fecha o menu e `onCloseAutoFocus={(e) => e.preventDefault()}` no `DropdownMenuContent` preserva o Dialog.
+
 ## [Unreleased] - 2026-08-19 - Propostas: 2ª via do Aceite sai dos becos sem saída
 
 Seis correções do QA do bloco F2 (issue #314), todas no modo Aceite/2ª via.

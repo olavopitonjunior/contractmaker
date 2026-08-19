@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -39,6 +39,9 @@ export function NovoNegocioLocacaoDropdown({
   const [formDialogOpen, setFormDialogOpen] = useState(false);
   const [proposalDialogOpen, setProposalDialogOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  // Só suprime o restore-focus do menu quando um Dialog está abrindo — em
+  // Esc/clique-fora o foco DEVE voltar ao trigger (a11y de teclado).
+  const suppressCloseFocusRef = useRef(false);
   const wizardDisabled = properties.length === 0 || tenants.length === 0;
 
   // Vindo do onboarding (?novo=1): realça e abre o menu pra guiar o 1º negócio.
@@ -65,13 +68,22 @@ export function NovoNegocioLocacaoDropdown({
             Novo negócio
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-72">
+        <DropdownMenuContent
+          align="end"
+          className="w-72"
+          // Ver NovoNegocioDropdown: fecha o menu pelo default do Radix e
+          // suprime o restore-focus SÓ quando um Dialog abre (a11y do Esc).
+          onCloseAutoFocus={(e) => {
+            if (suppressCloseFocusRef.current) {
+              e.preventDefault();
+              suppressCloseFocusRef.current = false;
+            }
+          }}
+        >
           <DropdownMenuItem
             className="flex items-start gap-3 py-2"
-            onSelect={(e) => {
-              // preventDefault: o close+restore-focus default do Radix fecha
-              // o Dialog controlado aberto no mesmo tick.
-              e.preventDefault();
+            onSelect={() => {
+              suppressCloseFocusRef.current = true;
               setFormDialogOpen(true);
             }}
           >
@@ -86,8 +98,8 @@ export function NovoNegocioLocacaoDropdown({
           </DropdownMenuItem>
           <DropdownMenuItem
             className="flex items-start gap-3 py-2"
-            onSelect={(e) => {
-              e.preventDefault();
+            onSelect={() => {
+              suppressCloseFocusRef.current = true;
               setProposalDialogOpen(true);
             }}
           >
@@ -118,8 +130,8 @@ export function NovoNegocioLocacaoDropdown({
           <DropdownMenuItem
             className="flex items-start gap-3 py-2"
             disabled={wizardDisabled}
-            onSelect={(e) => {
-              e.preventDefault();
+            onSelect={() => {
+              suppressCloseFocusRef.current = true;
               setWizardOpen(true);
             }}
           >

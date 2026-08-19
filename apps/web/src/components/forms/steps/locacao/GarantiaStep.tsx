@@ -184,7 +184,7 @@ export function GarantiaStep({
               <div className="flex rounded-md border border-input overflow-hidden">
                 <button
                   type="button"
-                  onClick={() => form.setValue("garantia.fiador.tipo_pessoa", "fisica")}
+                  onClick={() => form.setValue("garantia.fiador.tipo_pessoa", "fisica", { shouldDirty: true })}
                   className={`px-3 py-1.5 text-xs font-medium transition-colors ${
                     fiadorTipoPessoa !== "juridica"
                       ? "bg-primary text-primary-foreground"
@@ -195,7 +195,7 @@ export function GarantiaStep({
                 </button>
                 <button
                   type="button"
-                  onClick={() => form.setValue("garantia.fiador.tipo_pessoa", "juridica")}
+                  onClick={() => form.setValue("garantia.fiador.tipo_pessoa", "juridica", { shouldDirty: true })}
                   className={`px-3 py-1.5 text-xs font-medium transition-colors ${
                     fiadorTipoPessoa === "juridica"
                       ? "bg-primary text-primary-foreground"
