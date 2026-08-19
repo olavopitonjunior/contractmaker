@@ -309,7 +309,17 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
     <main
       data-slot="sidebar-inset"
       className={cn(
-        "relative flex w-full flex-1 flex-col bg-background",
+        // `min-w-0` NÃO é do registry do shadcn — foi acrescentado aqui de
+        // propósito; se um `npx shadcn add sidebar` regerar este arquivo, tem de
+        // voltar. Este <main> é o item flex ao lado da sidebar e, com o
+        // `min-width: auto` que o flexbox aplica por padrão, ele não consegue
+        // encolher abaixo da largura min-content do conteúdo. Uma tabela larga
+        // (ex.: /pipeline/propostas) então ESTICA o item e quem rola na
+        // horizontal é a PÁGINA inteira — breadcrumb e KPIs saem de posição —
+        // em vez de rolar dentro do próprio `overflow-x-auto` da tabela, que é
+        // o que o markup já pretende. Com min-w-0 o item encolhe e a rolagem
+        // volta pra dentro do contêiner certo.
+        "relative flex w-full min-w-0 flex-1 flex-col bg-background",
         "md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-sm md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
         className
       )}
