@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db/prisma";
 import { renderProposalVia } from "@/lib/proposals/render";
 import { selectPropostaTemplate } from "@/lib/proposals/template-select";
 import { SIGNED_OR_LATER_STATUSES } from "@/lib/proposals/status-sets";
+import { proposalNumero } from "@/lib/proposals/code";
 import { ViewBeacon } from "./ViewBeacon";
 
 export const runtime = "nodejs";
@@ -30,6 +31,7 @@ export default async function PublicProposalPage({
     where: { token: params.token },
     select: {
       id: true,
+      code: true,
       title: true,
       status: true,
       schemaType: true,
@@ -81,7 +83,7 @@ export default async function PublicProposalPage({
           dataJson,
           hiddenPaths: [],
           via: "completa",
-          numero: proposal.id.slice(-8),
+          numero: proposalNumero(proposal),
           comissaoIncluida: proposal.comissaoIncluida,
           meta: { emitidaEm: proposal.createdAt, validaAte: proposal.validUntil },
         })

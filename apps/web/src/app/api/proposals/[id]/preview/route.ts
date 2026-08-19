@@ -5,6 +5,7 @@ import { EDITABLE_STATUSES } from "@/lib/proposals/status-sets";
 import { renderProposalVia } from "@/lib/proposals/render";
 import { selectPropostaTemplate } from "@/lib/proposals/template-select";
 import { stripActiveContent } from "@/lib/proposals/preview-html";
+import { proposalNumero } from "@/lib/proposals/code";
 
 // Handlebars + seleção de template → node.
 export const runtime = "nodejs";
@@ -66,7 +67,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     dataJson,
     hiddenPaths: [],
     via: "completa",
-    numero: proposal.id.slice(-8),
+    numero: proposalNumero(proposal),
     comissaoIncluida: proposal.comissaoIncluida,
     meta: { emitidaEm: proposal.createdAt, validaAte: proposal.validUntil },
   });

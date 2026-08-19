@@ -387,6 +387,30 @@ model Organization {
   // espelho local de listings (a RexAPI não tem busca textual nem webhooks).
   ilistConnection IListConnection?
   ilistListings   IListListing[]
+
+  sequences OrgSequence[]
+}
+
+/// Contador sequencial por (org, escopo) — hoje só o código da proposta
+/// (`scope = "proposal:<ano>"`), mas genérico de propósito.
+///
+/// Por que uma tabela e não `MAX(code) + 1`: dois creates simultâneos leem o
+/// mesmo máximo e geram o mesmo código (o @@unique de Proposal transformaria
+/// isso num 500 aleatório). O incremento roda como statement ÚNICO
+/// (`INSERT ... ON CONFLICT DO UPDATE ... RETURNING`), que o Postgres serializa
+/// na row — ver `lib/proposals/code.ts`.
+///
+/// Por que não uma SEQUENCE do Postgres: sequence é global, e aqui o contador é
+/// por (org, ano) — precisaria de DDL dinâmico a cada tenant/virada de ano.
+model OrgSequence {
+  orgId     String
+  scope     String
+  value     Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@id([orgId, scope])
 }
 
 /// Conta Google conectada pela imobiliária (OAuth offline). Os Docs de template
@@ -3304,6 +3328,12 @@ model Proposal {
   schemaType      String    @default("compra_venda_v1")
   // Derivado do schemaType. Persistido pra facilitar filtro/índice.
   kind            String    @default("venda") // venda | locacao
+  // Código humano e estável: "PROP-<ano BRT>-<seq 4 dígitos>". Alocado no
+  // create a partir de OrgSequence (contador por org+ano). Substitui o
+  // `id.slice(-8)` que servia de "número" — ver lib/proposals/code.ts.
+  // Nullable APENAS por causa do backfill (toda proposta nova nasce com um);
+  // ler sempre via `proposalNumero()`, que cai no sufixo do id se faltar.
+  code            String?
   title           String
   // rascunho | aguardando_aprovacao | enviada | entregue | visualizada |
   // assinada_proponente | aguardando_vendedor | completa | convertida |
@@ -3430,6 +3460,7 @@ model Proposal {
   events         ProposalEvent[]
   envelopes      Envelope[]
 
+  @@unique([orgId, code])
   @@index([orgId, status])
   // Lista/KPIs filtram sempre por (org, tipo, status) — venda × locação.
   @@index([orgId, kind, status])

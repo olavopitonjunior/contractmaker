@@ -13,6 +13,7 @@ import { getEffectivePermissions, proposalScopeWhere, can } from "@/lib/security
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { generateProposalToken } from "@/lib/proposals/token";
 import { computeDedupeKey } from "@/lib/proposals/signer-dedupe";
+import { allocateProposalCode } from "@/lib/proposals/code";
 import { sanitizeHiddenPaths } from "@/lib/proposals/hidden-fields";
 import {
   createSchema,
@@ -173,53 +174,61 @@ export async function POST(req: NextRequest) {
     method: "POST",
     path: "/api/proposals",
     handler: async () => {
-      const proposal = await prisma.proposal.create({
-        data: {
-          orgId: auth.org.id,
-          userId: auth.actor.effectiveUserId,
-          schemaType: input.schemaType,
-          kind: kindForSchema(input.schemaType),
-          title: input.title,
-          status: "rascunho",
-          token: generateProposalToken(),
-          dataJson: input.dataJson as Prisma.InputJsonValue,
-          comissaoIncluida: input.comissaoIncluida ?? false,
-          // Ocultar comissão do proprietário → sanitiza contra a allowlist do
-          // schemaType. Não-vazio força o 2º envelope a sair na via reduzida.
-          hiddenPaths: input.hiddenPaths
-            ? sanitizeHiddenPaths(input.schemaType, input.hiddenPaths)
-            : [],
-          // Sem prazo informado → 7 dias. Nunca `null`: proposta sem validade
-          // não expira em canto nenhum (ver create-schema.ts).
-          validUntil: input.validUntil
-            ? new Date(input.validUntil)
-            : defaultValidUntil(),
-          propertyId: input.propertyId ?? null,
-          leaseClientId: input.leaseClientId ?? null,
-          tenantId: input.tenantId ?? null,
-          responsibleUserId: input.responsibleUserId ?? null,
-          responsibleName: input.responsibleName ?? null,
-          signers: input.signers?.length
-            ? {
-                create: input.signers.map((s) => ({
-                  role: s.role,
-                  name: s.name,
-                  email: s.email || null,
-                  cpf: s.cpf || null,
-                  phone: s.phone || null,
-                  notifyChannel: s.notifyChannel ?? "email",
-                  // Proponente assina primeiro (grupo 1); demais no grupo 2.
-                  signingGroup: s.signingGroup ?? (s.role === "proponente" ? 1 : 2),
-                  dedupeKey: computeDedupeKey({
+      // Transação: o código sai de um contador (OrgSequence) que é incrementado
+      // ANTES do insert. Fora de uma transação, um create que falhasse (P2002 de
+      // dedupeKey, por exemplo) deixaria o número queimado e abriria um buraco
+      // na sequência. Aqui o rollback devolve o contador junto.
+      const proposal = await prisma.$transaction(async (tx) => {
+        const code = await allocateProposalCode(tx, auth.org.id);
+        return tx.proposal.create({
+          data: {
+            orgId: auth.org.id,
+            userId: auth.actor.effectiveUserId,
+            schemaType: input.schemaType,
+            kind: kindForSchema(input.schemaType),
+            code,
+            title: input.title,
+            status: "rascunho",
+            token: generateProposalToken(),
+            dataJson: input.dataJson as Prisma.InputJsonValue,
+            comissaoIncluida: input.comissaoIncluida ?? false,
+            // Ocultar comissão do proprietário → sanitiza contra a allowlist do
+            // schemaType. Não-vazio força o 2º envelope a sair na via reduzida.
+            hiddenPaths: input.hiddenPaths
+              ? sanitizeHiddenPaths(input.schemaType, input.hiddenPaths)
+              : [],
+            // Sem prazo informado → 7 dias. Nunca `null`: proposta sem validade
+            // não expira em canto nenhum (ver create-schema.ts).
+            validUntil: input.validUntil
+              ? new Date(input.validUntil)
+              : defaultValidUntil(),
+            propertyId: input.propertyId ?? null,
+            leaseClientId: input.leaseClientId ?? null,
+            tenantId: input.tenantId ?? null,
+            responsibleUserId: input.responsibleUserId ?? null,
+            responsibleName: input.responsibleName ?? null,
+            signers: input.signers?.length
+              ? {
+                  create: input.signers.map((s) => ({
+                    role: s.role,
                     name: s.name,
-                    email: s.email,
-                    cpf: s.cpf,
-                    phone: s.phone,
-                  }),
-                })),
-              }
-            : undefined,
-        },
+                    email: s.email || null,
+                    cpf: s.cpf || null,
+                    phone: s.phone || null,
+                    notifyChannel: s.notifyChannel ?? "email",
+                    // Proponente assina primeiro (grupo 1); demais no grupo 2.
+                    signingGroup: s.signingGroup ?? (s.role === "proponente" ? 1 : 2),
+                    dedupeKey: computeDedupeKey({
+                      name: s.name,
+                      email: s.email,
+                      cpf: s.cpf,
+                      phone: s.phone,
+                    }),
+                  })),
+                }
+              : undefined,
+          },
+        });
       });
       await audit(
         extractAuditContextFromRequest(req, auth.org.id, auth.actor.effectiveUserId),
@@ -240,6 +249,19 @@ export async function POST(req: NextRequest) {
     // 409 acionável em vez de 500: cada signatário precisa de contato distinto
     // (e-mail ou CPF) pra assinar separadamente na ClickSign.
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      // `@@unique([orgId, code])` também é P2002. Não deveria acontecer (o
+      // contador serializa a alocação), mas responder "signatários duplicados"
+      // pra uma colisão de código mandaria o corretor caçar um erro que não
+      // existe. Distingue pelo alvo; alvo desconhecido cai no caso comum.
+      const target = String(
+        (err.meta as { target?: unknown } | undefined)?.target ?? ""
+      );
+      if (target.includes("code")) {
+        return NextResponse.json(
+          { error: "Conflito ao numerar a proposta. Tente novamente." },
+          { status: 409 }
+        );
+      }
       return NextResponse.json(
         {
           error:

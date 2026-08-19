@@ -11,6 +11,7 @@ import {
 } from "./acceptance-record-sync";
 import { notifyProposalMilestone } from "./notify-proposal";
 import { proposalPublicLink } from "./public-link";
+import { proposalNumero } from "./code";
 
 /**
  * Ponte webhook ClickSign → Proposal para o Aceite via WhatsApp
@@ -152,11 +153,11 @@ export async function processProposalAcceptanceEvent(
   const proposal = signer
     ? await prisma.proposal.findUnique({
         where: { id: signer.proposalId },
-        select: { id: true, orgId: true, userId: true, status: true, title: true, token: true, instrument: true, validUntil: true },
+        select: { id: true, code: true, orgId: true, userId: true, status: true, title: true, token: true, instrument: true, validUntil: true },
       })
     : await prisma.proposal.findFirst({
         where: { acceptanceClicksignId: input.acceptanceId, ...orgScope },
-        select: { id: true, orgId: true, userId: true, status: true, title: true, token: true, instrument: true, validUntil: true },
+        select: { id: true, code: true, orgId: true, userId: true, status: true, title: true, token: true, instrument: true, validUntil: true },
       });
   if (!proposal) {
     return { ok: true, handled: false, phase: input.phase, unknownAcceptance: true };
@@ -412,7 +413,7 @@ export async function processProposalAcceptanceEvent(
       // enviado, pelo helper compartilhado.
       const link = proposalPublicLink(proposal.token);
       const acceptedText = buildAcceptanceMessage({
-        numero: proposal.id.slice(-8),
+        numero: proposalNumero(proposal),
         title: proposal.title,
         link,
       });
