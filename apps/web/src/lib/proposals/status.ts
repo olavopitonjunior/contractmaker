@@ -56,6 +56,9 @@ export const ALLOWED_FROM: Record<ProposalStatus, ProposalStatus[]> = {
     "aguardando_vendedor",
   ],
   expirada: ["enviada", "entregue", "visualizada"],
+  // `falha_envio` entrou junto com o release da 1ª via no cancelamento de
+  // envelope: de lá se chega a proposta que o cliente JÁ viu, e arquivar
+  // (cancelar) precisa continuar possível. Espelhado em CANCELLABLE_STATUSES.
   cancelada: [
     "rascunho",
     "aguardando_aprovacao",
@@ -64,6 +67,7 @@ export const ALLOWED_FROM: Record<ProposalStatus, ProposalStatus[]> = {
     "visualizada",
     "assinada_proponente",
     "aguardando_vendedor",
+    "falha_envio",
   ],
   falha_envio: ["enviada"],
 };

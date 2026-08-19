@@ -7,6 +7,7 @@ import { ClicksignError } from "@/lib/clicksign/client";
 import { can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { loadScopedProposal, proposalFeatureGuard } from "@/lib/proposals/route-helpers";
+import { onProposalEnvelopeCanceled } from "@/lib/proposals/webhook-hooks";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
 export const runtime = "nodejs";
@@ -111,6 +112,25 @@ export async function PATCH(
   return NextResponse.json({ envelope: updated });
 }
 
+/**
+ * Propaga o cancelamento pro status da PROPOSTA. Sem isto o envelope morria mas
+ * a proposta seguia "aguardando assinatura", sem reenvio nem edição — presa até
+ * o prazo vencer. `appInitiated` marca que o cancelamento nasceu AQUI (botão do
+ * corretor), o que libera a 1ª via pra reenvio e cala o sino da 2ª; o webhook de
+ * cancel externo continua com o comportamento antigo.
+ *
+ * Best-effort: o envelope já foi cancelado na ClickSign e não dá pra desfazer —
+ * estourar aqui devolveria erro pra uma ação que de fato aconteceu. O caminho
+ * `alreadyCanceled` é o que dá o retry.
+ */
+async function propagateCancelToProposal(envelopeId: string): Promise<void> {
+  try {
+    await onProposalEnvelopeCanceled(envelopeId, { appInitiated: true });
+  } catch (err) {
+    console.error("[proposta envelope cancel] propagação de status falhou:", err);
+  }
+}
+
 export async function DELETE(
   req: NextRequest,
   { params }: { params: { id: string; envelopeId: string } }
@@ -133,8 +153,19 @@ export async function DELETE(
     return NextResponse.json({ error: "Envelope já finalizado" }, { status: 400 });
   }
   // Idempotente: recancelar não é erro (o botão pode ter sido clicado duas
-  // vezes, ou o webhook já ter cancelado antes).
+  // vezes, ou o webhook já ter cancelado antes). A propagação roda IGUAL aqui
+  // porque a resposta acima é `ok` sem ter mexido no status — sem isto, uma
+  // segunda chamada nunca corrigiria uma propagação que falhou na primeira
+  // (ela é best-effort e engole o erro).
+  //
+  // ATENÇÃO: hoje isto só é alcançável por chamada direta à API. O botão da UI
+  // some quando o envelope vira `canceled` (`EnvelopeCard.canEdit` = draft |
+  // running), então o cenário "cancelaram na ClickSign e o corretor clica aqui
+  // pra destravar" NÃO existe pela tela. Enquanto o release da 1ª via for
+  // exclusivo deste caminho, proposta cuja 1ª via morreu fora da plataforma
+  // segue presa até expirar. Ver CHANGELOG.
   if (envelope.status === "canceled") {
+    await propagateCancelToProposal(envelope.id);
     return NextResponse.json({ ok: true, alreadyCanceled: true });
   }
 
@@ -157,6 +188,8 @@ export async function DELETE(
       },
     })
     .catch(() => {});
+
+  await propagateCancelToProposal(envelope.id);
 
   await audit(
     extractAuditContextFromRequest(req, auth.org.id, auth.actor.effectiveUserId),
