@@ -4,6 +4,12 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-19 - Breadcrumb não linka segmento sem rota
+
+### Corrigido
+
+- **Breadcrumb do dashboard** (issue #320): crumb intermediário sem `page.tsx` nem redirect renderiza como texto (`role="link"` + `aria-disabled`) em vez de link 404 — casos: `/certidoes`, `/relatorios`, `/settings/pagamentos`, `/settings/seguranca/audit-log/users` e o "Detalhe" sob `/forms`. `/deals` e `/locacao/deals` seguem como links (o redirect do #319 os faz navegar). Whitelist guardada por teste que deriva a verdade do `app/(dashboard)` e subtrai os redirects do `next.config.js`.
+
 ## [Unreleased] - 2026-08-19 - Ressalvas de UX do QA de locação (checkboxes e dropdown)
 
 ### Corrigido
