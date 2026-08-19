@@ -50,6 +50,10 @@ vi.mock("@/lib/db/prisma", () => {
     contractTemplate: {
       findMany: vi.fn(),
       findFirst: vi.fn().mockResolvedValue(null),
+      // `resolveTemplateOverride` (escolha manual de modelo na geração de
+      // contrato) resolve o template por id — sem isto, toda rota que aceita
+      // `templateId` quebra no mock, não no código.
+      findUnique: vi.fn().mockResolvedValue(null),
       create: vi.fn(),
       count: vi.fn().mockResolvedValue(0),
     },
