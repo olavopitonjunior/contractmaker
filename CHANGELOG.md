@@ -4,6 +4,17 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-19 - Slot de garantia: o relatório para de mentir
+
+### Corrigido
+
+Três bugs encadeados da ingestão DOCX→template, todos com o mesmo desfecho silencioso: o modelo **declara** um `{{slot_garantia}}` que não está no Google Doc, a cláusula resolvida é descartada na geração e o contrato sai com a garantia da variante de referência **chumbada** — o cliente escolhe caução no formulário e assina fiador. Os três foram vividos montando a biblioteca da RE/MAX Trio em produção (19/08), onde os 4 modelos precisaram de conserto manual via Docs API.
+
+- **`applyClauseSlotToDoc` presumia a troca em vez de conferir**: as guardas rodam contra o texto PLANO (`getDocPlainText`, que concatena os `textRun`), mas quem aplica é o `replaceAllText`, que casa contra a estrutura real do Doc. Parágrafo partido em vários runs — herança comum de DOCX com formatação invisível — satisfaz a guarda e muda ZERO ocorrências, e o retorno do batch era descartado: `applied: true` sem nada ter acontecido. Agora o `occurrencesChanged` de cada reply é inspecionado e o doc é RELIDO; `applied: true` só sai quando o token está no documento e nenhum parágrafo do bloco sobrou. Casar em MAIS de um lugar (`over-matched`) também reprova — a guarda de unicidade não enxerga cabeçalho e rodapé, mas o `replaceAllText` edita os dois. Motivos novos no relatório, traduzidos na página de revisão: `replace-noop`, `over-matched`, `verify-failed`, `verify-unavailable` e `token-missing`.
+- **O pass de IA apagava o slot**: ele roda DEPOIS do apply, então enxerga o `{{slot_garantia}}` solto no doc e devolvia o trecho ao redor mapeado pro legado `{{clausula_garantia}}` — aconteceu nos 4 modelos da Trio. Guarda determinística passa a descartar qualquer mapeamento cujo `trecho_literal` contenha `{{...}}` (`reason: "already-tokenized"`), o que cobre também os parágrafos que seriam esvaziados num bloco multi-parágrafo. A regra entrou no prompt, mas a trava é o código.
+- **A declaração do slot saiu de antes pra depois do pass de IA** em `POST /api/templates/from-docx`, derivada do estado FINAL do documento: slot que não sobrevive não é declarado e é rebaixado no `draftReport`, travando a ativação na página de revisão. Doc ilegível na conferência é fail-closed — não declara e trava a ativação, mas com motivo `verify-unavailable`: "não consegui conferir" não é a mesma afirmação que "conferi e o token não está lá", e um 429 do Drive não pode virar diagnóstico.
+- **`validate-gdoc` nunca rebaixava `applied`**: o mapa só subia (false→true), então um `applied: true` gravado por engano era permanente e a revalidação — único ponto que relê o Doc — confirmava a mentira. Agora espelha o Doc nos dois sentidos, sem duplicar issue em slot que já estava falho, e um erro de credencial/rate-limit do Google segue devolvendo 502 sem tocar no relatório. O `update` também passou a ser escopado por `orgId`.
+
 ## [Unreleased] - 2026-08-19 - Rotas de negócio voltam a funcionar sob impersonation
 
 ### Corrigido
