@@ -408,7 +408,7 @@ export function CompradorStep({ form }: CompradorStepProps) {
                     <button
                       type="button"
                       onClick={() =>
-                        form.setValue(`${prefix}.tipo_pessoa`, "fisica")
+                        form.setValue(`${prefix}.tipo_pessoa`, "fisica", { shouldDirty: true })
                       }
                       className={`px-3 py-1.5 text-xs font-medium transition-colors ${
                         tipoPessoa === "fisica"
@@ -421,7 +421,7 @@ export function CompradorStep({ form }: CompradorStepProps) {
                     <button
                       type="button"
                       onClick={() =>
-                        form.setValue(`${prefix}.tipo_pessoa`, "juridica")
+                        form.setValue(`${prefix}.tipo_pessoa`, "juridica", { shouldDirty: true })
                       }
                       className={`px-3 py-1.5 text-xs font-medium transition-colors ${
                         tipoPessoa === "juridica"

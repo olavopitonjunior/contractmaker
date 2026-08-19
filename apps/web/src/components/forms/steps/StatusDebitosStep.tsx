@@ -121,7 +121,7 @@ export function StatusDebitosStep({ form }: StatusDebitosStepProps) {
             id="tem-debitos"
             label="O imóvel possui débitos pendentes"
             checked={!!temDebitos}
-            onChange={(v) => form.setValue("tem_debitos", v)}
+            onChange={(v) => form.setValue("tem_debitos", v, { shouldDirty: true })}
           />
 
           {temDebitos && (
@@ -133,7 +133,7 @@ export function StatusDebitosStep({ form }: StatusDebitosStepProps) {
                     label="IPTU"
                     checked={!!iptuSelecionado}
                     onChange={(v) =>
-                      form.setValue("debitos.iptu.selecionado", v)
+                      form.setValue("debitos.iptu.selecionado", v, { shouldDirty: true })
                     }
                   />
                   {iptuSelecionado && (
@@ -161,7 +161,7 @@ export function StatusDebitosStep({ form }: StatusDebitosStepProps) {
                     label="Condomínio"
                     checked={!!condominioSelecionado}
                     onChange={(v) =>
-                      form.setValue("debitos.condominio.selecionado", v)
+                      form.setValue("debitos.condominio.selecionado", v, { shouldDirty: true })
                     }
                   />
                   {condominioSelecionado && (
@@ -255,7 +255,7 @@ export function StatusDebitosStep({ form }: StatusDebitosStepProps) {
             id="debitos-assumidos"
             label="Comprador assume debitos existentes do imovel"
             checked={!!debitosAssumidos}
-            onChange={(v) => form.setValue("debitos_assumidos.assume", v)}
+            onChange={(v) => form.setValue("debitos_assumidos.assume", v, { shouldDirty: true })}
           />
 
           {debitosAssumidos && (
@@ -281,7 +281,7 @@ export function StatusDebitosStep({ form }: StatusDebitosStepProps) {
             id="tem-regularizacoes"
             label="Ha regularizacoes pendentes a serem realizadas"
             checked={!!temRegularizacoes}
-            onChange={(v) => form.setValue("regularizacoes.tem", v)}
+            onChange={(v) => form.setValue("regularizacoes.tem", v, { shouldDirty: true })}
           />
 
           {temRegularizacoes && (
