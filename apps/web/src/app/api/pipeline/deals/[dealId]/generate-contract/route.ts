@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth, getUserOrg } from "@/lib/auth/auth";
+import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
 import {
   generateContractForDeal,
@@ -11,18 +11,16 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 export const runtime = "nodejs";
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { dealId: string } }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const org = await getUserOrg(session.user.id);
-  if (!org) {
-    return NextResponse.json({ error: "No organization" }, { status: 400 });
-  }
+  // `ctx.userId` é o ator EFETIVO: sob impersonation, o dono do tenant. É ele
+  // que tem membership na org (RBAC do `guardDealScope`) e é ele que deve
+  // constar como autor do contrato gerado — o super_admin real fica carimbado
+  // no AuditLog por `audit()` (metadata `impersonatedBy`).
+  const authResult = await requireAuth(req);
+  if (!authResult.ok) return authResult.response;
+  const { ctx } = authResult;
 
   try {
     // Deals de locação usam o gerador próprio (template por schemaType +
@@ -40,8 +38,8 @@ export async function POST(
     // checagem de org própria — o guard fecha as duas coisas.
     const denied = await guardDealScope({
       dealId: params.dealId,
-      userId: session.user.id,
-      orgId: org.id,
+      userId: ctx.userId,
+      orgId: ctx.orgId,
       permission: PERMISSION.CONTRACT_CREATE,
     });
     if (denied) return denied;
@@ -50,7 +48,7 @@ export async function POST(
       deal.kind === "locacao"
         ? generateLocacaoContractForDeal
         : generateContractForDeal;
-    const result = await generate(params.dealId, session.user.id, org.id);
+    const result = await generate(params.dealId, ctx.userId, ctx.orgId);
 
     return NextResponse.json(result, { status: 201 });
   } catch (error: any) {
