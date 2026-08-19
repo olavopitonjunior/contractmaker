@@ -67,6 +67,7 @@ export interface IngestDocTypeDef {
 const LOCACAO_SUB: IngestSubOption[] = [
   { value: "residencial", label: "Residencial", modalidade: "locacao" },
   { value: "comercial", label: "Comercial", modalidade: "locacao_comercial" },
+  { value: "temporada", label: "Por temporada (short stay)", modalidade: "temporada" },
 ];
 
 const PROPOSTA_LOCACAO_SUB: IngestSubOption[] = [
