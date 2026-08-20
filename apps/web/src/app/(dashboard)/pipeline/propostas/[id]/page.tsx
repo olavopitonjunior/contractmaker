@@ -222,6 +222,7 @@ export default async function PropostaDetailPage({
         hasEnvelopes: envelopeCount > 0,
         createdAtLabel: formatDateTimeBR(proposal.createdAt),
         sentAtLabel: formatDateTimeBR(proposal.sentAt),
+        sentAt: proposal.sentAt?.toISOString() ?? null,
         deliveredAtLabel: formatDateTimeBR(proposal.deliveredAt),
         firstViewedAtLabel: formatDateTimeBR(proposal.firstViewedAt),
         viewCount: proposal.viewCount,

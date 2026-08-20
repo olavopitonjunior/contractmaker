@@ -86,6 +86,8 @@ interface Proposal {
   hasEnvelopes: boolean;
   createdAtLabel: string;
   sentAtLabel: string;
+  /** `sentAt` CRU (ISO) — pergunta da EXCLUSÃO. Ver `isFalhaEnvioAlreadyDelivered`. */
+  sentAt: string | null;
   deliveredAtLabel: string;
   firstViewedAtLabel: string;
   viewCount: number;
@@ -342,6 +344,7 @@ export function ProposalDetailClient({
               kind: proposal.kind,
               instrument: proposal.instrument,
               convertedDealId: proposal.convertedDealId,
+              sentAt: proposal.sentAt,
             }}
             permissions={permissions}
             kind={proposal.kind}

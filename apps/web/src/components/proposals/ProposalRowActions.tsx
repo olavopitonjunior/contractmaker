@@ -40,6 +40,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   CANCELLABLE_STATUSES,
   DELETABLE_STATUSES,
+  isFalhaEnvioAlreadyDelivered,
   REMINDABLE_STATUSES,
   CONVERTABLE_STATUSES,
   AWAITING_DECISION_STATUSES,
@@ -72,6 +73,14 @@ export interface RowProposal {
   convertedDealId: string | null;
   /** Título atual — abre o diálogo de renomear já preenchido. */
   title: string;
+  /**
+   * `Proposal.sentAt` em ISO. Obrigatório (aceita `null`): é o que separa
+   * `falha_envio` que nunca saiu (excluível) de `falha_envio` que saiu e foi
+   * cancelado (não se exclui — a API devolve 409). Opcional, um chamador que
+   * esquecesse de passar ofereceria o botão morto de novo, sem erro de
+   * compilação.
+   */
+  sentAt: string | null;
 }
 
 export function ProposalRowActions({
@@ -110,8 +119,14 @@ export function ProposalRowActions({
   const canRename = permissions.write && !TERMINAL_STATUSES.has(proposal.status);
   const canConvert = permissions.convert && CONVERTABLE_STATUSES.has(proposal.status);
   const canCancel = permissions.cancel && CANCELLABLE_STATUSES.has(proposal.status);
+  // `!isFalhaEnvioAlreadyDelivered` espelha EXATAMENTE o guard do DELETE: sem
+  // ele o botão reaparecia depois de cancelar o envelope e a API respondia 409
+  // sempre — a UI decidindo por status, o servidor por sentAt.
   const canDelete =
-    permissions.delete && DELETABLE_STATUSES.has(proposal.status) && !proposal.convertedDealId;
+    permissions.delete &&
+    DELETABLE_STATUSES.has(proposal.status) &&
+    !isFalhaEnvioAlreadyDelivered(proposal) &&
+    !proposal.convertedDealId;
 
   async function run(url: string, init: RequestInit, okMsg: string) {
     setBusy(true);
