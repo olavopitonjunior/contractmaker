@@ -68,9 +68,25 @@ function draftProps() {
         imovel: "Rua das Acácias, 120",
         valorLabel: "R$ 3.500",
       },
+      detalhes: {
+        proponentes: [],
+        vendedores: [],
+        condicoes: [],
+        comissao: [],
+        corretorLabel: null,
+        observacoes: null,
+      },
       responsible: { name: "Olavo Piton", isNonUser: false, image: null },
       responsibleUserId: "user-1",
       responsibleName: null,
+      creatorName: "Olavo Piton",
+      templateName: null,
+      publicUrl: "https://imobpro.ia.br/p/tok-abc123",
+      vendedorDeadlineLabel: "—",
+      reservedCostLabel: null,
+      comissaoIncluida: false,
+      comissaoOculta: false,
+      recusa: null,
     },
     signers: [
       {
@@ -116,6 +132,25 @@ function sentProps() {
       reminderCount: 2,
       lastReminderAtLabel: "31/07/2026 09:00",
       prazo: { label: "faltam 2d", danger: false },
+      detalhes: {
+        proponentes: [
+          {
+            nome: "Maria Silva",
+            doc: "CPF 123.456.789-00",
+            contato: "maria@exemplo.com · (11) 98765-4321",
+          },
+        ],
+        vendedores: [{ nome: "João Souza", doc: null, contato: null }],
+        condicoes: [
+          { label: "Prazo", value: "30 meses" },
+          { label: "Garantia", value: "Caução (3 aluguéis)" },
+        ],
+        comissao: [{ label: "Percentual", value: "10%" }],
+        corretorLabel: "Ana Corretora (CRECI 12345)",
+        observacoes: "Entrega das chaves após vistoria.",
+      },
+      reservedCostLabel: "R$ 3,00",
+      comissaoIncluida: true,
     },
     signers: [
       { id: "sig-1", name: "Maria Silva", role: "Proponente", channel: "email", status: "viewed" },

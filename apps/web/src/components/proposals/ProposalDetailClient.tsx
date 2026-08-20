@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Briefcase, ChevronLeft, FileText, Pencil } from "lucide-react";
+import { Briefcase, ChevronLeft, Copy, FileText, Pencil } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,7 @@ import { ProposalDocumentCard } from "./ProposalDocumentCard";
 import { ProposalAttachmentUpload } from "./ProposalAttachmentUpload";
 import { ProposalSignaturesSection } from "./ProposalSignaturesSection";
 import type { ProposalPermissions } from "./ProposalRowActions";
+import type { ProposalDetails, ProposalPartyLine } from "@/lib/proposals/summarize";
 
 // Rótulo/cor por signatário. Duas fontes de vocabulário DISJUNTAS:
 //  - EnvelopeSigner.status (polling/envelope): pending/notified/viewed/signed/
@@ -102,9 +103,29 @@ interface Proposal {
   convertedDealId: string | null;
   dossierUrl: string | null;
   resumo: { proponente: string | null; imovel: string | null; valorLabel: string | null };
+  /** Partes completas + condições/comissão/corretor, tudo formatado no server. */
+  detalhes: ProposalDetails;
   responsible: { name: string; isNonUser: boolean; image: string | null };
   responsibleUserId: string | null;
   responsibleName: string | null;
+  creatorName: string | null;
+  /** Nome do modelo (ContractTemplate) usado no render, ou null. */
+  templateName: string | null;
+  /** Link público /p/[token] pronto (host resolvido no server). */
+  publicUrl: string | null;
+  /** Prazo próprio da 2ª via (proprietário), formatado; "—" quando não há. */
+  vendedorDeadlineLabel: string;
+  /** Custo reservado do envio, formatado; null quando 0. */
+  reservedCostLabel: string | null;
+  comissaoIncluida: boolean;
+  /** `hiddenPaths` esconde a comissão na via do proprietário. */
+  comissaoOculta: boolean;
+  recusa: {
+    porLabel: string;
+    emLabel: string;
+    reason: string | null;
+    counterLabel: string | null;
+  } | null;
 }
 
 export function ProposalDetailClient({
@@ -211,6 +232,17 @@ export function ProposalDetailClient({
   // Mesma permissão que a rota /attachments/finalize exige (PROPOSAL_SEND):
   // quem envia a proposta pra assinatura é quem cuida da documentação dela.
   const canAttach = permissions.send;
+  const detalhes = proposal.detalhes;
+
+  async function copyPublicLink() {
+    if (!proposal.publicUrl) return;
+    try {
+      await navigator.clipboard.writeText(proposal.publicUrl);
+      toast.success("Link copiado");
+    } catch {
+      toast.error("Não foi possível copiar o link");
+    }
+  }
 
   // Ações por-signatário (no EnvelopeSigner do envelope em curso). "contact" é
   // alimentada pelo diálogo abaixo — dois `window.prompt` em sequência não davam
@@ -382,17 +414,47 @@ export function ProposalDetailClient({
         />
       </Card>
 
-      {/* Resumo + Responsável */}
+      {/* Grid 2×2 — os quatro cards informativos: Resumo & partes · Condições
+          do negócio · Responsável & origem · Datas & link. */}
       <div className="grid gap-4 md:grid-cols-2">
         <Card className="space-y-2 p-4">
           <h2 className="font-medium">Resumo</h2>
-          <Row label="Proponente" value={proposal.resumo.proponente ?? "—"} />
           <Row label="Imóvel" value={proposal.resumo.imovel ?? "—"} />
           <Row label="Valor" value={proposal.resumo.valorLabel ?? "—"} />
           <Row
             label="Instrumento"
             value={isAceite ? "Aceite via WhatsApp" : "Assinatura (envelope)"}
           />
+          <PartyList
+            title={detalhes.proponentes.length > 1 ? "Proponentes" : "Proponente"}
+            parties={
+              detalhes.proponentes.length > 0
+                ? detalhes.proponentes
+                : proposal.resumo.proponente
+                  ? [{ nome: proposal.resumo.proponente, doc: null, contato: null }]
+                  : []
+            }
+          />
+          <PartyList
+            title={
+              proposal.kind === "venda"
+                ? detalhes.vendedores.length > 1
+                  ? "Vendedores"
+                  : "Vendedor"
+                : detalhes.vendedores.length > 1
+                  ? "Locadores"
+                  : "Locador"
+            }
+            parties={detalhes.vendedores}
+          />
+          {detalhes.observacoes && (
+            <p
+              className="mt-2 border-l-2 border-border pl-3 text-xs text-muted-foreground"
+              title={detalhes.observacoes}
+            >
+              {detalhes.observacoes}
+            </p>
+          )}
           {proposal.dossierUrl && (
             <a
               href={proposal.dossierUrl}
@@ -418,6 +480,42 @@ export function ProposalDetailClient({
           )}
         </Card>
 
+        <Card className="space-y-2 p-4">
+          <h2 className="font-medium">Condições do negócio</h2>
+          {detalhes.condicoes.map((r) => (
+            <Row key={r.label} label={r.label} value={r.value} />
+          ))}
+          {detalhes.comissao.length > 0 && (
+            <div className="space-y-2 border-t pt-2">
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-muted-foreground">Comissão</span>
+                {proposal.comissaoOculta ? (
+                  <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                    oculta na via do proprietário
+                  </Badge>
+                ) : proposal.comissaoIncluida ? (
+                  <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                    incluída na proposta
+                  </Badge>
+                ) : null}
+              </div>
+              {detalhes.comissao.map((r) => (
+                <Row key={r.label} label={r.label} value={r.value} />
+              ))}
+            </div>
+          )}
+          {detalhes.corretorLabel && (
+            <Row label="Corretor" value={detalhes.corretorLabel} />
+          )}
+          {detalhes.condicoes.length === 0 &&
+            detalhes.comissao.length === 0 &&
+            !detalhes.corretorLabel && (
+              <p className="text-sm text-muted-foreground">
+                Sem condições informadas ainda.
+              </p>
+            )}
+        </Card>
+
         <Card className="space-y-3 p-4">
           <h2 className="font-medium">Responsável</h2>
           <ProposalAssigneeControl
@@ -427,17 +525,15 @@ export function ProposalDetailClient({
             members={members}
             canAssign={permissions.assign}
           />
+          <div className="space-y-2 border-t pt-3">
+            <Row label="Criada por" value={proposal.creatorName ?? "—"} />
+            <Row label="Modelo" value={proposal.templateName ?? "—"} />
+            <Row label="Criada" value={proposal.createdAtLabel} />
+          </div>
         </Card>
-      </div>
 
-      {/* Datas + Assinaturas. Com envelope, a lista simples dá lugar à seção
-          completa (abaixo) e "Datas" ocupa a linha inteira. */}
-      <div className={`grid gap-4 ${proposal.hasEnvelopes ? "" : "md:grid-cols-2"}`}>
-        {/* Sozinho no grid, o card viraria full-width e as linhas
-            rótulo/valor (justify-between) abririam um vão enorme no meio. */}
-        <Card className={`space-y-2 p-4 ${proposal.hasEnvelopes ? "md:max-w-xl" : ""}`}>
-          <h2 className="font-medium">Datas</h2>
-          <Row label="Criada" value={proposal.createdAtLabel} />
+        <Card className="space-y-2 p-4">
+          <h2 className="font-medium">Datas e link</h2>
           <Row label="Enviada" value={proposal.sentAtLabel} />
           <Row label="Entregue" value={proposal.deliveredAtLabel} />
           <Row
@@ -463,9 +559,55 @@ export function ProposalDetailClient({
               value={`${proposal.lastReminderAtLabel} (${proposal.reminderCount}×)`}
             />
           )}
+          {proposal.vendedorDeadlineLabel !== "—" && (
+            <Row label="Validade da 2ª via" value={proposal.vendedorDeadlineLabel} />
+          )}
+          {proposal.reservedCostLabel && (
+            <Row label="Custo do envio" value={proposal.reservedCostLabel} />
+          )}
+          {proposal.publicUrl && (
+            <div className="flex items-center gap-2 border-t pt-2 text-sm">
+              <span className="shrink-0 text-muted-foreground">Link público</span>
+              <span
+                className="min-w-0 flex-1 truncate text-right font-mono text-xs"
+                title={proposal.publicUrl}
+              >
+                {proposal.publicUrl}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0 text-muted-foreground"
+                title="Copiar link público"
+                aria-label="Copiar link público"
+                onClick={() => void copyPublicLink()}
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
+          {proposal.recusa && (
+            <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/5 p-2.5 text-xs">
+              <p className="font-medium text-destructive">
+                Recusada {proposal.recusa.porLabel} em {proposal.recusa.emLabel}
+              </p>
+              {proposal.recusa.reason && (
+                <p className="mt-0.5 text-muted-foreground">{proposal.recusa.reason}</p>
+              )}
+              {proposal.recusa.counterLabel && (
+                <p className="mt-0.5">
+                  Contraproposta:{" "}
+                  <span className="font-medium">{proposal.recusa.counterLabel}</span>
+                </p>
+              )}
+            </div>
+          )}
         </Card>
+      </div>
 
-        {!proposal.hasEnvelopes && (
+      {/* Assinaturas simples (Aceite/rascunho, sem envelope) — full-width
+          abaixo do grid; com envelope a seção completa assume (abaixo). */}
+      {!proposal.hasEnvelopes && (
         <Card className="space-y-2 p-4">
           <h2 className="font-medium">Assinaturas</h2>
           {(() => {
@@ -555,8 +697,7 @@ export function ProposalDetailClient({
             );
           })()}
         </Card>
-        )}
-      </div>
+      )}
 
       {/* Gestão de assinaturas (envelope ClickSign) — mesma UI dos contratos.
           Só rende quando há envelope; no Aceite via WhatsApp não existe um. */}
@@ -740,6 +881,39 @@ export function ProposalDetailClient({
         proposalId={proposal.id}
         currentTitle={proposal.title}
       />
+    </div>
+  );
+}
+
+function PartyList({
+  title,
+  parties,
+}: {
+  title: string;
+  parties: ProposalPartyLine[];
+}) {
+  if (parties.length === 0) return null;
+  return (
+    <div className="pt-1 text-sm">
+      <span className="text-muted-foreground">{title}</span>
+      <ul className="mt-1 space-y-1.5">
+        {parties.map((p, i) => {
+          const meta = [p.doc, p.contato].filter(Boolean).join(" · ");
+          return (
+            <li key={`${p.nome}-${i}`} className="leading-tight">
+              <span className="font-medium">{p.nome}</span>
+              {meta && (
+                <span
+                  className="block truncate text-xs text-muted-foreground"
+                  title={meta}
+                >
+                  {meta}
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

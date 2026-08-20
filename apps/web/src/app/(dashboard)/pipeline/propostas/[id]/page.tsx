@@ -15,6 +15,11 @@ import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { formatDateTimeBR } from "@/lib/format/datetime";
 import { proposalDeadline } from "@/lib/proposals/deadline";
 import { formatMoneyBR } from "@/lib/format/money";
+import {
+  summarizeProposalData,
+  summarizeProposalDetails,
+} from "@/lib/proposals/summarize";
+import { proposalPublicLink } from "@/lib/proposals/public-link";
 import { checkProposalReadiness } from "@/lib/proposals/clicksign-readiness";
 import { plannedProposalCostCents } from "@/lib/proposals/cost";
 import { getSignatureSettings } from "@/lib/clicksign/account";
@@ -49,6 +54,7 @@ export default async function PropostaDetailPage({
       user: { select: { id: true, name: true } },
       responsibleUser: { select: { id: true, name: true, image: true } },
       convertedDeal: { select: { managerUserId: true } },
+      template: { select: { name: true } },
     },
   });
   if (!proposal || proposal.orgId !== org.id) notFound();
@@ -166,6 +172,9 @@ export default async function PropostaDetailPage({
         }));
 
   const d = (proposal.dataJson ?? {}) as Record<string, unknown>;
+  // Mesmo resumo da listagem (lib compartilhada) — o local `summarize()` que
+  // vivia aqui divergia dela (sem número do imóvel, sem trim).
+  const resumo = summarizeProposalData(d, proposal.kind);
   const resp = responsibleDisplay({
     responsibleName: proposal.responsibleName,
     responsibleUser: proposal.responsibleUser,
@@ -243,10 +252,39 @@ export default async function PropostaDetailPage({
         updatedAtIso: proposal.updatedAt.toISOString(),
         convertedDealId: proposal.convertedDealId,
         dossierUrl: proposal.dossierUrl,
-        resumo: summarize(d, proposal.kind),
+        resumo,
+        detalhes: summarizeProposalDetails(d, proposal.kind),
         responsible: resp,
         responsibleUserId: proposal.responsibleUserId,
         responsibleName: proposal.responsibleName,
+        creatorName: proposal.user?.name ?? null,
+        templateName: proposal.template?.name ?? null,
+        // Link rastreado /p/[token] — só chega aqui DEPOIS do gate de acesso
+        // acima (a página é autenticada); a rota pública em si não o expõe.
+        publicUrl: proposalPublicLink(proposal.token),
+        vendedorDeadlineLabel: formatDateTimeBR(proposal.vendedorDeadlineAt),
+        reservedCostLabel:
+          proposal.reservedCostCents > 0
+            ? formatMoneyBR(proposal.reservedCostCents / 100)
+            : null,
+        comissaoIncluida: proposal.comissaoIncluida,
+        comissaoOculta: proposal.hiddenPaths.includes("comissao"),
+        recusa: proposal.refusedAt
+          ? {
+              porLabel:
+                proposal.refusedBy === "proponente"
+                  ? "pelo proponente"
+                  : proposal.refusedBy?.startsWith("vendedor")
+                    ? "pelo proprietário"
+                    : "",
+              emLabel: formatDateTimeBR(proposal.refusedAt),
+              reason: proposal.refusedReason,
+              counterLabel:
+                proposal.counterAmount != null && proposal.counterAmount > 0
+                  ? formatMoneyBR(proposal.counterAmount)
+                  : null,
+            }
+          : null,
       }}
       // Documento congelado no envio. Vai inteiro pro client porque é ele que a
       // janela "Documento" exibe quando a proposta já saiu — re-renderizar o
@@ -307,19 +345,4 @@ function extractEventDetail(payload: unknown): string | null {
   if (typeof p.reason === "string" && p.reason) return p.reason;
   if (typeof p.status === "string" && p.status) return `status: ${p.status}`;
   return null;
-}
-
-function summarize(d: Record<string, unknown>, kind: string) {
-  const isVenda = kind === "venda";
-  const parte = (isVenda ? d.compradores : d.locatarios) as Array<{ nome?: string }> | undefined;
-  const imoveis = d.imoveis as Array<{ endereco?: string }> | undefined;
-  const pag = d.pagamento as { valor_total?: number } | undefined;
-  const loc = d.locacao as { valor_aluguel?: number } | undefined;
-  const valor = pag?.valor_total ?? loc?.valor_aluguel ?? null;
-  return {
-    proponente: parte?.[0]?.nome ?? null,
-    imovel: imoveis?.[0]?.endereco ?? null,
-    // Formatado aqui (determinístico, sem ICU) pelo mesmo motivo das datas.
-    valorLabel: valor == null ? null : formatMoneyBR(valor, { decimals: 0 }),
-  };
 }
