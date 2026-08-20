@@ -62,6 +62,8 @@ function draftProps() {
       validUntilLabel: "04/08/2026 17:23",
       prazo: { label: "faltam 5d", danger: false },
       convertedDealId: null,
+      supersededById: null,
+      thread: { parent: null, supersededBy: null },
       dossierUrl: null,
       resumo: {
         proponente: "Maria Silva",

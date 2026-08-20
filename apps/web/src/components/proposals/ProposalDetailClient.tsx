@@ -102,6 +102,13 @@ interface Proposal {
   /** ISO do updatedAt do servidor — desempata prop fresco × polling parado. */
   updatedAtIso: string;
   convertedDealId: string | null;
+  /** Já recriada — o ActionBar esconde "Recriar" e o card mostra o link. */
+  supersededById: string | null;
+  /** Thread de recriação: de onde veio / quem a substituiu (label = code ou título). */
+  thread: {
+    parent: { id: string; label: string } | null;
+    supersededBy: { id: string; label: string } | null;
+  };
   dossierUrl: string | null;
   resumo: { proponente: string | null; imovel: string | null; valorLabel: string | null };
   /** Partes completas + condições/comissão/corretor, tudo formatado no server. */
@@ -391,6 +398,7 @@ export function ProposalDetailClient({
               instrument: proposal.instrument,
               convertedDealId: proposal.convertedDealId,
               sentAt: liveSentAt,
+              supersededById: proposal.supersededById,
             }}
             permissions={permissions}
             kind={proposal.kind}
@@ -533,6 +541,30 @@ export function ProposalDetailClient({
             <Row label="Criada por" value={proposal.creatorName ?? "—"} />
             <Row label="Modelo" value={proposal.templateName ?? "—"} />
             <Row label="Criada" value={proposal.createdAtLabel} />
+            {proposal.thread.parent && (
+              <div className="flex justify-between gap-2 text-sm">
+                <span className="shrink-0 text-muted-foreground">Recriação de</span>
+                <Link
+                  href={`/pipeline/propostas/${proposal.thread.parent.id}`}
+                  className="min-w-0 truncate font-medium text-primary hover:underline"
+                  title={proposal.thread.parent.label}
+                >
+                  {proposal.thread.parent.label}
+                </Link>
+              </div>
+            )}
+            {proposal.thread.supersededBy && (
+              <div className="flex justify-between gap-2 text-sm">
+                <span className="shrink-0 text-muted-foreground">Recriada como</span>
+                <Link
+                  href={`/pipeline/propostas/${proposal.thread.supersededBy.id}`}
+                  className="min-w-0 truncate font-medium text-primary hover:underline"
+                  title={proposal.thread.supersededBy.label}
+                >
+                  {proposal.thread.supersededBy.label}
+                </Link>
+              </div>
+            )}
           </div>
         </Card>
 

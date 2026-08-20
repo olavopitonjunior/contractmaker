@@ -3,7 +3,16 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Send, Bell, CheckCircle2, FileSignature, Ban, Trash2, UserCheck } from "lucide-react";
+import {
+  Send,
+  Bell,
+  CheckCircle2,
+  FileSignature,
+  Ban,
+  Trash2,
+  UserCheck,
+  CopyPlus,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -27,6 +36,7 @@ import {
   CONVERT_UNSIGNED_STATUSES,
   SEND_VENDEDOR_STATUSES,
   AWAITING_DECISION_STATUSES,
+  RECREATABLE_STATUSES,
 } from "@/lib/proposals/status-sets";
 import { useConvertProposal } from "@/lib/proposals/use-convert-proposal";
 import { parseProposalApiError } from "@/lib/proposals/api-errors";
@@ -50,6 +60,8 @@ export function ProposalActionBar({
     convertedDealId: string | null;
     /** `Proposal.sentAt` em ISO — ver RowProposal.sentAt. */
     sentAt: string | null;
+    /** Já recriada (aponta pra filha) → o botão "Recriar" some. */
+    supersededById?: string | null;
   };
   permissions: ProposalPermissions;
   /** venda | locacao — só muda a copy (proprietário × locador). */
@@ -60,7 +72,13 @@ export function ProposalActionBar({
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<
-    null | "cancel" | "delete" | "convertUnsigned" | "convertManager" | "complete"
+    | null
+    | "cancel"
+    | "delete"
+    | "convertUnsigned"
+    | "convertManager"
+    | "complete"
+    | "recreate"
   >(null);
   const [sendVendedorOpen, setSendVendedorOpen] = useState(false);
   const [reason, setReason] = useState("");
@@ -106,6 +124,18 @@ export function ProposalActionBar({
   const canConvertUnsigned =
     permissions.convert && !canConvert && CONVERT_UNSIGNED_STATUSES.has(status);
   const canCancel = permissions.cancel && CANCELLABLE_STATUSES.has(status);
+  // Recriar = cancelar (quando ainda viva) + novo rascunho pré-preenchido.
+  // Some depois de recriada (supersededById) — evita ramificação acidental; o
+  // detalhe mostra o link "Recriada como" no lugar. No caminho vivo o cancel é
+  // parte da ação, então `permissions.cancel` também é exigida.
+  const recreateNeedsCancel = CANCELLABLE_STATUSES.has(status);
+  const canRecreate =
+    permissions.write &&
+    RECREATABLE_STATUSES.has(status) &&
+    !proposal.supersededById &&
+    !proposal.convertedDealId &&
+    (!recreateNeedsCancel || permissions.cancel);
+  const recreateHref = `/pipeline/propostas/nova?fromId=${proposal.id}`;
   // Espelha o guard do DELETE, igual à lista — ver ProposalRowActions.
   const canDelete =
     permissions.delete &&
@@ -199,6 +229,18 @@ export function ProposalActionBar({
           {partialSigned ? "Converter sem assinatura completa" : "Converter sem assinatura"}
         </Button>
       )}
+      {canRecreate && (
+        <Button
+          variant="outline"
+          disabled={busy}
+          onClick={() => {
+            if (recreateNeedsCancel) setDialog("recreate");
+            else router.push(recreateHref);
+          }}
+        >
+          <CopyPlus className="mr-1.5 h-4 w-4" /> Recriar proposta
+        </Button>
+      )}
       {canCancel && (
         <Button variant="outline" className="text-destructive hover:text-destructive" disabled={busy} onClick={() => setDialog("cancel")}>
           <Ban className="mr-1.5 h-4 w-4" /> Cancelar
@@ -245,6 +287,53 @@ export function ProposalActionBar({
               }}
             >
               Concluir proposta
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Recriar (cancela a atual com motivo e abre o rascunho pré-preenchido) */}
+      <AlertDialog open={dialog === "recreate"} onOpenChange={(o) => !o && setDialog(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Recriar proposta</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta proposta será <strong>cancelada</strong> (assinaturas em curso
+              na ClickSign são canceladas junto) e um novo rascunho abre
+              pré-preenchido com os mesmos dados, pronto pra revisar e reenviar.
+              {partialSigned && (
+                <>
+                  {" "}
+                  <strong>Atenção:</strong> o proponente já assinou esta via — a
+                  assinatura dele será descartada e precisará ser colhida de novo
+                  na proposta nova.
+                </>
+              )}{" "}
+              Documentos anexados não são copiados. Informe o motivo — fica no
+              histórico.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Motivo (ex.: dados preenchidos errados, cliente não recebeu)"
+            rows={3}
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Voltar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy || reason.trim().length < 3}
+              onClick={(e) => {
+                e.preventDefault();
+                run(
+                  `/api/proposals/${proposal.id}/cancel`,
+                  jsonPost({ reason }),
+                  "Proposta cancelada — abrindo a recriação",
+                  { redirectPath: recreateHref }
+                );
+              }}
+            >
+              Cancelar e recriar
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

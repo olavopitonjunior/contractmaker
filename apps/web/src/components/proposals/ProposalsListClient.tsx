@@ -50,6 +50,8 @@ export interface ProposalRow {
   firstViewedAtLabel: string;
   prazo: { label: string; tone: "none" | "warn" | "danger" };
   convertedDealId: string | null;
+  /** Já recriada → a linha esconde "Recriar" (ver ProposalRowActions). */
+  supersededById: string | null;
   responsible: { name: string; isNonUser: boolean; image: string | null };
   resumo: {
     proponente: string | null;
@@ -291,6 +293,7 @@ export function ProposalsListClient({
                             convertedDealId: p.convertedDealId,
                             title: p.title,
                             sentAt: p.sentAt,
+                            supersededById: p.supersededById,
                           }}
                           permissions={permissions}
                           members={members}

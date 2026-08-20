@@ -181,6 +181,7 @@ export default async function PropostasPage({
         firstViewedAt: true,
         lastReminderAt: true,
         convertedDealId: true,
+        supersededById: true,
         dataJson: true,
         user: { select: { name: true } },
         responsibleName: true,
@@ -280,6 +281,7 @@ export default async function PropostasPage({
         firstViewedAtLabel: formatDayMonthBR(p.firstViewedAt, ""),
         prazo: { label: prazo.shortLabel, tone: prazo.tone },
         convertedDealId: p.convertedDealId,
+        supersededById: p.supersededById,
         responsible: resp,
         resumo: summarizeProposalData(p.dataJson, p.kind),
         round: proposalRoundView({

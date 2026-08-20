@@ -15,6 +15,7 @@ import {
   UserRound,
   Briefcase,
   Pencil,
+  CopyPlus,
 } from "lucide-react";
 import { ProposalAssigneeDialog } from "./ProposalAssigneeControl";
 import { RenameProposalDialog } from "./RenameProposalDialog";
@@ -45,6 +46,7 @@ import {
   CONVERTABLE_STATUSES,
   AWAITING_DECISION_STATUSES,
   TERMINAL_STATUSES,
+  RECREATABLE_STATUSES,
 } from "@/lib/proposals/status-sets";
 import {
   useConvertProposal,
@@ -81,6 +83,8 @@ export interface RowProposal {
    * compilação.
    */
   sentAt: string | null;
+  /** Já recriada (aponta pra filha) → "Recriar" some da linha. */
+  supersededById: string | null;
 }
 
 export function ProposalRowActions({
@@ -95,9 +99,9 @@ export function ProposalRowActions({
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const [dialog, setDialog] = useState<null | "cancel" | "delete" | "assign" | "rename">(
-    null
-  );
+  const [dialog, setDialog] = useState<
+    null | "cancel" | "delete" | "assign" | "rename" | "recreate"
+  >(null);
   const [reason, setReason] = useState("");
   const { convert, busy: convertBusy } = useConvertProposal();
 
@@ -127,8 +131,23 @@ export function ProposalRowActions({
     DELETABLE_STATUSES.has(proposal.status) &&
     !isFalhaEnvioAlreadyDelivered(proposal) &&
     !proposal.convertedDealId;
+  // Mesmo gate do ProposalActionBar (detalhe): cancelar faz parte da ação nos
+  // status vivos, então `cancel` também é exigida nesse caminho.
+  const recreateNeedsCancel = CANCELLABLE_STATUSES.has(proposal.status);
+  const canRecreate =
+    permissions.write &&
+    RECREATABLE_STATUSES.has(proposal.status) &&
+    !proposal.supersededById &&
+    !proposal.convertedDealId &&
+    (!recreateNeedsCancel || permissions.cancel);
+  const recreateHref = `/pipeline/propostas/nova?fromId=${proposal.id}`;
 
-  async function run(url: string, init: RequestInit, okMsg: string) {
+  async function run(
+    url: string,
+    init: RequestInit,
+    okMsg: string,
+    opts: { redirectPath?: string } = {}
+  ) {
     setBusy(true);
     try {
       const res = await fetch(url, init);
@@ -137,7 +156,8 @@ export function ProposalRowActions({
       toast.success(okMsg);
       setDialog(null);
       setReason("");
-      router.refresh();
+      if (opts.redirectPath) router.push(opts.redirectPath);
+      else router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro na ação");
       // Fecha TAMBÉM no erro. Antes só o sucesso fechava, então uma ação
@@ -248,6 +268,17 @@ export function ProposalRowActions({
             </DropdownMenuItem>
           )}
 
+          {canRecreate && (
+            <DropdownMenuItem
+              onClick={() => {
+                if (recreateNeedsCancel) setDialog("recreate");
+                else router.push(recreateHref);
+              }}
+            >
+              <CopyPlus className="mr-2 h-4 w-4" /> Recriar proposta…
+            </DropdownMenuItem>
+          )}
+
           {(canCancel || canDelete) && <DropdownMenuSeparator />}
           {canCancel && (
             <DropdownMenuItem
@@ -267,6 +298,52 @@ export function ProposalRowActions({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <AlertDialog open={dialog === "recreate"} onOpenChange={(o) => !o && setDialog(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Recriar proposta</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta proposta será <strong>cancelada</strong> (assinaturas em curso
+              na ClickSign são canceladas junto) e um novo rascunho abre
+              pré-preenchido com os mesmos dados.
+              {(proposal.status === "assinada_proponente" ||
+                proposal.status === "aguardando_vendedor") && (
+                <>
+                  {" "}
+                  <strong>Atenção:</strong> a assinatura já colhida do proponente
+                  será descartada.
+                </>
+              )}{" "}
+              Documentos anexados não são copiados. Informe o motivo — fica no
+              histórico.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Motivo (ex.: dados preenchidos errados, cliente não recebeu)"
+            rows={3}
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Voltar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy || reason.trim().length < 3}
+              onClick={(e) => {
+                e.preventDefault();
+                run(
+                  `/api/proposals/${proposal.id}/cancel`,
+                  jsonPost({ reason }),
+                  "Proposta cancelada — abrindo a recriação",
+                  { redirectPath: recreateHref }
+                );
+              }}
+            >
+              Cancelar e recriar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={dialog === "cancel"} onOpenChange={(o) => !o && setDialog(null)}>
         <AlertDialogContent>

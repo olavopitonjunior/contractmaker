@@ -172,6 +172,25 @@ export default async function PropostaDetailPage({
           viaLabel: null as string | null,
         }));
 
+  // Thread de recriação. `supersededById` é escalar puro (SEM relation no
+  // schema — adicionar uma seria migration); o lookup é por findUnique. O
+  // sentido inverso tem a relation `parentProposal`, mas o findUnique uniforme
+  // evita mexer no include principal.
+  const [parentRef, supersededRef] = await Promise.all([
+    proposal.parentProposalId
+      ? prisma.proposal.findUnique({
+          where: { id: proposal.parentProposalId },
+          select: { id: true, code: true, title: true },
+        })
+      : Promise.resolve(null),
+    proposal.supersededById
+      ? prisma.proposal.findUnique({
+          where: { id: proposal.supersededById },
+          select: { id: true, code: true, title: true },
+        })
+      : Promise.resolve(null),
+  ]);
+
   const d = (proposal.dataJson ?? {}) as Record<string, unknown>;
   // Mesmo resumo da listagem (lib compartilhada) — o local `summarize()` que
   // vivia aqui divergia dela (sem número do imóvel, sem trim).
@@ -252,6 +271,15 @@ export default async function PropostaDetailPage({
         prazo: { label: prazo.label, danger: prazo.tone === "danger" },
         updatedAtIso: proposal.updatedAt.toISOString(),
         convertedDealId: proposal.convertedDealId,
+        supersededById: proposal.supersededById,
+        thread: {
+          parent: parentRef
+            ? { id: parentRef.id, label: parentRef.code ?? parentRef.title }
+            : null,
+          supersededBy: supersededRef
+            ? { id: supersededRef.id, label: supersededRef.code ?? supersededRef.title }
+            : null,
+        },
         dossierUrl: proposal.dossierUrl,
         resumo,
         detalhes: summarizeProposalDetails(d, proposal.kind),
