@@ -11,6 +11,12 @@ import {
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
 import { detectPixKeyType } from "@/lib/asaas/pix";
+import {
+  isValidCpfCnpj,
+  isValidCreci,
+  normalizeEmail,
+  normalizePhoneForStorage,
+} from "@/lib/validators/corretor";
 
 export const runtime = "nodejs";
 
@@ -21,7 +27,7 @@ export const runtime = "nodejs";
  * individualmente (ex: chave PIX inválida ou duplicata) — retornamos
  * `{created, skipped, errors}` ao invés de all-or-nothing.
  *
- * Linha CSV: nome,cpf_cnpj,tipo,wallet_ou_chave,label?,email?
+ * Linha CSV: nome,cpf_cnpj,tipo,wallet_ou_chave,label?,email?,phone?,creci?,papel?,notify_email?,notify_whatsapp?
  * onde tipo = "wallet" | "pix"
  */
 const lineSchema = z.object({
@@ -31,6 +37,15 @@ const lineSchema = z.object({
   walletOuChave: z.string().trim().min(1).max(200),
   label: z.string().trim().max(120).optional(),
   email: z.string().trim().email().max(200).optional(),
+  // Campos de corretor (2026-08) — o import nascia incompleto sem eles.
+  phone: z.string().trim().max(30).optional(),
+  creci: z.string().trim().max(50).optional(),
+  papel: z
+    .enum(["imobiliaria_principal", "captador", "intermediador", "indicador", "outro"])
+    .optional(),
+  tipoPessoa: z.enum(["fisica", "juridica"]).optional(),
+  notifyByEmail: z.boolean().optional(),
+  notifyByWhatsapp: z.boolean().optional(),
 });
 
 const bodySchema = z.object({
@@ -73,6 +88,29 @@ export async function POST(req: NextRequest) {
 
   for (const [i, row] of parsed.data.rows.entries()) {
     try {
+      // Mesmas regras do cadastro individual (lib/validators/corretor).
+      const doc = row.cpfCnpj.replace(/\D/g, "");
+      if (!isValidCpfCnpj(doc)) {
+        result.errors.push({ row: i + 1, reason: "CPF/CNPJ inválido (dígito verificador)", rawNome: row.nome });
+        continue;
+      }
+      if (row.creci && !isValidCreci(row.creci)) {
+        result.errors.push({ row: i + 1, reason: "CRECI inválido", rawNome: row.nome });
+        continue;
+      }
+      const phoneNorm = normalizePhoneForStorage(row.phone);
+      if (phoneNorm.invalid) {
+        result.errors.push({ row: i + 1, reason: "Telefone inválido (use DDD + número)", rawNome: row.nome });
+        continue;
+      }
+      const corretorFields = {
+        phone: phoneNorm.value,
+        creci: row.creci?.trim() || null,
+        papel: row.papel ?? null,
+        tipoPessoa: row.tipoPessoa ?? (doc.length === 14 ? "juridica" : "fisica"),
+        notifyByEmail: row.notifyByEmail ?? undefined,
+        notifyByWhatsapp: row.notifyByWhatsapp ?? undefined,
+      };
       if (row.tipo === "pix") {
         const pixKeyType = detectPixKeyType(row.walletOuChave);
         if (!pixKeyType) {
@@ -92,8 +130,9 @@ export async function POST(req: NextRequest) {
             pixKeyType,
             ownerName: row.nome,
             ownerCpfCnpj: row.cpfCnpj,
-            cpfCnpj: row.cpfCnpj,
-            email: row.email ?? null,
+            cpfCnpj: doc,
+            email: normalizeEmail(row.email),
+            ...corretorFields,
           },
         });
         result.created.push({ id: created.id, label: created.label });
@@ -104,8 +143,9 @@ export async function POST(req: NextRequest) {
             label: row.label ?? row.nome,
             recipientType: "asaas_wallet",
             walletId: row.walletOuChave,
-            cpfCnpj: row.cpfCnpj,
-            email: row.email ?? null,
+            cpfCnpj: doc,
+            email: normalizeEmail(row.email),
+            ...corretorFields,
           },
         });
         result.created.push({ id: created.id, label: created.label });
