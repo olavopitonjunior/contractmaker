@@ -188,12 +188,23 @@ export async function executeProposalSend(proposalId: string): Promise<SendResul
  * /remind "ninguém pendente".
  */
 export async function releaseClaim(proposalId: string): Promise<void> {
-  await prisma.proposal
+  const released = await prisma.proposal
     .updateMany({
       where: { id: proposalId, status: "enviada" },
       data: { status: "falha_envio" },
     })
-    .catch(() => {});
+    .catch(() => null);
+  // Marca DURÁVEL de que esta queda pra `falha_envio` foi FALHA, não
+  // cancelamento. Sem ela não há como distinguir as duas origens depois de um
+  // reenvio: `sentAt` é monotônico (nunca é zerado — nem aqui, nem no claim de
+  // envio), então proposta que saiu uma vez carrega `sentAt` para sempre e
+  // toda falha posterior pareceria cancelamento.
+  // Só quando o CAS moveu de fato: `count === 0` = não houve queda nenhuma.
+  if (released && released.count > 0) {
+    await logProposalEvent(proposalId, "send_failed", {
+      reason: "envio não completou — liberada pra reenvio",
+    });
+  }
 }
 
 /**

@@ -94,6 +94,37 @@ export function isFalhaEnvioAlreadyDelivered(proposal: {
 }
 
 /**
+ * Eventos que registram a ÚLTIMA causa de queda pra `falha_envio`. Filtrar por
+ * este conjunto — em vez de pegar o último evento de qualquer tipo — é o que
+ * torna a leitura estável: um `assignee_changed` ou `manual_sync` posterior não
+ * desloca a resposta.
+ */
+export const SEND_OUTCOME_EVENTS = ["primeira_via_canceled", "send_failed"] as const;
+
+/**
+ * O último desfecho de envio foi CANCELAMENTO (e não falha)? É a pergunta do
+ * RÓTULO, e é OUTRA que a da exclusão acima.
+ *
+ * `sentAt` NÃO responde esta, e assumir que sim foi um erro caro: como ele é
+ * monotônico, proposta que saiu uma vez o carrega para sempre — então
+ * `enviar → cancelar → reenviar → o reenvio falha de verdade` mostraria "Envio
+ * cancelado" numa falha real, justamente no fluxo que esta distinção existe pra
+ * servir. O evento é durável e sobrevive a reenvios.
+ *
+ * `null` = nenhum dos dois, e cai em "falha". Isso é conservador E
+ * historicamente correto, e por isso NÃO precisa de backfill — a prova está no
+ * histórico, não na intuição: antes de 2026-08 (commit 7b00daad) este hook
+ * fazia `if (env.via !== "reduzida") return` e a rota de DELETE do envelope não
+ * o chamava, então NENHUMA proposta chegava a `falha_envio` por cancelamento.
+ * Toda cancelada existente nasceu depois disso, e desde o primeiro dia esse
+ * caminho grava `primeira_via_canceled`. As antigas em `falha_envio` são todas
+ * falha de envio de verdade, que é exatamente o que `null` classifica.
+ */
+export function lastSendOutcomeIsCancel(lastOutcomeEvent: string | null): boolean {
+  return lastOutcomeEvent === "primeira_via_canceled";
+}
+
+/**
  * Assinatura EM CURSO — alguém de fora ainda precisa assinar.
  *
  * `assinada_proponente` SAIU (2026-08): ele virou a PARADA DURÁVEL da decisão
