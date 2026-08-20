@@ -155,7 +155,15 @@ const NAV: NavEntry[] = [
     ],
   },
   { kind: "item", title: "Templates", url: "/templates", icon: FileStack },
-  { kind: "item", title: "Corretores", url: "/corretores", icon: Handshake },
+  {
+    kind: "item",
+    title: "Corretores",
+    url: "/corretores",
+    icon: Handshake,
+    // A tela consome GET /api/financeiro/split-recipients (SPLIT_VIEW) — sem a
+    // permissão o menu levava a um 403 (papel `sales`). Espelha o gate da API.
+    permission: [PERMISSION.SPLIT_VIEW, PERMISSION.SPLIT_CONFIGURE],
+  },
   {
     kind: "group",
     title: "Relatórios",
