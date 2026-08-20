@@ -24,16 +24,31 @@ export const STATUS_FILTERS: StatusFilterOption[] = [
     label: "Em aberto",
     statuses: ["enviada", "entregue", "visualizada", "assinada_proponente", "aguardando_vendedor"],
   },
-  // EM ABERTO (produto): desde que cancelar o envelope devolve a proposta pra
-  // `falha_envio`, este grupo passou a conter também proposta que SAIU e foi
-  // cancelada — cujo badge agora diz "Envio cancelado", não "Falha no envio".
-  // O rótulo do chip ficou INCOMPLETO (não errado: falha real continua aqui).
-  // Deixado como está de propósito: mudar copy de filtro, ou mover esse recorte
-  // pra um chip próprio, é decisão de produto e não conserto de bug. Se for
-  // mexer, o discriminador é `isFalhaEnvioAlreadyDelivered` — mas ele depende de
-  // `sentAt`, então um chip novo precisaria de `requiresServer: true`, porque
-  // `statuses` sozinho não expressa a condição.
-  { id: "rascunho", label: "Rascunho / falha", statuses: ["rascunho", "falha_envio", "aguardando_aprovacao"] },
+  // PARTIÇÃO com o chip "Envio cancelado" logo abaixo (decisão de produto,
+  // 2026-08-20): a `falha_envio` cujo último desfecho foi cancelamento sai
+  // DESTE grupo e entra naquele — os dois wheres são um predicado e sua
+  // negação (`sendCanceledWhere`, list-filters.server.ts), então toda
+  // falha_envio cai em exatamente UM dos dois, por construção.
+  //
+  // `statuses` continua listando os 3 de propósito: ele é o PRÉ-FILTRO da
+  // busca `q` (raw em page.tsx) e precisa ser SUPERSET do where do servidor —
+  // apertá-lo faria a busca esconder resultados que o filtro mostra.
+  {
+    id: "rascunho",
+    label: "Rascunho / falha",
+    statuses: ["rascunho", "falha_envio", "aguardando_aprovacao"],
+    requiresServer: true,
+  },
+  // Só a `falha_envio` que o badge âmbar chama de "Envio cancelado". O where
+  // (servidor) reproduz o discriminador do BADGE — o último evento de
+  // desfecho, via `sendCanceledWhere` — e NÃO `sentAt`, que é a pergunta da
+  // exclusão e mostraria uma falha real de reenvio sob este rótulo.
+  {
+    id: "envio_cancelado",
+    label: "Envio cancelado",
+    statuses: ["falha_envio"],
+    requiresServer: true,
+  },
   { id: "cliente", label: "Com o cliente", statuses: ["enviada", "entregue", "visualizada"] },
   // "proprietario" quebrou em dois (2026-08): a parada de decisão é bola do
   // CORRETOR; a 2ª via em curso é bola do proprietário — juntos, o filtro
