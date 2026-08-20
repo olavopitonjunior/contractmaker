@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect } from "react";
 import { useFieldArray, UseFormReturn, Controller } from "react-hook-form";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,11 +9,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
-import { Plus, Trash2, UserPlus, Building2, Search, Landmark } from "lucide-react";
+import { Plus, Trash2, UserPlus, Building2, Landmark } from "lucide-react";
 import { MoneyInput } from "@/components/forms/MoneyInput";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 import { OBSERVACOES_MAX } from "@/lib/forms/validation";
 import { maskCPF, maskCNPJ, maskTelefone } from "@/lib/forms/field-formats";
+import {
+  CorretorCombobox,
+  type CorretorComboboxOption,
+} from "@/components/corretores/CorretorCombobox";
 import { CadastroRecebimento } from "./CadastroRecebimento";
 
 interface ComissaoConfigStepProps {
@@ -27,17 +31,6 @@ interface ComissaoConfigStepProps {
    * O POST faz a mesma checagem; aqui é só a metade visual.
    */
   viewerIsMember?: boolean;
-}
-
-interface CommissionerLookup {
-  id: string;
-  label: string;
-  tipoPessoa: string | null;
-  doc: string | null;
-  creci: string | null;
-  papel: string | null;
-  email: string | null;
-  phone: string | null;
 }
 
 function FormField({
@@ -92,41 +85,19 @@ export function ComissaoConfigStep({
   const quemPaga = form.watch("comissao.quem_paga");
   const quandoPaga = form.watch("comissao.quando_paga");
 
-  // Lookup público de comissionados cadastrados na org.
-  // Carregado sob demanda quando usuário abre o picker "Selecionar cadastrado".
-  const [lookupOpen, setLookupOpen] = useState(false);
-  const [lookupQuery, setLookupQuery] = useState("");
-  const [lookupResults, setLookupResults] = useState<CommissionerLookup[]>([]);
-  const [lookupLoading, setLookupLoading] = useState(false);
-  const datalistId = useId();
-
-  useEffect(() => {
-    if (!lookupOpen || !token) return;
-    let cancelled = false;
-    setLookupLoading(true);
-    const q = lookupQuery.trim();
-    const url = `/api/forms/${token}/commissioners${q ? `?q=${encodeURIComponent(q)}` : ""}`;
-    // credentials default (same-origin): em prod imobpro.ia.br o endpoint
-    // é público sem auth — cookie da sessão NextAuth é inofensivo (route
-    // não chama requireAuth). Em preview Vercel com SSO, `credentials: "omit"`
-    // quebrava a request com 401 porque não enviava o cookie de SSO.
-    fetch(url)
-      .then((r) => (r.ok ? r.json() : { items: [] }))
-      .then((data) => {
-        if (!cancelled) {
-          setLookupResults(Array.isArray(data?.items) ? data.items : []);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setLookupResults([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLookupLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [lookupOpen, lookupQuery, token]);
+  // Lookup público de comissionados cadastrados na org, via endpoint
+  // token-scoped (nunca /api/financeiro/* no form público — ver o comentário
+  // no topo da rota). `credentials` default (same-origin): em prod
+  // imobpro.ia.br o endpoint é público sem auth; em preview Vercel com SSO,
+  // "omit" quebrava a request com 401 por não enviar o cookie de SSO.
+  async function fetchCommissionerOptions(q: string): Promise<CorretorComboboxOption[]> {
+    if (!token) return [];
+    const url = `/api/forms/${token}/commissioners?q=${encodeURIComponent(q)}`;
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json().catch(() => ({}));
+    return Array.isArray(data?.items) ? data.items : [];
+  }
 
   const {
     fields: testemunhaFields,
@@ -320,18 +291,39 @@ export function ComissaoConfigStep({
             </p>
             <div className="flex items-center gap-2 flex-wrap">
               {token && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setLookupOpen((v) => !v);
-                    setLookupQuery("");
+                <CorretorCombobox
+                  fetchOptions={fetchCommissionerOptions}
+                  onSelect={(r) => {
+                    const isPF = r.tipoPessoa === "fisica";
+                    appendComissionado({
+                      splitRecipientId: r.id,
+                      nome: r.label,
+                      tipo_pessoa: isPF ? "fisica" : "juridica",
+                      // O endpoint token-scoped devolve o doc MASCARADO
+                      // (anti-scraping, ex. "390***05") — persistir isso em
+                      // dataJson envenenaria ClickSign/DIMOB/qualificação.
+                      // O vínculo real é splitRecipientId; o doc fica vazio
+                      // pra quem preenche completar (ou o finalize resolver).
+                      cpf: "",
+                      cnpj: "",
+                      creci: r.creci ?? "",
+                      email: r.email ?? "",
+                      mobile_phone: r.phone ?? "",
+                      papel:
+                        (r.papel as
+                          | "captador"
+                          | "intermediador"
+                          | "indicador"
+                          | "imobiliaria_principal"
+                          | "outro"
+                          | null) ?? "imobiliaria_principal",
+                      incluir_como_signatario: false,
+                    });
+                    toast.success(`${r.label} adicionado(a) como comissionado.`);
                   }}
-                >
-                  <Search className="h-3.5 w-3.5 mr-1.5" />
-                  Selecionar cadastrado
-                </Button>
+                  placeholder="Selecionar cadastrado"
+                  className="w-64"
+                />
               )}
               <Button
                 type="button"
@@ -378,85 +370,6 @@ export function ComissaoConfigStep({
             O primeiro entra no corpo do contrato; demais aparecem só como
             assinantes adicionais no envelope ClickSign.
           </p>
-
-          {lookupOpen && token && (
-            <div className="rounded-md border bg-muted/30 p-3 space-y-2">
-              <div className="flex items-center gap-2">
-                <Search className="h-3.5 w-3.5 text-muted-foreground" />
-                <Input
-                  list={datalistId}
-                  value={lookupQuery}
-                  onChange={(e) => setLookupQuery(e.target.value)}
-                  placeholder="Buscar por nome, CPF/CNPJ ou CRECI..."
-                  className="bg-background"
-                />
-              </div>
-              <datalist id={datalistId}>
-                {lookupResults.map((r) => (
-                  <option key={r.id} value={r.label}>
-                    {r.label} — {r.tipoPessoa === "fisica" ? "Corretor" : "Imobiliária"}
-                    {r.creci ? ` · CRECI ${r.creci}` : ""}
-                  </option>
-                ))}
-              </datalist>
-              <p className="text-xs text-muted-foreground">
-                Dados bancários ficam visíveis apenas no painel administrativo.
-              </p>
-              {lookupLoading && (
-                <p className="text-xs text-muted-foreground">Buscando...</p>
-              )}
-              {!lookupLoading && lookupResults.length === 0 && lookupQuery && (
-                <p className="text-xs text-muted-foreground">
-                  Nenhum cadastrado encontrado. Use os botões "Novo corretor" ou
-                  "Nova imobiliária" pra cadastrar.
-                </p>
-              )}
-              {!lookupLoading && lookupResults.length > 0 && (
-                <div className="space-y-1 max-h-60 overflow-y-auto">
-                  {lookupResults.map((r) => (
-                    <button
-                      key={r.id}
-                      type="button"
-                      onClick={() => {
-                        const isPF = r.tipoPessoa === "fisica";
-                        appendComissionado({
-                          splitRecipientId: r.id,
-                          nome: r.label,
-                          tipo_pessoa: isPF ? "fisica" : "juridica",
-                          cpf: isPF ? (r.doc ?? "") : "",
-                          cnpj: !isPF ? (r.doc ?? "") : "",
-                          creci: r.creci ?? "",
-                          email: r.email ?? "",
-                          mobile_phone: r.phone ?? "",
-                          papel: (r.papel as
-                            | "captador"
-                            | "intermediador"
-                            | "indicador"
-                            | "imobiliaria_principal"
-                            | "outro"
-                            | null) ?? "imobiliaria_principal",
-                          incluir_como_signatario: false,
-                        });
-                        toast.success(`${r.label} adicionado(a) como comissionado.`);
-                        setLookupOpen(false);
-                      }}
-                      className="w-full text-left rounded border bg-background hover:bg-accent p-2 text-sm transition-colors"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium">{r.label}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {r.tipoPessoa === "fisica" ? "Corretor" : "Imobiliária"}
-                        </span>
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {r.doc ?? ""}{r.creci ? ` · CRECI ${r.creci}` : ""}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
 
           {comissionadoFields.map((field, index) => {
             const tipoPath =
