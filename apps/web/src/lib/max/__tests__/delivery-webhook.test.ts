@@ -13,8 +13,8 @@ import { createHmac } from "node:crypto";
  */
 
 const db = vi.hoisted(() => ({
-  dealNotificationLog: { findMany: vi.fn(), update: vi.fn() },
-  userNotificationDelivery: { findMany: vi.fn(), update: vi.fn() },
+  dealNotificationLog: { findFirst: vi.fn(), update: vi.fn() },
+  userNotificationDelivery: { findFirst: vi.fn(), update: vi.fn() },
 }));
 vi.mock("@/lib/db/prisma", () => ({ prisma: db }));
 
@@ -40,8 +40,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
   vi.stubEnv("MAX_WEBHOOK_SECRET", SECRET);
-  db.dealNotificationLog.findMany.mockResolvedValue([]);
-  db.userNotificationDelivery.findMany.mockResolvedValue([]);
+  db.dealNotificationLog.findFirst.mockResolvedValue(null);
+  db.userNotificationDelivery.findFirst.mockResolvedValue(null);
 });
 
 describe("verifyMaxWebhook", () => {
@@ -97,16 +97,18 @@ describe("parseDeliveryOutcome", () => {
 });
 
 describe("applyDeliveryOutcome", () => {
-  it("escopa por orgId+dedupeKey+whatsapp e faz MERGE do detail", async () => {
-    db.dealNotificationLog.findMany.mockResolvedValue([
-      { id: "d1", detail: { skipReason: "ja-existente" } },
-    ]);
+  it("casa pelo ID da linha de log (o dedupeKey do payload É o logId) e faz MERGE do detail", async () => {
+    db.dealNotificationLog.findFirst.mockResolvedValue(
+      { id: "log-abc", detail: { skipReason: "ja-existente" } }
+    );
 
     const r = await applyDeliveryOutcome(parseDeliveryOutcome(OUTCOME)!);
     expect(r.dealLogs).toBe(1);
 
-    expect(db.dealNotificationLog.findMany).toHaveBeenCalledWith({
-      where: { orgId: "org-1", dedupeKey: "log-abc", channel: "whatsapp" },
+    // O match é por id — a coluna dedupeKey dos modelos guarda chave de
+    // EVENTO e casaria zero linhas.
+    expect(db.dealNotificationLog.findFirst).toHaveBeenCalledWith({
+      where: { id: "log-abc", orgId: "org-1", channel: "whatsapp" },
     });
     const data = db.dealNotificationLog.update.mock.calls[0][0].data;
     // O que o trilho gravou sobrevive; a marca entra ao lado.
@@ -115,9 +117,9 @@ describe("applyDeliveryOutcome", () => {
   });
 
   it("é monotônico e idempotente: read existente não regride nem regrava", async () => {
-    db.userNotificationDelivery.findMany.mockResolvedValue([
-      { id: "u1", detail: { maxDelivery: { status: "read", at: "x" } } },
-    ]);
+    db.userNotificationDelivery.findFirst.mockResolvedValue(
+      { id: "u1", detail: { maxDelivery: { status: "read", at: "x" } } }
+    );
 
     const delivered = await applyDeliveryOutcome(
       parseDeliveryOutcome({ ...OUTCOME, status: "delivered" })!
@@ -126,17 +128,17 @@ describe("applyDeliveryOutcome", () => {
     expect(db.userNotificationDelivery.update).not.toHaveBeenCalled();
 
     // Upgrade de verdade passa: delivered gravado → read chega.
-    db.userNotificationDelivery.findMany.mockResolvedValue([
-      { id: "u1", detail: { maxDelivery: { status: "delivered", at: "x" } } },
-    ]);
+    db.userNotificationDelivery.findFirst.mockResolvedValue(
+      { id: "u1", detail: { maxDelivery: { status: "delivered", at: "x" } } }
+    );
     const read = await applyDeliveryOutcome(parseDeliveryOutcome(OUTCOME)!);
     expect(read.userDeliveries).toBe(1);
   });
 
   it("unconfirmed é notícia fraca: delivered atrasado a corrige", async () => {
-    db.dealNotificationLog.findMany.mockResolvedValue([
-      { id: "d1", detail: { maxDelivery: { status: "unconfirmed", at: "x" } } },
-    ]);
+    db.dealNotificationLog.findFirst.mockResolvedValue(
+      { id: "d1", detail: { maxDelivery: { status: "unconfirmed", at: "x" } } }
+    );
     const r = await applyDeliveryOutcome(
       parseDeliveryOutcome({ ...OUTCOME, status: "delivered" })!
     );

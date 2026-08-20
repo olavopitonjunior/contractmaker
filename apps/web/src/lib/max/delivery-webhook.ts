@@ -8,12 +8,16 @@ import { prisma } from "@/lib/db/prisma";
  * 202, falha real (número sem WhatsApp, bloqueio, instância desconectada) só
  * aparecia nos callbacks da Z-API, visíveis apenas dentro do Max.
  *
- * A costura é `(orgId, dedupeKey, channel)` — o `dedupeKey` é a mesma chave
- * que viajou no `/notify` e que os dois logs guardam. O `orgId` é OBRIGATÓRIO
- * no payload: os uniques dos logs são compostos e um `dedupeKey` sozinho pode
- * casar linhas de outra org — um webhook autenticado por secret global
- * escrevendo em tenant que ele não nomeou seria o mesmo defeito que o
- * `/admin/status` do Max acabou de corrigir na direção oposta.
+ * A costura: o `dedupeKey` que viajou no `/notify` (e voltou aqui) é o **ID
+ * da linha de log** — os call-sites mandam `dedupeKey: logId` /
+ * `dedupeKey: deliveryId` de propósito ("a linha de log é o chokepoint
+ * atômico de idempotência; reusá-la como dedupeKey estende a garantia até
+ * dentro do Max"). Por isso o match é por `id`, NUNCA pela coluna
+ * `dedupeKey` dos modelos (que guarda a chave de EVENTO — stageId+dia etc. —
+ * e casaria zero linhas). O `orgId` é OBRIGATÓRIO como cerca: um webhook
+ * autenticado por secret global não pode escrever em linha de tenant que ele
+ * não nomeou — o mesmo defeito que o `/admin/status` do Max corrigiu na
+ * direção oposta.
  *
  * O desfecho vai em `detail.maxDelivery` (MERGE, nunca replace — `detail` já
  * carrega motivo de skip/falha dos trilhos). O `status` da linha NÃO muda:
@@ -109,11 +113,12 @@ export interface ApplyResult {
 }
 
 /**
- * Grava o desfecho nos dois trilhos. `updateMany` não faz merge de Json, então
- * é read-modify-write por linha — o volume por `dedupeKey` é 1..poucas linhas.
- * `dedupeKey` desconhecida devolve zeros e o chamador responde 200 mesmo
- * assim: para quem tem o secret, a contagem não é segredo; para o resto, a
- * rota nem autentica.
+ * Grava o desfecho no trilho dono da linha. O id (`dedupeKey` do payload) é
+ * PK numa das duas tabelas — no máximo UMA linha no total; o Max não sabe de
+ * qual trilho a notificação nasceu, então tenta as duas. Read-modify-write
+ * porque `update` de Json não faz merge. Id desconhecido devolve zeros e o
+ * chamador responde 200 mesmo assim: para quem tem o secret a contagem não é
+ * segredo; para o resto, a rota nem autentica.
  */
 export async function applyDeliveryOutcome(
   outcome: DeliveryOutcome
@@ -124,21 +129,21 @@ export async function applyDeliveryOutcome(
     providerMessageId: outcome.providerMessageId ?? null,
     receivedAt: new Date().toISOString(),
   };
+  // Match pelo ID da linha de log (ver doc do módulo) + cercas de org/canal.
   const where = {
+    id: outcome.dedupeKey,
     orgId: outcome.orgId,
-    dedupeKey: outcome.dedupeKey,
     channel: "whatsapp",
   };
   const result: ApplyResult = { dealLogs: 0, userDeliveries: 0 };
 
-  const dealLogs = await prisma.dealNotificationLog.findMany({ where });
-  for (const row of dealLogs) {
-    if (!shouldApply(row.detail, outcome)) continue;
+  const dealLog = await prisma.dealNotificationLog.findFirst({ where });
+  if (dealLog && shouldApply(dealLog.detail, outcome)) {
     await prisma.dealNotificationLog.update({
-      where: { id: row.id },
+      where: { id: dealLog.id },
       data: {
         detail: {
-          ...((row.detail as Record<string, unknown> | null) ?? {}),
+          ...((dealLog.detail as Record<string, unknown> | null) ?? {}),
           maxDelivery: { ...marca },
         },
       },
@@ -146,14 +151,13 @@ export async function applyDeliveryOutcome(
     result.dealLogs += 1;
   }
 
-  const deliveries = await prisma.userNotificationDelivery.findMany({ where });
-  for (const row of deliveries) {
-    if (!shouldApply(row.detail, outcome)) continue;
+  const delivery = await prisma.userNotificationDelivery.findFirst({ where });
+  if (delivery && shouldApply(delivery.detail, outcome)) {
     await prisma.userNotificationDelivery.update({
-      where: { id: row.id },
+      where: { id: delivery.id },
       data: {
         detail: {
-          ...((row.detail as Record<string, unknown> | null) ?? {}),
+          ...((delivery.detail as Record<string, unknown> | null) ?? {}),
           maxDelivery: { ...marca },
         },
       },

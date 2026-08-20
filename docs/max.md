@@ -246,7 +246,10 @@ some com o assunto.
 - ~~**Entrega pós-202 é ponto cego.**~~ **Fechada (Fase 4, 2026-08-20).** O Max
   consome os callbacks de status da Z-API (`SENT/RECEIVED/READ`) e reporta o
   desfecho (`delivered | read | unconfirmed | failed`) em
-  `POST /api/webhooks/max`, costurado por `(orgId, dedupeKey)` e gravado em
+  `POST /api/webhooks/max`, costurado por `(orgId, id da linha de log)` — o
+  `dedupeKey` do payload É o `logId`/`deliveryId` que viajou no `/notify`;
+  a coluna `dedupeKey` dos modelos guarda chave de EVENTO e não entra no
+  match — e gravado em
   `detail.maxDelivery` dos dois logs (merge; o `status` da linha não muda —
   ele significa "processado pelo trilho", não "entregue"). Contrato:
   `{orgId, dedupeKey, status, at, providerMessageId}`, HMAC
