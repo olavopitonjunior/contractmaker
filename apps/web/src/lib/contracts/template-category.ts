@@ -530,10 +530,18 @@ export function eligibleModalidadesForDealKind(kind: string): string[] {
   return [...VENDA_MODALIDADES];
 }
 
+/**
+ * `draft` e `archived` são motivos separados porque levam o operador a lugares
+ * diferentes: rascunho é um modelo que ainda está em REVISÃO (falta terminar de
+ * conferir e ativar), arquivado é um que foi tirado de uso de propósito.
+ * Colapsar os dois em "arquivado" mandava quem tinha um rascunho procurar na
+ * aba errada — o modelo estava listado em Ativos o tempo todo.
+ */
 export type TemplateOverrideRejection =
   | "not-found"
   | "cross-org"
-  | "not-active"
+  | "draft"
+  | "archived"
   | "wrong-kind";
 
 /**
@@ -546,7 +554,9 @@ export type TemplateOverrideRejection =
 export const TEMPLATE_OVERRIDE_MESSAGE: Record<TemplateOverrideRejection, string> = {
   "not-found": "Modelo não encontrado.",
   "cross-org": "Modelo não encontrado.",
-  "not-active": "Esse modelo está arquivado. Ative-o em Modelos antes de usar.",
+  draft:
+    "Esse modelo ainda está em revisão. Termine a revisão e ative-o em Modelos antes de usar.",
+  archived: "Esse modelo está arquivado. Ative-o em Modelos antes de usar.",
   "wrong-kind": "Esse modelo não serve para este tipo de negócio.",
 };
 
@@ -570,7 +580,9 @@ export async function resolveTemplateOverride(params: {
   if (!t) return { ok: false, reason: "not-found" };
   // Cross-org antes de qualquer outra coisa: não vaza nem a existência.
   if (t.orgId !== params.orgId) return { ok: false, reason: "cross-org" };
-  if (t.status !== "active") return { ok: false, reason: "not-active" };
+  if (t.status !== "active") {
+    return { ok: false, reason: t.status === "draft" ? "draft" : "archived" };
+  }
   if (!eligibleModalidadesForDealKind(params.dealKind).includes(t.modalidade ?? "")) {
     return { ok: false, reason: "wrong-kind" };
   }

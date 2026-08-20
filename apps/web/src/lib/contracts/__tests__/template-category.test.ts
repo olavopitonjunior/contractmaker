@@ -699,7 +699,14 @@ describe("escolha manual de modelo (override)", () => {
     mockFindUnique.mockResolvedValueOnce(tplRow({ status: "archived" }) as never);
     expect(
       await resolveTemplateOverride({ templateId: "t1", orgId: "org-1", dealKind: "locacao" })
-    ).toEqual({ ok: false, reason: "not-active" });
+    ).toEqual({ ok: false, reason: "archived" });
+
+    // Rascunho é motivo PRÓPRIO: o modelo está listado em Ativos, ainda em
+    // revisão. Chamá-lo de "arquivado" mandava o operador procurar na aba errada.
+    mockFindUnique.mockResolvedValueOnce(tplRow({ status: "draft" }) as never);
+    expect(
+      await resolveTemplateOverride({ templateId: "t1", orgId: "org-1", dealKind: "locacao" })
+    ).toEqual({ ok: false, reason: "draft" });
 
     mockFindUnique.mockResolvedValueOnce(null as never);
     expect(

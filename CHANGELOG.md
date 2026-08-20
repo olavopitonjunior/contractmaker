@@ -4,6 +4,12 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-19 - Modelo em rascunho para de ser chamado de arquivado
+
+### Corrigido
+
+- **Escolher um modelo em RASCUNHO na geração de contrato dizia "Esse modelo está arquivado"** (achado no smoke de staging da promoção). Rascunho e arquivado levam o operador a lugares diferentes: rascunho é um modelo em revisão, listado na aba **Ativos**, e mandá-lo procurar em "Arquivados" era conselho errado. Viraram motivos separados (`draft` / `archived`), cada um com sua mensagem.
+
 ## [Unreleased] - 2026-08-19 - Cancelar o envelope da proposta não prende mais a proposta
 
 ### Corrigido
