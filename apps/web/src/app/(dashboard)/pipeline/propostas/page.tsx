@@ -23,6 +23,7 @@ import { proposalRoundView } from "@/lib/proposals/round-view";
 import { resolveLiveVendedorVia } from "@/lib/proposals/live-vendedor-via";
 import { proposalDeadline } from "@/lib/proposals/deadline";
 import { summarizeProposalData } from "@/lib/proposals/summarize";
+import { proposalSendChannel } from "@/lib/proposals/send-channel";
 import { formatDayMonthBR } from "@/lib/format/datetime";
 
 export const dynamic = "force-dynamic";
@@ -91,7 +92,10 @@ export default async function PropostasPage({
       const conds: Prisma.Sql[] = [
         Prisma.sql`"orgId" = ${orgId}`,
         Prisma.sql`"kind" = ${kindVal}`,
-        Prisma.sql`lower("title" || ' ' || COALESCE("dataJson"::text, '')) LIKE ${like} ESCAPE '\\'`,
+        // `code` entra na busca: virou o identificador humano da proposta
+        // (aparece na lista, no cabeçalho, no e-mail e no comprovante), então
+        // colar "PROP-2026-0042" no campo tem de achar a proposta.
+        Prisma.sql`lower(COALESCE("code", '') || ' ' || "title" || ' ' || COALESCE("dataJson"::text, '')) LIKE ${like} ESCAPE '\\'`,
       ];
       if (!can(eff, PERMISSION.PROPOSAL_VIEW_ALL)) {
         conds.push(Prisma.sql`("userId" = ${userId} OR "responsibleUserId" = ${userId})`);
@@ -121,10 +125,26 @@ export default async function PropostasPage({
       },
       select: {
         id: true,
+        code: true,
         title: true,
         status: true,
         kind: true,
         instrument: true,
+        // Canal de envio (coluna "Envio"). As duas relações são necessárias: o
+        // envelope guarda o canal EXECUTADO e as linhas de plano o PEDIDO — ver
+        // lib/proposals/send-channel.ts. Relação aninhada no select vira consulta
+        // agrupada no Prisma (não é N+1 por linha).
+        signers: { where: { included: true }, select: { notifyChannel: true } },
+        // `failed` fora: envelope que estourou na criação nunca notificou
+        // ninguém. `canceled` FICA — cancelar o envelope é fluxo normal de
+        // recuperação (devolve a 1ª via pra reenvio), e excluí-lo fazia a
+        // proposta enviada cair no plano e a célula dizer "ainda não enviada".
+        // Quem separa "saiu" de "não saiu" é o `sentAt` da proposta, passado
+        // ao `proposalSendChannel` — ver o doc-comment dele.
+        envelopes: {
+          where: { source: "proposal", status: { not: "failed" } },
+          select: { signers: { select: { notifyChannel: true } } },
+        },
         validUntil: true,
         createdAt: true,
         sentAt: true,
@@ -186,6 +206,11 @@ export default async function PropostasPage({
 
   const permissions = {
     send: can(eff, PERMISSION.PROPOSAL_SEND),
+    // Escrita na proposta (renomear, editar). Espelha o guard das rotas PATCH
+    // /api/proposals/[id] e .../title: não existe PROPOSAL_UPDATE, então o corte
+    // é quem cria OU envia. VIEW_ALL sozinho é LEITURA e não entra aqui.
+    write:
+      can(eff, PERMISSION.PROPOSAL_CREATE) || can(eff, PERMISSION.PROPOSAL_SEND),
     convert: can(eff, PERMISSION.PROPOSAL_CONVERT),
     cancel: can(eff, PERMISSION.PROPOSAL_CANCEL),
     delete: can(eff, PERMISSION.PROPOSAL_DELETE),
@@ -207,10 +232,17 @@ export default async function PropostasPage({
       const prazo = proposalDeadline(p.validUntil, p.status);
       return {
         id: p.id,
+        code: p.code,
         title: p.title,
         status: p.status,
         kind: p.kind,
         instrument: p.instrument,
+        sendChannel: proposalSendChannel({
+          instrument: p.instrument,
+          envelopeSigners: p.envelopes.flatMap((e) => e.signers),
+          plannedSigners: p.signers,
+          proposalSentAt: p.sentAt,
+        }),
         createdAtLabel: formatDayMonthBR(p.createdAt),
         sentAtLabel: formatDayMonthBR(p.sentAt, ""),
         firstViewedAtLabel: formatDayMonthBR(p.firstViewedAt, ""),
@@ -228,7 +260,7 @@ export default async function PropostasPage({
       // Busca já resolvida no banco (searchIdFilter). O post-filter em memória só
       // roda no FALLBACK (raw falhou) — aí sobre as 200 recentes, como antes.
       if (!qLower || !searchRawFailed) return true;
-      const hay = [r.title, r.resumo.imovel, r.resumo.proponente]
+      const hay = [r.code, r.title, r.resumo.imovel, r.resumo.proponente]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();

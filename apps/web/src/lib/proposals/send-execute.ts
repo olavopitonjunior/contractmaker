@@ -28,6 +28,8 @@ import { prepareSend, type PrepareResult } from "./send";
 import { withVendedorSendLock } from "./send-lock";
 import { ensureProposalDefaultWitnesses } from "./witnesses";
 import { advanceProposalStatus } from "./status";
+import { proposalNumero } from "./code";
+import { summarizeProposalData } from "./summarize";
 import { SEND_VENDEDOR_STATUSES } from "./status-sets";
 import { notifyProposalMilestone } from "./notify-proposal";
 import { toE164BR } from "./clicksign-readiness";
@@ -224,7 +226,7 @@ async function runSend(
         dataJson,
         hiddenPaths: [],
         via: "completa",
-        numero: proposal.id.slice(-8),
+        numero: proposalNumero(proposal),
         comissaoIncluida: proposal.comissaoIncluida,
         meta: { emitidaEm: proposal.createdAt, validaAte: proposal.validUntil },
       })
@@ -260,12 +262,18 @@ function matchSignerRow<T extends { cpf: string | null; email: string | null; ph
 }
 
 async function sendAceite(
-  proposal: { id: string; orgId: string; title: string; token: string },
+  proposal: {
+    id: string;
+    orgId: string;
+    title: string;
+    token: string;
+    code: string | null;
+  },
   decision: Extract<PrepareResult, { ok: true }>,
   _html: string
 ): Promise<SendResult> {
   const link = proposalPublicLink(proposal.token);
-  const numero = proposal.id.slice(-8);
+  const numero = proposalNumero(proposal);
 
   // Carrega as linhas pra rastrear o acceptance_term POR signatário. Retry-safe:
   // um signatário que já tem acceptanceClicksignId não é reenviado (senão o
@@ -376,13 +384,22 @@ type SigSettings = Awaited<ReturnType<typeof getSignatureSettings>>;
 /** Resolve placeholders da mensagem/assunto customizável da org. */
 function fillPlaceholders(
   tpl: string | null | undefined,
-  p: { proposalId: string; title: string; specs: EnvSignerSpec[] }
+  p: {
+    numero: string;
+    title: string;
+    imovel: string | null;
+    specs: EnvSignerSpec[];
+  }
 ): string | null {
   if (!tpl) return null;
   const proponente = p.specs.find((s) => s.role !== "vendedor")?.name ?? "";
-  const imovel = p.title.includes(" — ") ? p.title.split(" — ").slice(1).join(" — ") : "";
+  // `imovel` vem resolvido do dataJson. Antes era extraído fatiando o título no
+  // " — ", o que só funcionava enquanto o título era SEMPRE derivado
+  // ("proponente — endereço"). Com título livre, esse split devolvia um pedaço
+  // arbitrário do texto do corretor como se fosse o endereço do imóvel.
+  const imovel = p.imovel ?? "";
   return tpl
-    .replace(/\{\{\s*numero\s*\}\}/g, p.proposalId.slice(-8))
+    .replace(/\{\{\s*numero\s*\}\}/g, p.numero)
     .replace(/\{\{\s*titulo\s*\}\}/g, p.title)
     .replace(/\{\{\s*proponente\s*\}\}/g, proponente)
     .replace(/\{\{\s*imovel\s*\}\}/g, imovel);
@@ -400,6 +417,10 @@ async function runClickSignEnvelope(p: {
   proposalId: string;
   orgId: string;
   title: string;
+  /** Código da proposta (`proposalNumero`) — placeholder `{{numero}}`. */
+  numero: string;
+  /** Endereço do imóvel resolvido do dataJson — placeholder `{{imovel}}`. */
+  imovel: string | null;
   via: string;
   specs: EnvSignerSpec[];
   html: string;
@@ -597,7 +618,15 @@ async function runClickSignEnvelope(p: {
  * o dono, e o dono pode receber uma via com a comissão oculta.
  */
 async function sendEnvelope(
-  proposal: { id: string; orgId: string; title: string; validUntil: Date | null },
+  proposal: {
+    id: string;
+    orgId: string;
+    title: string;
+    code: string | null;
+    kind: string;
+    dataJson: unknown;
+    validUntil: Date | null;
+  },
   decision: Extract<PrepareResult, { ok: true }>,
   html: string
 ): Promise<SendResult> {
@@ -622,6 +651,8 @@ async function sendEnvelope(
     proposalId: proposal.id,
     orgId: proposal.orgId,
     title: proposal.title,
+    numero: proposalNumero(proposal),
+    imovel: summarizeProposalData(proposal.dataJson, proposal.kind).imovel,
     via: "completa",
     specs: first,
     html,
@@ -903,7 +934,7 @@ async function sendVendedorAceiteLocked(
   }
 
   const link = proposalPublicLink(proposal.token);
-  const numero = proposal.id.slice(-8);
+  const numero = proposalNumero(proposal);
   let created = 0;
   let lastError: string | null = null;
   for (const row of pending) {
@@ -1073,7 +1104,7 @@ async function sendVendedorEnvelopeLocked(
         dataJson,
         hiddenPaths: proposal.hiddenPaths,
         via: contentVia,
-        numero: proposal.id.slice(-8),
+        numero: proposalNumero(proposal),
         comissaoIncluida: proposal.comissaoIncluida,
         meta: { emitidaEm: proposal.createdAt, validaAte: proposal.validUntil },
       })
@@ -1118,6 +1149,8 @@ async function sendVendedorEnvelopeLocked(
       proposalId,
       orgId: proposal.orgId,
       title: proposal.title,
+      numero: proposalNumero(proposal),
+      imovel: summarizeProposalData(proposal.dataJson, proposal.kind).imovel,
       via: "reduzida",
       specs,
       html,

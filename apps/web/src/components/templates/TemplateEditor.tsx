@@ -130,6 +130,14 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
     initialCriteria?.fiadorPessoa ?? "any"
   );
   const [criteriaPessoa, setCriteriaPessoa] = useState<string>(initialCriteria?.pessoa ?? "any");
+  // Estado como string ("any" | "true" | "false") porque o Select é de string;
+  // vira boolean em `buildMatchCriteria`. `?? "any"` não serve aqui: `false` é
+  // um critério marcado e cairia pro default sob nullish/truthiness.
+  const [criteriaAdm, setCriteriaAdm] = useState<string>(
+    initialCriteria?.admImobiliaria === undefined
+      ? "any"
+      : String(initialCriteria.admImobiliaria)
+  );
 
   const showCriteria =
     family === "proposta" ||
@@ -148,6 +156,10 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
     }
     if (criteriaPessoa !== "any") {
       c.pessoa = criteriaPessoa as TemplateMatchCriteria["pessoa"];
+    }
+    // Só no contrato de locação: a proposta não coleta administração.
+    if (family === "locacao" && criteriaAdm !== "any") {
+      c.admImobiliaria = criteriaAdm === "true";
     }
     return Object.keys(c).length ? c : null;
   }
@@ -420,6 +432,23 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
                   </SelectContent>
                 </Select>
               </div>
+              {family === "locacao" && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="criteria-adm" className="text-xs">
+                    Administração pela imobiliária
+                  </Label>
+                  <Select value={criteriaAdm} onValueChange={setCriteriaAdm}>
+                    <SelectTrigger id="criteria-adm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="any">Qualquer</SelectItem>
+                      <SelectItem value="true">Sim, a imobiliária administra</SelectItem>
+                      <SelectItem value="false">Não, o locador recebe direto</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
           </div>
         )}

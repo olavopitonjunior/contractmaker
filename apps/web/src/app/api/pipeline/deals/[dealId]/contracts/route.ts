@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth, getUserOrg } from "@/lib/auth/auth";
+import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { guardDealScope } from "@/lib/deals/route-helpers";
@@ -25,14 +25,12 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: { dealId: string } }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const org = await getUserOrg(session.user.id);
-  if (!org) {
-    return NextResponse.json({ error: "No organization" }, { status: 400 });
-  }
+  // `requireAuth` (e não `auth()` cru): sob impersonation de tenant,
+  // `ctx.userId` é o DONO do tenant — é ele que tem membership/RBAC na org
+  // impersonada. Com o id cru do super_admin o RBAC negava tudo (404/403).
+  const authResult = await requireAuth(req);
+  if (!authResult.ok) return authResult.response;
+  const { ctx } = authResult;
 
   const deal = await prisma.deal.findUnique({
     where: { id: params.dealId },
@@ -46,7 +44,7 @@ export async function DELETE(
   if (!deal) {
     return NextResponse.json({ error: "Deal não encontrado" }, { status: 404 });
   }
-  if (deal.pipeline.orgId !== org.id) {
+  if (deal.pipeline.orgId !== ctx.orgId) {
     return NextResponse.json(
       { error: "Forbidden", reason: "deal de outra organização" },
       { status: 403 }
@@ -56,8 +54,8 @@ export async function DELETE(
   // Escopo do gerente + CONTRACT_EDIT (apaga TODAS as versões do contrato).
   const denied = await guardDealScope({
     dealId: params.dealId,
-    userId: session.user.id,
-    orgId: org.id,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
     permission: PERMISSION.CONTRACT_EDIT,
   });
   if (denied) return denied;
@@ -105,7 +103,7 @@ export async function DELETE(
     try {
       const { trashDriveFile } = await import("@/lib/google/org-oauth");
       for (const docId of docsToTrash) {
-        const ok = await trashDriveFile(docId, org.id);
+        const ok = await trashDriveFile(docId, ctx.orgId);
         if (ok) trashed++;
         await new Promise((r) => setTimeout(r, 200));
       }
@@ -132,7 +130,7 @@ export async function DELETE(
   const { waitUntil } = await import("@vercel/functions");
   waitUntil(deleteBlobs(blobUrls, prisma));
 
-  await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
+  await audit(extractAuditContextFromRequest(req, ctx.orgId, ctx.userId), {
     action: "CONTRACT_DELETE_BULK",
     result: "SUCCESS",
     resource: deal.id,

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/db/prisma", () => ({
   prisma: {
-    contractTemplate: { findMany: vi.fn() },
+    contractTemplate: { findMany: vi.fn(), findUnique: vi.fn() },
   },
 }));
 
@@ -10,10 +10,14 @@ import {
   deriveCategory,
   deriveCategoryFromPayment,
   deriveTemplateFacts,
+  eligibleModalidadesForDealKind,
+  matchCriteriaSchema,
   matchCriteriaSummary,
   parseMatchCriteria,
   resolveTemplateId,
+  resolveTemplateOverride,
   modalidadeForCategory,
+  modalidadeLabel,
   resolveTemplateTaxonomy,
   schemaTypeForModalidade,
   scoreTemplateAgainstFacts,
@@ -26,6 +30,7 @@ import {
 import { prisma } from "@/lib/db/prisma";
 
 const mockFindMany = vi.mocked(prisma.contractTemplate.findMany);
+const mockFindUnique = vi.mocked(prisma.contractTemplate.findUnique);
 
 describe("deriveCategoryFromPayment", () => {
   it("classifica o caso do deal 20486 (sinal + financiamento + banco) como financiamento", () => {
@@ -316,7 +321,12 @@ describe("deriveTemplateFacts", () => {
         garantia: { tipo: "fiador", fiador: { tipo_pessoa: "juridica", cnpj: "1" } },
         locatarios: [{ tipo_pessoa: "fisica", cpf: "1" }],
       })
-    ).toEqual({ garantia: "fiador", fiadorPessoa: "pj", pessoa: "pf" });
+    ).toEqual({
+      garantia: "fiador",
+      fiadorPessoa: "pj",
+      pessoa: "pf",
+      admImobiliaria: null,
+    });
   });
 
   it("QUALQUER locatário jurídico torna o negócio PJ", () => {
@@ -343,7 +353,12 @@ describe("deriveTemplateFacts", () => {
   });
 
   it("dataJson pobre/ausente → tudo desconhecido (nunca desclassifica)", () => {
-    const vazio = { garantia: null, fiadorPessoa: null, pessoa: null };
+    const vazio = {
+      garantia: null,
+      fiadorPessoa: null,
+      pessoa: null,
+      admImobiliaria: null,
+    };
     // Shape das propostas ANTIGAS (pré-página): partes só com nome.
     expect(deriveTemplateFacts({ locatarios: [{ nome: "Fulano" }] })).toEqual(vazio);
     expect(deriveTemplateFacts({})).toEqual(vazio);
@@ -369,6 +384,36 @@ describe("parseMatchCriteria / matchCriteriaSummary", () => {
       matchCriteriaSummary({ garantia: "fiador", fiadorPessoa: "pj", pessoa: "pf" })
     ).toEqual(["Fiador", "Fiador PJ", "Pessoa física"]);
     expect(matchCriteriaSummary(null)).toEqual([]);
+  });
+
+  it("admImobiliaria: `false` é preservado no parse e etiquetado na badge", () => {
+    // Truthiness aqui apagaria o critério e a badge mentiria por omissão.
+    expect(parseMatchCriteria({ admImobiliaria: false })).toEqual({
+      admImobiliaria: false,
+    });
+    expect(parseMatchCriteria({ admImobiliaria: true })).toEqual({
+      admImobiliaria: true,
+    });
+    expect(matchCriteriaSummary({ admImobiliaria: true })).toEqual(["Com administração"]);
+    expect(matchCriteriaSummary({ admImobiliaria: false })).toEqual(["Sem administração"]);
+    // String não vira critério no parse (a coerção é do schema, na fronteira).
+    expect(parseMatchCriteria({ admImobiliaria: "false" })).toBeNull();
+  });
+
+  it("o schema coage o `false` que o <select> manda como string", () => {
+    // Sem isso, "false" (string truthy) viraria `true` em algum boundary.
+    expect(matchCriteriaSchema.parse({ admImobiliaria: "false" })).toEqual({
+      admImobiliaria: false,
+    });
+    expect(matchCriteriaSchema.parse({ admImobiliaria: "true" })).toEqual({
+      admImobiliaria: true,
+    });
+    expect(matchCriteriaSchema.parse({ admImobiliaria: true })).toEqual({
+      admImobiliaria: true,
+    });
+    expect(() => matchCriteriaSchema.parse({ admImobiliaria: "talvez" })).toThrow();
+    // `.strict()` segue valendo pro resto.
+    expect(() => matchCriteriaSchema.parse({ chaveInventada: 1 })).toThrow();
   });
 });
 
@@ -397,6 +442,26 @@ describe("scoreTemplateAgainstFacts", () => {
   it("fato desconhecido não pontua nem desclassifica", () => {
     const cegos = deriveTemplateFacts({});
     expect(scoreTemplateAgainstFacts({ garantia: "fiador", pessoa: "pj" }, cegos)).toBe(0);
+  });
+
+  // ——— Eixo booleano: `false` é critério, não ausência de critério ———
+
+  it("critério admImobiliaria:false PONTUA e DESCLASSIFICA como qualquer outro", () => {
+    const semAdm = deriveTemplateFacts({ aluguel: { adm_imobiliaria: false } });
+    const comAdm = deriveTemplateFacts({ aluguel: { adm_imobiliaria: true } });
+
+    // Sob truthiness (`if (!wanted) continue`) este critério era ignorado e o
+    // modelo de administração empatava com o comum em TODA locação.
+    expect(scoreTemplateAgainstFacts({ admImobiliaria: false }, semAdm)).toBe(1);
+    expect(scoreTemplateAgainstFacts({ admImobiliaria: false }, comAdm)).toBe(-1);
+    expect(scoreTemplateAgainstFacts({ admImobiliaria: true }, comAdm)).toBe(1);
+    expect(scoreTemplateAgainstFacts({ admImobiliaria: true }, semAdm)).toBe(-1);
+  });
+
+  it("form sem o campo de administração não desclassifica nenhum dos dois lados", () => {
+    const antigo = deriveTemplateFacts({ locatarios: [{ tipo_pessoa: "fisica" }] });
+    expect(scoreTemplateAgainstFacts({ admImobiliaria: true }, antigo)).toBe(0);
+    expect(scoreTemplateAgainstFacts({ admImobiliaria: false }, antigo)).toBe(0);
   });
 });
 
@@ -472,6 +537,39 @@ describe("selectLocacaoTemplate × matchCriteria (variantes do form)", () => {
     expect(result?.template.id).toBe("fiador-def");
   });
 
+  it("caso RE/MAX Trio: o form escolhe sozinho entre o modelo comum e o de Administração", async () => {
+    // Os dois modelos são da mesma modalidade e o operador escolhia à mão.
+    const comum = tpl("trio-comum", { admImobiliaria: false }, true);
+    const administracao = tpl("trio-adm", { admImobiliaria: true });
+    const semDeal = { locatarios: [{ tipo_pessoa: "fisica" }] };
+
+    mockFindMany.mockResolvedValueOnce([comum, administracao]);
+    expect(
+      (
+        await selectLocacaoTemplate("org-1", "locacao_residencial_v1", {
+          ...semDeal,
+          aluguel: { adm_imobiliaria: true },
+        })
+      )?.template.id
+    ).toBe("trio-adm");
+
+    mockFindMany.mockResolvedValueOnce([comum, administracao]);
+    expect(
+      (
+        await selectLocacaoTemplate("org-1", "locacao_residencial_v1", {
+          ...semDeal,
+          aluguel: { adm_imobiliaria: false },
+        })
+      )?.template.id
+    ).toBe("trio-comum");
+
+    // Deal antigo, sem o campo: ninguém é desclassificado, vence o isDefault.
+    mockFindMany.mockResolvedValueOnce([comum, administracao]);
+    expect(
+      (await selectLocacaoTemplate("org-1", "locacao_residencial_v1", semDeal))?.template.id
+    ).toBe("trio-comum");
+  });
+
   it("o critério também desempata no fallback startsWith('locacao')", async () => {
     // Nenhum template da modalidade comercial: cai nos residenciais e ainda
     // assim respeita a variante.
@@ -502,6 +600,133 @@ describe("selectAdministracaoTemplate", () => {
     mockFindMany.mockResolvedValueOnce([]);
     const result = await selectAdministracaoTemplate("org-1");
     expect(result).toBeNull();
+  });
+});
+
+describe("modalidade temporada (short stay)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("é família locação e tem rótulo e schemaType próprios", () => {
+    expect(templateFamilyForModalidade("temporada")).toBe("locacao");
+    expect(modalidadeLabel("temporada")).toBe("Locação por temporada");
+    // Reusa o schema residencial: sem form próprio, não há o que derivar.
+    expect(schemaTypeForModalidade("temporada")).toBe("locacao_residencial_v1");
+  });
+
+  it("NUNCA é servida ao pareamento automático de uma locação comum", async () => {
+    // O nome sem prefixo "locacao" é o que a mantém fora do fallback
+    // `startsWith("locacao")`. Se alguém renomear pra `locacao_temporada`, este
+    // teste cai — e é pra cair: seria servida por acidente a todo contrato de
+    // locação de uma org que não tenha outro modelo ativo.
+    mockFindMany.mockResolvedValueOnce([
+      { id: "short-stay", modalidade: "temporada", isDefault: true, status: "active", matchCriteria: null },
+    ] as never);
+
+    const result = await selectLocacaoTemplate("org-1", "locacao_residencial_v1", {
+      locatarios: [{ tipo_pessoa: "fisica" }],
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it("é elegível pra ESCOLHA MANUAL num deal de locação", async () => {
+    // O caminho pelo qual ela é de fato usada.
+    expect(eligibleModalidadesForDealKind("locacao")).toContain("temporada");
+
+    mockFindUnique.mockResolvedValueOnce({
+      id: "short-stay",
+      orgId: "org-1",
+      status: "active",
+      modalidade: "temporada",
+    } as never);
+    const r = await resolveTemplateOverride({
+      templateId: "short-stay",
+      orgId: "org-1",
+      dealKind: "locacao",
+    });
+    expect(r.ok).toBe(true);
+  });
+});
+
+describe("escolha manual de modelo (override)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("locação NÃO oferece o contrato de administração", () => {
+    const elegiveis = eligibleModalidadesForDealKind("locacao");
+    expect(elegiveis).toContain("locacao");
+    expect(elegiveis).toContain("locacao_comercial");
+    // É outro INSTRUMENTO (imobiliária↔proprietário), apesar de família
+    // "locacao": gerar o contrato do inquilino com ele produziria um documento
+    // que não vincula quem assina.
+    expect(elegiveis).not.toContain("administracao_locacao");
+  });
+
+  it("venda oferece só as modalidades de venda", () => {
+    expect(eligibleModalidadesForDealKind("venda")).toEqual([
+      "a_vista",
+      "financiamento",
+    ]);
+  });
+
+  const tplRow = (over: Record<string, unknown> = {}) => ({
+    id: "t1",
+    orgId: "org-1",
+    status: "active",
+    modalidade: "locacao",
+    ...over,
+  });
+
+  it("aceita o modelo válido da própria org", async () => {
+    mockFindUnique.mockResolvedValueOnce(tplRow() as never);
+    const r = await resolveTemplateOverride({
+      templateId: "t1",
+      orgId: "org-1",
+      dealKind: "locacao",
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it("recusa template de outra org, arquivado, inexistente e de kind errado", async () => {
+    mockFindUnique.mockResolvedValueOnce(tplRow({ orgId: "outra" }) as never);
+    expect(
+      await resolveTemplateOverride({ templateId: "t1", orgId: "org-1", dealKind: "locacao" })
+    ).toEqual({ ok: false, reason: "cross-org" });
+
+    mockFindUnique.mockResolvedValueOnce(tplRow({ status: "archived" }) as never);
+    expect(
+      await resolveTemplateOverride({ templateId: "t1", orgId: "org-1", dealKind: "locacao" })
+    ).toEqual({ ok: false, reason: "archived" });
+
+    // Rascunho é motivo PRÓPRIO: o modelo está listado em Ativos, ainda em
+    // revisão. Chamá-lo de "arquivado" mandava o operador procurar na aba errada.
+    mockFindUnique.mockResolvedValueOnce(tplRow({ status: "draft" }) as never);
+    expect(
+      await resolveTemplateOverride({ templateId: "t1", orgId: "org-1", dealKind: "locacao" })
+    ).toEqual({ ok: false, reason: "draft" });
+
+    mockFindUnique.mockResolvedValueOnce(null as never);
+    expect(
+      await resolveTemplateOverride({ templateId: "t1", orgId: "org-1", dealKind: "locacao" })
+    ).toEqual({ ok: false, reason: "not-found" });
+
+    // Modelo de VENDA num deal de locação.
+    mockFindUnique.mockResolvedValueOnce(tplRow({ modalidade: "a_vista" }) as never);
+    expect(
+      await resolveTemplateOverride({ templateId: "t1", orgId: "org-1", dealKind: "locacao" })
+    ).toEqual({ ok: false, reason: "wrong-kind" });
+  });
+
+  it("REGRESSÃO: o contrato de administração é recusado como modelo de um deal de locação", async () => {
+    mockFindUnique.mockResolvedValueOnce(
+      tplRow({ modalidade: "administracao_locacao" }) as never
+    );
+    expect(
+      await resolveTemplateOverride({ templateId: "t1", orgId: "org-1", dealKind: "locacao" })
+    ).toEqual({ ok: false, reason: "wrong-kind" });
   });
 });
 

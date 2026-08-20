@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
-import { auth, getUserOrg } from "@/lib/auth/auth";
+import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { archiveDealAttachmentsBeforeCascade } from "@/lib/attachments/archive";
@@ -14,17 +14,16 @@ import { moveDealStage } from "@/lib/pipeline/move-stage";
 import { getEffectivePermissions, canAccessDeal } from "@/lib/security/rbac/check";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { dealId: string } }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const org = await getUserOrg(session.user.id);
-  if (!org) {
-    return NextResponse.json({ error: "No organization" }, { status: 400 });
-  }
+  // `requireAuth` (e não `auth()` cru): sob impersonation de tenant, `ctx.userId`
+  // é o DONO do tenant — é ele que tem membership/RBAC na org impersonada. Com o
+  // id cru do super_admin, `getEffectivePermissions` voltava null e a rota
+  // respondia 404 pra todo deal do tenant.
+  const authResult = await requireAuth(req);
+  if (!authResult.ok) return authResult.response;
+  const { ctx } = authResult;
 
   const deal = await prisma.deal.findUnique({
     where: { id: params.dealId },
@@ -44,13 +43,13 @@ export async function GET(
   // Cross-org guard — o GET devolve o dossiê completo (dataJson com CPF/RG/
   // renda + anexos). Antes só exigia auth(); qualquer conta lia deal alheio.
   // 404 pra não vazar existência.
-  if (!deal || (deal.form?.orgId ?? deal.pipeline.orgId) !== org.id) {
+  if (!deal || (deal.form?.orgId ?? deal.pipeline.orgId) !== ctx.orgId) {
     return NextResponse.json({ error: "Deal not found" }, { status: 404 });
   }
 
   // Escopo por usuário (feature Gerente): visão restrita só acessa deals onde
   // é gerente atribuído ou criador. 404 pra não vazar existência.
-  const eff = await getEffectivePermissions(session.user.id, org.id);
+  const eff = await getEffectivePermissions(ctx.userId, ctx.orgId);
   if (
     !eff ||
     !canAccessDeal({
@@ -81,14 +80,9 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { dealId: string } }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const org = await getUserOrg(session.user.id);
-  if (!org) {
-    return NextResponse.json({ error: "No organization" }, { status: 400 });
-  }
+  const authResult = await requireAuth(req);
+  if (!authResult.ok) return authResult.response;
+  const { ctx } = authResult;
 
   const body = await req.json();
   const parsed = updateDealSchema.safeParse(body);
@@ -109,12 +103,12 @@ export async function PATCH(
     return NextResponse.json({ error: "Deal not found" }, { status: 404 });
   }
   const dealOrgId = existing.form?.orgId ?? existing.pipeline.orgId;
-  if (dealOrgId !== org.id) {
+  if (dealOrgId !== ctx.orgId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   // Escopo por usuário (feature Gerente).
-  const eff = await getEffectivePermissions(session.user.id, org.id);
+  const eff = await getEffectivePermissions(ctx.userId, ctx.orgId);
   if (
     !eff ||
     !canAccessDeal({
@@ -140,10 +134,10 @@ export async function PATCH(
       dealId: params.dealId,
       toStageId: stageId,
       reason: milestoneDate ? "manual_update" : "drag",
-      actorUserId: session.user.id,
-      orgId: org.id,
+      actorUserId: ctx.userId,
+      orgId: ctx.orgId,
       dealData: data,
-      auditCtx: extractAuditContextFromRequest(req, org.id, session.user.id),
+      auditCtx: extractAuditContextFromRequest(req, ctx.orgId, ctx.userId),
       auditMetadata: {
         // `kind` legado preservado pros consumidores do AuditLog.
         kind: milestoneDate ? "manual_milestone_date" : "drag",
@@ -156,7 +150,7 @@ export async function PATCH(
   } else if (Object.keys(data).length > 0) {
     await prisma.deal.update({ where: { id: params.dealId }, data });
     if (milestoneDate) {
-      await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
+      await audit(extractAuditContextFromRequest(req, ctx.orgId, ctx.userId), {
         action: "DEAL_STAGE_CHANGE",
         result: "SUCCESS",
         resource: params.dealId,
@@ -185,7 +179,7 @@ export async function PATCH(
     waitUntil(
       notifyDealEvent({
         dealId: deal.id,
-        orgId: org.id,
+        orgId: ctx.orgId,
         event: "stage_change",
         dedupeKey: stageChangeDedupeKey(deal.stageId),
         context: { stageName: deal.stage.name },
@@ -218,15 +212,9 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: { dealId: string } }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const org = await getUserOrg(session.user.id);
-  if (!org) {
-    return NextResponse.json({ error: "No organization" }, { status: 400 });
-  }
+  const authResult = await requireAuth(req);
+  if (!authResult.ok) return authResult.response;
+  const { ctx } = authResult;
 
   const url = new URL(req.url);
   const deleteForm = url.searchParams.get("deleteForm") === "true";
@@ -246,7 +234,7 @@ export async function DELETE(
     return NextResponse.json({ error: "Deal não encontrado" }, { status: 404 });
   }
 
-  if (deal.pipeline.orgId !== org.id) {
+  if (deal.pipeline.orgId !== ctx.orgId) {
     return NextResponse.json(
       { error: "Forbidden", reason: "deal de outra organização" },
       { status: 403 }
@@ -255,7 +243,7 @@ export async function DELETE(
 
   // Escopo por usuário (feature Gerente) — delete é destrutivo; visão restrita
   // só alcança os próprios deals (e mesmo assim o botão é gated na UI).
-  const eff = await getEffectivePermissions(session.user.id, org.id);
+  const eff = await getEffectivePermissions(ctx.userId, ctx.orgId);
   if (
     !eff ||
     !canAccessDeal({
@@ -297,7 +285,7 @@ export async function DELETE(
     try {
       const { trashDriveFile } = await import("@/lib/google/org-oauth");
       for (const docId of docsToTrash) {
-        await trashDriveFile(docId, org.id);
+        await trashDriveFile(docId, ctx.orgId);
       }
     } catch (err) {
       console.warn("[deal DELETE] não foi possível mover docs pra lixeira:", err);
@@ -341,8 +329,8 @@ export async function DELETE(
     // pular os blobs desses anexos sozinho.
     await archiveDealAttachmentsBeforeCascade(tx, {
       dealId: deal.id,
-      orgId: org.id,
-      userId: session.user.id,
+      orgId: ctx.orgId,
+      userId: ctx.userId,
       ipAddress: auditIp,
     });
     const atts = await tx.dealAttachment.deleteMany({ where: { dealId: deal.id } });
@@ -396,7 +384,7 @@ export async function DELETE(
   // com as rows já commitadas.
   waitUntil(deleteBlobs(urlsToDelete, prisma));
 
-  await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
+  await audit(extractAuditContextFromRequest(req, ctx.orgId, ctx.userId), {
     action: "DEAL_DELETE",
     result: "SUCCESS",
     resource: deal.id,

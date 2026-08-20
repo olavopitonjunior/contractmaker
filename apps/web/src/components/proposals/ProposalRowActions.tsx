@@ -14,8 +14,10 @@ import {
   Trash2,
   UserRound,
   Briefcase,
+  Pencil,
 } from "lucide-react";
 import { ProposalAssigneeDialog } from "./ProposalAssigneeControl";
+import { RenameProposalDialog } from "./RenameProposalDialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -41,6 +43,7 @@ import {
   REMINDABLE_STATUSES,
   CONVERTABLE_STATUSES,
   AWAITING_DECISION_STATUSES,
+  TERMINAL_STATUSES,
 } from "@/lib/proposals/status-sets";
 import {
   useConvertProposal,
@@ -50,6 +53,9 @@ import { parseProposalApiError } from "@/lib/proposals/api-errors";
 
 export interface ProposalPermissions {
   send: boolean;
+  /** Pode ESCREVER na proposta (renomear, editar). CREATE ou SEND — VIEW_ALL
+   *  sozinho é leitura e não conta. Espelha o guard das rotas PATCH. */
+  write: boolean;
   convert: boolean;
   cancel: boolean;
   delete: boolean;
@@ -64,6 +70,8 @@ export interface RowProposal {
   kind: string;
   instrument: string;
   convertedDealId: string | null;
+  /** Título atual — abre o diálogo de renomear já preenchido. */
+  title: string;
 }
 
 export function ProposalRowActions({
@@ -78,7 +86,9 @@ export function ProposalRowActions({
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const [dialog, setDialog] = useState<null | "cancel" | "delete" | "assign">(null);
+  const [dialog, setDialog] = useState<null | "cancel" | "delete" | "assign" | "rename">(
+    null
+  );
   const [reason, setReason] = useState("");
   const { convert, busy: convertBusy } = useConvertProposal();
 
@@ -94,6 +104,10 @@ export function ProposalRowActions({
     permissions.resend &&
     proposal.status === "aguardando_vendedor" &&
     proposal.instrument === "envelope";
+  // Renomear vale em qualquer status vivo (título é rótulo, não conteúdo) —
+  // mesmo corte da rota PATCH .../title, que barra os terminais E exige
+  // permissão de escrita: só VIEW_ALL (papel de leitura) não renomeia.
+  const canRename = permissions.write && !TERMINAL_STATUSES.has(proposal.status);
   const canConvert = permissions.convert && CONVERTABLE_STATUSES.has(proposal.status);
   const canCancel = permissions.cancel && CANCELLABLE_STATUSES.has(proposal.status);
   const canDelete =
@@ -132,6 +146,12 @@ export function ProposalRowActions({
           onOpenChange={(o) => !o && setDialog(null)}
         />
       )}
+      <RenameProposalDialog
+        open={dialog === "rename"}
+        onOpenChange={(o) => !o && setDialog(null)}
+        proposalId={proposal.id}
+        currentTitle={proposal.title}
+      />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Ações">
@@ -144,6 +164,11 @@ export function ProposalRowActions({
               <ExternalLink className="mr-2 h-4 w-4" /> Abrir
             </Link>
           </DropdownMenuItem>
+          {canRename && (
+            <DropdownMenuItem onClick={() => setDialog("rename")}>
+              <Pencil className="mr-2 h-4 w-4" /> Renomear…
+            </DropdownMenuItem>
+          )}
 
           {canRemind && (
             <DropdownMenuItem

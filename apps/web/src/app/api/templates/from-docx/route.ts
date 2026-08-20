@@ -17,9 +17,11 @@ import {
   resolveUniqueTemplateName,
   type DuplicateTemplate,
 } from "@/lib/templates/upload-dedup";
+import { getDocPlainText } from "@/lib/google/docs";
 import {
   CLAUSE_SLOT_KEYS,
   slotDeclarationComment,
+  slotToken,
   type ClauseSlotKey,
 } from "@/lib/templates/clause-slots";
 import {
@@ -313,36 +315,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ─── DECLARAÇÃO DO SLOT ───────────────────────────────────────────────────
-  // Só declaramos o que REALMENTE entrou no documento. Declarar um slot que não
-  // foi aberto é a pior falha possível deste fluxo: na geração,
-  // `replacePlaceholdersInDoc` não acharia `{{slot_garantia}}` (ele não existe
-  // no Doc), a cláusula resolvida seria descartada em silêncio e o contrato
-  // sairia com a garantia HARDCODED da variante de referência — cliente escolhe
-  // caução no formulário e assina fiador.
-  //
-  // Quando `applied: false`, o modelo simplesmente segue com a cláusula fixa
-  // (comportamento pré-consolidação) e o motivo vai pro `draftReport.slots`, que
-  // a página de revisão mostra e usa pra travar a ativação.
-  const openedSlots = slotReports.filter((r) => r.applied).map((r) => r.slot);
-  if (openedSlots.length > 0) {
-    try {
-      await prisma.contractTemplate.update({
-        where: { id: template.id },
-        data: {
-          handlebarsSource: [
-            GOOGLE_DOCS_SOURCE_HEADER,
-            slotDeclarationComment(openedSlots),
-          ].join("\n"),
-        },
-      });
-    } catch (err) {
-      // Sem a declaração o template é um modelo comum com um `{{slot_*}}` órfão
-      // — que `cleanupOrphanPlaceholders` remove na geração. Degrada, não quebra.
-      console.error("[templates/from-docx] falha ao declarar os slots:", err);
-    }
-  }
-
   // Pass de IA best-effort: insere {{placeholders}} no doc. Falha não
   // bloqueia — o template fica draft e o operador faz manualmente na revisão.
   // (Não derruba a claim-row: o doc já existe e o template é utilizável.)
@@ -357,17 +329,100 @@ export async function POST(req: NextRequest) {
     console.error("[templates/from-docx] Pass de IA falhou (segue draft):", err);
   }
 
+  // ─── DECLARAÇÃO DO SLOT ───────────────────────────────────────────────────
+  // DEPOIS do pass de IA, e derivada do estado FINAL do documento.
+  //
+  // Declarar um slot que não está no Doc é a pior falha possível deste fluxo:
+  // na geração, `replacePlaceholdersInDoc` não acharia `{{slot_garantia}}`, a
+  // cláusula resolvida seria descartada em silêncio e o contrato sairia com a
+  // garantia HARDCODED da variante de referência — cliente escolhe caução no
+  // formulário e assina fiador.
+  //
+  // Declarar antes da IA abria exatamente esse buraco: o pass rodava depois e
+  // podia reescrever o token (mapeando o trecho pro legado
+  // `{{clausula_garantia}}`), deixando o template declarado-sem-token. A guarda
+  // `already-tokenized` em `ai-placeholder-insertion` fecha a causa; ler o doc
+  // aqui fecha o efeito, inclusive pra qualquer outra mutação futura entre o
+  // apply e a declaração.
+  //
+  // Quando o slot não sobrevive, o modelo segue com a cláusula fixa
+  // (comportamento pré-consolidação) e o motivo vai pro `draftReport.slots`, que
+  // a página de revisão mostra e usa pra travar a ativação.
+  const appliedReports = slotReports.filter((r) => r.applied);
+  let finalDocText: string | null = null;
+  if (appliedReports.length > 0) {
+    try {
+      finalDocText = await getDocPlainText(uploaded.docId);
+    } catch (err) {
+      console.error(
+        "[templates/from-docx] não consegui reler o doc pra declarar os slots:",
+        err
+      );
+    }
+  }
+  // Doc ilegível → não declara (fail-closed): melhor um token órfão, que
+  // `cleanupOrphanPlaceholders` limpa na geração, do que uma declaração mentindo.
+  const survivingSlots = appliedReports
+    .filter((r) => (finalDocText ? finalDocText.includes(r.token!) : false))
+    .map((r) => r.slot);
+
+  // "Não consegui ler" NÃO é "o token sumiu". `applyClauseSlotToDoc` já releu e
+  // confirmou o token; se esta terceira leitura cai num 429/403 transitório,
+  // rebaixar o slot como `verify-failed` afirmaria uma coisa que não sabemos.
+  // O slot é marcado como não-conferido (segura a ativação do mesmo jeito, e a
+  // página de revisão manda revalidar), mas o motivo diz a verdade.
+  const unverified = finalDocText === null;
+  const lostSlots = new Set(
+    appliedReports.map((r) => r.slot).filter((s) => !survivingSlots.includes(s))
+  );
+  const finalSlotReports: ApplyClauseSlotReport[] = slotReports.map((r) =>
+    lostSlots.has(r.slot) && r.applied
+      ? {
+          ...r,
+          applied: false,
+          token: null,
+          issues: [
+            ...r.issues,
+            {
+              paragraph: `{{${slotToken(r.slot)}}}`,
+              reason: unverified
+                ? ("verify-unavailable" as const)
+                : ("verify-failed" as const),
+            },
+          ],
+        }
+      : r
+  );
+
+  if (survivingSlots.length > 0) {
+    try {
+      await prisma.contractTemplate.update({
+        where: { id: template.id },
+        data: {
+          handlebarsSource: [
+            GOOGLE_DOCS_SOURCE_HEADER,
+            slotDeclarationComment(survivingSlots),
+          ].join("\n"),
+        },
+      });
+    } catch (err) {
+      // Sem a declaração o template é um modelo comum com um `{{slot_*}}` órfão
+      // — que `cleanupOrphanPlaceholders` remove na geração. Degrada, não quebra.
+      console.error("[templates/from-docx] falha ao declarar os slots:", err);
+    }
+  }
+
   // O relatório é gravado FORA do try do pass de IA: os avisos de slot precisam
   // chegar à página de revisão mesmo quando a IA falha (antes, um erro na IA
   // engolia junto o motivo de o slot não ter aberto).
-  if (report || slotReports.length > 0) {
+  if (report || finalSlotReports.length > 0) {
     try {
       await prisma.contractTemplate.update({
         where: { id: template.id },
         data: {
           draftReport: {
             ...((report ?? {}) as object),
-            ...(slotReports.length ? { slots: slotReports } : {}),
+            ...(finalSlotReports.length ? { slots: finalSlotReports } : {}),
           } as object,
         },
       });

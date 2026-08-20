@@ -50,6 +50,9 @@ beforeEach(() => {
     actor: { effectiveUserId: "admin-1" },
   } as never);
   mockPrisma.proposal.create.mockResolvedValue({ id: "p1", kind: "venda" } as never);
+  // O create aloca o código sequencial (`allocateProposalCode`) num $queryRaw
+  // antes do insert; o mock global devolve [] e a alocação falharia.
+  mockPrisma.$queryRaw.mockResolvedValue([{ value: 7 }] as never);
 });
 
 /** can() por permissão — CREATE sempre; ASSIGN configurável. */

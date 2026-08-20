@@ -4,6 +4,7 @@ import { exportPdfToBuffer } from "@/lib/render/exporter";
 import { loadOrgDocumentStyleExport } from "@/lib/render/org-document-style";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { renderProposalVia } from "./render";
+import { proposalNumero } from "./code";
 import { selectPropostaTemplate } from "./template-select";
 import type { AcceptanceOfficialFacts } from "./acceptance-record";
 
@@ -186,7 +187,7 @@ export async function buildAcceptanceProof(
           dataJson,
           hiddenPaths: [],
           via: "completa",
-          numero: proposal.id.slice(-8),
+          numero: proposalNumero(proposal),
           comissaoIncluida: proposal.comissaoIncluida,
           meta: { emitidaEm: proposal.createdAt, validaAte: proposal.validUntil },
         })
@@ -195,7 +196,7 @@ export async function buildAcceptanceProof(
 
   const html = buildAcceptanceProofHtml({
     proposalHtml,
-    facts: { ...facts, numero: proposal.id.slice(-8) },
+    facts: { ...facts, numero: proposalNumero(proposal) },
   });
   // Leiaute da org (mesmo caminho do export de contrato); `null` se não houver.
   const style = await loadOrgDocumentStyleExport(proposal.orgId);

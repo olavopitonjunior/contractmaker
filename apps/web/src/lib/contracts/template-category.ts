@@ -234,6 +234,14 @@ export interface TemplateMatchCriteria {
   garantia?: GarantiaTipo;
   fiadorPessoa?: PessoaTipo;
   pessoa?: PessoaTipo;
+  /**
+   * O imóvel é administrado pela imobiliária? Espelha `aluguel.adm_imobiliaria`
+   * do formulário. Nome com `adm` (e não `administracao`) de propósito: neste
+   * mesmo módulo `administracao_locacao` é uma MODALIDADE — outro tipo de
+   * contrato, entre imobiliária e proprietário — e confundir os dois num
+   * arquivo que decide qual contrato o cliente assina sairia caro.
+   */
+  admImobiliaria?: boolean;
 }
 
 /** Fatos lidos do form/proposta. `null` = não dá pra saber. */
@@ -241,16 +249,36 @@ export interface TemplateFacts {
   garantia: GarantiaTipo | null;
   fiadorPessoa: PessoaTipo | null;
   pessoa: PessoaTipo | null;
+  admImobiliaria: boolean | null;
 }
 
 /** Campos comparáveis critério × fato. Adicionar campo novo passa por aqui. */
-const MATCH_FIELDS = ["garantia", "fiadorPessoa", "pessoa"] as const;
+const MATCH_FIELDS = [
+  "garantia",
+  "fiadorPessoa",
+  "pessoa",
+  "admImobiliaria",
+] as const;
+
+/**
+ * `<select>` de HTML só produz string, e este schema é a fronteira de TRÊS
+ * rotas (`/templates`, `/templates/[id]`, `/templates/from-docx`). Coagir aqui
+ * — em vez de em cada call-site — mantém `.strict()` e `z.boolean()` intactos
+ * e impede que um `"false"` (string, truthy!) vire `true` em algum caminho
+ * esquecido. Só as duas strings canônicas passam; qualquer outra coisa segue
+ * pro `z.boolean()` e é rejeitada.
+ */
+const booleanFromForm = z.preprocess(
+  (v) => (v === "true" ? true : v === "false" ? false : v),
+  z.boolean().nullish()
+);
 
 export const matchCriteriaSchema = z
   .object({
     garantia: z.enum(GARANTIA_TIPOS).nullish(),
     fiadorPessoa: z.enum(["pf", "pj"]).nullish(),
     pessoa: z.enum(["pf", "pj"]).nullish(),
+    admImobiliaria: booleanFromForm,
   })
   .strict()
   .nullish();
@@ -271,6 +299,11 @@ export function parseMatchCriteria(raw: unknown): TemplateMatchCriteria | null {
     out.fiadorPessoa = obj.fiadorPessoa;
   }
   if (obj.pessoa === "pf" || obj.pessoa === "pj") out.pessoa = obj.pessoa;
+  // `typeof === "boolean"` e não truthiness: `false` é um critério LEGÍTIMO
+  // ("este modelo é pra imóvel SEM administração"), não ausência de critério.
+  if (typeof obj.admImobiliaria === "boolean") {
+    out.admImobiliaria = obj.admImobiliaria;
+  }
   return Object.keys(out).length ? out : null;
 }
 
@@ -282,6 +315,10 @@ export function matchCriteriaSummary(raw: unknown): string[] {
   if (c.garantia) out.push(GARANTIA_LABELS[c.garantia]);
   if (c.fiadorPessoa) out.push(`Fiador ${c.fiadorPessoa.toUpperCase()}`);
   if (c.pessoa) out.push(PESSOA_LABELS[c.pessoa]);
+  // Os DOIS valores viram badge: omitir o `false` faria a etiqueta declarar
+  // menos do que o template de fato exige.
+  if (c.admImobiliaria === true) out.push("Com administração");
+  if (c.admImobiliaria === false) out.push("Sem administração");
   return out;
 }
 
@@ -341,7 +378,15 @@ export function deriveTemplateFacts(dataJson: unknown): TemplateFacts {
     if (tipo === "pf") pessoa = "pf";
   }
 
-  return { garantia, fiadorPessoa, pessoa };
+  // Ausente ⇒ `null` (desconhecido), NUNCA `false`. Form antigo e proposta não
+  // têm `aluguel`; mapear ausência pra "não tem administração" desclassificaria
+  // (-1) todo modelo marcado como administração nesses fluxos, trocando um
+  // template certo por outro sem que ninguém pedisse.
+  const aluguel = data.aluguel as { adm_imobiliaria?: unknown } | undefined;
+  const admImobiliaria =
+    typeof aluguel?.adm_imobiliaria === "boolean" ? aluguel.adm_imobiliaria : null;
+
+  return { garantia, fiadorPessoa, pessoa, admImobiliaria };
 }
 
 /**
@@ -357,7 +402,11 @@ export function scoreTemplateAgainstFacts(criteria: unknown, facts: TemplateFact
   let score = 0;
   for (const key of MATCH_FIELDS) {
     const wanted = c[key];
-    if (!wanted) continue;
+    // `== null` e não `!wanted`: com o eixo booleano, `false` é um critério
+    // marcado ("modelo pra imóvel SEM administração"). Sob truthiness ele seria
+    // ignorado, e o modelo de administração empataria com o comum em TODA
+    // locação — o operador voltaria a escolher à mão, sem saber por quê.
+    if (wanted == null) continue;
     const fact = facts[key];
     if (fact == null) continue;
     if (fact !== wanted) return -1;
@@ -457,6 +506,90 @@ export async function selectAdministracaoTemplate(
 }
 
 // ============================================================================
+// ESCOLHA MANUAL DE MODELO (override do pareamento automático).
+//
+// O matcher acerta quando o que distingue dois modelos é um FATO do formulário
+// (garantia, PF/PJ, administração). Quando não é — "este é o contrato de curta
+// temporada", que nenhum campo do form declara — o modelo fica inalcançável:
+// pontua 0 como o genérico e perde o desempate pro `isDefault`. Daí o override.
+//
+// A validação NÃO é por família. `administracao_locacao` é família "locacao" e
+// mesmo assim é outro INSTRUMENTO — o contrato entre imobiliária e proprietário,
+// com gerador próprio e `Contract.kind = "administracao"`. Deixá-lo na lista
+// permitiria gerar o contrato do INQUILINO com o modelo de administração: um
+// documento que não vincula quem assina.
+// ============================================================================
+
+/** Modalidades que um contrato daquele `deal.kind` pode legitimamente usar. */
+export function eligibleModalidadesForDealKind(kind: string): string[] {
+  if (kind === "locacao") {
+    return (LOCACAO_MODALIDADES as readonly string[]).filter(
+      (m) => m !== ADMINISTRACAO_LOCACAO_MODALIDADE
+    );
+  }
+  return [...VENDA_MODALIDADES];
+}
+
+/**
+ * `draft` e `archived` são motivos separados porque levam o operador a lugares
+ * diferentes: rascunho é um modelo que ainda está em REVISÃO (falta terminar de
+ * conferir e ativar), arquivado é um que foi tirado de uso de propósito.
+ * Colapsar os dois em "arquivado" mandava quem tinha um rascunho procurar na
+ * aba errada — o modelo estava listado em Ativos o tempo todo.
+ */
+export type TemplateOverrideRejection =
+  | "not-found"
+  | "cross-org"
+  | "draft"
+  | "archived"
+  | "wrong-kind";
+
+/**
+ * Mensagem de recusa pro cliente. Mora AQUI, e não em cada rota, porque
+ * `not-found` e `cross-org` TÊM que sair idênticos: são motivos distintos pra
+ * quem escreve o código e a mesma frase pra quem chama, senão o `reason` vira
+ * um oráculo de enumeração — "este id não existe" × "existe, mas é de outra
+ * imobiliária". Rota que monte a mensagem por conta própria desfaz isso.
+ */
+export const TEMPLATE_OVERRIDE_MESSAGE: Record<TemplateOverrideRejection, string> = {
+  "not-found": "Modelo não encontrado.",
+  "cross-org": "Modelo não encontrado.",
+  draft:
+    "Esse modelo ainda está em revisão. Termine a revisão e ative-o em Modelos antes de usar.",
+  archived: "Esse modelo está arquivado. Ative-o em Modelos antes de usar.",
+  "wrong-kind": "Esse modelo não serve para este tipo de negócio.",
+};
+
+/**
+ * Resolve o template escolhido à mão, ou o motivo da recusa. Nunca lança e
+ * nunca "corrige" a escolha em silêncio — pedido inválido é 400 pro caller,
+ * porque cair no automático depois de o operador escolher outra coisa seria
+ * exatamente o tipo de troca silenciosa que este produto não pode fazer.
+ */
+export async function resolveTemplateOverride(params: {
+  templateId: string;
+  orgId: string;
+  dealKind: string;
+}): Promise<
+  { ok: true; template: ContractTemplate } | { ok: false; reason: TemplateOverrideRejection }
+> {
+  const { prisma } = await import("@/lib/db/prisma");
+  const t = await prisma.contractTemplate.findUnique({
+    where: { id: params.templateId },
+  });
+  if (!t) return { ok: false, reason: "not-found" };
+  // Cross-org antes de qualquer outra coisa: não vaza nem a existência.
+  if (t.orgId !== params.orgId) return { ok: false, reason: "cross-org" };
+  if (t.status !== "active") {
+    return { ok: false, reason: t.status === "draft" ? "draft" : "archived" };
+  }
+  if (!eligibleModalidadesForDealKind(params.dealKind).includes(t.modalidade ?? "")) {
+    return { ok: false, reason: "wrong-kind" };
+  }
+  return { ok: true, template: t };
+}
+
+// ============================================================================
 // FAMÍLIA do template (venda | locação | proposta).
 //
 // `category` é a forma de pagamento do negócio — existe SÓ no mundo de venda.
@@ -466,9 +599,23 @@ export async function selectAdministracaoTemplate(
 // placeholders (que passava a oferecer campos de venda). A família é sempre
 // lida da MODALIDADE persistida, nunca da categoria.
 // ============================================================================
+/**
+ * Locação por temporada (short stay). Modalidade PRÓPRIA pra não disputar o
+ * padrão da locação residencial: o contrato é outro (diária, sem vínculo de
+ * moradia, sem garantia locatícia clássica) e nenhum campo do formulário
+ * declara "isto é uma temporada" — então o pareamento automático não tem como
+ * escolhê-lo, e ele é alcançado pela ESCOLHA MANUAL de modelo.
+ *
+ * Nome sem o prefixo "locacao" de propósito, igual a `administracao_locacao`:
+ * assim fica fora do fallback `startsWith("locacao")` de `selectLocacaoTemplate`
+ * e nunca é servido por acidente a um contrato de locação comum.
+ */
+export const TEMPORADA_MODALIDADE = "temporada";
+
 export const LOCACAO_MODALIDADES = [
   "locacao",
   "locacao_comercial",
+  TEMPORADA_MODALIDADE,
   ADMINISTRACAO_LOCACAO_MODALIDADE,
 ] as const;
 export type LocacaoModalidade = (typeof LOCACAO_MODALIDADES)[number];
@@ -491,6 +638,7 @@ export const MODALIDADE_LABELS: Record<string, string> = {
   financiamento: "Venda com financiamento",
   locacao: "Locação residencial",
   locacao_comercial: "Locação comercial",
+  temporada: "Locação por temporada",
   administracao_locacao: "Administração de locação",
   proposta_venda: "Proposta de compra",
   proposta_locacao_residencial: "Proposta de locação residencial",
@@ -540,6 +688,10 @@ export const SCHEMA_TYPE_BY_MODALIDADE: Record<string, string> = {
   financiamento: "compra_venda_v2",
   locacao: "locacao_residencial_v1",
   locacao_comercial: "locacao_comercial_v1",
+  // Reusa o schema residencial: os campos de temporada (diária, check-in/out)
+  // ficam em [colchetes] no próprio modelo, preenchidos no editor. Sem form
+  // próprio, não há o que derivar.
+  temporada: "locacao_residencial_v1",
   administracao_locacao: "administracao_locacao_v1",
   proposta_venda: "compra_venda_v1",
   proposta_locacao_residencial: "locacao_residencial_v1",
@@ -558,6 +710,7 @@ export function schemaTypeForModalidade(modalidade: string | null | undefined): 
 export const UPLOAD_MODALIDADES = [
   "locacao",
   "locacao_comercial",
+  "temporada",
   "administracao_locacao",
   "a_vista",
   "financiamento",

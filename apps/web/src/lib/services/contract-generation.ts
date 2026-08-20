@@ -1,4 +1,5 @@
 import { waitUntil } from "@vercel/functions";
+import type { ContractTemplate } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { moveDealStage } from "@/lib/pipeline/move-stage";
 import { renderContratoHTML } from "@/lib/render/handlebars";
@@ -52,6 +53,21 @@ interface GenerateResult {
   contractId: string;
   version: number;
   googleDocUrl?: string;
+}
+
+/**
+ * Opções da geração. Hoje só a escolha MANUAL de modelo, que sobrepõe o
+ * pareamento automático.
+ *
+ * O template chega JÁ RESOLVIDO E VALIDADO (existe, é da org, está ativo, e a
+ * modalidade é compatível com o `deal.kind` — ver `resolveTemplateOverride`).
+ * O gerador não revalida de propósito: validar aqui exigiria repetir o contexto
+ * de autorização da rota, e duas validações que podem divergir são piores que
+ * uma. Ninguém deve chamar estes geradores com um template que não passou por
+ * lá.
+ */
+export interface GenerateOptions {
+  template?: ContractTemplate;
 }
 
 
@@ -824,7 +840,8 @@ function indexToLetter(idx: number): string {
 export async function generateContractForDeal(
   dealId: string,
   userId: string,
-  orgId: string
+  orgId: string,
+  opts?: GenerateOptions
 ): Promise<GenerateResult> {
   await assertModuleEnabled(orgId, MODULE.VENDAS);
 
@@ -845,13 +862,17 @@ export async function generateContractForDeal(
   // fazia um financiamento cair no template À Vista (QA contrato cmpfp60h5).
   // Agora a categoria vem dos `parcelas[].tipo`, com fallback p/ o principal
   // do grupo (ex.: consórcio sem template → financiamento).
-  const selection = await selectTemplateForDeal(orgId, dataJson);
-  if (!selection) {
-    throw new Error(
-      "Nenhum template ativo para gerar o contrato. Ative ou envie um modelo em Configurações → Modelos."
-    );
+  // `opts.template` é a escolha MANUAL do operador, já validada na rota.
+  let template = opts?.template;
+  if (!template) {
+    const selection = await selectTemplateForDeal(orgId, dataJson);
+    if (!selection) {
+      throw new Error(
+        "Nenhum template ativo para gerar o contrato. Ative ou envie um modelo em Configurações → Modelos."
+      );
+    }
+    template = selection.template;
   }
-  const template = selection.template;
 
   // Perfil da imobiliária (Organization) — fallback da intermediadora quando o
   // formulário do negócio não nomeou corretora. Espelha o que a locação já faz
@@ -1212,7 +1233,8 @@ export async function generateContractForDeal(
 export async function generateLocacaoContractForDeal(
   dealId: string,
   userId: string,
-  orgId: string
+  orgId: string,
+  opts?: GenerateOptions
 ): Promise<GenerateResult> {
   await assertModuleEnabled(orgId, MODULE.LOCACAO);
 
@@ -1228,13 +1250,18 @@ export async function generateLocacaoContractForDeal(
 
   // dataJson entra na seleção: além da modalidade, garantia e PF/PJ (locatário e
   // fiador) escolhem a variante do template (ContractTemplate.matchCriteria).
-  const selection = await selectLocacaoTemplate(orgId, schemaType, dataJson);
-  if (!selection) {
-    throw new Error(
-      "Nenhum template de locação ativo. Ative ou envie um modelo em Configurações → Modelos."
-    );
+  // `opts.template` é a escolha MANUAL do operador, já validada na rota (org,
+  // status, modalidade compatível com o kind) — quando vem, o matcher nem roda.
+  let template = opts?.template;
+  if (!template) {
+    const selection = await selectLocacaoTemplate(orgId, schemaType, dataJson);
+    if (!selection) {
+      throw new Error(
+        "Nenhum template de locação ativo. Ative ou envie um modelo em Configurações → Modelos."
+      );
+    }
+    template = selection.template;
   }
-  const template = selection.template;
 
   // Administradora nomeada na cláusula de pagamento. O gate é a RAZÃO SOCIAL
   // (cadastro deliberado do dono no perfil da imobiliária) — não `org.name`,

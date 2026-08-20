@@ -50,6 +50,7 @@ import {
   buildProposalDataJson,
   buildProposalSigners,
   buildProposalTitle,
+  derivedProposalTitle,
   buildValidUntil,
   emptyParty,
   formatAmountInput,
@@ -88,6 +89,7 @@ export function ProposalForm({
   schemaOptions,
   members = [],
   canAssign = false,
+  hasIList = false,
 }: {
   mode: "create" | "edit";
   proposalId?: string;
@@ -97,6 +99,13 @@ export function ProposalForm({
   members?: { id: string; name: string }[];
   /** PROPOSAL_ASSIGN — sem ela o select não aparece e o POST não manda o campo. */
   canAssign?: boolean;
+  /**
+   * A org tem conexão iList (RE/MAX) provisionada pelo super-admin. Sem ela o
+   * botão do catálogo some — é o mesmo gate de `NovoNegocioDropdown` no
+   * pipeline (`getIListConnection(orgId) !== null`). Default `false`: um tenant
+   * sem iList não pode ver a porta abrir num diálogo de "não habilitado".
+   */
+  hasIList?: boolean;
 }) {
   const router = useRouter();
   const [v, setV] = useState<ProposalFormValues>(initial);
@@ -348,6 +357,24 @@ export function ProposalForm({
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Título fica FORA do accordion: é o rótulo da proposta inteira, não
+            um detalhe de uma seção. Em branco cai no derivado (o placeholder
+            mostra qual seria), então o caminho rápido não ganhou um campo
+            obrigatório. */}
+        <div className={`${sectionCls} space-y-1 py-4`}>
+          <Label htmlFor="proposal-title">Título da proposta</Label>
+          <Input
+            id="proposal-title"
+            value={v.title}
+            onChange={(e) => patch({ title: e.target.value })}
+            placeholder={derivedProposalTitle(v)}
+            maxLength={200}
+          />
+          <p className="text-xs text-muted-foreground">
+            Deixe em branco para usar o padrão: proponente — imóvel.
+          </p>
+        </div>
+
         <Accordion
           type="multiple"
           defaultValue={["partes", "negocio"]}
@@ -422,15 +449,17 @@ export function ProposalForm({
                     onChange={(e) => patch({ imovelEndereco: e.target.value })}
                     placeholder="Endereço do imóvel"
                   />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    title="Buscar no catálogo iList (RE/MAX)"
-                    onClick={() => setPickerOpen(true)}
-                  >
-                    <Building2 className="h-4 w-4" />
-                  </Button>
+                  {hasIList && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      title="Buscar no catálogo iList (RE/MAX)"
+                      onClick={() => setPickerOpen(true)}
+                    >
+                      <Building2 className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               </div>
 
@@ -939,6 +968,7 @@ export function ProposalForm({
         </div>
       </form>
 
+      {hasIList && (
       <IListPickerDialog
         open={pickerOpen}
         onOpenChange={setPickerOpen}
@@ -955,6 +985,7 @@ export function ProposalForm({
           }));
         }}
       />
+      )}
 
       <WitnessPicker
         open={witnessPickerOpen}

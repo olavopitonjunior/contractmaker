@@ -44,6 +44,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { NO_PERMISSION_HINT } from "@/lib/security/rbac/ui";
 import { formPublicPath } from "@/lib/forms/form-url";
+import { PickTemplateDialog } from "@/components/contracts/PickTemplateDialog";
 
 interface LocacaoDealHeaderActionsProps {
   dealId: string;
@@ -88,6 +89,7 @@ export function LocacaoDealHeaderActions({
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(title);
   const [busy, setBusy] = useState<string | null>(null);
+  const [pickTemplateOpen, setPickTemplateOpen] = useState(false);
   // Segurança do link: token em estado (rotação gera novo) + travamento.
   const [formToken, setFormToken] = useState(initialFormToken);
   const [formLockedAt, setFormLockedAt] = useState<string | null>(
@@ -185,11 +187,18 @@ export function LocacaoDealHeaderActions({
     toast.success("Link do formulário copiado!");
   }
 
-  async function generateContract() {
+  async function generateContract(templateId?: string) {
     setBusy("generate");
     try {
       const res = await fetch(`/api/pipeline/deals/${dealId}/generate-contract`, {
         method: "POST",
+        // Sem escolha manual, a chamada segue sem corpo — como sempre foi.
+        ...(templateId
+          ? {
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ templateId }),
+            }
+          : {}),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -415,7 +424,7 @@ export function LocacaoDealHeaderActions({
         )}
         <Button
           size="sm"
-          onClick={generateContract}
+          onClick={() => generateContract()}
           disabled={busy === "generate" || !canCreateContract}
           title={canCreateContract ? undefined : NO_PERMISSION_HINT}
         >
@@ -426,6 +435,25 @@ export function LocacaoDealHeaderActions({
               ? "Regerar contrato"
               : "Gerar contrato"}
         </Button>
+        {/* Caminho secundário de propósito: o automático acerta quase sempre,
+            e cada escolha manual é uma chance de errar o contrato. */}
+        {canCreateContract && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setPickTemplateOpen(true)}
+            disabled={busy === "generate"}
+          >
+            Escolher outro modelo
+          </Button>
+        )}
+        <PickTemplateDialog
+          open={pickTemplateOpen}
+          onOpenChange={setPickTemplateOpen}
+          dealId={dealId}
+          hasContract={hasContract}
+          onConfirm={(templateId) => generateContract(templateId)}
+        />
         {isLost && (
           <Button size="sm" onClick={reopen} disabled={busy === "reopen"}>
             <RotateCcw className="h-4 w-4 mr-1" />

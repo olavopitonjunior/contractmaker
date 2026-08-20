@@ -114,6 +114,17 @@ export function formatDateTimeBR(
   return `${p.day}/${p.month}/${p.year} ${p.hour}:${p.minute}`;
 }
 
+/**
+ * Ano civil em São Paulo — 2026 para 31/12/2026 23h BRT, mesmo que em UTC já
+ * seja 2027. Usado pela numeração de propostas, que reinicia por ano: o runtime
+ * da Vercel roda em UTC, então `new Date().getFullYear()` viraria o ano três
+ * horas cedo e furaria a sequência todo 31 de dezembro à noite.
+ */
+export function yearBR(input: string | number | Date = new Date()): number {
+  const d = toDate(input);
+  return Number(partsOf(d ?? new Date()).year);
+}
+
 /** "28/07/2026" (horário de São Paulo). */
 export function formatDateBR(
   input: string | number | Date | null | undefined,

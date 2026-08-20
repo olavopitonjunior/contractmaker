@@ -30,7 +30,11 @@ export const INGEST_DOC_TYPES = [
 export type IngestDocType = (typeof INGEST_DOC_TYPES)[number];
 
 /** Eixo de `matchCriteria` oferecido na triagem. */
-export type CriteriaField = "garantia" | "fiadorPessoa" | "pessoa";
+export type CriteriaField =
+  | "garantia"
+  | "fiadorPessoa"
+  | "pessoa"
+  | "admImobiliaria";
 
 export interface IngestSubOption {
   value: string;
@@ -63,6 +67,7 @@ export interface IngestDocTypeDef {
 const LOCACAO_SUB: IngestSubOption[] = [
   { value: "residencial", label: "Residencial", modalidade: "locacao" },
   { value: "comercial", label: "Comercial", modalidade: "locacao_comercial" },
+  { value: "temporada", label: "Por temporada (short stay)", modalidade: "temporada" },
 ];
 
 const PROPOSTA_LOCACAO_SUB: IngestSubOption[] = [
@@ -94,7 +99,10 @@ export const INGEST_DOC_TYPE_DEFS: IngestDocTypeDef[] = [
     module: "locacao",
     subLabel: "Residencial ou comercial?",
     subOptions: LOCACAO_SUB,
-    criteria: ["garantia", "fiadorPessoa", "pessoa"],
+    // `admImobiliaria` só no CONTRATO de locação: é lá que o texto muda (quem
+    // recebe o aluguel, boleto da imobiliária × pagamento direto ao locador).
+    // Na proposta o dado nem foi coletado ainda.
+    criteria: ["garantia", "fiadorPessoa", "pessoa", "admImobiliaria"],
     slots: ["garantia"],
   },
   {

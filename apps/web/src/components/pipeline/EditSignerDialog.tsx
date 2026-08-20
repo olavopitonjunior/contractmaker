@@ -85,7 +85,9 @@ export function EditSignerDialog({
   const initialAuth = signer.authMethod || "email";
 
   const [name, setName] = useState(signer.name);
-  const [email, setEmail] = useState(signer.email);
+  // `signer.email` é nullable (signatário de proposta pode ser só WhatsApp) —
+  // o input é controlado, então null viraria campo não-controlado no React.
+  const [email, setEmail] = useState(signer.email ?? "");
   const [documentation, setDocumentation] = useState(signer.documentation || "");
   const [phone, setPhone] = useState(signer.phone || "");
   const [role, setRole] = useState<ClicksignRole>(initialRole);
@@ -96,7 +98,7 @@ export function EditSignerDialog({
   useEffect(() => {
     if (!open) return;
     setName(signer.name);
-    setEmail(signer.email);
+    setEmail(signer.email ?? "");
     setDocumentation(signer.documentation || "");
     setPhone(signer.phone || "");
     setRole((signer.role as ClicksignRole) || "sign");
@@ -143,7 +145,7 @@ export function EditSignerDialog({
     try {
       const body: Record<string, unknown> = { action: "update" };
       if (name.trim() !== signer.name) body.name = name.trim();
-      if (email.trim() !== signer.email) body.email = email.trim();
+      if (email.trim() !== (signer.email ?? "")) body.email = email.trim();
       if (docDigits !== (signer.documentation || "")) {
         body.documentation = docDigits;
       }

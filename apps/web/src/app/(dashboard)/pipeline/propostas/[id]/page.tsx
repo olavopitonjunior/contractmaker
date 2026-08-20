@@ -67,7 +67,8 @@ export default async function PropostaDetailPage({
     notFound();
   }
 
-  const [planSigners, events, attachments, memberRows, envelopes] = await Promise.all([
+  const [planSigners, events, attachments, memberRows, envelopes, envelopeCount] =
+    await Promise.all([
     prisma.proposalSigner.findMany({
       where: { proposalId: params.id },
       orderBy: { signingGroup: "asc" },
@@ -94,6 +95,11 @@ export default async function PropostaDetailPage({
       },
       orderBy: { via: "asc" },
     }),
+    // Conta TODOS os envelopes, inclusive `failed` (que a query acima exclui de
+    // propósito, pra não sujar a lista de status por signatário). É o que decide
+    // se a seção de assinaturas assume o lugar da lista simples — e um envelope
+    // que falhou é justamente o que o corretor precisa ver, com o `lastError`.
+    prisma.envelope.count({ where: { proposalId: params.id, source: "proposal" } }),
   ]);
 
   // Status REAL por signatário vem do EnvelopeSigner (onde vive sign/view/refuse),
@@ -192,6 +198,11 @@ export default async function PropostaDetailPage({
 
   const permissions = {
     send: can(eff, PERMISSION.PROPOSAL_SEND),
+    // Escrita na proposta (renomear, editar). Espelha o guard das rotas PATCH
+    // /api/proposals/[id] e .../title: não existe PROPOSAL_UPDATE, então o corte
+    // é quem cria OU envia. VIEW_ALL sozinho é LEITURA e não entra aqui.
+    write:
+      can(eff, PERMISSION.PROPOSAL_CREATE) || can(eff, PERMISSION.PROPOSAL_SEND),
     convert: can(eff, PERMISSION.PROPOSAL_CONVERT),
     cancel: can(eff, PERMISSION.PROPOSAL_CANCEL),
     delete: can(eff, PERMISSION.PROPOSAL_DELETE),
@@ -203,10 +214,12 @@ export default async function PropostaDetailPage({
     <ProposalDetailClient
       proposal={{
         id: proposal.id,
+        code: proposal.code,
         title: proposal.title,
         status: proposal.status,
         kind: proposal.kind,
         instrument: proposal.instrument,
+        hasEnvelopes: envelopeCount > 0,
         createdAtLabel: formatDateTimeBR(proposal.createdAt),
         sentAtLabel: formatDateTimeBR(proposal.sentAt),
         deliveredAtLabel: formatDateTimeBR(proposal.deliveredAt),

@@ -239,6 +239,7 @@ export type AuditAction =
   | "PROPOSAL_DELETE"
   | "PROPOSAL_REMIND"
   | "PROPOSAL_ASSIGN"
+  | "PROPOSAL_RENAME"
   | "PROPOSAL_SEND_COUNTERPARTY"
   | "PROPOSAL_COMPLETE"
   // Pesquisas de satisfação (NPS/CSAT)

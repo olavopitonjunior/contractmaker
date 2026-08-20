@@ -12,6 +12,7 @@ export type PlaceholderKind = "simple" | "composed";
 export type PlaceholderModalidade =
   | "locacao"
   | "locacao_comercial"
+  | "temporada"
   | "a_vista"
   | "financiamento"
   | "administracao_locacao";
@@ -26,7 +27,8 @@ export interface PlaceholderDef {
   modalidades: PlaceholderModalidade[];
 }
 
-const LOCACAO: PlaceholderModalidade[] = ["locacao", "locacao_comercial"];
+// Temporada usa o mesmo schema residencial, então o mesmo catálogo de tokens.
+const LOCACAO: PlaceholderModalidade[] = ["locacao", "locacao_comercial", "temporada"];
 const VENDA: PlaceholderModalidade[] = ["a_vista", "financiamento"];
 const TODAS: PlaceholderModalidade[] = [...LOCACAO, ...VENDA];
 // Contrato de administração (imobiliária ↔ proprietário). Conjunto MÍNIMO e
