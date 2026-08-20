@@ -143,19 +143,29 @@ export default async function PropostasPage({
         // Quem separa "saiu" de "não saiu" é o `sentAt` da proposta, passado
         // ao `proposalSendChannel` — ver o doc-comment dele.
         envelopes: {
-          where: { source: "proposal", status: { not: "failed" } },
+          // Só a via do PROPONENTE (decisão de produto 2026-08-20): a coluna
+          // responde "por onde o CLIENTE recebeu". Sem o filtro, proponente
+          // por e-mail + proprietário por WhatsApp virava "E-mail e WhatsApp".
+          // `via` é NULLABLE em envelopes antigos — por isso o OR (este OR é
+          // do where ANINHADO da relação, não do topo: sem risco de clobber
+          // com o escopo). `via: "completa"` puro sumiria com o acervo legado.
+          where: {
+            source: "proposal",
+            status: { not: "failed" },
+            OR: [{ via: null }, { via: { not: "reduzida" } }],
+          },
           select: { signers: { select: { notifyChannel: true } } },
         },
         // Último desfecho de envio — separa "falha real" de "cancelado" no
         // badge. `sentAt` não serve aqui: é monotônico e diria "cancelado"
         // numa falha de reenvio.
         //
-        // Sobre custo: relação aninhada SEM take o Prisma 5 resolve em batch
-        // (2 queries totais). COM `take: 1` a doc do engine clássico não é
-        // explícita — NÃO está verificado empiricamente que não vira 1 query
-        // por linha. Antes de copiar este padrão pra outra listagem, confira o
-        // número real de queries de /pipeline/propostas (log do Neon ou
-        // prisma.$on("query")) — review de 2026-08-20 pediu essa confirmação.
+        // Custo VERIFICADO empiricamente (2026-08-20, prisma.$on("query")
+        // contra o banco de staging, Prisma 5.22): o `take: 1` aninhado é
+        // resolvido em UMA query batizada (`WHERE eventName IN (...) AND
+        // proposalId IN (<todos os ids>)`), não 1 por linha — a listagem
+        // inteira emitiu 5 queries no total, 1 delas em ProposalEvent. O
+        // padrão é seguro de copiar pra outras listagens neste engine.
         events: {
           where: { eventName: { in: [...SEND_OUTCOME_EVENTS] } },
           // `id` desempata timestamps iguais. Hoje os dois desfechos não
