@@ -188,6 +188,13 @@ export function ProposalDetailClient({
     live && Date.parse(live.updatedAt) > Date.parse(proposal.updatedAtIso)
       ? live.status
       : proposal.status;
+  // Mesma regra de frescor do status, e NÃO um ?? simples: os dois têm de vir
+  // do MESMO snapshot. Status ao vivo com sentAt congelado da carga reabria uma
+  // janela do bug do Excluir (status já é falha_envio, sentAt ainda null).
+  const liveSentAt =
+    live && Date.parse(live.updatedAt) > Date.parse(proposal.updatedAtIso)
+      ? live.sentAt
+      : proposal.sentAt;
   const sv = proposalStatusView(liveStatus, proposal.lastSendOutcome);
   const pz = proposal.prazo;
   // Derivado do status AO VIVO (não do prop do servidor): se a proposta for
@@ -346,7 +353,7 @@ export function ProposalDetailClient({
               kind: proposal.kind,
               instrument: proposal.instrument,
               convertedDealId: proposal.convertedDealId,
-              sentAt: proposal.sentAt,
+              sentAt: liveSentAt,
             }}
             permissions={permissions}
             kind={proposal.kind}
