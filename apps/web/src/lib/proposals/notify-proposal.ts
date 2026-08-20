@@ -55,7 +55,12 @@ export type ProposalNotifKind =
   //     em ProposalEvent que ninguém abria.
   | "awaiting_decision"
   | "vendedor_sent"
-  | "vendedor_send_failed";
+  | "vendedor_send_failed"
+  //   - send_canceled: o envio da 1ª via foi cancelado FORA daqui (direto na
+  //     ClickSign) e a proposta foi liberada pra reenvio. Sem o sino, o
+  //     corretor só descobria abrindo a lista e vendo o badge — o fato nasceu
+  //     fora da vista dele (2026-08, decisão de produto).
+  | "send_canceled";
 
 const TEXT: Record<ProposalNotifKind, { type: string; title: string; body: string }> = {
   delivered: {
@@ -108,6 +113,11 @@ const TEXT: Record<ProposalNotifKind, { type: string; title: string; body: strin
     title: "Falha na 2ª via ao proprietário",
     body: "A via do proprietário não pôde ser enviada. Abra a proposta para ver o motivo e corrigir.",
   },
+  send_canceled: {
+    type: "proposal_send_canceled",
+    title: "Envio da proposta cancelado",
+    body: "O envio foi cancelado na ClickSign e a proposta foi liberada. Revise e reenvie para assinatura.",
+  },
 };
 
 /** Marcos de andamento — os que pedem um link clicável no WhatsApp. */
@@ -116,6 +126,9 @@ const TRACKING_KINDS = new Set<ProposalNotifKind>([
   "signed_proponente",
   "awaiting_decision",
   "vendedor_send_failed",
+  // CTA de ação (reenviar): sem o link absoluto, quem recebe pelo WhatsApp
+  // não tem porta de entrada — mesma lógica do awaiting_decision.
+  "send_canceled",
 ]);
 
 function appUrl(): string {

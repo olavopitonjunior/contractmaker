@@ -315,11 +315,9 @@ export async function syncEnvelopeState(
         // expirou) na ClickSign. Antes caía no ramo de cima e a proposta virava
         // `recusada_proponente` — TERMINAL, com `refusedBy` gravado e sino de
         // "recusada" — afirmando no histórico uma recusa que não existiu.
-        // O hook de cancelamento é o correto: devolve a 2ª via à parada de
-        // decisão e, na 1ª via, não mexe (não sabemos se foi cancelamento ou
-        // expiração, e o `appInitiated` é exclusivo do cancelamento
-        // deliberado feito na nossa UI).
-        await onProposalEnvelopeCanceled(envelope.id);
+        // O sync ainda não distingue cancelamento de expiração — "unknown",
+        // que no hook é no-op na 1ª via (comportamento anterior preservado).
+        await onProposalEnvelopeCanceled(envelope.id, "unknown");
       }
     } catch (err) {
       console.error("[envelope sync] propagação de status da proposta falhou:", err);
@@ -393,6 +391,7 @@ export class EnvelopeNotSyncableError extends Error {
     this.name = "EnvelopeNotSyncableError";
   }
 }
+
 
 interface SignerEventState {
   signedAt: Date | null;

@@ -423,10 +423,16 @@ export async function processClickSignWebhookPayload(
         data: { status: "canceled", canceledAt: new Date() },
       });
       await revertInspectionOnEnvelopeCanceled(envelope.id);
-      // Proposta: 2ª via cancelada/expirada devolve à parada de decisão (bug D
-      // — antes ficava presa em aguardando_vendedor pra sempre). No-op p/
-      // envelope de contrato/attachment e pra via completa.
-      await onProposalEnvelopeCanceled(envelope.id);
+      // Proposta: `cancel` = alguém cancelou DELIBERADAMENTE na ClickSign →
+      // libera a 1ª via pra reenvio (falha_envio) e avisa o corretor.
+      // `deadline` = prazo venceu → o cron de expire é o dono (marca
+      // `expirada` + sino próprio); tratar aqui tiraria a proposta de
+      // EXPIRABLE_STATUSES e ela nunca expiraria. A 2ª via devolve à parada
+      // de decisão nos dois casos (bug D). No-op p/ contrato/attachment.
+      await onProposalEnvelopeCanceled(
+        envelope.id,
+        eventName === "cancel" ? "external_cancel" : "deadline"
+      );
       break;
     }
     case "add_signer":

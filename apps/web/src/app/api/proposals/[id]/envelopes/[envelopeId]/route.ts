@@ -125,7 +125,7 @@ export async function PATCH(
  */
 async function propagateCancelToProposal(envelopeId: string): Promise<void> {
   try {
-    await onProposalEnvelopeCanceled(envelopeId, { appInitiated: true });
+    await onProposalEnvelopeCanceled(envelopeId, "app");
   } catch (err) {
     console.error("[proposta envelope cancel] propagação de status falhou:", err);
   }

@@ -89,9 +89,11 @@ describe("syncEnvelopeState — propagação pra proposta", () => {
   it("cancelada SEM recusa → onProposalEnvelopeCanceled, NUNCA recusa", async () => {
     // Antes: cancelamento virava `recusada_proponente` (terminal) com sino de
     // recusa — o histórico afirmava uma recusa que ninguém fez.
+    // Feed vazio → causa "unknown": sem evidência o hook não mexe na 1ª via
+    // (comportamento idêntico ao anterior — o fallback nunca piora nada).
     getEnv.mockResolvedValue(remote("canceled"));
     await syncEnvelopeState(makeEnvelope(), { actorVia: "cron" });
-    expect(onCanceled).toHaveBeenCalledWith("env-1");
+    expect(onCanceled).toHaveBeenCalledWith("env-1", "unknown");
     expect(onRefused).not.toHaveBeenCalled();
     expect(onClosed).not.toHaveBeenCalled();
   });
