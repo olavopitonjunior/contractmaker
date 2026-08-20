@@ -1,9 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { STATUS_FILTERS, statusesForFilter } from "../list-filters";
-import {
-  proposalListWhereForFilter,
-  filterRequiresServer,
-} from "../list-filters.server";
+import { proposalListWhereForFilter } from "../list-filters.server";
 import { sendCanceledWhere, notSendCanceledWhere } from "../send-canceled-where";
 
 describe("list-filters — split da parada de decisão (2026-08)", () => {
@@ -16,8 +13,12 @@ describe("list-filters — split da parada de decisão (2026-08)", () => {
     const opt = STATUS_FILTERS.find((f) => f.id === "segunda_via_falhou");
     expect(opt?.requiresServer).toBe(true);
     expect(opt?.statuses).toEqual(["aguardando_vendedor"]);
-    expect(filterRequiresServer("segunda_via_falhou")).toBe(true);
-    expect(filterRequiresServer("decisao")).toBe(false);
+    // filterRequiresServer foi REMOVIDO (2026-08): exportado sem chamador de
+    // produção — page.tsx sempre resolve via proposalListWhereForFilter. Um
+    // caller futuro que o usasse pra um caminho "barato" (só statuses) mudaria
+    // o comportamento dos filtros server-side em silêncio. O campo declarativo
+    // continua e é o que se checa aqui.
+    expect(STATUS_FILTERS.find((f) => f.id === "decisao")?.requiresServer).toBeFalsy();
   });
 
   it("where do servidor: 2ª via falhou = aguardando_vendedor sem via viva em NENHUM instrumento", () => {
