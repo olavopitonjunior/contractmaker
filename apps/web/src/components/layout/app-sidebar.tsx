@@ -72,8 +72,9 @@ type NavGroup = {
 };
 type NavEntry = NavSimple | NavGroup;
 
-/** View serializável dos entitlements (vinda do server via props). */
-type ModulesView = {
+/** View serializável dos entitlements (vinda do server via props). Exportada
+ *  pra command palette e header reusarem o mesmo shape client-safe. */
+export type ModulesView = {
   enabled: Record<string, boolean>;
   features: Record<string, boolean>;
 } | null;
@@ -82,7 +83,7 @@ type ModulesView = {
  * `requires` ausente => sempre visível (itens compartilhados). `modules` null
  * (sem org) => fail-open. Module key vs feature key distinguidos por isValidModule.
  */
-function requiresEnabled(modules: ModulesView, requires?: Requires): boolean {
+export function requiresEnabled(modules: ModulesView, requires?: Requires): boolean {
   if (!requires) return true;
   if (!modules) return true;
   // Array = anyOf.
@@ -251,11 +252,13 @@ const NAV: NavEntry[] = [
       {
         title: "Contas bancárias",
         url: "/settings/pagamentos/contas",
+        requires: FEATURE.VENDAS_PAGADORIA,
         permission: PERMISSION.ORG_SETTINGS_READ,
       },
       {
         title: "Destinatários de split",
         url: "/settings/pagamentos/split-recipients",
+        requires: FEATURE.VENDAS_PAGADORIA,
         permission: PERMISSION.ORG_SETTINGS_READ,
       },
       {

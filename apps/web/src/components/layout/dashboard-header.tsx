@@ -14,6 +14,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { CommandTrigger } from "@/components/layout/command-palette";
+import type { ModulesView } from "@/components/layout/app-sidebar";
 import { NotificationsBell } from "@/components/layout/NotificationsBell";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { isDeadCrumb } from "@/components/layout/breadcrumb-routes";
@@ -108,12 +109,15 @@ function buildSegments(pathname: string): Segment[] {
 
 export function DashboardHeader({
   tenantSwitcher,
+  modules = null,
 }: {
   /**
    * Slot do seletor de tenant (super_admin). Vem pronto do layout (server) —
    * este header é client e não deve consultar PlatformRole por conta própria.
    */
   tenantSwitcher?: React.ReactNode;
+  /** Entitlements da org (mesma view da sidebar) — filtram os atalhos do ⌘K. */
+  modules?: ModulesView;
 }) {
   const pathname = usePathname();
   const segments = buildSegments(pathname);
@@ -179,7 +183,7 @@ export function DashboardHeader({
 
       <div className="ml-auto flex items-center gap-3">
         {tenantSwitcher}
-        <CommandTrigger />
+        <CommandTrigger modules={modules} />
         <ThemeToggle />
         <NotificationsBell />
       </div>

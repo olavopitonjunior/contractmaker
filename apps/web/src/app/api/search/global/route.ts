@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
+import { FEATURE } from "@/lib/modules/catalog";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +31,15 @@ export async function GET(req: NextRequest) {
 
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
   if (q.length < 2) return NextResponse.json({ results: [] });
+
+  // Todos os tipos buscados aqui (imóveis, contratos de locação, pessoas,
+  // cobranças de aluguel) são dados de ADM Locação e linkam pra páginas do
+  // route group (adm). Feature off → vazio, senão a busca do ⌘K continuaria
+  // expondo dados e links de um módulo escondido.
+  const modules = await getOrgModules(org.id);
+  if (!isFeatureEnabled(modules, FEATURE.LOCACAO_ADM)) {
+    return NextResponse.json({ results: [] });
+  }
 
   const insensitive = "insensitive" as const;
   const orFilter = (field: string) => ({ contains: q, mode: insensitive });

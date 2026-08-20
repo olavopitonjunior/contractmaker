@@ -104,6 +104,34 @@ async function main() {
   console.log(`✓ Org: ${membership.org.name} (${membership.org.id})`);
   console.log(`✓ AsaasAccount.status atual: ${asaasAccount.status}`);
 
+  // Entitlement da pagadoria: default do catálogo virou OFF (2026-08-20) — a
+  // org de QA precisa do override explícito, senão /financeiro e
+  // /settings/pagamentos redirecionam e a suíte e2e (pagadoria-fase2.spec.ts)
+  // quebra inteira. Merge preservando outras chaves de featureFlags.
+  if (dryRun) {
+    console.log("   [dry-run] gravaria featureFlags['vendas.pagadoria']=true na org de QA");
+  } else {
+    const row = await prisma.orgModule.findUnique({
+      where: { orgId_module: { orgId: membership.org.id, module: "vendas" } },
+      select: { featureFlags: true },
+    });
+    const flags =
+      row?.featureFlags && typeof row.featureFlags === "object" && !Array.isArray(row.featureFlags)
+        ? (row.featureFlags as Record<string, unknown>)
+        : {};
+    await prisma.orgModule.upsert({
+      where: { orgId_module: { orgId: membership.org.id, module: "vendas" } },
+      create: {
+        orgId: membership.org.id,
+        module: "vendas",
+        enabled: true,
+        featureFlags: { "vendas.pagadoria": true },
+      },
+      update: { featureFlags: { ...flags, "vendas.pagadoria": true } },
+    });
+    console.log("✓ Feature vendas.pagadoria=true garantida na org de QA");
+  }
+
   const subApiKey = decryptSecret({
     ciphertext: asaasAccount.apiKeyEncrypted,
     iv: asaasAccount.apiKeyIvBase64,

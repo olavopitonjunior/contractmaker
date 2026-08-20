@@ -16,10 +16,10 @@ export default async function PipelinePage({
 }: {
   searchParams?: Record<string, string | string[] | undefined>;
 }) {
-  // Gate de módulo: tenant só-locação (vendas OFF) é redirecionado pra /locacao.
+  // Gate de módulo: tenant sem vendas cai na landing por entitlement (homeHref).
   // NÃO usar layout aqui — /pipeline/locacao é filho deste segmento e precisa
   // continuar acessível pra quem só tem locação.
-  const { userId, orgId } = await requireFeaturePage(FEATURE.VENDAS_PIPELINE, "/locacao");
+  const { userId, orgId } = await requireFeaturePage(FEATURE.VENDAS_PIPELINE);
 
   // Escopo por usuário (feature Gerente): visão restrita só vê deals onde é
   // gerente atribuído ou criador; demais roles seguem org-wide ({}).

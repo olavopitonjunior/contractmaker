@@ -23,9 +23,12 @@ export default function NotFound() {
               <ArrowLeft className="h-4 w-4 mr-1" /> Voltar ao pipeline
             </Link>
           </Button>
+          {/* "/" resolve a landing por entitlement (homeHref) — /financeiro
+              virou rota gateada (vendas.pagadoria default OFF) e o CTA antigo
+              era um beco pra maioria dos tenants. */}
           <Button asChild>
-            <Link href="/financeiro">
-              <Home className="h-4 w-4 mr-1" /> Ir para o financeiro
+            <Link href="/">
+              <Home className="h-4 w-4 mr-1" /> Ir para o início
             </Link>
           </Button>
         </div>

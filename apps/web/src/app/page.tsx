@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth, getUserOrg } from "@/lib/auth/auth";
-import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
-import { MODULE } from "@/lib/modules/catalog";
+import { getOrgModules, homeHref } from "@/lib/modules/read";
 import { getOnboardingStatus } from "@/lib/onboarding/status";
 import { canSeeOnboarding } from "@/lib/onboarding/gate";
 
@@ -22,11 +21,11 @@ export default async function HomePage() {
       }
     }
 
-    // Landing por módulo: tenant só-locação cai em /locacao; senão /pipeline.
+    // Landing por entitlement (homeHref): kanban de vendas → kanban de locação
+    // → perfil. O antigo redirect pra /locacao virou loop quando locacao.adm
+    // passou a default OFF (2026-08-20).
     const modules = await getOrgModules(org.id);
-    if (!isModuleEnabled(modules, MODULE.VENDAS) && isModuleEnabled(modules, MODULE.LOCACAO)) {
-      redirect("/locacao");
-    }
+    redirect(homeHref(modules));
   }
   redirect("/pipeline");
 }

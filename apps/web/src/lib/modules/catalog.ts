@@ -75,7 +75,11 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
       { key: FEATURE.VENDAS_PIPELINE, label: "Pipeline de vendas", default: true },
       { key: FEATURE.VENDAS_FORM_PUBLICO, label: "Formulário público", default: true },
       { key: FEATURE.VENDAS_CERTIDOES, label: "Certidões", default: true },
-      { key: FEATURE.VENDAS_PAGADORIA, label: "Pagadoria / comissão", default: true },
+      // Default OFF desde 2026-08-20: menu Financeiro + settings de pagamentos
+      // escondidos de todos os tenants; religar por tenant no painel super-admin.
+      // O MOTOR não é gateado por esta flag (crons/webhooks/aba de cobrança do
+      // deal seguem funcionando) — só navegação e páginas de settings.
+      { key: FEATURE.VENDAS_PAGADORIA, label: "Pagadoria / comissão", default: false },
       { key: FEATURE.VENDAS_NEWTON, label: "Newton (agente WhatsApp) — vendas", default: false },
       { key: FEATURE.VENDAS_MAX, label: "Max (agente WhatsApp) — vendas", default: false },
       { key: FEATURE.VENDAS_PROPOSTAS, label: "Propostas — vendas", default: true },
@@ -87,7 +91,9 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
     label: "Locação",
     features: [
       { key: FEATURE.LOCACAO_PIPELINE, label: "Pipeline de locação", default: true },
-      { key: FEATURE.LOCACAO_ADM, label: "ADM Locação (menu)", default: true },
+      // Default OFF desde 2026-08-20: escondido de todos os tenants em produção;
+      // religar por tenant via painel super-admin (/admin/orgs/[orgId]/modules).
+      { key: FEATURE.LOCACAO_ADM, label: "ADM Locação (menu)", default: false },
       { key: FEATURE.LOCACAO_CONTRATOS, label: "ADM — contratos", default: true },
       { key: FEATURE.LOCACAO_COBRANCAS, label: "ADM — cobranças", default: false },
       { key: FEATURE.LOCACAO_REPASSES, label: "ADM — repasses", default: false },

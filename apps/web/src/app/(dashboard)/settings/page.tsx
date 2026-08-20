@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { auth, getUserOrg } from "@/lib/auth/auth";
+import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
+import { FEATURE, type FeatureKey } from "@/lib/modules/catalog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
 import { BellRing, Bot, BookOpen, Palette, Lightbulb, ShieldCheck, Sparkles, KeyRound, Users, UserCog, UsersRound, Split, FileSignature, Wallet, ListChecks, UserRound, Receipt, FileText, Rocket, Timer, type LucideIcon } from "lucide-react";
 
-type SettingsLink = { href: string; label: string; icon: LucideIcon };
+/** `requires` espelha o gate da sidebar: item some quando a feature da org está off. */
+type SettingsLink = { href: string; label: string; icon: LucideIcon; requires?: FeatureKey };
 const SETTINGS_GROUPS: { title: string; items: SettingsLink[] }[] = [
   {
     title: "Conta & organização",
@@ -32,8 +35,8 @@ const SETTINGS_GROUPS: { title: string; items: SettingsLink[] }[] = [
   {
     title: "Financeiro & assinaturas",
     items: [
-      { href: "/settings/pagamentos/contas", label: "Contas bancárias", icon: Wallet },
-      { href: "/settings/pagamentos/split-recipients", label: "Destinatários de split", icon: Split },
+      { href: "/settings/pagamentos/contas", label: "Contas bancárias", icon: Wallet, requires: FEATURE.VENDAS_PAGADORIA },
+      { href: "/settings/pagamentos/split-recipients", label: "Destinatários de split", icon: Split, requires: FEATURE.VENDAS_PAGADORIA },
       { href: "/settings/signatures", label: "Assinaturas", icon: FileSignature },
       { href: "/settings/signatures?tab=testemunhas", label: "Testemunhas padrão", icon: UsersRound },
     ],
@@ -69,6 +72,17 @@ export default async function SettingsPage() {
 
   const org = await getUserOrg(session.user.id);
 
+  // Filtra os atalhos pelos entitlements da org (mesmo eixo `requires` da
+  // sidebar); grupo sem item visível some inteiro. Sem org → mostra tudo
+  // (fail-open, espelhando a sidebar).
+  const modules = org ? await getOrgModules(org.id) : null;
+  const visibleGroups = SETTINGS_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter(
+      (item) => !item.requires || !modules || isFeatureEnabled(modules, item.requires)
+    ),
+  })).filter((group) => group.items.length > 0);
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -78,7 +92,7 @@ export default async function SettingsPage() {
 
       {/* Atalhos agrupados por categoria — grid de cards navegáveis */}
       <div className="space-y-5">
-        {SETTINGS_GROUPS.map((group) => (
+        {visibleGroups.map((group) => (
           <div key={group.title} className="space-y-2">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               {group.title}

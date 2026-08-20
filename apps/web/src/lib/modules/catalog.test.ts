@@ -68,6 +68,11 @@ describe("featureDefault", () => {
   it("é false para feature desconhecida (fail-safe)", () => {
     expect(featureDefault("x.y" as never)).toBe(false);
   });
+
+  it("ADM Locação e Pagadoria nascem OFF (decisão 2026-08-20: escondidos de todos os tenants)", () => {
+    expect(featureDefault(FEATURE.LOCACAO_ADM)).toBe(false);
+    expect(featureDefault(FEATURE.VENDAS_PAGADORIA)).toBe(false);
+  });
 });
 
 describe("moduleDef", () => {
