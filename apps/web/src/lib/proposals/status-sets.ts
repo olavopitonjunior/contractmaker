@@ -69,6 +69,31 @@ export const DELETABLE_STATUSES = new Set<string>([
 ]);
 
 /**
+ * `falha_envio` tem DUAS origens, e as superfícies precisam de DUAS perguntas
+ * diferentes sobre elas — que só coincidem no caso comum:
+ *
+ *  1. **O envio nunca saiu** — `releaseClaim` (send-execute.ts) devolve
+ *     `enviada → falha_envio` quando o envio morreu no meio. Ninguém foi
+ *     notificado.
+ *  2. **Saiu e foi cancelado** — o hook de cancelamento de envelope devolve
+ *     `enviada|entregue|visualizada → falha_envio` pra liberar o reenvio. O
+ *     cliente RECEBEU e possivelmente abriu o documento.
+ *
+ * A pergunta da EXCLUSÃO é "esta proposta já circulou alguma vez?", e `sentAt`
+ * responde exatamente isso, porque nunca é zerado. É a pergunta certa: um
+ * documento que chegou ao cliente não se apaga, tenha a queda atual vindo de
+ * cancelamento ou de falha.
+ */
+export function isFalhaEnvioAlreadyDelivered(proposal: {
+  status: string;
+  /** `Proposal.sentAt`. Obrigatório (aceita `null`): opcional, um chamador que
+   *  esquecesse de passar leria "nunca saiu" e voltaria a mentir em silêncio. */
+  sentAt: Date | string | null;
+}): boolean {
+  return proposal.status === "falha_envio" && proposal.sentAt != null;
+}
+
+/**
  * Assinatura EM CURSO — alguém de fora ainda precisa assinar.
  *
  * `assinada_proponente` SAIU (2026-08): ele virou a PARADA DURÁVEL da decisão
