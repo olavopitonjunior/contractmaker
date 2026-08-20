@@ -4,6 +4,41 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-20 - Cancelar o envelope não é "Falha no envio"
+
+Três defeitos achados no smoke de staging, todos consequência de o mesmo status `falha_envio` ter passado a cobrir duas situações diferentes desde que cancelar o envelope devolve a 1ª via para reenvio.
+
+### Corrigido
+
+- **O botão "Excluir" reaparecia e a API sempre recusava.** A UI decidia por `status` (`falha_envio` está em `DELETABLE_STATUSES`) e o servidor por `sentAt` — o guard que impede apagar proposta que o cliente já viu. Resultado: menu oferecia "Excluir", o usuário confirmava, e vinha 409. Mesmo padrão de botão morto que o guard de renomear/editar fechou.
+
+- **O diálogo de confirmação não fechava quando a ação falhava.** `setDialog(null)` só existia no caminho de sucesso, então a pessoa lia o toast "não pode" com o "Confirmar" ainda na tela, parecendo travada. Agora fecha também no erro, nos dois componentes de ação (lista e detalhe). O texto do motivo **não** é limpo — reabrir traz o que já tinha sido escrito. Vale além do caso acima: o 409 continua alcançável por proposta já convertida e por corrida com outra aba.
+
+- **O badge dizia "Falha no envio", em vermelho, para quem cancelou de propósito.** Culpar o sistema por um ato do corretor gasta a credibilidade do vermelho para quando houver falha real. Passa a "Envio cancelado" em âmbar quando o envio efetivamente saiu. Só rótulo e cor mudam: o *bucket* continua "sua vez" nos dois casos, porque em ambos a bola é do corretor — reenviar ou arquivar.
+
+- **A timeline mostrava o nome técnico cru** de `envelope_canceled` e `primeira_via_canceled`: nenhum dos dois tinha entrada em `EVENT_LABEL`, justamente nos eventos que explicam por que a proposta "voltou".
+
+### Como — são DUAS perguntas, não uma
+
+A tentação (e o primeiro desenho desta correção) é usar `sentAt` para tudo. Ele responde bem a **uma** das perguntas e é falso para a outra:
+
+- **Exclusão — "esta proposta já circulou alguma vez?"** → `sentAt`, e é exato, porque ele nunca é zerado. É a pergunta certa: documento que chegou ao cliente não se apaga, tenha a queda atual vindo de cancelamento ou de falha. (`isFalhaEnvioAlreadyDelivered`, consumido pelo guard do DELETE e pelos dois botões Excluir — há teste amarrando a paridade, não só comentário.)
+
+- **Rótulo — "por que ela está em `falha_envio` AGORA?"** → `sentAt` **não** responde. Justamente por ser monotônico, proposta que saiu uma vez o carrega para sempre: `enviar → cancelar → reenviar → o reenvio falha de verdade` mostraria "Envio cancelado" numa falha real — e esse é o fluxo que a distinção existe para servir. Quem responde é o **último evento de desfecho** (`primeira_via_canceled` × `send_failed`), que é durável e sobrevive a reenvios. (`lastSendOutcomeIsCancel`.)
+
+Para isso, `releaseClaim` passou a gravar `send_failed` — antes o caminho de falha real não deixava rastro nenhum, e era essa ausência que tornava as duas origens indistinguíveis depois do primeiro envio.
+
+**Sem backfill**: cancelamento sempre gravou `primeira_via_canceled` e falha nunca gravou nada, então `null` cai em "falha" e o acervo já classifica certo.
+
+A leitura filtra por `SEND_OUTCOME_EVENTS` em vez de pegar o último evento de qualquer tipo — senão um `assignee_changed` posterior deslocaria a resposta. Na lista é uma consulta agrupada (`take: 1` em relação aninhada), não N+1; no detalhe é uma consulta própria, porque o array de eventos da página é `take: 50` e uma proposta conversada empurraria o desfecho para fora da janela.
+
+`proposalStatusView` ganhou o desfecho como parâmetro **obrigatório** (aceita `null`), como `proposalSendChannel`: opcional, um chamador novo mostraria o vermelho errado sem erro de compilação. `falha_envio` continua em `DELETABLE_STATUSES` — o predicado recorta só a subpopulação que circulou.
+
+### Em aberto
+
+- **O chip de filtro "Rascunho / falha" ficou incompleto** (não errado — falha real continua ali). Mover o recorte para um chip próprio é decisão de produto, e exigiria `requiresServer: true`, porque a condição depende de `sentAt` e não se expressa só por lista de status. Documentado no código.
+- Os conjuntos `OPEN_STATUSES`, `REMINDABLE_STATUSES` e `CONVERT_UNSIGNED_STATUSES` seguem sem distinguir as duas origens de `falha_envio`.
+
 ## [Unreleased] - 2026-08-19 - Papel de leitura escrevia em proposta; coluna "Envio" mentia depois de cancelar o envelope
 
 ### Segurança
@@ -55,6 +90,8 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 - **1ª via cancelada FORA da plataforma continua presa até expirar.** O release só acontece pelo cancelamento feito na nossa UI. Pela tela não há como acionar o caminho de reparo depois: `EnvelopeCard` esconde "Cancelar envelope" assim que o envelope vira `canceled` (`canEdit` = `draft | running`), e o passo de claim órfão do cron exige `sentAt: null`, então não resgata proposta realmente enviada. Fechar isso exige decidir se o webhook `cancel` (distinguindo-o de `deadline`, que hoje divide o mesmo ramo) também deve liberar a 1ª via.
 - **A supressão do sino na 2ª via é best-effort, não garantida.** `cancelEnvelopeFlow` cancela na ClickSign, que dispara o webhook `cancel`. Se ele for processado antes da propagação da rota, `webhook-process` chama o hook SEM a flag, ganha o CAS e emite exatamente a notificação que se queria evitar; a chamada da rota chega depois e vê `count === 0`. Corrida inerente a ter dois produtores do mesmo fato.
 - **`falha_envio` muda o enquadramento da proposta na UI.** Não está em `OPEN_STATUSES`, `REMINDABLE_STATUSES` nem `CONVERT_UNSIGNED_STATUSES`, e `list-filters` a arquiva sob "Rascunho / falha". Quem cancela o envelope só para corrigir o e-mail de um signatário vê a proposta sair dos KPIs de "em aberto" e reaparecer com cara de rascunho, além de perder o "Converter em negócio sem assinatura". É consequência de reusar o balde existente em vez de criar um status novo.
+
+  > **Parcialmente corrigido em 2026-08-20** (ver seção "Cancelar o envelope não é 'Falha no envio'"): o badge vermelho e o botão Excluir morto foram resolvidos. O que PERMANECE desta limitação é o enquadramento em conjuntos: `OPEN_STATUSES`, `REMINDABLE_STATUSES`, `CONVERT_UNSIGNED_STATUSES` e o chip "Rascunho / falha" seguem sem distinguir as duas origens.
 ## [Unreleased] - 2026-08-19 - Escolher o modelo do contrato à mão
 
 ### Adicionado
