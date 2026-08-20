@@ -72,6 +72,14 @@ export const USER_CHANNEL_REGISTRY: Record<string, UserChannelPolicy> = {
   proposal_refused: { category: "propostas", label: "Proposta recusada" },
   proposal_expired: { category: "propostas", label: "Proposta expirada" },
   proposal_email_failed: { category: "propostas", label: "E-mail de proposta não chegou" },
+  // O sino existe justamente porque o fato nasceu FORA da vista do corretor
+  // (cancelamento direto na ClickSign) — sem canal externo, o aviso só
+  // apareceria quando ele abrisse a plataforma, que é o que o sino evita.
+  // NOTA: proposal_awaiting_decision, proposal_vendedor_sent e
+  // proposal_vendedor_send_failed seguem FORA da allowlist (gap pré-existente,
+  // follow-up separado: ligá-los muda comportamento de notificação de tipos
+  // antigos, decisão à parte).
+  proposal_send_canceled: { category: "propostas", label: "Envio da proposta cancelado" },
 
   // ── Avisos do sistema ──────────────────────────────────────────────────
   contract_generation_failed: { category: "sistema", label: "Falha ao gerar contrato" },

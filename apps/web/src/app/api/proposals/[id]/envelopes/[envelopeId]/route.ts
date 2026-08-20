@@ -115,9 +115,11 @@ export async function PATCH(
 /**
  * Propaga o cancelamento pro status da PROPOSTA. Sem isto o envelope morria mas
  * a proposta seguia "aguardando assinatura", sem reenvio nem edição — presa até
- * o prazo vencer. `appInitiated` marca que o cancelamento nasceu AQUI (botão do
- * corretor), o que libera a 1ª via pra reenvio e cala o sino da 2ª; o webhook de
- * cancel externo continua com o comportamento antigo.
+ * o prazo vencer. `cause: "app"` marca que o cancelamento nasceu AQUI (botão
+ * do corretor) — libera a 1ª via pra reenvio SEM sino (seria eco da ação
+ * dele). Desde 2026-08-20 o webhook de `cancel` externo também libera, com a
+ * mesma transição; a diferença entre os dois é só o sino (`send_canceled`,
+ * que toca apenas quando o fato veio de fora).
  *
  * Best-effort: o envelope já foi cancelado na ClickSign e não dá pra desfazer —
  * estourar aqui devolveria erro pra uma ação que de fato aconteceu. O caminho
