@@ -64,21 +64,59 @@ function fromChannels(channels: string[], resolved: boolean): SendChannelView | 
 
 export function proposalSendChannel(input: {
   instrument: string;
-  /** Signatários dos envelopes da proposta (canal executado). */
+  /**
+   * Signatários dos envelopes da proposta (canal executado).
+   *
+   * EM ABERTO: o chamador da lista passa os signatários das DUAS vias juntos
+   * (`via: "completa"` do proponente e `via: "reduzida"` do proprietário —
+   * ambas têm `source: "proposal"`). Se o proponente foi por e-mail e o
+   * proprietário por WhatsApp, a célula vira "E-mail e WhatsApp". Isso é
+   * defensável lendo a coluna como "por onde a proposta saiu" (as duas saíram)
+   * e enganoso lendo como "por onde o PROPONENTE recebeu". Comportamento
+   * anterior a esta função, mantido de propósito: escolher um dos dois é
+   * decisão de produto, não conserto de bug. Se for pra restringir ao
+   * proponente, o filtro é no chamador — `via` é nullable em envelopes antigos,
+   * então tem de ser `OR: [{ via: null }, { via: { not: "reduzida" } }]`, nunca
+   * `via: "completa"` puro, senão a coluna some pro acervo legado.
+   */
   envelopeSigners?: { notifyChannel: string | null }[];
   /** Linhas de plano da proposta (canal pedido). */
   plannedSigners?: { notifyChannel: string | null }[];
+  /**
+   * `Proposal.sentAt` — a proposta SAIU? É o discriminador de `resolved`, e tem
+   * de vir de fora porque a sobrevivência do envelope não responde a pergunta:
+   *
+   *  - envelope `canceled` numa proposta enviada = saiu e depois foi cancelado
+   *    (fluxo normal desde que cancelar o envelope devolve a 1ª via pra
+   *    reenvio). Sem isto a linha voltava pro plano e a célula dizia "Canal
+   *    previsto — ainda não enviada" sobre proposta que o cliente recebeu;
+   *  - envelope `canceled` que morreu em `draft` NUNCA notificou ninguém — e
+   *    tratar todo `canceled` como executado afirmaria um canal usado num envio
+   *    que não houve, que é o mesmo bug invertido.
+   *
+   * `Envelope.sentAt` não serve: nasce preenchido junto com o rascunho
+   * (`executor.ts`, `status: "draft"`). O `sentAt` da PROPOSTA é gravado como
+   * último passo dos dois caminhos felizes de envio.
+   *
+   * OBRIGATÓRIO (aceita `null`) de propósito: opcional, um chamador novo que
+   * esquecesse de passar veria os signatários do envelope ignorados em silêncio
+   * — a coluna voltaria a mentir, sem erro de compilação. Melhor obrigar a
+   * decisão do que ter um default plausível.
+   */
+  proposalSentAt: Date | string | null;
 }): SendChannelView {
-  // 1. Executado — envelope já criado.
-  const fromEnvelope = fromChannels(
-    (input.envelopeSigners ?? []).map((s) => s.notifyChannel ?? ""),
-    true
-  );
+  const wasSent = input.proposalSentAt != null;
+
+  // 1. Executado — envelope já criado E proposta efetivamente enviada.
+  const fromEnvelope = wasSent
+    ? fromChannels((input.envelopeSigners ?? []).map((s) => s.notifyChannel ?? ""), true)
+    : null;
   if (fromEnvelope) return fromEnvelope;
 
   // 2. Aceite não cria Envelope nenhum, e o roteamento força TODOS os canais pra
   //    whatsapp antes de escolher esse instrumento — então é WhatsApp por
-  //    construção, não por inferência.
+  //    construção, não por inferência. Sem gate de `wasSent` de propósito:
+  //    `instrument` só é gravado NO envio, então aceite já implica enviada.
   if (input.instrument === "aceite") {
     return { key: "whatsapp", label: LABELS.whatsapp, resolved: true };
   }

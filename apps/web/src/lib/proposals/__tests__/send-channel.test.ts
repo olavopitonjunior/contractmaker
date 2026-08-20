@@ -3,7 +3,7 @@ import { proposalSendChannel } from "../send-channel";
 
 describe("proposalSendChannel", () => {
   it("sem signatário nenhum devolve vazio", () => {
-    const v = proposalSendChannel({ instrument: "envelope" });
+    const v = proposalSendChannel({ instrument: "envelope", proposalSentAt: null });
     expect(v).toEqual({ key: "nenhum", label: "—", resolved: false });
   });
 
@@ -11,8 +11,35 @@ describe("proposalSendChannel", () => {
     const v = proposalSendChannel({
       instrument: "envelope",
       plannedSigners: [{ notifyChannel: "whatsapp" }, { notifyChannel: "whatsapp" }],
+      proposalSentAt: null,
     });
     expect(v).toMatchObject({ key: "whatsapp", label: "WhatsApp", resolved: false });
+  });
+
+  it("proposta ENVIADA com envelope cancelado ainda mostra o canal USADO", () => {
+    // Cancelar o envelope virou fluxo normal de recuperação (devolve a 1ª via
+    // pra reenvio). Antes o envelope `canceled` era excluído da consulta, a
+    // linha caía no plano e a célula dizia "ainda não enviada" sobre proposta
+    // que o cliente recebeu e abriu.
+    const v = proposalSendChannel({
+      instrument: "envelope",
+      plannedSigners: [{ notifyChannel: "whatsapp" }],
+      envelopeSigners: [{ notifyChannel: "email" }],
+      proposalSentAt: new Date("2026-08-19T12:00:00Z"),
+    });
+    expect(v).toMatchObject({ key: "email", resolved: true });
+  });
+
+  it("envelope cancelado ainda em RASCUNHO não vira canal usado", () => {
+    // O bug invertido: envelope que morreu em draft nunca notificou ninguém.
+    // Sem `proposalSentAt`, os signers dele afirmariam um envio que não houve.
+    const v = proposalSendChannel({
+      instrument: "envelope",
+      plannedSigners: [{ notifyChannel: "whatsapp" }],
+      envelopeSigners: [{ notifyChannel: "email" }],
+      proposalSentAt: null,
+    });
+    expect(v).toMatchObject({ key: "whatsapp", resolved: false });
   });
 
   it("o canal do ENVELOPE vence o do plano", () => {
@@ -23,6 +50,7 @@ describe("proposalSendChannel", () => {
       instrument: "envelope",
       plannedSigners: [{ notifyChannel: "whatsapp" }],
       envelopeSigners: [{ notifyChannel: "email" }],
+      proposalSentAt: new Date("2026-08-19T12:00:00Z"),
     });
     expect(v).toMatchObject({ key: "email", label: "E-mail", resolved: true });
   });
@@ -32,6 +60,7 @@ describe("proposalSendChannel", () => {
     const v = proposalSendChannel({
       instrument: "aceite",
       plannedSigners: [{ notifyChannel: "email" }],
+      proposalSentAt: null,
     });
     expect(v).toMatchObject({ key: "whatsapp", resolved: true });
   });
@@ -40,6 +69,7 @@ describe("proposalSendChannel", () => {
     const v = proposalSendChannel({
       instrument: "aceite",
       envelopeSigners: [{ notifyChannel: "email" }],
+      proposalSentAt: new Date("2026-08-19T12:00:00Z"),
     });
     expect(v).toMatchObject({ key: "email", resolved: true });
   });
@@ -48,10 +78,12 @@ describe("proposalSendChannel", () => {
     const a = proposalSendChannel({
       instrument: "envelope",
       envelopeSigners: [{ notifyChannel: "whatsapp" }, { notifyChannel: "email" }],
+      proposalSentAt: new Date("2026-08-19T12:00:00Z"),
     });
     const b = proposalSendChannel({
       instrument: "envelope",
       envelopeSigners: [{ notifyChannel: "email" }, { notifyChannel: "whatsapp" }],
+      proposalSentAt: new Date("2026-08-19T12:00:00Z"),
     });
     expect(a).toMatchObject({ key: "misto", label: "E-mail e WhatsApp" });
     // A ordem das linhas no banco não pode mudar o rótulo.
@@ -62,6 +94,7 @@ describe("proposalSendChannel", () => {
     const v = proposalSendChannel({
       instrument: "envelope",
       envelopeSigners: [{ notifyChannel: null }, { notifyChannel: "email" }],
+      proposalSentAt: new Date("2026-08-19T12:00:00Z"),
     });
     expect(v).toMatchObject({ key: "email", resolved: true });
   });
@@ -70,6 +103,7 @@ describe("proposalSendChannel", () => {
     const v = proposalSendChannel({
       instrument: "envelope",
       envelopeSigners: [{ notifyChannel: "sms" }],
+      proposalSentAt: new Date("2026-08-19T12:00:00Z"),
     });
     expect(v).toMatchObject({ key: "sms", label: "SMS" });
   });
