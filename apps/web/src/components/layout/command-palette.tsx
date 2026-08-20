@@ -13,6 +13,8 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 import { Search, Building2, FileText, User, Wallet, Plus, LayoutDashboard, ClipboardList } from "lucide-react";
+import { FEATURE } from "@/lib/modules/catalog";
+import { requiresEnabled, type ModulesView } from "@/components/layout/app-sidebar";
 
 interface SearchResult {
   id: string;
@@ -36,21 +38,27 @@ const TYPE_LABEL: Record<SearchResult["type"], string> = {
   cobranca: "Cobranças",
 };
 
+// `requires` espelha os gates da sidebar (entitlements da org): TODAS as chaves
+// precisam estar ligadas (allOf — grupo ADM + sub-função, como o filtro em dois
+// níveis da sidebar). Sem `modules` (prop ausente) é fail-open, como lá.
 const QUICK_ACTIONS = [
-  { label: "Ir para Dashboard de Locação", href: "/locacao", icon: LayoutDashboard },
-  { label: "Ir para Pipeline de Locação", href: "/pipeline/locacao", icon: ClipboardList },
-  { label: "Ir para Contratos", href: "/locacao/contratos", icon: FileText },
-  { label: "Ir para Imóveis", href: "/locacao/imoveis", icon: Building2 },
-  { label: "Ir para Cobranças", href: "/locacao/cobrancas", icon: Wallet },
-  { label: "Ir para Despesas", href: "/locacao/despesas", icon: Wallet },
-  { label: "Ir para Repasses", href: "/locacao/repasses", icon: Wallet },
-  { label: "Cadastrar novo imóvel", href: "/locacao/imoveis?new=1", icon: Plus },
+  { label: "Ir para Dashboard de Locação", href: "/locacao", icon: LayoutDashboard, requires: [FEATURE.LOCACAO_ADM] },
+  { label: "Ir para Pipeline de Locação", href: "/pipeline/locacao", icon: ClipboardList, requires: [FEATURE.LOCACAO_PIPELINE] },
+  { label: "Ir para Contratos", href: "/locacao/contratos", icon: FileText, requires: [FEATURE.LOCACAO_ADM, FEATURE.LOCACAO_CONTRATOS] },
+  { label: "Ir para Imóveis", href: "/locacao/imoveis", icon: Building2, requires: [FEATURE.LOCACAO_ADM] },
+  { label: "Ir para Cobranças", href: "/locacao/cobrancas", icon: Wallet, requires: [FEATURE.LOCACAO_ADM, FEATURE.LOCACAO_COBRANCAS] },
+  { label: "Ir para Despesas", href: "/locacao/despesas", icon: Wallet, requires: [FEATURE.LOCACAO_ADM, FEATURE.LOCACAO_DESPESAS] },
+  { label: "Ir para Repasses", href: "/locacao/repasses", icon: Wallet, requires: [FEATURE.LOCACAO_ADM, FEATURE.LOCACAO_REPASSES] },
+  { label: "Cadastrar novo imóvel", href: "/locacao/imoveis?new=1", icon: Plus, requires: [FEATURE.LOCACAO_ADM] },
 ];
 
 // Componente global que gerencia o estado do CommandDialog + atalho cmd+k.
 // Renderizado uma vez por sessão dentro do DashboardHeader via `<CommandTrigger />`.
-export function CommandTrigger() {
+export function CommandTrigger({ modules = null }: { modules?: ModulesView }) {
   const router = useRouter();
+  const quickActions = QUICK_ACTIONS.filter((qa) =>
+    qa.requires.every((key) => requiresEnabled(modules, key))
+  );
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -130,10 +138,10 @@ export function CommandTrigger() {
           {loading && (
             <div className="py-6 text-center text-xs text-muted-foreground">Buscando…</div>
           )}
-          {!loading && query.length < 2 && (
+          {!loading && query.length < 2 && quickActions.length > 0 && (
             <>
               <CommandGroup heading="Atalhos">
-                {QUICK_ACTIONS.map((qa) => {
+                {quickActions.map((qa) => {
                   const Icon = qa.icon;
                   return (
                     <CommandItem

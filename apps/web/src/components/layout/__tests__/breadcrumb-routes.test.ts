@@ -22,8 +22,21 @@ const WEB_ROOT = path.join(__dirname, "../../../..");
 const DASHBOARD_DIR = path.join(WEB_ROOT, "src/app/(dashboard)");
 
 function hasPage(dir: string): boolean {
-  return ["page.tsx", "page.jsx", "page.ts", "page.js"].some((f) =>
-    fs.existsSync(path.join(dir, f))
+  if (
+    ["page.tsx", "page.jsx", "page.ts", "page.js"].some((f) =>
+      fs.existsSync(path.join(dir, f))
+    )
+  ) {
+    return true;
+  }
+  // Route group serve a MESMA URL do dir pai: page.tsx em (grupo)/ conta como
+  // página do pai (ex.: locacao/(adm)/page.tsx responde por /locacao).
+  return fs.readdirSync(dir, { withFileTypes: true }).some(
+    (e) =>
+      e.isDirectory() &&
+      isRouteGroup(e.name) &&
+      !isInterceptingRoute(e.name) &&
+      hasPage(path.join(dir, e.name))
   );
 }
 

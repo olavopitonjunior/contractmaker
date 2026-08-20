@@ -8,7 +8,7 @@
 
 import { redirect } from "next/navigation";
 import { auth, getUserOrg } from "@/lib/auth/auth";
-import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
+import { getOrgModules, isModuleEnabled, homeHref } from "@/lib/modules/read";
 import { MODULE } from "@/lib/modules/catalog";
 
 export default async function LocacaoLayout({
@@ -24,7 +24,7 @@ export default async function LocacaoLayout({
 
   const modules = await getOrgModules(org.id);
   if (!isModuleEnabled(modules, MODULE.LOCACAO)) {
-    redirect("/pipeline");
+    redirect(homeHref(modules));
   }
 
   return (

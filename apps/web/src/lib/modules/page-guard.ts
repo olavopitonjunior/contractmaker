@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { getEffectiveUserId } from "@/lib/auth/impersonation";
-import { getOrgModules, isModuleEnabled, isFeatureEnabled } from "./read";
+import { getOrgModules, isModuleEnabled, isFeatureEnabled, homeHref } from "./read";
 import type { ModuleKey, FeatureKey } from "./catalog";
 
 /**
@@ -31,27 +31,29 @@ import type { ModuleKey, FeatureKey } from "./catalog";
  */
 export async function requireModulePage(
   module: ModuleKey,
-  fallback = "/pipeline",
+  fallback?: string,
 ): Promise<{ userId: string; orgId: string }> {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
   const org = await getUserOrg(session.user.id);
-  if (!org) redirect(fallback);
+  if (!org) redirect(fallback ?? "/pipeline");
   const view = await getOrgModules(org.id);
-  if (!isModuleEnabled(view, module)) redirect(fallback);
+  // Sem fallback explícito, o destino é resolvido por entitlement (homeHref) —
+  // fallback estático pra rota gateada criava ciclo de redirects (ver read.ts).
+  if (!isModuleEnabled(view, module)) redirect(fallback ?? homeHref(view));
   return { userId: await getEffectiveUserId(session.user.id), orgId: org.id };
 }
 
 export async function requireFeaturePage(
   feature: FeatureKey,
-  fallback = "/pipeline",
+  fallback?: string,
 ): Promise<{ userId: string; orgId: string }> {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
   const org = await getUserOrg(session.user.id);
-  if (!org) redirect(fallback);
+  if (!org) redirect(fallback ?? "/pipeline");
   const view = await getOrgModules(org.id);
-  if (!isFeatureEnabled(view, feature)) redirect(fallback);
+  if (!isFeatureEnabled(view, feature)) redirect(fallback ?? homeHref(view));
   return { userId: await getEffectiveUserId(session.user.id), orgId: org.id };
 }
 
@@ -62,15 +64,15 @@ export async function requireFeaturePage(
  */
 export async function requireAnyFeaturePage(
   features: readonly FeatureKey[],
-  fallback = "/pipeline",
+  fallback?: string,
 ): Promise<{ userId: string; orgId: string; enabled: Record<string, boolean> }> {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
   const org = await getUserOrg(session.user.id);
-  if (!org) redirect(fallback);
+  if (!org) redirect(fallback ?? "/pipeline");
   const view = await getOrgModules(org.id);
   const enabled: Record<string, boolean> = {};
   for (const f of features) enabled[f] = isFeatureEnabled(view, f);
-  if (!features.some((f) => enabled[f])) redirect(fallback);
+  if (!features.some((f) => enabled[f])) redirect(fallback ?? homeHref(view));
   return { userId: await getEffectiveUserId(session.user.id), orgId: org.id, enabled };
 }

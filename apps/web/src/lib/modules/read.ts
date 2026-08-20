@@ -9,6 +9,7 @@ const cache: <T extends (...args: never[]) => unknown>(fn: T) => T =
 import {
   MODULE_CATALOG,
   ALL_FEATURES,
+  FEATURE,
   featureDefault,
   featureModule,
   isValidFeature,
@@ -73,6 +74,22 @@ export function isModuleEnabled(view: OrgModulesView, module: ModuleKey): boolea
 
 export function isFeatureEnabled(view: OrgModulesView, feature: FeatureKey): boolean {
   return view.features[feature] === true;
+}
+
+/**
+ * Landing SEGURA por entitlement — o destino de fallback dos guards de página.
+ *
+ * Nunca aponta pra uma rota gateada que devolveria o usuário pra origem: com
+ * `locacao.adm` default OFF (2026-08-20), fallbacks estáticos "/locacao" e
+ * "/pipeline" viravam ciclo A→B→A pra tenant só-locação (ERR_TOO_MANY_REDIRECTS
+ * no login). Ordem: kanban de vendas → kanban de locação → perfil (rota sem
+ * gate de módulo, sempre acessível a qualquer membro).
+ */
+export function homeHref(view: OrgModulesView | null): string {
+  if (!view) return "/pipeline";
+  if (isFeatureEnabled(view, FEATURE.VENDAS_PIPELINE)) return "/pipeline";
+  if (isFeatureEnabled(view, FEATURE.LOCACAO_PIPELINE)) return "/pipeline/locacao";
+  return "/settings/profile";
 }
 
 /** Normaliza o Json de overrides, ignorando chaves que não são features válidas. */
