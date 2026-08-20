@@ -21,7 +21,11 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
   Fica de fora, e depende de branch protection: os workflows só disparam em `pull_request`, então push direto em `master` continua sem passar por gate algum.
 ## [Unreleased] - 2026-08-20 - Cancelar o envelope não é "Falha no envio"
 
-Três defeitos achados no smoke de staging, todos consequência de o mesmo status `falha_envio` ter passado a cobrir duas situações diferentes desde que cancelar o envelope devolve a 1ª via para reenvio.
+Três defeitos achados no smoke de staging — e, na sequência, um chip próprio de filtro nascido da mesma distinção —, todos consequência de o mesmo status `falha_envio` ter passado a cobrir duas situações diferentes desde que cancelar o envelope devolve a 1ª via para reenvio.
+
+### Adicionado
+
+- **Chip "Envio cancelado" no filtro da lista** (decisão de produto, opção 3): a `falha_envio` cujo último desfecho foi cancelamento sai de "Rascunho / falha" e ganha chip próprio — os dois wheres são o mesmo predicado (`sendCanceledWhere`) afirmado e negado, então toda `falha_envio` cai em exatamente um dos dois, por construção. O discriminador é o do **badge** (último evento de desfecho), não `sentAt`: um chip por `sentAt` mostraria uma falha real de reenvio sob "Envio cancelado" — o erro que este mesmo lote matou no badge. Como o Prisma não expressa "último evento é X", o where é a aproximação conservadora "existe cancelamento e não existe falha": sob o invariante de CAS ela é exata, e se os dois desfechos um dia coexistirem o único erro possível é o chip omitir — nunca mostrar falha real como cancelamento. Há teste avaliando where e badge sobre os mesmos históricos, incluindo a divergência documentada.
 
 ### Corrigido
 
