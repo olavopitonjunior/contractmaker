@@ -254,7 +254,12 @@ some com o assunto.
   ele significa "processado pelo trilho", não "entregue"). Contrato:
   `{orgId, dedupeKey, status, at, providerMessageId}`, HMAC
   `${timestamp}.${rawBody}` com `MAX_WEBHOOK_SECRET` (§6). Idempotente e
-  monotônico dos dois lados; `sent` puro não é reportado.
+  monotônico dos dois lados; `sent` puro não é reportado. **Cobertura**: só
+  canais cuja `dedupeKey` é o ID de uma linha de log. Canais com dedupeKey
+  SEMÂNTICA e sem linha de log (ex.: request-completion de split-recipients,
+  `split_recipient_completion:<id>:<exp>`) ficam fora — o desfecho reportado
+  casa zero linhas, responde 200 e o Max o dá por entregue (sem retry). Para
+  cobrir um canal novo, crie a linha de log e mande o id como dedupeKey.
 - **`supports` do `max` segue `false`** no registry: o serviço ainda não lê o
   perfil, e a tela não deve prometer controle que o runtime não honra. Virar
   `true` campo a campo, conforme o serviço passar a honrar cada um.
