@@ -143,7 +143,17 @@ export default async function PropostasPage({
         // Quem separa "saiu" de "não saiu" é o `sentAt` da proposta, passado
         // ao `proposalSendChannel` — ver o doc-comment dele.
         envelopes: {
-          where: { source: "proposal", status: { not: "failed" } },
+          // Só a via do PROPONENTE (decisão de produto 2026-08-20): a coluna
+          // responde "por onde o CLIENTE recebeu". Sem o filtro, proponente
+          // por e-mail + proprietário por WhatsApp virava "E-mail e WhatsApp".
+          // `via` é NULLABLE em envelopes antigos — por isso o OR (este OR é
+          // do where ANINHADO da relação, não do topo: sem risco de clobber
+          // com o escopo). `via: "completa"` puro sumiria com o acervo legado.
+          where: {
+            source: "proposal",
+            status: { not: "failed" },
+            OR: [{ via: null }, { via: { not: "reduzida" } }],
+          },
           select: { signers: { select: { notifyChannel: true } } },
         },
         // Último desfecho de envio — separa "falha real" de "cancelado" no

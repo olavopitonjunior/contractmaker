@@ -67,17 +67,12 @@ export function proposalSendChannel(input: {
   /**
    * Signatários dos envelopes da proposta (canal executado).
    *
-   * EM ABERTO: o chamador da lista passa os signatários das DUAS vias juntos
-   * (`via: "completa"` do proponente e `via: "reduzida"` do proprietário —
-   * ambas têm `source: "proposal"`). Se o proponente foi por e-mail e o
-   * proprietário por WhatsApp, a célula vira "E-mail e WhatsApp". Isso é
-   * defensável lendo a coluna como "por onde a proposta saiu" (as duas saíram)
-   * e enganoso lendo como "por onde o PROPONENTE recebeu". Comportamento
-   * anterior a esta função, mantido de propósito: escolher um dos dois é
-   * decisão de produto, não conserto de bug. Se for pra restringir ao
-   * proponente, o filtro é no chamador — `via` é nullable em envelopes antigos,
-   * então tem de ser `OR: [{ via: null }, { via: { not: "reduzida" } }]`, nunca
-   * `via: "completa"` puro, senão a coluna some pro acervo legado.
+   * DECIDIDO (produto, 2026-08-20): a coluna responde "por onde o PROPONENTE
+   * recebeu" — o chamador filtra a via reduzida do proprietário ANTES de
+   * passar os signatários (ver o where em pipeline/propostas/page.tsx).
+   * `via` é nullable em envelopes antigos, então o filtro é
+   * `OR: [{ via: null }, { via: { not: "reduzida" } }]`, nunca
+   * `via: "completa"` puro — senão a coluna some pro acervo legado.
    */
   envelopeSigners?: { notifyChannel: string | null }[];
   /** Linhas de plano da proposta (canal pedido). */
