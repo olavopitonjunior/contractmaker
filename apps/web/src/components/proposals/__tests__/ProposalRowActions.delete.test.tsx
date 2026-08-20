@@ -62,3 +62,30 @@ describe("botão Excluir espelha o guard do servidor", () => {
     expect(screen.queryByText("Excluir")).toBeNull();
   });
 });
+
+describe("diálogo de confirmação fecha quando a ação falha", () => {
+  it("erro do servidor fecha o diálogo em vez de deixar o usuário preso", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: "Esta proposta já foi enviada ao cliente." }),
+    });
+
+    // Cancelar (não excluir) para exercitar o caminho de erro com o botão
+    // visível: `falha_envio` está em CANCELLABLE_STATUSES.
+    render(<ProposalRowActions proposal={row()} permissions={ALL} members={[]} />);
+    await openMenu();
+    await userEvent.click(screen.getByText("Cancelar"));
+
+    // O confirmar só habilita com motivo (>= 3 chars).
+    await userEvent.type(await screen.findByPlaceholderText("Motivo do cancelamento"), "engano");
+    await userEvent.click(screen.getByRole("button", { name: "Cancelar proposta" }));
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    // O diálogo NÃO pode continuar de pé por cima do toast de erro — era o
+    // "usuário preso" relatado no smoke.
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Cancelar proposta" })).toBeNull()
+    );
+  });
+});
