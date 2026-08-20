@@ -3,6 +3,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { loadScopedProposal, proposalFeatureGuard } from "@/lib/proposals/route-helpers";
 import { TERMINAL_STATUSES } from "@/lib/proposals/status-sets";
+import { can } from "@/lib/security/rbac/check";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
 export const runtime = "nodejs";
@@ -26,13 +28,26 @@ const bodySchema = z.object({
  * Não renomeia o envelope já criado na ClickSign — o nome de lá foi congelado
  * no envio, junto do documento que as pessoas viram.
  *
- * Permissão: só o escopo de `loadScopedProposal` (criador OU responsável OU
- * quem tem VIEW_ALL), igual ao PATCH principal — não existe PROPOSAL_UPDATE.
+ * Permissão: escopo NÃO basta. `loadScopedProposal` libera quem tem
+ * `PROPOSAL_VIEW_ALL`, e esse é exatamente o recorte do papel `viewer`
+ * (rbac/roles.ts): vê todas as propostas da org e não produz nenhuma — sem
+ * CREATE, SEND ou CANCEL. Sem a checagem abaixo, o papel explicitamente
+ * somente-leitura renomeava qualquer proposta em curso, com a UI oferecendo o
+ * botão. Não existe PROPOSAL_UPDATE, então o corte é quem pode criar OU
+ * enviar: quem produz a proposta pode rebatizá-la.
+ *
+ * O teste desta rota varre TODOS os presets em vez de fixar `viewer`, porque o
+ * que abre o buraco é a forma da permissão (VIEW_ALL sem CREATE/SEND), não o
+ * rótulo — um preset novo de auditoria ou portal cairia nele em silêncio.
  */
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const r = await loadScopedProposal(req, params.id);
   if ("fail" in r) return r.fail;
-  const { auth, proposal } = r;
+  const { auth, eff, proposal } = r;
+
+  if (!can(eff, PERMISSION.PROPOSAL_CREATE) && !can(eff, PERMISSION.PROPOSAL_SEND)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const feat = await proposalFeatureGuard(auth.org.id, proposal.kind);
   if (feat) return feat;
