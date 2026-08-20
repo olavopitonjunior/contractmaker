@@ -98,6 +98,39 @@ describe("syncEnvelopeState — propagação pra proposta", () => {
     expect(onClosed).not.toHaveBeenCalled();
   });
 
+  it("feed com evento `cancel` → causa external_cancel (webhook perdido, recuperado)", async () => {
+    // O sync é O caminho de recuperação de webhook perdido: sem isto, envelope
+    // cancelado externamente cujo webhook se perdeu ficava preso pra sempre.
+    getEnv.mockResolvedValue(remote("canceled"));
+    listEvents.mockResolvedValue({
+      data: [{ attributes: { name: "cancel", created: "2026-08-20T12:00:00Z", data: {} } }],
+    });
+    await syncEnvelopeState(makeEnvelope(), { actorVia: "cron" });
+    expect(onCanceled).toHaveBeenCalledWith("env-1", "external_cancel");
+  });
+
+  it("feed com evento `deadline` → causa deadline (cron de expire é o dono)", async () => {
+    getEnv.mockResolvedValue(remote("canceled"));
+    listEvents.mockResolvedValue({
+      data: [{ attributes: { name: "deadline", created: "2026-08-20T12:00:00Z", data: {} } }],
+    });
+    await syncEnvelopeState(makeEnvelope(), { actorVia: "cron" });
+    expect(onCanceled).toHaveBeenCalledWith("env-1", "deadline");
+  });
+
+  it("cancel E deadline no feed → vence o MAIS RECENTE", async () => {
+    // Um deadline seguido de cancel manual é cancelamento (e vice-versa).
+    getEnv.mockResolvedValue(remote("canceled"));
+    listEvents.mockResolvedValue({
+      data: [
+        { attributes: { name: "deadline", created: "2026-08-20T10:00:00Z", data: {} } },
+        { attributes: { name: "cancel", created: "2026-08-20T12:00:00Z", data: {} } },
+      ],
+    });
+    await syncEnvelopeState(makeEnvelope(), { actorVia: "cron" });
+    expect(onCanceled).toHaveBeenCalledWith("env-1", "external_cancel");
+  });
+
   it("canceled SEM feed de eventos → não decide, não fecha o envelope, tenta de novo depois", async () => {
     // O feed `/events` é a ÚNICA fonte de recusa e é best-effort. Sem ele,
     // "ninguém recusou" é indistinguível de "não consegui verificar" — e

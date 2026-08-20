@@ -315,9 +315,15 @@ export async function syncEnvelopeState(
         // expirou) na ClickSign. Antes caía no ramo de cima e a proposta virava
         // `recusada_proponente` — TERMINAL, com `refusedBy` gravado e sino de
         // "recusada" — afirmando no histórico uma recusa que não existiu.
-        // O sync ainda não distingue cancelamento de expiração — "unknown",
-        // que no hook é no-op na 1ª via (comportamento anterior preservado).
-        await onProposalEnvelopeCanceled(envelope.id, "unknown");
+        // A CAUSA vem do feed (o webhook perdido é exatamente o que o sync
+        // recupera): "cancel" no feed libera a 1ª via como o webhook faria;
+        // "deadline" ou feed sem o evento → o hook não mexe na 1ª via e o
+        // cron de expire trata. Aqui o feed está garantidamente disponível —
+        // o ramo `refusalEvidenceUnavailable` acima captura o caso sem feed.
+        await onProposalEnvelopeCanceled(
+          envelope.id,
+          resolveCancelCauseFromFeed(eventsResp)
+        );
       }
     } catch (err) {
       console.error("[envelope sync] propagação de status da proposta falhou:", err);
@@ -392,6 +398,33 @@ export class EnvelopeNotSyncableError extends Error {
   }
 }
 
+
+/**
+ * Causa do cancelamento a partir do feed `/events` — os nomes de evento são os
+ * MESMOS do webhook ("cancel"/"deadline"), então o sync repassa ao hook a
+ * mesma distinção que o caminho quente. Eventos de ENVELOPE, sem signatário:
+ * por isso NÃO entra no aggregateEventsBy* (que é keyed por signer).
+ *
+ * O feed pode não trazer nenhum dos dois (conta antiga, evento não exposto
+ * pela API) → "unknown", que no hook é no-op na 1ª via — nunca pior que o
+ * comportamento anterior. Vale o MAIS RECENTE: um deadline seguido de um
+ * cancel manual é cancelamento (e vice-versa).
+ */
+export function resolveCancelCauseFromFeed(
+  resp: unknown
+): "external_cancel" | "deadline" | "unknown" {
+  const data = (resp as { data?: unknown } | null)?.data;
+  if (!Array.isArray(data)) return "unknown";
+  let latest: { name: "cancel" | "deadline"; at: number } | null = null;
+  for (const item of data as Array<{ attributes?: { name?: string; created?: string } }>) {
+    const name = item.attributes?.name;
+    if (name !== "cancel" && name !== "deadline") continue;
+    const at = item.attributes?.created ? Date.parse(item.attributes.created) : 0;
+    if (!latest || at >= latest.at) latest = { name, at };
+  }
+  if (!latest) return "unknown";
+  return latest.name === "cancel" ? "external_cancel" : "deadline";
+}
 
 interface SignerEventState {
   signedAt: Date | null;
