@@ -140,6 +140,17 @@ export function ProposalRowActions({
       router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro na ação");
+      // Fecha TAMBÉM no erro. Antes só o sucesso fechava, então uma ação
+      // recusada pelo servidor deixava o diálogo de confirmação aberto com o
+      // toast por cima: o usuário lia "não pode" e continuava olhando pro
+      // botão "Confirmar", parecendo travado. Nenhum diálogo que passa por
+      // aqui tem como o usuário corrigir e repetir de dentro dele — o 422
+      // `gerente_obrigatorio`, que é o único caso assim, vai por
+      // `useConvertProposal` e não por esta função.
+      //
+      // `reason` NÃO é limpo aqui de propósito: reabrir traz o texto que a
+      // pessoa já tinha escrito.
+      setDialog(null);
     } finally {
       setBusy(false);
     }
