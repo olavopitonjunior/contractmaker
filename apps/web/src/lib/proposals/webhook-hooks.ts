@@ -157,34 +157,39 @@ export async function onProposalEnvelopeClosed(
  * o CAS é local (updateMany) e ela NÃO entra em ALLOWED_FROM, senão qualquer
  * caller ganharia um "voltar status".
  *
- * `appInitiated` diz DE ONDE nasceu o cancelamento, e é o que separa os dois
- * mundos: `true` só quando veio do DELETE do envelope, isto é, do botão que o
- * corretor apertou aqui dentro, com intenção inequívoca de desfazer o envio.
- * O webhook `cancel`/`deadline` e a reconciliação passam `false` (omitem):
- * lá o fato nasceu na ClickSign e nem sequer distinguimos cancelamento de
- * expiração — os dois chegam pelo mesmo ramo.
+ * `cause` diz DE ONDE nasceu o cancelamento, e é POSICIONAL OBRIGATÓRIO de
+ * propósito: a versão anterior era `opts.appInitiated?` com default vazio, e a
+ * omissão silenciosa era exatamente o bug — o webhook chamava sem opts e a 1ª
+ * via cancelada FORA da plataforma ficava presa até expirar. Obrigatório, um
+ * caller novo que não souber a causa tem de ESCREVER "unknown", e isso é uma
+ * decisão visível no diff, não um esquecimento.
  *
- * Via completa (1ª via) → depende disso:
- *  - sem a flag (cancelamento nasceu FORA daqui): nada, o cron de expire trata
- *    — comportamento original, preservado;
- *  - com a flag: o corretor cancelou DELIBERADAMENTE na nossa UI, com a
- *    intenção de corrigir algo e reenviar. Sem isto a proposta ficava em
- *    `enviada`/`entregue`/
- *    `visualizada` com o envelope morto: a tela seguia dizendo "aguardando
- *    assinatura", o /send recusava ("já foi enviada"), editar era proibido
- *    (`EDITABLE_STATUSES`) e a única saída era o cancelamento TERMINAL da
- *    proposta ou esperar o prazo vencer pra cair em `expirada`.
- *    `falha_envio` é o balde já existente de "envio não vingou, reenvie": está
- *    em `EDITABLE_STATUSES` e no claim de `executeProposalSend`, então devolve
- *    edição e reenvio sem alargar nenhum dos dois conjuntos.
+ * Via completa (1ª via), por causa:
+ *  - "app": o corretor cancelou DELIBERADAMENTE na nossa UI (DELETE do
+ *    envelope) pra corrigir algo e reenviar → CAS pra `falha_envio`, SEM sino
+ *    (seria eco da ação dele). `falha_envio` é o balde já existente de "envio
+ *    não vingou, reenvie": está em `EDITABLE_STATUSES` e no claim de
+ *    `executeProposalSend`, então devolve edição e reenvio sem alargar nenhum
+ *    dos dois conjuntos.
+ *  - "external_cancel": alguém cancelou direto na ClickSign → MESMO CAS, e COM
+ *    sino: o fato nasceu fora da vista do corretor; sem o aviso ele seguia
+ *    achando "aguardando assinatura" (era a limitação registrada no changelog
+ *    de 2026-08-19, agora fechada por decisão de produto).
+ *  - "deadline": prazo venceu → NADA. O cron de expire é o DONO da expiração
+ *    (marca `expirada` + sino próprio). Liberar aqui tiraria a proposta de
+ *    EXPIRABLE_STATUSES e ela nunca mais seria marcada expirada.
+ *  - "unknown": sem evidência não se afirma nada (padrão da reconciliação) —
+ *    comportamento idêntico ao anterior, o cron de expire trata.
  *
  * A aresta `enviada|entregue|visualizada → falha_envio` também é exclusiva
  * daqui (ALLOWED_FROM.falha_envio só admite `enviada`, para o release de claim
  * órfão), então segue o mesmo padrão de CAS local do caso reduzida.
  */
+export type ProposalCancelCause = "app" | "external_cancel" | "deadline" | "unknown";
+
 export async function onProposalEnvelopeCanceled(
   envelopeId: string,
-  opts: { appInitiated?: boolean } = {}
+  cause: ProposalCancelCause
 ): Promise<void> {
   const env = await prisma.envelope.findUnique({
     where: { id: envelopeId },
@@ -194,7 +199,8 @@ export async function onProposalEnvelopeCanceled(
   const proposalId = env.proposalId;
 
   if (env.via !== "reduzida") {
-    if (!opts.appInitiated) return;
+    // Só cancelamento CONFIRMADO libera — ver a tabela de causas no docblock.
+    if (cause !== "app" && cause !== "external_cancel") return;
     const released = await prisma.proposal.updateMany({
       where: {
         id: proposalId,
@@ -211,16 +217,42 @@ export async function onProposalEnvelopeCanceled(
         data: {
           proposalId,
           eventName: "primeira_via_canceled",
-          source: "api",
+          // O badge "Envio cancelado" e o chip de filtro discriminam SÓ pelo
+          // eventName — a causa entra no source/payload pra forense.
+          source: cause === "app" ? "api" : "clicksign",
           payload: {
             envelopeId,
             clicksignId: env.clicksignId,
             to: "falha_envio",
+            cause,
           } as Prisma.InputJsonValue,
         },
       })
       .catch(() => {});
-    // Sem sino: quem cancelou foi o próprio corretor, na nossa UI — ele já sabe.
+
+    // Sino SÓ no cancelamento externo: o fato nasceu na ClickSign, fora da
+    // vista do corretor — sem o aviso ele seguia achando "aguardando
+    // assinatura". `cause === "app"` continua mudo (seria eco da ação dele na
+    // nossa UI). Emitido depois do CAS e só quando ele moveu: replay de
+    // webhook vê count 0 e nem chega aqui.
+    if (cause !== "external_cancel") return;
+    const proposal = await prisma.proposal.findUnique({
+      where: { id: proposalId },
+      select: { userId: true },
+    });
+    if (!proposal) return;
+    waitUntil(
+      notifyProposalMilestone({
+        proposalId,
+        orgId: env.orgId,
+        userId: proposal.userId,
+        kind: "send_canceled",
+        // Por ENVELOPE, não por proposta: reenviar e ter o NOVO envelope
+        // cancelado de fora é fato novo e merece sino novo; replay do mesmo
+        // envelope dedupa.
+        dedupeSuffix: envelopeId,
+      })
+    );
     return;
   }
 
@@ -235,7 +267,7 @@ export async function onProposalEnvelopeCanceled(
       data: {
         proposalId,
         eventName: "vendedor_via_canceled",
-        source: opts.appInitiated ? "api" : "clicksign",
+        source: cause === "app" ? "api" : "clicksign",
         payload: { envelopeId, clicksignId: env.clicksignId } as Prisma.InputJsonValue,
       },
     })
@@ -244,8 +276,9 @@ export async function onProposalEnvelopeCanceled(
   // Sino só quando o fato veio de FORA. Cancelamento feito aqui dentro pelo
   // próprio corretor não vira notificação: seria eco da ação dele, e o texto
   // ("cancelada ou expirou na ClickSign") descreveria um evento externo que
-  // não houve. A devolução à parada de decisão acontece igual nos dois casos.
-  if (opts.appInitiated) return;
+  // não houve. A devolução à parada de decisão acontece igual em todos os
+  // casos — e o texto cobre external_cancel, deadline E unknown por igual.
+  if (cause === "app") return;
 
   const proposal = await prisma.proposal.findUnique({
     where: { id: proposalId },

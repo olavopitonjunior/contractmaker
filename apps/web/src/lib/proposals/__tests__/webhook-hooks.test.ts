@@ -214,7 +214,7 @@ describe("onProposalEnvelopeCanceled (bug D — 2ª via expirada/cancelada)", ()
       orgId: "org1",
       clicksignId: "ck-1",
     });
-    await onProposalEnvelopeCanceled("e1");
+    await onProposalEnvelopeCanceled("e1", "unknown");
     expect(propUpdateMany).toHaveBeenCalledWith({
       where: { id: "p1", status: "aguardando_vendedor" },
       data: { status: "assinada_proponente" },
@@ -240,12 +240,14 @@ describe("onProposalEnvelopeCanceled (bug D — 2ª via expirada/cancelada)", ()
       clicksignId: "ck-1",
     });
     propUpdateMany.mockResolvedValue({ count: 0 });
-    await onProposalEnvelopeCanceled("e1");
+    await onProposalEnvelopeCanceled("e1", "unknown");
     expect(eventCreate).not.toHaveBeenCalled();
     expect(notify).not.toHaveBeenCalled();
   });
 
-  it("via completa cancelada pelo WEBHOOK → no-op (cron expire trata)", async () => {
+  it("via completa com DEADLINE → no-op (o cron de expire é o dono)", async () => {
+    // Se alguém unificar deadline com external_cancel, este teste falha — e o
+    // estrago seria a proposta sair de EXPIRABLE_STATUSES e nunca expirar.
     envFind.mockResolvedValue({
       source: "proposal",
       proposalId: "p1",
@@ -253,17 +255,31 @@ describe("onProposalEnvelopeCanceled (bug D — 2ª via expirada/cancelada)", ()
       orgId: "org1",
       clicksignId: "ck-1",
     });
-    await onProposalEnvelopeCanceled("e1");
+    await onProposalEnvelopeCanceled("e1", "deadline");
     expect(propUpdateMany).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("via completa com causa DESCONHECIDA → no-op (sem evidência não se afirma)", async () => {
+    envFind.mockResolvedValue({
+      source: "proposal",
+      proposalId: "p1",
+      via: "completa",
+      orgId: "org1",
+      clicksignId: "ck-1",
+    });
+    await onProposalEnvelopeCanceled("e1", "unknown");
+    expect(propUpdateMany).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("envelope de contrato → no-op", async () => {
     envFind.mockResolvedValue({ source: "contract", proposalId: null, via: null });
-    await onProposalEnvelopeCanceled("e1");
+    await onProposalEnvelopeCanceled("e1", "external_cancel");
     expect(propUpdateMany).not.toHaveBeenCalled();
   });
 
-  describe("appInitiated (cancelamento deliberado, feito na nossa UI)", () => {
+  describe('cause "app" (cancelamento deliberado, feito na nossa UI)', () => {
     const firstRoundEnvelope = {
       source: "proposal",
       proposalId: "p1",
@@ -274,7 +290,7 @@ describe("onProposalEnvelopeCanceled (bug D — 2ª via expirada/cancelada)", ()
 
     it("1ª via em curso → falha_envio (reenviável) + evento, SEM sino", async () => {
       envFind.mockResolvedValue(firstRoundEnvelope);
-      await onProposalEnvelopeCanceled("e1", { appInitiated: true });
+      await onProposalEnvelopeCanceled("e1", "app");
       expect(propUpdateMany).toHaveBeenCalledWith({
         where: { id: "p1", status: { in: ["enviada", "entregue", "visualizada"] } },
         data: { status: "falha_envio" },
@@ -293,14 +309,14 @@ describe("onProposalEnvelopeCanceled (bug D — 2ª via expirada/cancelada)", ()
     it("proposta fora da 1ª via (CAS não moveu) → sem evento", async () => {
       envFind.mockResolvedValue(firstRoundEnvelope);
       propUpdateMany.mockResolvedValue({ count: 0 });
-      await onProposalEnvelopeCanceled("e1", { appInitiated: true });
+      await onProposalEnvelopeCanceled("e1", "app");
       expect(eventCreate).not.toHaveBeenCalled();
       expect(notify).not.toHaveBeenCalled();
     });
 
     it("via reduzida mantém a devolução à parada de decisão, mas SEM sino", async () => {
       envFind.mockResolvedValue({ ...firstRoundEnvelope, via: "reduzida" });
-      await onProposalEnvelopeCanceled("e1", { appInitiated: true });
+      await onProposalEnvelopeCanceled("e1", "app");
       expect(propUpdateMany).toHaveBeenCalledWith({
         where: { id: "p1", status: "aguardando_vendedor" },
         data: { status: "assinada_proponente" },
@@ -320,8 +336,54 @@ describe("onProposalEnvelopeCanceled (bug D — 2ª via expirada/cancelada)", ()
 
     it("envelope de contrato ignora a flag", async () => {
       envFind.mockResolvedValue({ source: "contract", proposalId: null, via: null });
-      await onProposalEnvelopeCanceled("e1", { appInitiated: true });
+      await onProposalEnvelopeCanceled("e1", "app");
       expect(propUpdateMany).not.toHaveBeenCalled();
+    });
+
+    it("external_cancel: MESMO CAS, evento com source clicksign, COM sino", async () => {
+      // A mudança de 2026-08-20 (decisão de produto): cancelamento direto na
+      // ClickSign também libera — e avisa, porque o fato nasceu fora da vista
+      // do corretor.
+      envFind.mockResolvedValue(firstRoundEnvelope);
+      await onProposalEnvelopeCanceled("e1", "external_cancel");
+      expect(propUpdateMany).toHaveBeenCalledWith({
+        where: { id: "p1", status: { in: ["enviada", "entregue", "visualizada"] } },
+        data: { status: "falha_envio" },
+      });
+      expect(eventCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            eventName: "primeira_via_canceled",
+            source: "clicksign",
+          }),
+        })
+      );
+      expect(notify).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "send_canceled", dedupeSuffix: "e1" })
+      );
+    });
+
+    it("external_cancel em replay (CAS não moveu) → sem evento e SEM sino", async () => {
+      // O sino vem DEPOIS do CAS de propósito: replay de webhook não re-toca.
+      envFind.mockResolvedValue(firstRoundEnvelope);
+      propUpdateMany.mockResolvedValue({ count: 0 });
+      await onProposalEnvelopeCanceled("e1", "external_cancel");
+      expect(eventCreate).not.toHaveBeenCalled();
+      expect(notify).not.toHaveBeenCalled();
+    });
+
+    it("external_cancel na via reduzida → comportamento da reduzida intacto", async () => {
+      // A matriz de causas é da 1ª via; a reduzida segue igual (devolve à
+      // parada + sino vendedor_send_failed pra qualquer causa externa).
+      envFind.mockResolvedValue({ ...firstRoundEnvelope, via: "reduzida" });
+      await onProposalEnvelopeCanceled("e1", "external_cancel");
+      expect(propUpdateMany).toHaveBeenCalledWith({
+        where: { id: "p1", status: "aguardando_vendedor" },
+        data: { status: "assinada_proponente" },
+      });
+      expect(notify).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "vendedor_send_failed" })
+      );
     });
 
     it("falha_envio é reenviável, editável E cancelável — o ponto da correção", () => {

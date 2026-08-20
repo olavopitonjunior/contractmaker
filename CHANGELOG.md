@@ -4,6 +4,20 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-20 - Cancelamento externo da 1ª via libera a proposta
+
+### Corrigido
+
+- **Proposta cujo envelope foi cancelado DIRETO na ClickSign ficava presa até expirar** — a limitação registrada em 19/08 ("1ª via cancelada FORA da plataforma continua presa"), agora fechada por decisão de produto. O webhook separa `cancel` de `deadline` (os dois já chegavam distintos em `payload.event.name`; a fusão era só fall-through do `case`): cancelamento externo faz o MESMO CAS pra `falha_envio` do cancelamento pela UI, e expiração continua com o cron de expire — liberar no `deadline` tiraria a proposta de `EXPIRABLE_STATUSES` e ela nunca mais seria marcada `expirada`.
+
+  A API do hook trocou `opts.appInitiated?` por um **`cause` posicional obrigatório** (`app | external_cancel | deadline | unknown`): a omissão silenciosa era exatamente o bug — o webhook chamava sem opts e caía no no-op. Obrigatório, esquecer vira erro de compilação.
+
+  **Sino novo `send_canceled`** só no cancelamento externo — o fato nasceu fora da vista do corretor; sem o aviso ele seguia achando "aguardando assinatura". Cancelamento pela própria UI continua mudo (seria eco). Kind próprio em vez de reusar `vendedor_send_failed`: o `title` viaja fixo no WhatsApp e mentiria "2ª via". Dedupe por envelope; emitido depois do CAS e só quando ele moveu (replay não re-toca).
+
+  **A reconciliação aprende a causa pelo feed `/events`** (mesmos nomes de evento do webhook) — o sync é o caminho de recuperação de webhook perdido, e sem isso um envelope cancelado externamente cujo webhook se perdeu ficaria preso pra sempre. Fallback `unknown` = comportamento anterior: se a API não expuser os eventos no feed, a mudança nunca piora nada.
+
+  O evento gravado continua `primeira_via_canceled` (com `source: "clicksign"` e a causa no payload) — badge âmbar "Envio cancelado" e o chip de filtro discriminam só pelo `eventName`, então funcionam sem nenhuma mudança de UI.
+
 ## [Unreleased] - 2026-08-20 - Cancelar o envelope não é "Falha no envio"
 
 Três defeitos achados no smoke de staging — e, na sequência, um chip próprio de filtro nascido da mesma distinção —, todos consequência de o mesmo status `falha_envio` ter passado a cobrir duas situações diferentes desde que cancelar o envelope devolve a 1ª via para reenvio.
