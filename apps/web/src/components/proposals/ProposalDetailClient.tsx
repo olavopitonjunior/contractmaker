@@ -121,7 +121,7 @@ interface Proposal {
   /** `hiddenPaths` esconde a comissão na via do proprietário. */
   comissaoOculta: boolean;
   recusa: {
-    porLabel: string;
+    porLabel: string | null;
     emLabel: string;
     reason: string | null;
     counterLabel: string | null;
@@ -233,6 +233,7 @@ export function ProposalDetailClient({
   // quem envia a proposta pra assinatura é quem cuida da documentação dela.
   const canAttach = permissions.send;
   const detalhes = proposal.detalhes;
+  const sellerBase = proposal.kind === "venda" ? "Vendedor" : "Locador";
 
   async function copyPublicLink() {
     if (!proposal.publicUrl) return;
@@ -427,23 +428,11 @@ export function ProposalDetailClient({
           />
           <PartyList
             title={detalhes.proponentes.length > 1 ? "Proponentes" : "Proponente"}
-            parties={
-              detalhes.proponentes.length > 0
-                ? detalhes.proponentes
-                : proposal.resumo.proponente
-                  ? [{ nome: proposal.resumo.proponente, doc: null, contato: null }]
-                  : []
-            }
+            parties={detalhes.proponentes}
           />
           <PartyList
             title={
-              proposal.kind === "venda"
-                ? detalhes.vendedores.length > 1
-                  ? "Vendedores"
-                  : "Vendedor"
-                : detalhes.vendedores.length > 1
-                  ? "Locadores"
-                  : "Locador"
+              detalhes.vendedores.length > 1 ? `${sellerBase}es` : sellerBase
             }
             parties={detalhes.vendedores}
           />
@@ -485,7 +474,10 @@ export function ProposalDetailClient({
           {detalhes.condicoes.map((r) => (
             <Row key={r.label} label={r.label} value={r.value} />
           ))}
-          {detalhes.comissao.length > 0 && (
+          {/* `comissaoOculta` força o bloco mesmo sem linhas: o aviso de que a
+              via do proprietário omite a comissão não pode depender de haver
+              percentual/valor preenchidos. */}
+          {(detalhes.comissao.length > 0 || proposal.comissaoOculta) && (
             <div className="space-y-2 border-t pt-2">
               <div className="flex items-center gap-2 text-sm">
                 <span className="text-muted-foreground">Comissão</span>
@@ -509,6 +501,7 @@ export function ProposalDetailClient({
           )}
           {detalhes.condicoes.length === 0 &&
             detalhes.comissao.length === 0 &&
+            !proposal.comissaoOculta &&
             !detalhes.corretorLabel && (
               <p className="text-sm text-muted-foreground">
                 Sem condições informadas ainda.
@@ -589,7 +582,8 @@ export function ProposalDetailClient({
           {proposal.recusa && (
             <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/5 p-2.5 text-xs">
               <p className="font-medium text-destructive">
-                Recusada {proposal.recusa.porLabel} em {proposal.recusa.emLabel}
+                Recusada{proposal.recusa.porLabel ? ` ${proposal.recusa.porLabel}` : ""} em{" "}
+                {proposal.recusa.emLabel}
               </p>
               {proposal.recusa.reason && (
                 <p className="mt-0.5 text-muted-foreground">{proposal.recusa.reason}</p>
@@ -892,7 +886,9 @@ function PartyList({
   title: string;
   parties: ProposalPartyLine[];
 }) {
-  if (parties.length === 0) return null;
+  // Vazio renderiza "—" (não some): num rascunho recém-criado a linha ausente
+  // esconderia justamente o que falta preencher.
+  if (parties.length === 0) return <Row label={title} value="—" />;
   return (
     <div className="pt-1 text-sm">
       <span className="text-muted-foreground">{title}</span>

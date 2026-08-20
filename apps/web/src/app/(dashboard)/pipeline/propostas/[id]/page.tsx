@@ -276,7 +276,7 @@ export default async function PropostaDetailPage({
                   ? "pelo proponente"
                   : proposal.refusedBy?.startsWith("vendedor")
                     ? "pelo proprietário"
-                    : "",
+                    : null,
               emLabel: formatDateTimeBR(proposal.refusedAt),
               reason: proposal.refusedReason,
               counterLabel:

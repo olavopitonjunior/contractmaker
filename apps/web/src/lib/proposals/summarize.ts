@@ -26,8 +26,14 @@ export function summarizeProposalData(
   const imovel = im?.endereco
     ? `${im.endereco}${im.numero ? `, ${im.numero}` : ""}`
     : null;
-  // Proponente = 1º comprador (venda) ou 1º locatário (locação).
-  const partes = (d.compradores ?? d.locatarios) as Array<{ nome?: string }> | undefined;
+  // Proponente = 1º comprador (venda) ou 1º locatário (locação). Com `kind`
+  // conhecido a lista certa é escolhida por ele — o `??` sozinho deixava um
+  // `compradores: []` legado numa locação esconder os locatários preenchidos.
+  const partes = (kind === "venda"
+    ? d.compradores
+    : kind === "locacao"
+      ? d.locatarios
+      : (d.compradores ?? d.locatarios)) as Array<{ nome?: string }> | undefined;
   const proponente = partes?.[0]?.nome?.trim() || null;
   const pag = d.pagamento as { valor_total?: number } | undefined;
   const loc = d.locacao as
@@ -47,17 +53,11 @@ export function summarizeProposalData(
           ? "À vista"
           : null;
   } else if (kind === "locacao") {
-    const garantiaObj = d.garantia as { tipo?: string } | undefined;
-    const garantiaLabel =
-      loc?.garantia ??
-      (garantiaObj?.tipo
-        ? GARANTIA_LABELS[garantiaObj.tipo as GarantiaTipo] ?? garantiaObj.tipo
-        : null);
     const prazo =
       typeof loc?.prazo_meses === "number" && loc.prazo_meses > 0
         ? `${loc.prazo_meses}m`
         : null;
-    negocio = [garantiaLabel, prazo].filter(Boolean).join(" · ") || null;
+    negocio = [garantiaLabel(d), prazo].filter(Boolean).join(" · ") || null;
   }
 
   return {
@@ -66,6 +66,25 @@ export function summarizeProposalData(
     valorLabel: typeof valor === "number" ? formatMoneyBR(valor, { decimals: 0 }) : null,
     negocio,
   };
+}
+
+const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+
+/**
+ * Label humano da garantia: `locacao.garantia` (string pronta do
+ * buildProposalDataJson) vence; fallback pro shape canônico `garantia.tipo`
+ * via GARANTIA_LABELS. Compartilhado entre o chip da listagem e o detalhe —
+ * duas cópias divergiriam exatamente como o summarize() local divergiu.
+ */
+function garantiaLabel(d: Record<string, unknown>): string | null {
+  const loc = (d.locacao ?? {}) as Record<string, unknown>;
+  const garantiaObj = (d.garantia ?? {}) as Record<string, unknown>;
+  const tipo = str(garantiaObj.tipo);
+  return (
+    str(loc.garantia) ||
+    (tipo ? GARANTIA_LABELS[tipo as GarantiaTipo] ?? tipo : null) ||
+    null
+  );
 }
 
 export interface ProposalDetailRow {
@@ -95,7 +114,6 @@ export interface ProposalDetails {
 
 function partyLine(raw: unknown): ProposalPartyLine | null {
   const p = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-  const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
   const nome = str(p.razao_social) || str(p.nome);
   if (!nome) return null;
   const cnpj = str(p.cnpj);
@@ -121,10 +139,11 @@ export function summarizeProposalDetails(
   kind?: string
 ): ProposalDetails {
   const d = (dataJson ?? {}) as Record<string, unknown>;
-  const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const lines = (v: unknown) =>
-    (Array.isArray(v) ? v : []).map(partyLine).filter(Boolean) as ProposalPartyLine[];
+    (Array.isArray(v) ? v : [])
+      .map(partyLine)
+      .filter((l): l is ProposalPartyLine => l !== null);
 
   const isVenda = kind !== "locacao";
   const proponentes = lines(isVenda ? d.compradores : d.locatarios);
@@ -149,7 +168,6 @@ export function summarizeProposalDetails(
     }
   } else {
     const loc = (d.locacao ?? {}) as Record<string, unknown>;
-    const garantiaObj = (d.garantia ?? {}) as Record<string, unknown>;
     const prazo = num(loc.prazo_meses);
     if (prazo != null && prazo > 0) {
       condicoes.push({ label: "Prazo", value: `${prazo} meses` });
@@ -165,11 +183,7 @@ export function summarizeProposalDetails(
     }
     const finalidade = str(loc.finalidade);
     if (finalidade) condicoes.push({ label: "Finalidade", value: finalidade });
-    const garantia =
-      str(loc.garantia) ||
-      (str(garantiaObj.tipo)
-        ? GARANTIA_LABELS[garantiaObj.tipo as GarantiaTipo] ?? str(garantiaObj.tipo)
-        : "");
+    const garantia = garantiaLabel(d);
     if (garantia) condicoes.push({ label: "Garantia", value: garantia });
   }
 

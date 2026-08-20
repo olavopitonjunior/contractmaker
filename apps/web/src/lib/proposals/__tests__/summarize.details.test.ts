@@ -1,5 +1,23 @@
 import { describe, it, expect } from "vitest";
-import { summarizeProposalDetails } from "@/lib/proposals/summarize";
+import {
+  summarizeProposalData,
+  summarizeProposalDetails,
+} from "@/lib/proposals/summarize";
+
+describe("summarizeProposalData — seleção de partes por kind", () => {
+  it("locação com compradores:[] legado não esconde o locatário", () => {
+    const r = summarizeProposalData(
+      { compradores: [], locatarios: [{ nome: "João" }] },
+      "locacao"
+    );
+    expect(r.proponente).toBe("João");
+  });
+
+  it("sem kind mantém o fallback compradores ?? locatarios", () => {
+    const r = summarizeProposalData({ locatarios: [{ nome: "João" }] });
+    expect(r.proponente).toBe("João");
+  });
+});
 
 describe("summarizeProposalDetails", () => {
   it("venda com financiamento: partes completas, modalidade, sinal, comissão e corretor", () => {
