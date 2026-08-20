@@ -147,13 +147,21 @@ export default async function PropostasPage({
           select: { signers: { select: { notifyChannel: true } } },
         },
         // Último desfecho de envio — separa "falha real" de "cancelado" no
-        // badge. Filtrado por SEND_OUTCOME_EVENTS e `take: 1`, então é UMA
-        // consulta agrupada (o Prisma resolve relação aninhada em batch), não
-        // N+1 por linha. `sentAt` não serve aqui: é monotônico e diria
-        // "cancelado" numa falha de reenvio.
+        // badge. `sentAt` não serve aqui: é monotônico e diria "cancelado"
+        // numa falha de reenvio.
+        //
+        // Sobre custo: relação aninhada SEM take o Prisma 5 resolve em batch
+        // (2 queries totais). COM `take: 1` a doc do engine clássico não é
+        // explícita — NÃO está verificado empiricamente que não vira 1 query
+        // por linha. Antes de copiar este padrão pra outra listagem, confira o
+        // número real de queries de /pipeline/propostas (log do Neon ou
+        // prisma.$on("query")) — review de 2026-08-20 pediu essa confirmação.
         events: {
           where: { eventName: { in: [...SEND_OUTCOME_EVENTS] } },
-          orderBy: { receivedAt: "desc" },
+          // `id` desempata timestamps iguais. Hoje os dois desfechos não
+          // coexistem (CAS por status garante), mas a leitura não deve
+          // depender desse invariante continuar valendo.
+          orderBy: [{ receivedAt: "desc" }, { id: "desc" }],
           take: 1,
           select: { eventName: true },
         },
