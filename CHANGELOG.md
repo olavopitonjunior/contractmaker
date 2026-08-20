@@ -4,6 +4,34 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-19 - Papel de leitura escrevia em proposta; coluna "Envio" mentia depois de cancelar o envelope
+
+### Segurança
+
+- **`viewer` editava e renomeava qualquer proposta da org.** `loadScopedProposal` resolve ESCOPO (quem enxerga a proposta) e libera todo mundo que tem `PROPOSAL_VIEW_ALL` — que é exatamente o recorte do preset `viewer`, o papel explicitamente somente-leitura. Duas rotas de escrita confiavam só nisso e não checavam permissão nenhuma:
+  - `PATCH /api/proposals/[id]/title` — renomeava qualquer proposta não terminal.
+  - `PATCH /api/proposals/[id]` — o buraco largo: reescrevia o `dataJson` inteiro, trocava `validUntil`/`comissaoIncluida`/`hiddenPaths` e **substituía a lista de signatários** de qualquer proposta pré-envio. Era incoerente com as próprias rotas irmãs: `/signers`, `/signers/[signerId]` e `/attachments`, que fazem essas mesmas escritas em pedaços, já exigiam `PROPOSAL_SEND`; só o PATCH monolítico, que faz tudo de uma vez, não exigia nada.
+
+  As duas passam a exigir `PROPOSAL_CREATE` **ou** `PROPOSAL_SEND` (não existe `PROPOSAL_UPDATE`; o corte é quem produz a proposta). Fechar o PATCH é aplicar a convenção que já existia no resto da família, não criar regra nova.
+
+  A UI foi gateada em lockstep, porque botão que só falha no salvar é pior que botão ausente: `ProposalPermissions` ganhou `write` (nome pelo que a permissão É, não pelo botão que ela habilita), usado em "Renomear", em "Editar proposta" e na página `/pipeline/propostas/[id]/editar` — que gateava só por escopo e servia o formulário inteiro, preenchido, para quem o PATCH agora recusa. O doc-comment dela dizia "o guard de verdade está lá", apontando para um PATCH que não tinha guard.
+
+  Os testes varrem **todos** os `ROLE_PRESETS` em vez de fixar `viewer`: o que abre o buraco é a FORMA da permissão (`VIEW_ALL` sem `CREATE`/`SEND`), não o rótulo, e um preset novo de auditoria ou portal cairia nele em silêncio.
+
+  Consequência conhecida: o preset `gerente` tem `PROPOSAL_VIEW_OWN_ONLY` sem `CREATE`/`SEND`, então um gerente atribuído como responsável perde a edição via PATCH. É coerência, não perda — ele já não podia editar signatário, anexar arquivo nem enviar, então nenhum fluxo de edição fechava para ele de qualquer maneira.
+
+### Corrigido
+
+- **A coluna "Envio" voltava a dizer "ainda não enviada" depois que o envelope era cancelado.** A subquery da lista filtrava `status: { notIn: ["failed", "canceled"] }`, então uma proposta enviada cujo envelope foi depois cancelado perdia os `EnvelopeSigner` e a célula caía no plano, esmaecida, afirmando "canal previsto" sobre uma proposta que o cliente recebeu. Ficou visível agora porque cancelar o envelope passou a ser um caminho normal (devolve a 1ª via para reenvio).
+
+  O filtro passou a `not: "failed"`, e `proposalSendChannel` ganhou `proposalSentAt` como discriminador de `resolved`. Tratar todo `canceled` como executado seria o mesmo bug invertido: um envelope que morreu em `draft` nunca notificou ninguém, e a célula afirmaria um canal usado num envio que não houve. `Envelope.sentAt` não serve — nasce preenchido junto com o rascunho, em `executor.ts`, com `status: "draft"`. O `sentAt` da **proposta** é gravado como último passo dos dois caminhos felizes de envio.
+
+  O parâmetro é **obrigatório** (aceita `null`) de propósito: opcional, um chamador novo que esquecesse de passá-lo veria os signatários do envelope ignorados em silêncio e a coluna voltaria a mentir, sem erro de compilação.
+
+### Em aberto
+
+- **A coluna "Envio" soma as duas vias.** O chamador passa os signatários da via `completa` (proponente) e da `reduzida` (proprietário) juntos — ambas têm `source: "proposal"`. Proponente por e-mail e proprietário por WhatsApp viram "E-mail e WhatsApp". É defensável lendo a coluna como "por onde a proposta saiu" e enganoso lendo como "por onde o proponente recebeu". Comportamento anterior a esta correção, mantido: escolher um dos dois é decisão de produto, não conserto de bug. Documentado em `send-channel.ts` com a forma correta do filtro (`via` é nullable em envelopes antigos).
+- **A mudança na cláusula Prisma não tem teste.** Os testes novos fixam a lógica de `proposalSendChannel`, que é pura; o `where` em si e a fusão de múltiplos envelopes só seriam alcançados por teste de integração com banco.
 ## [Unreleased] - 2026-08-19 - Modelo em rascunho para de ser chamado de arquivado
 
 ### Corrigido
