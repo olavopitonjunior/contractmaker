@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { summarizeCompletion } from "@/components/corretores/completion-toast";
 import {
   Sheet,
   SheetContent,
@@ -421,10 +422,8 @@ export default function SplitRecipientsClient() {
                   onEdit={() => openEdit(r)}
                   onDeactivate={() => setConfirmDeactivate(r)}
                   onRequestCompletion={async () => {
-                    if (!r.email) {
-                      toast.error("Cadastre o email do destinatário antes de pedir os dados");
-                      return;
-                    }
+                    // Canais default do servidor (email e/ou WhatsApp viáveis) —
+                    // o guard antigo por email bloqueava o caminho só-WhatsApp.
                     const res = await fetch(
                       `/api/financeiro/split-recipients/${r.id}/request-completion`,
                       { method: "POST", credentials: "include" }
@@ -434,7 +433,9 @@ export default function SplitRecipientsClient() {
                       toast.error(data.error ?? "Falha ao gerar link");
                       return;
                     }
-                    toast.success(`Email enviado para ${r.email}`);
+                    const { message, anySent } = summarizeCompletion(data);
+                    if (anySent) toast.success(message);
+                    else toast.error(message);
                   }}
                 />
               ))}

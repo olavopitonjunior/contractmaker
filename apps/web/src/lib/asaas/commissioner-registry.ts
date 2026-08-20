@@ -17,6 +17,7 @@
 import { Prisma, type SplitRecipient } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { normalizeDoc, normalizeName } from "@/lib/asaas/commissionados-matcher";
+import { normalizeEmail, normalizePhoneForStorage } from "@/lib/validators/corretor";
 
 export interface CommissionerInput {
   nome?: string | null;
@@ -152,14 +153,15 @@ export async function createCommissioner(
       ownerName: extras?.pix?.titularNome ?? null,
       ownerCpfCnpj: extras?.pix?.titularCpfCnpj ?? null,
       cpfCnpj: doc.length >= 11 ? doc : null,
-      email: input.email?.trim() ? input.email.trim() : null,
+      email: normalizeEmail(input.email),
       pendingFields,
       active: !isDraft,
       kind: "commissioner",
       tipoPessoa: input.tipo_pessoa ?? null,
       creci: input.creci?.trim() ? input.creci.trim() : null,
       papel: sanitizePapel(input.papel),
-      phone: input.mobile_phone?.trim() ? input.mobile_phone.trim() : null,
+      // E.164 quando parseável; origem anônima não perde dado (soft).
+      phone: normalizePhoneForStorage(input.mobile_phone, { soft: true }).value,
       bankName: extras?.banco?.nome ?? null,
       bankBranch: extras?.banco?.agencia ?? null,
       bankAccount: extras?.banco?.conta ?? null,
@@ -189,9 +191,11 @@ export async function upsertCommissionerFromFormData(
     // Backfill leve de contato: cadastro existente sem email/phone ganha o
     // que veio do form (nunca sobrescreve valor já preenchido).
     const patch: Prisma.SplitRecipientUpdateInput = {};
-    if (!matched.email && input.email?.trim()) patch.email = input.email.trim();
+    if (!matched.email && input.email?.trim()) {
+      patch.email = normalizeEmail(input.email);
+    }
     if (!matched.phone && input.mobile_phone?.trim()) {
-      patch.phone = input.mobile_phone.trim();
+      patch.phone = normalizePhoneForStorage(input.mobile_phone, { soft: true }).value;
     }
     if (!matched.creci && input.creci?.trim()) patch.creci = input.creci.trim();
     if (Object.keys(patch).length > 0) {

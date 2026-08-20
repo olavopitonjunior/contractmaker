@@ -3,6 +3,7 @@
 import { useId, useState } from "react";
 import { UseFormReturn } from "react-hook-form";
 import { toast } from "sonner";
+import { summarizeCompletion } from "@/components/corretores/completion-toast";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -125,7 +126,12 @@ export function CadastroRecebimento({
         );
         return;
       }
-      toast.success("Pedido enviado: o corretor recebe por e-mail um link seguro pra preencher os dados de recebimento.");
+      const { message, anySent } = summarizeCompletion(body);
+      if (anySent) {
+        toast.success(`Pedido enviado — ${message}. O corretor preenche os dados num link seguro.`);
+      } else {
+        toast.error(message);
+      }
     } catch (err) {
       console.error("[CadastroRecebimento request-completion]", err);
       toast.error("Erro ao enviar o pedido.");

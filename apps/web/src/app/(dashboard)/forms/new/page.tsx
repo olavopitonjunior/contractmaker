@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,11 +12,41 @@ import { toast } from "sonner";
 import { Copy, ExternalLink, X } from "lucide-react";
 import { PartyLinksPanel } from "@/components/forms/PartyLinksPanel";
 import { ManagerSelect } from "@/components/deals/ManagerSelect";
+import {
+  CorretorCombobox,
+  type CorretorComboboxOption,
+} from "@/components/corretores/CorretorCombobox";
 
-interface CorretorOption {
-  id: string;
-  label: string;
-  email: string | null;
+type CorretorOption = CorretorComboboxOption;
+
+async function fetchCorretorOptions(q: string): Promise<CorretorComboboxOption[]> {
+  const res = await fetch(
+    `/api/financeiro/split-recipients?kind=commissioner&q=${encodeURIComponent(q)}`,
+    { credentials: "include" }
+  );
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.recipients ?? []).map(
+    (r: {
+      id: string;
+      label: string;
+      tipoPessoa: "fisica" | "juridica" | null;
+      cpfCnpj: string | null;
+      creci: string | null;
+      papel: string | null;
+      email: string | null;
+      phone: string | null;
+    }) => ({
+      id: r.id,
+      label: r.label,
+      tipoPessoa: r.tipoPessoa,
+      doc: r.cpfCnpj,
+      creci: r.creci,
+      papel: r.papel,
+      email: r.email,
+      phone: r.phone,
+    })
+  );
 }
 
 export default function NewFormPage() {
@@ -27,8 +57,6 @@ export default function NewFormPage() {
   const [createdToken, setCreatedToken] = useState<string | null>(null);
   // Corretores envolvidos (pré-seed da etapa 7 + destinatários de atualizações)
   const [corretores, setCorretores] = useState<CorretorOption[]>([]);
-  const [corretorQuery, setCorretorQuery] = useState("");
-  const [corretorOptions, setCorretorOptions] = useState<CorretorOption[]>([]);
   const [sendUpdates, setSendUpdates] = useState(true);
   // Gerente responsável pelo negócio (obrigatório quando a org liga o toggle).
   const [managerUserId, setManagerUserId] = useState<string | null>(null);
@@ -38,32 +66,12 @@ export default function NewFormPage() {
   // um segundo form + deal.
   const [idemKey, setIdemKey] = useState(() => crypto.randomUUID());
 
-  useEffect(() => {
-    const q = corretorQuery.trim();
-    if (q.length < 2) {
-      setCorretorOptions([]);
-      return;
-    }
-    const timer = setTimeout(async () => {
-      const res = await fetch(
-        `/api/financeiro/split-recipients?kind=commissioner&q=${encodeURIComponent(q)}`,
-        { credentials: "include" }
-      );
-      if (!res.ok) return;
-      const data = await res.json();
-      const chosen = new Set(corretores.map((c) => c.id));
-      setCorretorOptions(
-        (data.recipients ?? [])
-          .filter((r: { id: string }) => !chosen.has(r.id))
-          .map((r: { id: string; label: string; email: string | null }) => ({
-            id: r.id,
-            label: r.label,
-            email: r.email,
-          }))
-      );
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [corretorQuery, corretores]);
+  // Já escolhidos não devem reaparecer nas sugestões do combobox.
+  async function fetchAvailableCorretores(q: string): Promise<CorretorComboboxOption[]> {
+    const options = await fetchCorretorOptions(q);
+    const chosen = new Set(corretores.map((c) => c.id));
+    return options.filter((o) => !chosen.has(o.id));
+  }
 
   async function postForm(key: string, force: boolean) {
     const res = await fetch("/api/forms", {
@@ -207,7 +215,7 @@ export default function NewFormPage() {
                       onClick={() =>
                         setCorretores((prev) => prev.filter((x) => x.id !== c.id))
                       }
-                      className="hover:text-red-600"
+                      className="hover:text-destructive"
                     >
                       <X className="h-3 w-3" />
                     </button>
@@ -215,35 +223,13 @@ export default function NewFormPage() {
                 ))}
               </div>
             )}
-            <div className="relative">
-              <Input
-                id="corretores"
+            <div>
+              <CorretorCombobox
+                fetchOptions={fetchAvailableCorretores}
+                onSelect={(o) => setCorretores((prev) => [...prev, o])}
                 placeholder="Buscar corretor cadastrado por nome, CPF/CNPJ ou CRECI"
-                value={corretorQuery}
-                onChange={(e) => setCorretorQuery(e.target.value)}
                 disabled={!!createdUrl}
               />
-              {corretorOptions.length > 0 && (
-                <div className="absolute z-10 mt-1 w-full border rounded-md bg-popover shadow-md max-h-56 overflow-y-auto">
-                  {corretorOptions.map((o) => (
-                    <button
-                      key={o.id}
-                      type="button"
-                      className="w-full text-left px-3 py-2 text-sm hover:bg-accent"
-                      onClick={() => {
-                        setCorretores((prev) => [...prev, o]);
-                        setCorretorQuery("");
-                        setCorretorOptions([]);
-                      }}
-                    >
-                      <span className="font-medium">{o.label}</span>
-                      {o.email && (
-                        <span className="text-muted-foreground"> · {o.email}</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
             <p className="text-xs text-muted-foreground">
               Já entram preenchidos na etapa de Comissão do formulário. Corretor

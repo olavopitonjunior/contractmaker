@@ -12,6 +12,12 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
 import { detectPixKeyType } from "@/lib/asaas/pix";
 import { findCommissionerMatch } from "@/lib/asaas/commissioner-registry";
+import {
+  isValidCpfCnpj,
+  isValidCreci,
+  normalizeEmail,
+  normalizePhoneForStorage,
+} from "@/lib/validators/corretor";
 
 const baseSchema = z.object({
   label: z.string().trim().min(1).max(120),
@@ -149,6 +155,30 @@ export async function POST(req: NextRequest) {
   const pendingFields = data.pendingFields ?? [];
   const isDraft = pendingFields.length > 0;
 
+  // Dígito verificador: o Zod acima só valida tamanho — sem isto, doc lixo
+  // entra e o dedupe por documento deixa de proteger. (O form público NÃO tem
+  // esta checagem de propósito: origem anônima grava soft e o admin corrige.)
+  if (data.cpfCnpj && !isValidCpfCnpj(data.cpfCnpj)) {
+    return NextResponse.json(
+      { error: "CPF/CNPJ inválido (dígito verificador não confere)" },
+      { status: 422 }
+    );
+  }
+  if (data.creci && !isValidCreci(data.creci)) {
+    return NextResponse.json(
+      { error: "CRECI inválido — use o número, com UF/sufixo opcionais (ex.: 12345-F ou SP-12345)" },
+      { status: 422 }
+    );
+  }
+  // Telefone: grava E.164 (+55…) — formato que o Max/notify comparam na leitura.
+  const phoneNorm = normalizePhoneForStorage(data.phone);
+  if (phoneNorm.invalid) {
+    return NextResponse.json(
+      { error: "Telefone inválido — use DDD + número (ex.: (11) 98765-4321)" },
+      { status: 422 }
+    );
+  }
+
   // Validações relaxadas para rascunho (campos críticos podem vir vazios)
   if (!isDraft) {
     if (isPix && (!data.pixAddressKey || data.pixAddressKey.trim() === "")) {
@@ -212,7 +242,7 @@ export async function POST(req: NextRequest) {
         // Digits-only: o partial unique de commissioner compara normalizado.
         cpfCnpj: data.cpfCnpj ? data.cpfCnpj.replace(/\D/g, "") || null : null,
         description: data.description ?? null,
-        email: data.email && data.email !== "" ? data.email : null,
+        email: normalizeEmail(data.email),
         pendingFields,
         // Rascunho não pode ser usado em cobranças até completar
         active: !isDraft,
@@ -221,7 +251,7 @@ export async function POST(req: NextRequest) {
         tipoPessoa: data.tipoPessoa ?? undefined,
         creci: data.creci ?? undefined,
         papel: data.papel ?? undefined,
-        phone: data.phone ?? undefined,
+        phone: data.phone === undefined ? undefined : phoneNorm.value,
         bankName: data.bankName ?? undefined,
         bankBranch: data.bankBranch ?? undefined,
         bankAccount: data.bankAccount ?? undefined,
