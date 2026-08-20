@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db/prisma";
+import { SEND_OUTCOME_EVENTS } from "@/lib/proposals/status-sets";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { redirect, notFound } from "next/navigation";
 import {
@@ -67,11 +68,19 @@ export default async function PropostaDetailPage({
     notFound();
   }
 
-  const [planSigners, events, attachments, memberRows, envelopes, envelopeCount] =
+  const [planSigners, lastOutcome, events, attachments, memberRows, envelopes, envelopeCount] =
     await Promise.all([
     prisma.proposalSigner.findMany({
       where: { proposalId: params.id },
       orderBy: { signingGroup: "asc" },
+    }),
+    // Consulta PRÓPRIA e não um `find` no array acima: aquele é `take: 50` e
+    // uma proposta conversada (lembretes, syncs) empurraria o desfecho pra fora
+    // da janela, fazendo o badge dizer "Falha no envio" num cancelamento.
+    prisma.proposalEvent.findFirst({
+      where: { proposalId: params.id, eventName: { in: [...SEND_OUTCOME_EVENTS] } },
+      orderBy: { receivedAt: "desc" },
+      select: { eventName: true },
     }),
     prisma.proposalEvent.findMany({
       where: { proposalId: params.id },
@@ -223,6 +232,7 @@ export default async function PropostaDetailPage({
         createdAtLabel: formatDateTimeBR(proposal.createdAt),
         sentAtLabel: formatDateTimeBR(proposal.sentAt),
         sentAt: proposal.sentAt?.toISOString() ?? null,
+        lastSendOutcome: lastOutcome?.eventName ?? null,
         deliveredAtLabel: formatDateTimeBR(proposal.deliveredAt),
         firstViewedAtLabel: formatDateTimeBR(proposal.firstViewedAt),
         viewCount: proposal.viewCount,

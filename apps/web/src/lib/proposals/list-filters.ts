@@ -24,6 +24,15 @@ export const STATUS_FILTERS: StatusFilterOption[] = [
     label: "Em aberto",
     statuses: ["enviada", "entregue", "visualizada", "assinada_proponente", "aguardando_vendedor"],
   },
+  // EM ABERTO (produto): desde que cancelar o envelope devolve a proposta pra
+  // `falha_envio`, este grupo passou a conter também proposta que SAIU e foi
+  // cancelada — cujo badge agora diz "Envio cancelado", não "Falha no envio".
+  // O rótulo do chip ficou INCOMPLETO (não errado: falha real continua aqui).
+  // Deixado como está de propósito: mudar copy de filtro, ou mover esse recorte
+  // pra um chip próprio, é decisão de produto e não conserto de bug. Se for
+  // mexer, o discriminador é `isFalhaEnvioAlreadyDelivered` — mas ele depende de
+  // `sentAt`, então um chip novo precisaria de `requiresServer: true`, porque
+  // `statuses` sozinho não expressa a condição.
   { id: "rascunho", label: "Rascunho / falha", statuses: ["rascunho", "falha_envio", "aguardando_aprovacao"] },
   { id: "cliente", label: "Com o cliente", statuses: ["enviada", "entregue", "visualizada"] },
   // "proprietario" quebrou em dois (2026-08): a parada de decisão é bola do

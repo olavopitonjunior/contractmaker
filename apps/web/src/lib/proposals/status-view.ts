@@ -5,6 +5,8 @@
  * Cores em TOKENS SEMÂNTICOS (success/warning/info/destructive) — dark-mode
  * seguro (auto-adaptam). Nada de `text-blue-700` cru, que não tem variante dark.
  */
+import { lastSendOutcomeIsCancel } from "./status-sets";
+
 export interface StatusView {
   label: string;
   /** "sua_vez" | "cliente" | "proprietario" | "encerrada" */
@@ -37,14 +39,38 @@ function view(
   return { label, bucket, turn: TURN[bucket], className };
 }
 
-export function proposalStatusView(status: string): StatusView {
+/**
+ * `lastSendOutcome` é o nome do evento mais recente dentre `SEND_OUTCOME_EVENTS`
+ * (`primeira_via_canceled` | `send_failed` | `null`), resolvido no servidor.
+ *
+ * NÃO use `sentAt` para isto. Ele responde "já circulou alguma vez?" e é
+ * monotônico, então depois de `enviar → cancelar → reenviar` uma falha REAL do
+ * reenvio ainda apareceria como "Envio cancelado" — exatamente o fluxo que
+ * esta distinção existe pra servir. O evento é durável e sobrevive a reenvios.
+ *
+ * Obrigatório (aceita `null`) e não opcional: com default, um chamador novo
+ * mostraria o rótulo errado sem erro de compilação.
+ *
+ * Só o RÓTULO e a COR mudam; o bucket segue `sua_vez` nos dois casos, porque em
+ * ambos a bola é do corretor (reenviar ou arquivar).
+ */
+export function proposalStatusView(
+  status: string,
+  lastSendOutcome: string | null
+): StatusView {
   switch (status) {
     case "rascunho":
       return view("Rascunho", "sua_vez", ENCERRADA);
     case "aguardando_aprovacao":
       return view("Max sugeriu", "sua_vez", VIOLET);
     case "falha_envio":
-      return view("Falha no envio", "sua_vez", DESTRUCTIVE);
+      // Cancelar o envelope de propósito devolve a proposta pra cá. Chamar isso
+      // de "Falha no envio", em vermelho, culpa o sistema por um ato do
+      // corretor — e gasta a credibilidade do badge vermelho pra quando houver
+      // falha de verdade. Âmbar: precisa de ação, não deu errado.
+      return lastSendOutcomeIsCancel(lastSendOutcome)
+        ? view("Envio cancelado", "sua_vez", WARNING)
+        : view("Falha no envio", "sua_vez", DESTRUCTIVE);
     case "enviada":
       return view("Enviada", "cliente", INFO);
     case "entregue":
@@ -132,6 +158,13 @@ const EVENT_LABEL: Record<string, string> = {
   envelope_replaced: "Envelope anterior substituído",
   chained_envelope2_wrong_status: "2ª via bloqueada — proposta fora do ponto de envio",
   vendedor_via_canceled: "2ª via cancelada/expirada — voltou pra sua decisão",
+  // Os dois lados do cancelamento de envelope pela UI (2026-08): a rota grava
+  // `envelope_canceled`, e o hook que devolve a 1ª via pra reenvio grava
+  // `primeira_via_canceled`. Nenhum dos dois tinha rótulo — a timeline mostrava
+  // o nome técnico cru justamente no evento que explica por que a proposta
+  // "voltou".
+  envelope_canceled: "Envelope cancelado",
+  primeira_via_canceled: "Envio cancelado — liberada pra reenvio",
   send_failed: "Envio não completou — liberada pra reenvio",
   // Parada de decisão / conclusão manual (Fase 2 do plano 2026-08-06).
   awaiting_owner_decision: "Aguardando sua decisão",
