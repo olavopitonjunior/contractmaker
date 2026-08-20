@@ -28,7 +28,7 @@ export default async function LocacaoNewtonInboxPage({
   searchParams?: Promise<{ status?: string }>;
 }) {
   // Tenant sem o Newton (default do catálogo) não tem inbox — redireciona.
-  const { orgId } = await requireFeaturePage(FEATURE.LOCACAO_NEWTON, "/locacao");
+  const { orgId } = await requireFeaturePage(FEATURE.LOCACAO_NEWTON);
 
   const params = (await searchParams) ?? {};
   const status = params.status;

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { prisma } from "@/lib/db/prisma";
-import { getOrgModules, isModuleEnabled, isFeatureEnabled } from "./read";
+import { getOrgModules, isModuleEnabled, isFeatureEnabled, homeHref } from "./read";
 import { assertModuleEnabled, assertFeatureEnabled, ModuleDisabledError } from "./guard";
 import { MODULE, FEATURE } from "./catalog";
 
@@ -86,5 +86,37 @@ describe("guard — assert*Enabled", () => {
       expect((e as ModuleDisabledError).module).toBe(MODULE.LOCACAO);
       expect((e as ModuleDisabledError).feature).toBe(FEATURE.LOCACAO_COBRANCAS);
     }
+  });
+});
+
+describe("homeHref — landing segura por entitlement (anti-loop de redirect)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("vendas.pipeline ligado => /pipeline", async () => {
+    findMany.mockResolvedValue([]);
+    const view = await getOrgModules("org-home-vendas");
+    expect(homeHref(view)).toBe("/pipeline");
+  });
+
+  it("tenant só-locação => /pipeline/locacao (nunca /locacao, que é gateado por locacao.adm)", async () => {
+    findMany.mockResolvedValue([
+      { module: "vendas", enabled: false, featureFlags: {} },
+      { module: "locacao", enabled: true, featureFlags: {} },
+    ]);
+    const view = await getOrgModules("org-home-locacao");
+    expect(homeHref(view)).toBe("/pipeline/locacao");
+  });
+
+  it("nenhum pipeline ligado => /settings/profile (rota sem gate de módulo)", async () => {
+    findMany.mockResolvedValue([
+      { module: "vendas", enabled: false, featureFlags: {} },
+      { module: "locacao", enabled: true, featureFlags: { "locacao.pipeline": false } },
+    ]);
+    const view = await getOrgModules("org-home-none");
+    expect(homeHref(view)).toBe("/settings/profile");
+  });
+
+  it("view null (sem org) => /pipeline", () => {
+    expect(homeHref(null)).toBe("/pipeline");
   });
 });

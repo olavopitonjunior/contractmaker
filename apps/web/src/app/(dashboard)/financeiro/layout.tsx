@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
-import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
+import { getOrgModules, isFeatureEnabled, homeHref } from "@/lib/modules/read";
 import { FEATURE } from "@/lib/modules/catalog";
 import {
   listAccessibleAccounts,
@@ -40,10 +40,11 @@ export default async function FinanceiroLayout({
   // do tenant, não o super_admin (ver lib/auth/impersonation.ts).
   const effUserId = await getEffectiveUserId(session.user.id);
 
-  // Gate de módulo: financeiro/pagadoria pertence a Vendas. Tenant só-locação
-  // (feature OFF) é redirecionado pra /locacao — antes de qualquer lookup Asaas.
+  // Gate de módulo: financeiro/pagadoria pertence a Vendas. Feature OFF →
+  // landing por entitlement (homeHref) — fallback estático pra rota gateada
+  // criava ciclo de redirects pra tenant só-locação (ver lib/modules/read.ts).
   const modules = await getOrgModules(org.id);
-  if (!isFeatureEnabled(modules, FEATURE.VENDAS_PAGADORIA)) redirect("/locacao");
+  if (!isFeatureEnabled(modules, FEATURE.VENDAS_PAGADORIA)) redirect(homeHref(modules));
 
   // Defesa em profundidade (feature Gerente): usuário de visão restrita — vê só
   // os deals atribuídos — sem NENHUMA leitura financeira não entra no módulo.
