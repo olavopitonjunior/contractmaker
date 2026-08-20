@@ -4,6 +4,21 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-19 - O gate humano de master só valia para PR vindo de staging
+
+### Corrigido
+
+- **O gate humano de `master` era pulado em todo PR que não viesse de `staging`** — e job pulado conta como **sucesso** para a branch protection do GitHub. O `if: github.head_ref == 'staging'` existia para não exigir o smoke de homologação num hotfix, mas desligava o job inteiro em vez de trocar a exigência: o fluxo `hotfix/critical → master` documentado em `docs/staging-workflow.md` entrava em produção sem nenhuma aprovação manual. O guarda da porta era exatamente o que abria a porta.
+
+  O `if:` saiu. O gate passa a valer para todos, mudando apenas QUAL label o satisfaz: origem `staging` exige `staging-smoke-passed` (o smoke de homologação), qualquer outra origem exige `hotfix-sem-smoke` (label novo, criado no repo).
+
+  As duas exigências são **disjuntas de propósito**: `hotfix-sem-smoke` não satisfaz um PR vindo de `staging`. Se satisfizesse, viraria um bypass do smoke no fluxo de todo dia, que é justamente o que o gate existe para impedir.
+
+  Junto: a checagem passou de `grep -q` (substring) para `grep -qx` (linha inteira). Um label chamado `nao-staging-smoke-passed-x` satisfazia o gate antigo.
+
+  **A validação nunca esteve descoberta** — `ci.yml` roda `prisma validate` + `typecheck` + `vitest` em todo PR com base `master`, sem `if:`, e sempre rodou. `promote-to-prod.yml` tinha um job `validate` idêntico ao dele (mesmos env, mesmos steps), que foi **removido**: dobrava o tempo de CI de cada PR sem acrescentar sinal. O workflow fica sendo só o gate humano, que é o que ele de fato protege.
+
+  Fica de fora, e depende de branch protection: os workflows só disparam em `pull_request`, então push direto em `master` continua sem passar por gate algum.
 ## [Unreleased] - 2026-08-20 - Cancelar o envelope não é "Falha no envio"
 
 Três defeitos achados no smoke de staging, todos consequência de o mesmo status `falha_envio` ter passado a cobrir duas situações diferentes desde que cancelar o envelope devolve a 1ª via para reenvio.

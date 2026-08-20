@@ -5,65 +5,58 @@ on:
     branches: [master]
     types: [opened, synchronize, reopened, labeled, unlabeled]
 
+# Menor privilégio: o job só faz `gh pr view --json labels`, que é LEITURA.
+# `pull-requests: write` estava declarado e nunca era exercido.
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: read
 
+# O trigger inclui `labeled`/`unlabeled`, então mexer em label várias vezes
+# empilharia runs redundantes. Escopo por PR: nunca cancela o run de outro.
+concurrency:
+  group: promote-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+# Este workflow é SÓ o gate humano. Typecheck, testes e `prisma validate` de todo
+# PR pra master são do `ci.yml` (job `typecheck + unit`, sem `if:`, roda em
+# todos). Havia aqui um job `validate` byte-a-byte equivalente ao dele — mesmos
+# env, mesmos steps — que só dobrava o tempo de CI sem acrescentar sinal.
 jobs:
-  validate:
-    name: Validate (typecheck + tests)
-    runs-on: ubuntu-latest
-    if: github.head_ref == 'staging'
-    # Repo é npm-workspaces (root package.json `workspaces`, sem pnpm-workspace.yaml).
-    # Espelha ci.yml/staging-ci.yml — usa npm, não pnpm. Antes o job tentava
-    # `cache: pnpm` + `pnpm install --frozen-lockfile` e falhava por não haver
-    # pnpm-lock.yaml na raiz (o lockfile pnpm vive em apps/web/ e é untracked).
-    env:
-      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
-      # `prisma validate` exige DIRECT_URL (datasource declara directUrl); dummy.
-      DIRECT_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
-      ANTHROPIC_API_KEY: test-key
-      AUTH_SECRET: test-secret
-      # tsc --noEmit estoura a heap padrão (~2GB) neste projeto no runner.
-      NODE_OPTIONS: --max-old-space-size=4096
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install deps
-        run: npm install
-
-      - name: Prisma generate
-        run: npm run prisma:generate -w apps/web
-
-      - name: Prisma schema validate
-        run: npm run prisma:validate -w apps/web
-
-      - name: Type check
-        run: npm run typecheck -w apps/web
-
-      - name: Tests
-        run: npm run test -w apps/web
-
   require-smoke-label:
-    name: Require staging-smoke-passed
+    name: Require smoke/hotfix label
     runs-on: ubuntu-latest
-    if: github.head_ref == 'staging'
+    # SEM `if:` de propósito. Havia aqui um `if: github.head_ref == 'staging'`,
+    # e num PR vindo de qualquer outra branch o job era PULADO — o GitHub conta
+    # check pulado como sucesso pra branch protection. O gate humano que existia
+    # pra proteger master era exatamente o que deixava hotfix/* entrar sem
+    # nenhuma aprovação manual. O gate agora vale sempre; o que muda conforme a
+    # origem é QUAL label o satisfaz.
     steps:
       - name: Check label
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
+          set -euo pipefail
           LABELS=$(gh pr view ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --json labels --jq '.labels[].name')
-          if echo "$LABELS" | grep -q "staging-smoke-passed"; then
-            echo "✓ staging-smoke-passed label present"
+
+          # Promoção normal: exige o smoke feito em staging.imobpro.ia.br.
+          # Hotfix: exige o label de escape, que NÃO é aceito na promoção normal
+          # — senão ele viraria um bypass do smoke pro fluxo de todo dia.
+          if [ "$HEAD_REF" = "staging" ]; then
+            WANTED="staging-smoke-passed"
+            WHY="PR de staging → master precisa de smoke test em https://staging.imobpro.ia.br antes de promover"
+          else
+            WANTED="hotfix-sem-smoke"
+            WHY="PR de '$HEAD_REF' → master pula a homologação em staging. Aplique o label só se o risco for consciente, e faça cherry-pick na staging depois pra evitar drift"
+          fi
+
+          # `grep -qx` (linha inteira) e não `-q`: o antigo casava SUBSTRING, então
+          # um label chamado "nao-staging-smoke-passed-x" satisfazia o gate.
+          if printf '%s\n' "$LABELS" | grep -qx "$WANTED"; then
+            echo "✓ label '$WANTED' presente (head: $HEAD_REF)"
             exit 0
           fi
-          echo "::error::PR de staging → master precisa do label 'staging-smoke-passed' aplicado manualmente após smoke test em staging.imobpro.ia.br"
+
+          echo "::error::Faltando o label '$WANTED'. $WHY."
           exit 1
