@@ -29,11 +29,9 @@ export function summarizeProposalData(
   // Proponente = 1º comprador (venda) ou 1º locatário (locação). Com `kind`
   // conhecido a lista certa é escolhida por ele — o `??` sozinho deixava um
   // `compradores: []` legado numa locação esconder os locatários preenchidos.
-  const partes = (kind === "venda"
-    ? d.compradores
-    : kind === "locacao"
-      ? d.locatarios
-      : (d.compradores ?? d.locatarios)) as Array<{ nome?: string }> | undefined;
+  const partes = partesRaw(d, kind).proponentes as
+    | Array<{ nome?: string }>
+    | undefined;
   const proponente = partes?.[0]?.nome?.trim() || null;
   const pag = d.pagamento as { valor_total?: number } | undefined;
   const loc = d.locacao as
@@ -71,6 +69,47 @@ export function summarizeProposalData(
 const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 
 /**
+ * Número do dataJson: aceita number E string numérica. O dataJson é
+ * `z.record(z.unknown())` gravado verbatim — proposta criada por API/agente
+ * (Max tem escrita em /api/proposals) chega com `percentual: "6"`, e exigir
+ * `typeof number` derrubava a linha em silêncio.
+ */
+const num = (v: unknown): number | null => {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+};
+
+/**
+ * Listas de partes por papel, com o MESMO dispatch nos dois resumos (chip da
+ * listagem e detalhe): kind conhecido escolhe a lista certa; sem kind, o
+ * fallback `??` cobre dataJson legado. Divergir os dois fazia a mesma proposta
+ * mostrar partes diferentes conforme o caminho.
+ */
+function partesRaw(
+  d: Record<string, unknown>,
+  kind?: string
+): { proponentes: unknown; vendedores: unknown } {
+  return {
+    proponentes:
+      kind === "venda"
+        ? d.compradores
+        : kind === "locacao"
+          ? d.locatarios
+          : (d.compradores ?? d.locatarios),
+    vendedores:
+      kind === "venda"
+        ? d.vendedores
+        : kind === "locacao"
+          ? d.locadores
+          : (d.vendedores ?? d.locadores),
+  };
+}
+
+/**
  * Label humano da garantia: `locacao.garantia` (string pronta do
  * buildProposalDataJson) vence; fallback pro shape canônico `garantia.tipo`
  * via GARANTIA_LABELS. Compartilhado entre o chip da listagem e o detalhe —
@@ -86,6 +125,20 @@ function garantiaLabel(d: Record<string, unknown>): string | null {
     null
   );
 }
+
+/**
+ * `comissao.responsavel_pagamento` guarda FRAGMENTOS de frase do template ("o
+ * proponente comprador", "a parte vendedora" — valores do Select do
+ * ProposalForm, impressos no documento). Como valor de card eles precisam de
+ * rótulo próprio; capitalizar o fragmento cru dava "O proponente comprador".
+ */
+const RESPONSAVEL_PAGAMENTO_LABELS: Record<string, string> = {
+  "o proponente comprador": "Proponente comprador",
+  "o proponente locatário": "Proponente locatário",
+  "a parte vendedora": "Parte vendedora",
+  "a parte locadora": "Parte locadora",
+  "ambas as partes": "Ambas as partes",
+};
 
 export interface ProposalDetailRow {
   label: string;
@@ -116,13 +169,19 @@ function partyLine(raw: unknown): ProposalPartyLine | null {
   const p = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const nome = str(p.razao_social) || str(p.nome);
   if (!nome) return null;
-  const cnpj = str(p.cnpj);
-  const cpf = str(p.cpf);
-  const doc = cnpj
-    ? `CNPJ ${maskCNPJ(cnpj)}`
-    : cpf
-      ? `CPF ${maskCPF(cpf)}`
-      : null;
+  // Rótulo/máscara pelo TAMANHO, não pelo campo: `partyToData` grava qualquer
+  // documento de parte não-PJ em `cpf` (e o caminho MCP idem) — um CNPJ de 14
+  // dígitos ali passaria por maskCPF, que trunca em 11 e fabrica um CPF
+  // plausível e ERRADO na tela de onde o corretor copia números.
+  const docDigits = (str(p.cnpj) || str(p.cpf)).replace(/\D/g, "");
+  const doc =
+    docDigits.length === 14
+      ? `CNPJ ${maskCNPJ(docDigits)}`
+      : docDigits.length === 11
+        ? `CPF ${maskCPF(docDigits)}`
+        : docDigits
+          ? `Doc. ${docDigits}`
+          : null;
   const contato =
     [str(p.email), str(p.telefone)].filter(Boolean).join(" · ") || null;
   return { nome, doc, contato };
@@ -139,15 +198,15 @@ export function summarizeProposalDetails(
   kind?: string
 ): ProposalDetails {
   const d = (dataJson ?? {}) as Record<string, unknown>;
-  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const lines = (v: unknown) =>
     (Array.isArray(v) ? v : [])
       .map(partyLine)
       .filter((l): l is ProposalPartyLine => l !== null);
 
   const isVenda = kind !== "locacao";
-  const proponentes = lines(isVenda ? d.compradores : d.locatarios);
-  const vendedores = lines(isVenda ? d.vendedores : d.locadores);
+  const partes = partesRaw(d, kind);
+  const proponentes = lines(partes.proponentes);
+  const vendedores = lines(partes.vendedores);
 
   const condicoes: ProposalDetailRow[] = [];
   if (isVenda) {
@@ -204,7 +263,7 @@ export function summarizeProposalDetails(
   if (resp) {
     comissao.push({
       label: "Quem paga",
-      value: resp.charAt(0).toUpperCase() + resp.slice(1),
+      value: RESPONSAVEL_PAGAMENTO_LABELS[resp] ?? resp.charAt(0).toUpperCase() + resp.slice(1),
     });
   }
 

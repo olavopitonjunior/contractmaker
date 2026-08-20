@@ -20,6 +20,7 @@ import {
   summarizeProposalDetails,
 } from "@/lib/proposals/summarize";
 import { proposalPublicLink } from "@/lib/proposals/public-link";
+import { hidesComissao } from "@/lib/proposals/hidden-fields";
 import { checkProposalReadiness } from "@/lib/proposals/clicksign-readiness";
 import { plannedProposalCostCents } from "@/lib/proposals/cost";
 import { getSignatureSettings } from "@/lib/clicksign/account";
@@ -262,21 +263,23 @@ export default async function PropostaDetailPage({
         // Link rastreado /p/[token] — só chega aqui DEPOIS do gate de acesso
         // acima (a página é autenticada); a rota pública em si não o expõe.
         publicUrl: proposalPublicLink(proposal.token),
-        vendedorDeadlineLabel: formatDateTimeBR(proposal.vendedorDeadlineAt),
+        vendedorDeadlineLabel: proposal.vendedorDeadlineAt
+          ? formatDateTimeBR(proposal.vendedorDeadlineAt)
+          : null,
         reservedCostLabel:
           proposal.reservedCostCents > 0
             ? formatMoneyBR(proposal.reservedCostCents / 100)
             : null,
         comissaoIncluida: proposal.comissaoIncluida,
-        comissaoOculta: proposal.hiddenPaths.includes("comissao"),
+        // Helper canônico (não `includes("comissao")` exato): é o mesmo que o
+        // render usa pra decidir a via reduzida — um sub-path `comissao.*`
+        // futuro divergiria badge e documento.
+        comissaoOculta: hidesComissao(proposal.hiddenPaths),
         recusa: proposal.refusedAt
           ? {
-              porLabel:
-                proposal.refusedBy === "proponente"
-                  ? "pelo proponente"
-                  : proposal.refusedBy?.startsWith("vendedor")
-                    ? "pelo proprietário"
-                    : null,
+              // `refusedBy` não é persistido pelo fluxo de Aceite — o STATUS
+              // terminal carrega a mesma informação e serve de fallback.
+              porLabel: refusedByLabel(proposal.refusedBy, proposal.status),
               emLabel: formatDateTimeBR(proposal.refusedAt),
               reason: proposal.refusedReason,
               counterLabel:
@@ -321,6 +324,16 @@ export default async function PropostaDetailPage({
       vendedorSkipped={events.some((e) => e.eventName === "completed_manually")}
     />
   );
+}
+
+function refusedByLabel(refusedBy: string | null, status: string): string | null {
+  if (refusedBy === "proponente" || status === "recusada_proponente") {
+    return "pelo proponente";
+  }
+  if (refusedBy?.startsWith("vendedor") || status === "recusada_vendedor") {
+    return "pelo proprietário";
+  }
+  return null;
 }
 
 /**

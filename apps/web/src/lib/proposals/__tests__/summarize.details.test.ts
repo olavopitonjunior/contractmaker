@@ -42,7 +42,7 @@ describe("summarizeProposalDetails", () => {
           forma: "Financiamento bancário (Itaú)",
           banco_financiamento: "Itaú",
         },
-        comissao: { percentual: 6, valor: 30000, responsavel_pagamento: "vendedor" },
+        comissao: { percentual: 6, valor: 30000, responsavel_pagamento: "a parte vendedora" },
         corretor: { nome: "Ana", creci: "12345" },
         observacoes: "Entrega em 30 dias.",
       },
@@ -66,7 +66,7 @@ describe("summarizeProposalDetails", () => {
     expect(d.comissao).toEqual([
       { label: "Percentual", value: "6%" },
       { label: "Valor", value: "R$ 30.000,00" },
-      { label: "Quem paga", value: "Vendedor" },
+      { label: "Quem paga", value: "Parte vendedora" },
     ]);
     expect(d.corretorLabel).toBe("Ana (CRECI 12345)");
     expect(d.observacoes).toBe("Entrega em 30 dias.");
@@ -114,6 +114,27 @@ describe("summarizeProposalDetails", () => {
     expect(d.comissao).toEqual([]);
     expect(d.corretorLabel).toBeNull();
     expect(d.observacoes).toBeNull();
+  });
+
+  it("aceita números como string (dataJson de API/agente)", () => {
+    const d = summarizeProposalDetails(
+      {
+        comissao: { percentual: "6" },
+        pagamento: { sinal_arras: "50000" },
+        modalidade: "a_vista",
+      },
+      "venda"
+    );
+    expect(d.comissao).toContainEqual({ label: "Percentual", value: "6%" });
+    expect(d.condicoes).toContainEqual({ label: "Sinal", value: "R$ 50.000,00" });
+  });
+
+  it("documento é rotulado pelo tamanho, não pelo campo", () => {
+    const d = summarizeProposalDetails(
+      { compradores: [{ nome: "PJ no campo errado", cpf: "12345678000199" }] },
+      "venda"
+    );
+    expect(d.proponentes[0].doc).toBe("CNPJ 12.345.678/0001-99");
   });
 
   it("percentual quebrado formata com vírgula", () => {

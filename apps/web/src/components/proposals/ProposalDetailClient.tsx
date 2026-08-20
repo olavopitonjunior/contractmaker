@@ -23,6 +23,7 @@ import {
   EDITABLE_STATUSES,
   AWAITING_DECISION_STATUSES,
   TERMINAL_STATUSES,
+  PUBLIC_LINK_BLOCKED_STATUSES,
 } from "@/lib/proposals/status-sets";
 import { RenameProposalDialog } from "./RenameProposalDialog";
 import { dealPathForKind } from "@/lib/proposals/use-convert-proposal";
@@ -113,8 +114,8 @@ interface Proposal {
   templateName: string | null;
   /** Link público /p/[token] pronto (host resolvido no server). */
   publicUrl: string | null;
-  /** Prazo próprio da 2ª via (proprietário), formatado; "—" quando não há. */
-  vendedorDeadlineLabel: string;
+  /** Prazo próprio da 2ª via (proprietário), formatado; null quando não há. */
+  vendedorDeadlineLabel: string | null;
   /** Custo reservado do envio, formatado; null quando 0. */
   reservedCostLabel: string | null;
   comissaoIncluida: boolean;
@@ -233,7 +234,10 @@ export function ProposalDetailClient({
   // quem envia a proposta pra assinatura é quem cuida da documentação dela.
   const canAttach = permissions.send;
   const detalhes = proposal.detalhes;
-  const sellerBase = proposal.kind === "venda" ? "Vendedor" : "Locador";
+  // Default VENDA (não locação) — o mesmo do dispatch do servidor em
+  // summarizeProposalDetails; divergir os dois rotularia a lista errada num
+  // kind fora do domínio (backfill/futuro schemaType).
+  const sellerBase = proposal.kind === "locacao" ? "Locador" : "Vendedor";
 
   async function copyPublicLink() {
     if (!proposal.publicUrl) return;
@@ -481,6 +485,9 @@ export function ProposalDetailClient({
             <div className="space-y-2 border-t pt-2">
               <div className="flex items-center gap-2 text-sm">
                 <span className="text-muted-foreground">Comissão</span>
+                {/* Sem `comissaoIncluida` o render tira a comissão das DUAS
+                    vias — os números abaixo existem no dataJson mas não no
+                    documento, e sem o badge o card mentiria por omissão. */}
                 {proposal.comissaoOculta ? (
                   <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
                     oculta na via do proprietário
@@ -489,7 +496,11 @@ export function ProposalDetailClient({
                   <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
                     incluída na proposta
                   </Badge>
-                ) : null}
+                ) : (
+                  <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                    fora do documento
+                  </Badge>
+                )}
               </div>
               {detalhes.comissao.map((r) => (
                 <Row key={r.label} label={r.label} value={r.value} />
@@ -552,13 +563,15 @@ export function ProposalDetailClient({
               value={`${proposal.lastReminderAtLabel} (${proposal.reminderCount}×)`}
             />
           )}
-          {proposal.vendedorDeadlineLabel !== "—" && (
+          {proposal.vendedorDeadlineLabel && (
             <Row label="Validade da 2ª via" value={proposal.vendedorDeadlineLabel} />
           )}
           {proposal.reservedCostLabel && (
             <Row label="Custo do envio" value={proposal.reservedCostLabel} />
           )}
-          {proposal.publicUrl && (
+          {/* Mesmo gate do /p/[token] (404 nesses status): oferecer copiar um
+              link que o cliente abriria em notFound() é pior que não mostrar. */}
+          {proposal.publicUrl && !PUBLIC_LINK_BLOCKED_STATUSES.has(liveStatus) && (
             <div className="flex items-center gap-2 border-t pt-2 text-sm">
               <span className="shrink-0 text-muted-foreground">Link público</span>
               <span
@@ -599,10 +612,12 @@ export function ProposalDetailClient({
         </Card>
       </div>
 
-      {/* Assinaturas simples (Aceite/rascunho, sem envelope) — full-width
-          abaixo do grid; com envelope a seção completa assume (abaixo). */}
+      {/* Assinaturas simples (Aceite/rascunho, sem envelope) — abaixo do grid;
+          com envelope a seção completa assume. `md:max-w-xl` porque as linhas
+          rótulo/valor (justify-between) num card full-width abririam um vão
+          enorme no meio. */}
       {!proposal.hasEnvelopes && (
-        <Card className="space-y-2 p-4">
+        <Card className="space-y-2 p-4 md:max-w-xl">
           <h2 className="font-medium">Assinaturas</h2>
           {(() => {
             // Enviada: EnvelopeSigner do polling (id + status → ações por-linha).

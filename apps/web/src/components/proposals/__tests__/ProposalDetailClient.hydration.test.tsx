@@ -82,7 +82,7 @@ function draftProps() {
       creatorName: "Olavo Piton",
       templateName: null,
       publicUrl: "https://imobpro.ia.br/p/tok-abc123",
-      vendedorDeadlineLabel: "—",
+      vendedorDeadlineLabel: null,
       reservedCostLabel: null,
       comissaoIncluida: false,
       comissaoOculta: false,
