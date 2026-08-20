@@ -4,21 +4,20 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
-## [Unreleased] - 2026-08-19 - O gate humano de master só valia para PR vindo de staging
+## [Unreleased] - 2026-08-20 - Cancelamento externo da 1ª via libera a proposta
 
 ### Corrigido
 
-- **O gate humano de `master` era pulado em todo PR que não viesse de `staging`** — e job pulado conta como **sucesso** para a branch protection do GitHub. O `if: github.head_ref == 'staging'` existia para não exigir o smoke de homologação num hotfix, mas desligava o job inteiro em vez de trocar a exigência: o fluxo `hotfix/critical → master` documentado em `docs/staging-workflow.md` entrava em produção sem nenhuma aprovação manual. O guarda da porta era exatamente o que abria a porta.
+- **Proposta cujo envelope foi cancelado DIRETO na ClickSign ficava presa até expirar** — a limitação registrada em 19/08 ("1ª via cancelada FORA da plataforma continua presa"), agora fechada por decisão de produto. O webhook separa `cancel` de `deadline` (os dois já chegavam distintos em `payload.event.name`; a fusão era só fall-through do `case`): cancelamento externo faz o MESMO CAS pra `falha_envio` do cancelamento pela UI, e expiração continua com o cron de expire — liberar no `deadline` tiraria a proposta de `EXPIRABLE_STATUSES` e ela nunca mais seria marcada `expirada`.
 
-  O `if:` saiu. O gate passa a valer para todos, mudando apenas QUAL label o satisfaz: origem `staging` exige `staging-smoke-passed` (o smoke de homologação), qualquer outra origem exige `hotfix-sem-smoke` (label novo, criado no repo).
+  A API do hook trocou `opts.appInitiated?` por um **`cause` posicional obrigatório** (`app | external_cancel | deadline | unknown`): a omissão silenciosa era exatamente o bug — o webhook chamava sem opts e caía no no-op. Obrigatório, esquecer vira erro de compilação.
 
-  As duas exigências são **disjuntas de propósito**: `hotfix-sem-smoke` não satisfaz um PR vindo de `staging`. Se satisfizesse, viraria um bypass do smoke no fluxo de todo dia, que é justamente o que o gate existe para impedir.
+  **Sino novo `send_canceled`** só no cancelamento externo — o fato nasceu fora da vista do corretor; sem o aviso ele seguia achando "aguardando assinatura". Cancelamento pela própria UI continua mudo (seria eco). Kind próprio em vez de reusar `vendedor_send_failed`: o `title` viaja fixo no WhatsApp e mentiria "2ª via". Dedupe por envelope; emitido depois do CAS e só quando ele moveu (replay não re-toca).
 
-  Junto: a checagem passou de `grep -q` (substring) para `grep -qx` (linha inteira). Um label chamado `nao-staging-smoke-passed-x` satisfazia o gate antigo.
+  **A reconciliação aprende a causa pelo feed `/events`** (mesmos nomes de evento do webhook) — o sync é o caminho de recuperação de webhook perdido, e sem isso um envelope cancelado externamente cujo webhook se perdeu ficaria preso pra sempre. Fallback `unknown` = comportamento anterior: se a API não expuser os eventos no feed, a mudança nunca piora nada.
 
-  **A validação nunca esteve descoberta** — `ci.yml` roda `prisma validate` + `typecheck` + `vitest` em todo PR com base `master`, sem `if:`, e sempre rodou. `promote-to-prod.yml` tinha um job `validate` idêntico ao dele (mesmos env, mesmos steps), que foi **removido**: dobrava o tempo de CI de cada PR sem acrescentar sinal. O workflow fica sendo só o gate humano, que é o que ele de fato protege.
+  O evento gravado continua `primeira_via_canceled` (com `source: "clicksign"` e a causa no payload) — badge âmbar "Envio cancelado" e o chip de filtro discriminam só pelo `eventName`, então funcionam sem nenhuma mudança de UI.
 
-  Fica de fora, e depende de branch protection: os workflows só disparam em `pull_request`, então push direto em `master` continua sem passar por gate algum.
 ## [Unreleased] - 2026-08-20 - Cancelar o envelope não é "Falha no envio"
 
 Três defeitos achados no smoke de staging — e, na sequência, um chip próprio de filtro nascido da mesma distinção —, todos consequência de o mesmo status `falha_envio` ter passado a cobrir duas situações diferentes desde que cancelar o envelope devolve a 1ª via para reenvio.
@@ -28,6 +27,8 @@ Três defeitos achados no smoke de staging — e, na sequência, um chip própri
 - **Chip "Envio cancelado" no filtro da lista** (decisão de produto, opção 3): a `falha_envio` cujo último desfecho foi cancelamento sai de "Rascunho / falha" e ganha chip próprio — os dois wheres são o mesmo predicado (`sendCanceledWhere`) afirmado e negado, então toda `falha_envio` cai em exatamente um dos dois, por construção. O discriminador é o do **badge** (último evento de desfecho), não `sentAt`: um chip por `sentAt` mostraria uma falha real de reenvio sob "Envio cancelado" — o erro que este mesmo lote matou no badge. Como o Prisma não expressa "último evento é X", o where é a aproximação conservadora "existe cancelamento e não existe falha": sob o invariante de CAS ela é exata, e se os dois desfechos um dia coexistirem o único erro possível é o chip omitir — nunca mostrar falha real como cancelamento. Há teste avaliando where e badge sobre os mesmos históricos, incluindo a divergência documentada.
 
 ### Corrigido
+
+- **Coluna "Envio" passa a mostrar só o canal do PROPONENTE** (decisão de produto): a via reduzida do proprietário sai da conta — proponente por e-mail + proprietário por WhatsApp não vira mais "E-mail e WhatsApp". Filtro com `OR` por causa do `via` nullable em envelopes antigos.
 
 - **O botão "Excluir" reaparecia e a API sempre recusava.** A UI decidia por `status` (`falha_envio` está em `DELETABLE_STATUSES`) e o servidor por `sentAt` — o guard que impede apagar proposta que o cliente já viu. Resultado: menu oferecia "Excluir", o usuário confirmava, e vinha 409. Mesmo padrão de botão morto que o guard de renomear/editar fechou.
 
@@ -58,6 +59,22 @@ A leitura filtra por `SEND_OUTCOME_EVENTS` em vez de pegar o último evento de q
 - **O chip de filtro "Rascunho / falha" ficou incompleto** (não errado — falha real continua ali). Mover o recorte para um chip próprio é decisão de produto, e exigiria `requiresServer: true`, porque a condição depende de `sentAt` e não se expressa só por lista de status. Documentado no código.
 - Os conjuntos `OPEN_STATUSES`, `REMINDABLE_STATUSES` e `CONVERT_UNSIGNED_STATUSES` seguem sem distinguir as duas origens de `falha_envio`.
 
+## [Unreleased] - 2026-08-19 - O gate humano de master só valia para PR vindo de staging
+
+### Corrigido
+
+- **O gate humano de `master` era pulado em todo PR que não viesse de `staging`** — e job pulado conta como **sucesso** para a branch protection do GitHub. O `if: github.head_ref == 'staging'` existia para não exigir o smoke de homologação num hotfix, mas desligava o job inteiro em vez de trocar a exigência: o fluxo `hotfix/critical → master` documentado em `docs/staging-workflow.md` entrava em produção sem nenhuma aprovação manual. O guarda da porta era exatamente o que abria a porta.
+
+  O `if:` saiu. O gate passa a valer para todos, mudando apenas QUAL label o satisfaz: origem `staging` exige `staging-smoke-passed` (o smoke de homologação), qualquer outra origem exige `hotfix-sem-smoke` (label novo, criado no repo).
+
+  As duas exigências são **disjuntas de propósito**: `hotfix-sem-smoke` não satisfaz um PR vindo de `staging`. Se satisfizesse, viraria um bypass do smoke no fluxo de todo dia, que é justamente o que o gate existe para impedir.
+
+  Junto: a checagem passou de `grep -q` (substring) para `grep -qx` (linha inteira). Um label chamado `nao-staging-smoke-passed-x` satisfazia o gate antigo.
+
+  **A validação nunca esteve descoberta** — `ci.yml` roda `prisma validate` + `typecheck` + `vitest` em todo PR com base `master`, sem `if:`, e sempre rodou. `promote-to-prod.yml` tinha um job `validate` idêntico ao dele (mesmos env, mesmos steps), que foi **removido**: dobrava o tempo de CI de cada PR sem acrescentar sinal. O workflow fica sendo só o gate humano, que é o que ele de fato protege.
+
+  Fica de fora, e depende de branch protection: os workflows só disparam em `pull_request`, então push direto em `master` continua sem passar por gate algum.
+
 ## [Unreleased] - 2026-08-19 - Papel de leitura escrevia em proposta; coluna "Envio" mentia depois de cancelar o envelope
 
 ### Segurança
@@ -86,6 +103,7 @@ A leitura filtra por `SEND_OUTCOME_EVENTS` em vez de pegar o último evento de q
 
 - **A coluna "Envio" soma as duas vias.** O chamador passa os signatários da via `completa` (proponente) e da `reduzida` (proprietário) juntos — ambas têm `source: "proposal"`. Proponente por e-mail e proprietário por WhatsApp viram "E-mail e WhatsApp". É defensável lendo a coluna como "por onde a proposta saiu" e enganoso lendo como "por onde o proponente recebeu". Comportamento anterior a esta correção, mantido: escolher um dos dois é decisão de produto, não conserto de bug. Documentado em `send-channel.ts` com a forma correta do filtro (`via` é nullable em envelopes antigos).
 - **A mudança na cláusula Prisma não tem teste.** Os testes novos fixam a lógica de `proposalSendChannel`, que é pura; o `where` em si e a fusão de múltiplos envelopes só seriam alcançados por teste de integração com banco.
+
 ## [Unreleased] - 2026-08-19 - Modelo em rascunho para de ser chamado de arquivado
 
 ### Corrigido
@@ -111,6 +129,7 @@ A leitura filtra por `SEND_OUTCOME_EVENTS` em vez de pegar o último evento de q
 - **`falha_envio` muda o enquadramento da proposta na UI.** Não está em `OPEN_STATUSES`, `REMINDABLE_STATUSES` nem `CONVERT_UNSIGNED_STATUSES`, e `list-filters` a arquiva sob "Rascunho / falha". Quem cancela o envelope só para corrigir o e-mail de um signatário vê a proposta sair dos KPIs de "em aberto" e reaparecer com cara de rascunho, além de perder o "Converter em negócio sem assinatura". É consequência de reusar o balde existente em vez de criar um status novo.
 
   > **Parcialmente corrigido em 2026-08-20** (ver seção "Cancelar o envelope não é 'Falha no envio'"): o badge vermelho e o botão Excluir morto foram resolvidos. O que PERMANECE desta limitação é o enquadramento em conjuntos: `OPEN_STATUSES`, `REMINDABLE_STATUSES`, `CONVERT_UNSIGNED_STATUSES` e o chip "Rascunho / falha" seguem sem distinguir as duas origens.
+
 ## [Unreleased] - 2026-08-19 - Escolher o modelo do contrato à mão
 
 ### Adicionado
@@ -213,7 +232,6 @@ Seis correções do QA do bloco F2 (issue #314), todas no modo Aceite/2ª via.
 - **Diálogo do resumo**: "Baixar PDF" mostra "Gerando…" durante a geração (evita clique repetido no ~5-8s de Puppeteer) e "Enviar" fica desabilitado até selecionar destinatário.
 - **FAB do assistente IA** não cobre mais o "Salvar identidade" em `/settings/perfil` em viewport estreita (respiro no fim do container).
 - **`/propostas` redireciona** para `/pipeline/propostas` (antes 404).
-
 
 ## [Unreleased] - 2026-08-18 - Visibilidade de seções por link de parte, configurável
 
@@ -377,7 +395,6 @@ Em prod a `VOYAGE_API_KEY` está retornando 401. O multi-agente roda normalmente
 ### Motivação
 
 Newton estava fazendo OCR errada de documento de uma das partes em produção (relato 2026-05-07). `classifyAndExtract` retorna confidence GLOBAL — Newton não sabia quais campos especificamente precisava conferir antes de gravar. Com score por campo + needsReview por campo + persona OCR.md (no repo openclaw), Newton agora recita campos de baixa confiança e pede confirmação antes de chamar `fill_form`.
-
 ## [0.3.1] - 2026-04-11 - Deploy e Documentacao
 
 ### Adicionado

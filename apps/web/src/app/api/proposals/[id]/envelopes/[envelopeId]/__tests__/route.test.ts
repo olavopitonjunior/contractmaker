@@ -68,12 +68,12 @@ beforeEach(() => {
 });
 
 describe("DELETE /api/proposals/[id]/envelopes/[envelopeId]", () => {
-  it("cancela e propaga pro status da proposta com appInitiated", async () => {
+  it("cancela e propaga pro status da proposta com cause app", async () => {
     envelope("running");
     const res = await DELETE(req(), params);
     expect(res.status).toBe(200);
     expect(mockCancelFlow).toHaveBeenCalledWith("e1");
-    expect(mockPropagate).toHaveBeenCalledWith("e1", { appInitiated: true });
+    expect(mockPropagate).toHaveBeenCalledWith("e1", "app");
   });
 
   it("envelope JÁ cancelado ainda propaga — senão o botão é no-op permanente", async () => {
@@ -88,7 +88,7 @@ describe("DELETE /api/proposals/[id]/envelopes/[envelopeId]", () => {
     // Não recancela na ClickSign...
     expect(mockCancelFlow).not.toHaveBeenCalled();
     // ...mas destrava a proposta.
-    expect(mockPropagate).toHaveBeenCalledWith("e1", { appInitiated: true });
+    expect(mockPropagate).toHaveBeenCalledWith("e1", "app");
   });
 
   it("falha na propagação não derruba a resposta (o envelope já morreu lá fora)", async () => {

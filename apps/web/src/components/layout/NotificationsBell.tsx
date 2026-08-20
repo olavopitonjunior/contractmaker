@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  Ban,
   Bell,
   CheckCircle2,
   XCircle,
@@ -76,6 +77,10 @@ function iconForType(type: string) {
     case "envelope_refused":
     case "proposal_refused":
       return <XCircle className="h-4 w-4 text-red-600 shrink-0" />;
+    // Âmbar, não vermelho: cancelamento externo libera pra reenvio — é "sua
+    // vez", não desfecho ruim (mesma semântica do badge "Envio cancelado").
+    case "proposal_send_canceled":
+      return <Ban className="h-4 w-4 text-amber-600 shrink-0" />;
     case "envelope_email_failed":
     case "proposal_email_failed":
     case "contract_generation_failed":

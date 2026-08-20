@@ -2,7 +2,7 @@
 // devolve `Prisma.ProposalWhereInput` — importar isto num client component
 // quebraria o build de qualquer jeito.
 import type { Prisma } from "@prisma/client";
-import { statusesForFilter, STATUS_FILTERS } from "./list-filters";
+import { statusesForFilter } from "./list-filters";
 import { noLiveVendedorViaWhere } from "./live-vendedor-via";
 import { sendCanceledWhere, notSendCanceledWhere } from "./send-canceled-where";
 
@@ -56,6 +56,3 @@ export function proposalListWhereForFilter(
   return statuses ? { status: { in: statuses } } : {};
 }
 
-export function filterRequiresServer(id: string | undefined | null): boolean {
-  return Boolean(id && STATUS_FILTERS.find((f) => f.id === id)?.requiresServer);
-}
