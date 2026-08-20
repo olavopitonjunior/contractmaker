@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/db/prisma";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { redirect, notFound } from "next/navigation";
-import { getEffectivePermissions, canAccessProposal } from "@/lib/security/rbac/check";
+import { getEffectivePermissions, canAccessProposal, can } from "@/lib/security/rbac/check";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { EDITABLE_STATUSES } from "@/lib/proposals/status-sets";
 import { ProposalForm } from "@/components/proposals/ProposalForm";
@@ -16,6 +17,12 @@ export const dynamic = "force-dynamic";
  *
  * Fora de `EDITABLE_STATUSES` a rota REDIRECIONA pro detalhe em vez de renderizar
  * um formulário que o PATCH recusaria com 409 (o guard de verdade está lá).
+ *
+ * O mesmo vale pra PERMISSÃO: `canAccessProposal` é só escopo e libera quem tem
+ * `PROPOSAL_VIEW_ALL` (o papel `viewer`, somente-leitura). Sem a checagem de
+ * escrita abaixo esta página servia o formulário inteiro, preenchido, pra quem o
+ * PATCH agora recusa com 403 — o usuário só descobriria ao salvar. Os dois
+ * gates têm de ser o MESMO; se um mudar, muda o outro junto.
  */
 export default async function EditarPropostaPage({
   params,
@@ -41,6 +48,11 @@ export default async function EditarPropostaPage({
     })
   ) {
     notFound();
+  }
+
+  // Espelha o guard do PATCH /api/proposals/[id].
+  if (!can(eff, PERMISSION.PROPOSAL_CREATE) && !can(eff, PERMISSION.PROPOSAL_SEND)) {
+    redirect(`/pipeline/propostas/${params.id}`);
   }
 
   if (!EDITABLE_STATUSES.has(proposal.status)) {
