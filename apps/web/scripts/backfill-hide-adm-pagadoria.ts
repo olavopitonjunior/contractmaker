@@ -19,6 +19,11 @@ import { prisma } from "@/lib/db/prisma";
 const APPLY = process.argv.includes("--apply");
 const ORG_ARG = process.argv.find((a) => a.startsWith("--orgId="));
 const TARGET_ORG = ORG_ARG ? ORG_ARG.split("=")[1] : null;
+if (ORG_ARG && !TARGET_ORG) {
+  // `--orgId=$VAR` com a var vazia cairia no ramo "todas as orgs" em silêncio.
+  console.error("--orgId presente mas vazio — abortando (omita a flag para rodar em todas as orgs).");
+  process.exit(1);
+}
 
 const KEYS_BY_MODULE: Record<string, string[]> = {
   locacao: ["locacao.adm"],
