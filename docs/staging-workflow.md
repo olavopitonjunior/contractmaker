@@ -36,12 +36,50 @@ git checkout -b hotfix/critical master
 # ... fix ...
 git push -u origin hotfix/critical
 gh pr create --base master --title "hotfix: ..."
+
+# Gate humano: hotfix pula a homologação em staging, então precisa do label
+# de escape (o CI bloqueia sem ele). Aplicar é uma decisão consciente e fica
+# registrada na timeline do PR com autor e horário:
+gh pr edit <NUM> --add-label hotfix-sem-smoke
+
 # Merge → prod
 # Depois cherry-pick na staging pra evitar drift:
 git checkout staging
 git cherry-pick <hotfix-sha>
 git push
 ```
+
+`hotfix-sem-smoke` dispensa o **smoke**, nunca a **validação**: typecheck e testes
+são do `ci.yml`, rodam em todo PR pra master e não têm label que os pule.
+
+## O gate de master
+
+Dois workflows, com papéis separados, ambos em **todo** PR com base `master`:
+
+| Workflow | Job | O que exige | Escape |
+| --- | --- | --- | --- |
+| `ci.yml` | `typecheck + unit` | prisma validate + tsc + vitest | nenhum |
+| `promote-to-prod.yml` | `Require smoke/hotfix label` | `staging-smoke-passed` se o head for `staging`; `hotfix-sem-smoke` caso contrário | o label é o escape |
+
+As duas exigências de label são disjuntas de propósito: `hotfix-sem-smoke` **não**
+satisfaz um PR vindo de `staging`, senão viraria um bypass do smoke no fluxo de
+todo dia.
+
+Até 2026-08-19 o job de label tinha `if: github.head_ref == 'staging'`. Num PR de
+qualquer outra branch ele era **pulado** — e o GitHub conta job pulado como
+sucesso pra branch protection. Ou seja: o gate humano que existia pra proteger
+master era justamente o que deixava `hotfix/*` entrar sem aprovação manual
+nenhuma. (A validação em si nunca esteve descoberta: o `ci.yml` sempre rodou em
+todos.) O `if:` foi removido; o que era um pulo virou uma exigência diferente.
+
+`promote-to-prod.yml` também tinha um job `validate` idêntico ao do `ci.yml` —
+mesmos env, mesmos steps. Foi removido: dobrava o tempo de CI sem acrescentar
+sinal. Este workflow é só o gate humano.
+
+> O gate humano (`promote-to-prod.yml`) só dispara em `pull_request`. Push direto
+> em `master` não passa por ele. O `ci.yml` até roda em `push: [master]`, mas aí
+> o commit já entrou — ele reporta, não barra. Quem fecha essa porta é a branch
+> protection exigindo PR.
 
 ## Reset staging (wipe + re-seed)
 
