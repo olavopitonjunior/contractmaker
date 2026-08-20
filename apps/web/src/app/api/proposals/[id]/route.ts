@@ -60,10 +60,34 @@ const patchSchema = z.object({
 /** Sinaliza o 409 de dentro da transação do PATCH (aborta e faz rollback). */
 class ProposalNotEditableError extends Error {}
 
-// PATCH /api/proposals/[id] — só antes do envio (EDITABLE_STATUSES).
+/**
+ * PATCH /api/proposals/[id] — edita a proposta antes do envio (EDITABLE_STATUSES).
+ *
+ * Permissão: escopo NÃO basta, pelo mesmo motivo da rota de renomear.
+ * `loadScopedProposal` libera quem tem `PROPOSAL_VIEW_ALL`, que é o recorte do
+ * papel `viewer` — somente-leitura. Sem a checagem abaixo ele reescrevia o
+ * `dataJson` inteiro, trocava `validUntil`/`comissaoIncluida`/`hiddenPaths` e
+ * SUBSTITUÍA a lista de signatários de qualquer proposta pré-envio da org.
+ *
+ * Era o buraco mais largo da família: as rotas irmãs que fazem exatamente essas
+ * escritas em pedaços (`/signers`, `/signers/[signerId]`, `/attachments`) já
+ * exigiam `PROPOSAL_SEND`; só este PATCH monolítico, que faz tudo de uma vez,
+ * não exigia nada. Fechar aqui é aplicar a convenção que já existe, não criar
+ * regra nova.
+ *
+ * Consequência conhecida: o preset `gerente` tem `PROPOSAL_VIEW_OWN_ONLY` sem
+ * CREATE/SEND, então um gerente atribuído como responsável perde esta escrita.
+ * Isso é coerência, não perda: ele já não podia editar signatário, anexar
+ * arquivo nem enviar — nenhum fluxo de edição fechava pra ele de qualquer jeito.
+ */
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const r = await loadScopedProposal(req, params.id);
   if ("fail" in r) return r.fail;
+
+  if (!can(r.eff, PERMISSION.PROPOSAL_CREATE) && !can(r.eff, PERMISSION.PROPOSAL_SEND)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   // Mesmo conjunto do claim de envio: tudo que ainda pode virar "enviada" é
   // editável, nada depois. Antes só `rascunho` passava, o que travava a correção
   // de uma proposta em `falha_envio` — exatamente o caso em que editar é o
