@@ -53,6 +53,9 @@ import { parseProposalApiError } from "@/lib/proposals/api-errors";
 
 export interface ProposalPermissions {
   send: boolean;
+  /** Pode ESCREVER na proposta (renomear, editar). CREATE ou SEND — VIEW_ALL
+   *  sozinho é leitura e não conta. Espelha o guard das rotas PATCH. */
+  write: boolean;
   convert: boolean;
   cancel: boolean;
   delete: boolean;
@@ -102,8 +105,9 @@ export function ProposalRowActions({
     proposal.status === "aguardando_vendedor" &&
     proposal.instrument === "envelope";
   // Renomear vale em qualquer status vivo (título é rótulo, não conteúdo) —
-  // mesmo corte da rota PATCH .../title, que só barra os terminais.
-  const canRename = !TERMINAL_STATUSES.has(proposal.status);
+  // mesmo corte da rota PATCH .../title, que barra os terminais E exige
+  // permissão de escrita: só VIEW_ALL (papel de leitura) não renomeia.
+  const canRename = permissions.write && !TERMINAL_STATUSES.has(proposal.status);
   const canConvert = permissions.convert && CONVERTABLE_STATUSES.has(proposal.status);
   const canCancel = permissions.cancel && CANCELLABLE_STATUSES.has(proposal.status);
   const canDelete =

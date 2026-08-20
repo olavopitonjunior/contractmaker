@@ -198,6 +198,11 @@ export default async function PropostaDetailPage({
 
   const permissions = {
     send: can(eff, PERMISSION.PROPOSAL_SEND),
+    // Escrita na proposta (renomear, editar). Espelha o guard das rotas PATCH
+    // /api/proposals/[id] e .../title: não existe PROPOSAL_UPDATE, então o corte
+    // é quem cria OU envia. VIEW_ALL sozinho é LEITURA e não entra aqui.
+    write:
+      can(eff, PERMISSION.PROPOSAL_CREATE) || can(eff, PERMISSION.PROPOSAL_SEND),
     convert: can(eff, PERMISSION.PROPOSAL_CONVERT),
     cancel: can(eff, PERMISSION.PROPOSAL_CANCEL),
     delete: can(eff, PERMISSION.PROPOSAL_DELETE),

@@ -188,11 +188,14 @@ export function ProposalDetailClient({
   const pz = proposal.prazo;
   // Derivado do status AO VIVO (não do prop do servidor): se a proposta for
   // enviada em outra aba, o botão de editar some junto com o preview — mesmo
-  // conjunto que o PATCH e o /preview aceitam no servidor.
-  const canEdit = EDITABLE_STATUSES.has(liveStatus);
+  // conjunto que o PATCH e o /preview aceitam no servidor. `write` porque o
+  // PATCH também exige permissão de escrita: sem isso o botão levava um papel
+  // de leitura a um formulário que só falharia no salvar.
+  const canEdit = permissions.write && EDITABLE_STATUSES.has(liveStatus);
   // Renomear vale além de EDITABLE_STATUSES: título é rótulo interno, não o
-  // documento congelado. Mesmo corte da rota PATCH .../title.
-  const canRename = !TERMINAL_STATUSES.has(liveStatus);
+  // documento congelado. Mesmo corte da rota PATCH .../title — terminais fora,
+  // e permissão de escrita exigida (VIEW_ALL sozinho não basta).
+  const canRename = permissions.write && !TERMINAL_STATUSES.has(liveStatus);
   const isAceite = proposal.instrument === "aceite";
   // Mesma permissão que a rota /attachments/finalize exige (PROPOSAL_SEND):
   // quem envia a proposta pra assinatura é quem cuida da documentação dela.
