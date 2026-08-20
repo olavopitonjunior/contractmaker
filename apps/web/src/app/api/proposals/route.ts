@@ -9,7 +9,12 @@ import {
 import { withIdempotency } from "@/lib/api/idempotency";
 import { assertFeatureEnabled, ModuleDisabledError } from "@/lib/modules/guard";
 import { proposalFeatureForKind } from "@/lib/modules/catalog";
-import { getEffectivePermissions, proposalScopeWhere, can } from "@/lib/security/rbac/check";
+import {
+  getEffectivePermissions,
+  proposalScopeWhere,
+  canAccessProposal,
+  can,
+} from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { generateProposalToken } from "@/lib/proposals/token";
 import { computeDedupeKey } from "@/lib/proposals/signer-dedupe";
@@ -166,6 +171,52 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Recriação: o pai precisa existir, ser DESTA org E estar no escopo do ator
+  // (dono/responsável/VIEW_ALL — MESMO corte da nova/page.tsx, sem
+  // convertedDealManagerUserId). O escopo importa porque o handler ESCREVE no
+  // pai (supersededById + evento) — sem ele, um VIEW_OWN_ONLY com o cuid de
+  // proposta de colega marcaria a proposta alheia como recriada. 404 único nos
+  // três casos pra não vazar existência. Nenhum status é exigido: a filha
+  // nasce rascunho inofensivo; quem gateia a AÇÃO é a UI (RECREATABLE_STATUSES)
+  // e o cancel que a precede.
+  //
+  // TOCTOU consciente (v1): o pai é lido AQUI, fora da transação — duas
+  // recriações simultâneas do mesmo pai podem duplicar o `round` da thread.
+  // `supersededById` resolve por "última vence" e o round é rótulo, não chave;
+  // serializar a leitura não paga o custo.
+  let parent: { id: string; code: string | null; round: number } | null = null;
+  if (input.parentProposalId) {
+    const row = await prisma.proposal.findUnique({
+      where: { id: input.parentProposalId },
+      select: {
+        id: true,
+        orgId: true,
+        code: true,
+        round: true,
+        userId: true,
+        responsibleUserId: true,
+      },
+    });
+    if (
+      !row ||
+      row.orgId !== auth.org.id ||
+      // `eff` nulo não chega aqui (o can() do CREATE já devolveu 403), mas o
+      // narrowing não atravessa a chamada — o guard explícito é só pro TS.
+      !eff ||
+      !canAccessProposal({
+        effective: eff,
+        ownerUserId: row.userId,
+        responsibleUserId: row.responsibleUserId,
+      })
+    ) {
+      return NextResponse.json(
+        { error: "Proposta de origem não encontrada." },
+        { status: 404 }
+      );
+    }
+    parent = { id: row.id, code: row.code, round: row.round };
+  }
+
   let result;
   try {
     result = await withIdempotency({
@@ -180,7 +231,7 @@ export async function POST(req: NextRequest) {
       // na sequência. Aqui o rollback devolve o contador junto.
       const proposal = await prisma.$transaction(async (tx) => {
         const code = await allocateProposalCode(tx, auth.org.id);
-        return tx.proposal.create({
+        const created = await tx.proposal.create({
           data: {
             orgId: auth.org.id,
             userId: auth.actor.effectiveUserId,
@@ -189,6 +240,10 @@ export async function POST(req: NextRequest) {
             code,
             title: input.title,
             status: "rascunho",
+            // Thread de recriação: round herda do pai; sem pai, default 1.
+            ...(parent
+              ? { parentProposalId: parent.id, round: parent.round + 1 }
+              : {}),
             token: generateProposalToken(),
             dataJson: input.dataJson as Prisma.InputJsonValue,
             comissaoIncluida: input.comissaoIncluida ?? false,
@@ -229,6 +284,34 @@ export async function POST(req: NextRequest) {
               : undefined,
           },
         });
+        if (parent) {
+          // Última recriação vence: o pai aponta sempre pra filha mais nova.
+          await tx.proposal.update({
+            where: { id: parent.id },
+            data: { supersededById: created.id },
+          });
+          // Eventos de TIMELINE apenas — decisão deliberada de não notificar:
+          // quem recria é o próprio corretor, na tela; sino/WhatsApp aqui
+          // seria eco (por isso nenhum dos dois entra em TRACKING_KINDS nem
+          // na allowlist de user-channels-registry).
+          await tx.proposalEvent.createMany({
+            data: [
+              {
+                proposalId: parent.id,
+                eventName: "superseded_by_recreation",
+                payload: { newProposalId: created.id, newCode: created.code },
+                source: "system",
+              },
+              {
+                proposalId: created.id,
+                eventName: "recreated_from",
+                payload: { parentProposalId: parent.id, parentCode: parent.code },
+                source: "system",
+              },
+            ],
+          });
+        }
+        return created;
       });
       await audit(
         extractAuditContextFromRequest(req, auth.org.id, auth.actor.effectiveUserId),
@@ -237,7 +320,13 @@ export async function POST(req: NextRequest) {
           result: "SUCCESS",
           resource: proposal.id,
           resourceType: "Proposal",
-          metadata: mergeAuditMetadata({ kind: proposal.kind }, auth.actor),
+          metadata: mergeAuditMetadata(
+            {
+              kind: proposal.kind,
+              ...(parent ? { parentProposalId: parent.id } : {}),
+            },
+            auth.actor
+          ),
         }
       ).catch(() => {});
       return { status: 201, body: { proposal } };

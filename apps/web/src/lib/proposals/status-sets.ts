@@ -59,6 +59,29 @@ export const CANCELLABLE_STATUSES = new Set<string>([
 ]);
 
 /**
+ * De onde "recriar" (cancelar + novo rascunho pré-preenchido) é oferecido.
+ *
+ * É a resposta a preenchimento errado ou não-recebimento DEPOIS do envio — por
+ * isso rascunho/aguardando_aprovacao ficam fora (basta editar), e convertida/
+ * completa também (o desfecho já aconteceu; recriar ali seria ramificar um
+ * negócio fechado). Nos status canceláveis a ação passa pelo POST /cancel
+ * (que cancela envelopes ClickSign) antes de abrir o rascunho novo; nos
+ * terminais recriáveis (recusadas/expirada/cancelada) navega direto.
+ */
+export const RECREATABLE_STATUSES = new Set<string>([
+  "enviada",
+  "entregue",
+  "visualizada",
+  "assinada_proponente",
+  "aguardando_vendedor",
+  "falha_envio",
+  "recusada_proponente",
+  "recusada_vendedor",
+  "expirada",
+  "cancelada",
+]);
+
+/**
  * Status em que a landing pública `/p/[token]` responde notFound() — e,
  * portanto, em que o detalhe NÃO deve oferecer o link pra copiar. Fonte única
  * dos dois lados (gate da page pública + render do botão no detalhe).
