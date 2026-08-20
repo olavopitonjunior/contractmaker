@@ -2,7 +2,10 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db/prisma";
 import { renderProposalVia } from "@/lib/proposals/render";
 import { selectPropostaTemplate } from "@/lib/proposals/template-select";
-import { SIGNED_OR_LATER_STATUSES } from "@/lib/proposals/status-sets";
+import {
+  SIGNED_OR_LATER_STATUSES,
+  PUBLIC_LINK_BLOCKED_STATUSES,
+} from "@/lib/proposals/status-sets";
 import { proposalNumero } from "@/lib/proposals/code";
 import { ViewBeacon } from "./ViewBeacon";
 
@@ -49,8 +52,9 @@ export default async function PublicProposalPage({
   // 404 genérico pra token inválido — não vaza se o token existe ou não.
   if (!proposal) notFound();
 
-  // Estados em que não faz sentido exibir a proposta pro público.
-  if (["rascunho", "aguardando_aprovacao", "cancelada"].includes(proposal.status)) {
+  // Estados em que não faz sentido exibir a proposta pro público. Fonte única
+  // com o botão "copiar link" do detalhe — divergir os dois oferece link 404.
+  if (PUBLIC_LINK_BLOCKED_STATUSES.has(proposal.status)) {
     notFound();
   }
 

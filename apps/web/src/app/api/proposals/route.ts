@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
     });
     return NextResponse.json({
       proposals: rows.map((p) => {
-        const resumo = summarizeProposalData(p.dataJson);
+        const resumo = summarizeProposalData(p.dataJson, p.kind);
         return {
           id: p.id,
           title: p.title,
