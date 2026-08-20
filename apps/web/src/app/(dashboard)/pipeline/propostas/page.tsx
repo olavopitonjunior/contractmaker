@@ -135,11 +135,14 @@ export default async function PropostasPage({
         // lib/proposals/send-channel.ts. Relação aninhada no select vira consulta
         // agrupada no Prisma (não é N+1 por linha).
         signers: { where: { included: true }, select: { notifyChannel: true } },
-        // `failed`/`canceled` fora: um envelope que estourou na criação nunca
-        // notificou ninguém, e os signers dele marcariam a coluna como canal
-        // JÁ USADO ("Canal usado no envio") numa proposta que não saiu.
+        // `failed` fora: envelope que estourou na criação nunca notificou
+        // ninguém. `canceled` FICA — cancelar o envelope é fluxo normal de
+        // recuperação (devolve a 1ª via pra reenvio), e excluí-lo fazia a
+        // proposta enviada cair no plano e a célula dizer "ainda não enviada".
+        // Quem separa "saiu" de "não saiu" é o `sentAt` da proposta, passado
+        // ao `proposalSendChannel` — ver o doc-comment dele.
         envelopes: {
-          where: { source: "proposal", status: { notIn: ["failed", "canceled"] } },
+          where: { source: "proposal", status: { not: "failed" } },
           select: { signers: { select: { notifyChannel: true } } },
         },
         validUntil: true,
@@ -238,6 +241,7 @@ export default async function PropostasPage({
           instrument: p.instrument,
           envelopeSigners: p.envelopes.flatMap((e) => e.signers),
           plannedSigners: p.signers,
+          proposalSentAt: p.sentAt,
         }),
         createdAtLabel: formatDayMonthBR(p.createdAt),
         sentAtLabel: formatDayMonthBR(p.sentAt, ""),
