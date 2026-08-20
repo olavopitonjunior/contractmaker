@@ -166,6 +166,9 @@ const EVENT_LABEL: Record<string, string> = {
   envelope_canceled: "Envelope cancelado",
   primeira_via_canceled: "Envio cancelado — liberada pra reenvio",
   send_failed: "Envio não completou — liberada pra reenvio",
+  // Gravado pelo cron de claim órfão LOGO APÓS o send_failed do releaseClaim —
+  // sem rótulo ele aparecia cru ao lado de um evento bem-rotulado.
+  send_claim_recovered: "Recuperação automática — envio interrompido",
   // Parada de decisão / conclusão manual (Fase 2 do plano 2026-08-06).
   awaiting_owner_decision: "Aguardando sua decisão",
   completed_manually: "Concluída sem enviar ao proprietário",

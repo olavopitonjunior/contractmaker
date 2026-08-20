@@ -79,7 +79,7 @@ export default async function PropostaDetailPage({
     // da janela, fazendo o badge dizer "Falha no envio" num cancelamento.
     prisma.proposalEvent.findFirst({
       where: { proposalId: params.id, eventName: { in: [...SEND_OUTCOME_EVENTS] } },
-      orderBy: { receivedAt: "desc" },
+      orderBy: [{ receivedAt: "desc" }, { id: "desc" }],
       select: { eventName: true },
     }),
     prisma.proposalEvent.findMany({
