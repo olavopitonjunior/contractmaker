@@ -40,6 +40,12 @@ export interface ProposalRow {
   createdAtLabel: string;
   /** "28/07" ou "" quando não enviada. */
   sentAtLabel: string;
+  /** `sentAt` CRU (ISO) — o rótulo acima é formatado e não serve de
+   *  discriminador. Ver `isFalhaEnvioAlreadyDelivered` (pergunta da EXCLUSÃO). */
+  sentAt: string | null;
+  /** Último de `SEND_OUTCOME_EVENTS`, ou `null`. Pergunta do RÓTULO — outra que
+   *  a da exclusão, e `sentAt` não a responde. Ver `lastSendOutcomeIsCancel`. */
+  lastSendOutcome: string | null;
   /** "28/07" ou "" quando nunca vista. */
   firstViewedAtLabel: string;
   prazo: { label: string; tone: "none" | "warn" | "danger" };
@@ -168,7 +174,7 @@ export function ProposalsListClient({
               </TableHeader>
               <TableBody>
                 {proposals.map((p) => {
-                  const sv = proposalStatusView(p.status);
+                  const sv = proposalStatusView(p.status, p.lastSendOutcome);
                   const pz = p.prazo;
                   return (
                     <TableRow key={p.id} className="group">
@@ -284,6 +290,7 @@ export function ProposalsListClient({
                             instrument: p.instrument,
                             convertedDealId: p.convertedDealId,
                             title: p.title,
+                            sentAt: p.sentAt,
                           }}
                           permissions={permissions}
                           members={members}

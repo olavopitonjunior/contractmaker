@@ -13,6 +13,7 @@ import { ProposalsNoAccess } from "@/components/proposals/ProposalsNoAccess";
 import { statusesForFilter } from "@/lib/proposals/list-filters";
 import { proposalListWhereForFilter } from "@/lib/proposals/list-filters.server";
 import {
+  SEND_OUTCOME_EVENTS,
   OPEN_STATUSES,
   EXPIRABLE_STATUSES,
   CONVERSION_KPI_STATUSES,
@@ -145,6 +146,25 @@ export default async function PropostasPage({
           where: { source: "proposal", status: { not: "failed" } },
           select: { signers: { select: { notifyChannel: true } } },
         },
+        // Último desfecho de envio — separa "falha real" de "cancelado" no
+        // badge. `sentAt` não serve aqui: é monotônico e diria "cancelado"
+        // numa falha de reenvio.
+        //
+        // Sobre custo: relação aninhada SEM take o Prisma 5 resolve em batch
+        // (2 queries totais). COM `take: 1` a doc do engine clássico não é
+        // explícita — NÃO está verificado empiricamente que não vira 1 query
+        // por linha. Antes de copiar este padrão pra outra listagem, confira o
+        // número real de queries de /pipeline/propostas (log do Neon ou
+        // prisma.$on("query")) — review de 2026-08-20 pediu essa confirmação.
+        events: {
+          where: { eventName: { in: [...SEND_OUTCOME_EVENTS] } },
+          // `id` desempata timestamps iguais. Hoje os dois desfechos não
+          // coexistem (CAS por status garante), mas a leitura não deve
+          // depender desse invariante continuar valendo.
+          orderBy: [{ receivedAt: "desc" }, { id: "desc" }],
+          take: 1,
+          select: { eventName: true },
+        },
         validUntil: true,
         createdAt: true,
         sentAt: true,
@@ -245,6 +265,8 @@ export default async function PropostasPage({
         }),
         createdAtLabel: formatDayMonthBR(p.createdAt),
         sentAtLabel: formatDayMonthBR(p.sentAt, ""),
+        sentAt: p.sentAt?.toISOString() ?? null,
+        lastSendOutcome: p.events[0]?.eventName ?? null,
         firstViewedAtLabel: formatDayMonthBR(p.firstViewedAt, ""),
         prazo: { label: prazo.shortLabel, tone: prazo.tone },
         convertedDealId: p.convertedDealId,

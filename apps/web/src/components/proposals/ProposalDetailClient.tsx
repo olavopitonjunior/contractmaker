@@ -86,6 +86,10 @@ interface Proposal {
   hasEnvelopes: boolean;
   createdAtLabel: string;
   sentAtLabel: string;
+  /** `sentAt` CRU (ISO) — pergunta da EXCLUSÃO. Ver `isFalhaEnvioAlreadyDelivered`. */
+  sentAt: string | null;
+  /** Último de `SEND_OUTCOME_EVENTS`, ou `null` — pergunta do RÓTULO. */
+  lastSendOutcome: string | null;
   deliveredAtLabel: string;
   firstViewedAtLabel: string;
   viewCount: number;
@@ -184,7 +188,14 @@ export function ProposalDetailClient({
     live && Date.parse(live.updatedAt) > Date.parse(proposal.updatedAtIso)
       ? live.status
       : proposal.status;
-  const sv = proposalStatusView(liveStatus);
+  // Mesma regra de frescor do status, e NÃO um ?? simples: os dois têm de vir
+  // do MESMO snapshot. Status ao vivo com sentAt congelado da carga reabria uma
+  // janela do bug do Excluir (status já é falha_envio, sentAt ainda null).
+  const liveSentAt =
+    live && Date.parse(live.updatedAt) > Date.parse(proposal.updatedAtIso)
+      ? live.sentAt
+      : proposal.sentAt;
+  const sv = proposalStatusView(liveStatus, proposal.lastSendOutcome);
   const pz = proposal.prazo;
   // Derivado do status AO VIVO (não do prop do servidor): se a proposta for
   // enviada em outra aba, o botão de editar some junto com o preview — mesmo
@@ -342,6 +353,7 @@ export function ProposalDetailClient({
               kind: proposal.kind,
               instrument: proposal.instrument,
               convertedDealId: proposal.convertedDealId,
+              sentAt: liveSentAt,
             }}
             permissions={permissions}
             kind={proposal.kind}

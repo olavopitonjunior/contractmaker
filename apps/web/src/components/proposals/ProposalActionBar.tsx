@@ -21,6 +21,7 @@ import type { ProposalPermissions } from "./ProposalRowActions";
 import {
   CANCELLABLE_STATUSES,
   DELETABLE_STATUSES,
+  isFalhaEnvioAlreadyDelivered,
   REMINDABLE_STATUSES,
   CONVERTABLE_STATUSES,
   CONVERT_UNSIGNED_STATUSES,
@@ -47,6 +48,8 @@ export function ProposalActionBar({
     kind: string;
     instrument: string;
     convertedDealId: string | null;
+    /** `Proposal.sentAt` em ISO — ver RowProposal.sentAt. */
+    sentAt: string | null;
   };
   permissions: ProposalPermissions;
   /** venda | locacao — só muda a copy (proprietário × locador). */
@@ -103,8 +106,12 @@ export function ProposalActionBar({
   const canConvertUnsigned =
     permissions.convert && !canConvert && CONVERT_UNSIGNED_STATUSES.has(status);
   const canCancel = permissions.cancel && CANCELLABLE_STATUSES.has(status);
+  // Espelha o guard do DELETE, igual à lista — ver ProposalRowActions.
   const canDelete =
-    permissions.delete && DELETABLE_STATUSES.has(status) && !proposal.convertedDealId;
+    permissions.delete &&
+    DELETABLE_STATUSES.has(status) &&
+    !isFalhaEnvioAlreadyDelivered({ status, sentAt: proposal.sentAt }) &&
+    !proposal.convertedDealId;
 
   async function run(
     url: string,
@@ -137,6 +144,17 @@ export function ProposalActionBar({
       else router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro na ação");
+      // Fecha TAMBÉM no erro. Antes só o sucesso fechava, então uma ação
+      // recusada pelo servidor deixava o diálogo de confirmação aberto com o
+      // toast por cima: o usuário lia "não pode" e continuava olhando pro
+      // botão "Confirmar", parecendo travado. Nenhum diálogo que passa por
+      // aqui tem como o usuário corrigir e repetir de dentro dele — o 422
+      // `gerente_obrigatorio`, que é o único caso assim, vai por
+      // `useConvertProposal` e não por esta função.
+      //
+      // `reason` NÃO é limpo aqui de propósito: reabrir traz o texto que a
+      // pessoa já tinha escrito.
+      setDialog(null);
     } finally {
       setBusy(false);
     }

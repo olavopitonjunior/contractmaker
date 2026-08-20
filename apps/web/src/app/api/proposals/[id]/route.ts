@@ -5,7 +5,11 @@ import { prisma } from "@/lib/db/prisma";
 import { can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { loadScopedProposal } from "@/lib/proposals/route-helpers";
-import { DELETABLE_STATUSES, EDITABLE_STATUSES } from "@/lib/proposals/status-sets";
+import {
+  DELETABLE_STATUSES,
+  EDITABLE_STATUSES,
+  isFalhaEnvioAlreadyDelivered,
+} from "@/lib/proposals/status-sets";
 import { sanitizeHiddenPaths } from "@/lib/proposals/hidden-fields";
 import { computeDedupeKey } from "@/lib/proposals/signer-dedupe";
 import { runEnvelopeCancel } from "@/lib/clicksign/cancel-action";
@@ -224,7 +228,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   // documento que circulou. `sentAt` é o discriminador — os dois caminhos
   // felizes de envio o gravam como último passo. Arquivar (cancelar) continua
   // disponível: `falha_envio` está em CANCELLABLE_STATUSES.
-  if (proposal.status === "falha_envio" && proposal.sentAt) {
+  if (isFalhaEnvioAlreadyDelivered(proposal)) {
     return NextResponse.json(
       {
         error:
