@@ -245,6 +245,7 @@ export default async function PropostasPage({
         }),
         createdAtLabel: formatDayMonthBR(p.createdAt),
         sentAtLabel: formatDayMonthBR(p.sentAt, ""),
+        sentAt: p.sentAt?.toISOString() ?? null,
         firstViewedAtLabel: formatDayMonthBR(p.firstViewedAt, ""),
         prazo: { label: prazo.shortLabel, tone: prazo.tone },
         convertedDealId: p.convertedDealId,
