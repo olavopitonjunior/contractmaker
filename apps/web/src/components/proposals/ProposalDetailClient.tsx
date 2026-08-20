@@ -88,6 +88,8 @@ interface Proposal {
   sentAtLabel: string;
   /** `sentAt` CRU (ISO) — pergunta da EXCLUSÃO. Ver `isFalhaEnvioAlreadyDelivered`. */
   sentAt: string | null;
+  /** Último de `SEND_OUTCOME_EVENTS`, ou `null` — pergunta do RÓTULO. */
+  lastSendOutcome: string | null;
   deliveredAtLabel: string;
   firstViewedAtLabel: string;
   viewCount: number;
@@ -186,7 +188,7 @@ export function ProposalDetailClient({
     live && Date.parse(live.updatedAt) > Date.parse(proposal.updatedAtIso)
       ? live.status
       : proposal.status;
-  const sv = proposalStatusView(liveStatus);
+  const sv = proposalStatusView(liveStatus, proposal.lastSendOutcome);
   const pz = proposal.prazo;
   // Derivado do status AO VIVO (não do prop do servidor): se a proposta for
   // enviada em outra aba, o botão de editar some junto com o preview — mesmo

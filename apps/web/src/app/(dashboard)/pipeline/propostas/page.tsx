@@ -13,6 +13,7 @@ import { ProposalsNoAccess } from "@/components/proposals/ProposalsNoAccess";
 import { statusesForFilter } from "@/lib/proposals/list-filters";
 import { proposalListWhereForFilter } from "@/lib/proposals/list-filters.server";
 import {
+  SEND_OUTCOME_EVENTS,
   OPEN_STATUSES,
   EXPIRABLE_STATUSES,
   CONVERSION_KPI_STATUSES,
@@ -145,6 +146,17 @@ export default async function PropostasPage({
           where: { source: "proposal", status: { not: "failed" } },
           select: { signers: { select: { notifyChannel: true } } },
         },
+        // Último desfecho de envio — separa "falha real" de "cancelado" no
+        // badge. Filtrado por SEND_OUTCOME_EVENTS e `take: 1`, então é UMA
+        // consulta agrupada (o Prisma resolve relação aninhada em batch), não
+        // N+1 por linha. `sentAt` não serve aqui: é monotônico e diria
+        // "cancelado" numa falha de reenvio.
+        events: {
+          where: { eventName: { in: [...SEND_OUTCOME_EVENTS] } },
+          orderBy: { receivedAt: "desc" },
+          take: 1,
+          select: { eventName: true },
+        },
         validUntil: true,
         createdAt: true,
         sentAt: true,
@@ -246,6 +258,7 @@ export default async function PropostasPage({
         createdAtLabel: formatDayMonthBR(p.createdAt),
         sentAtLabel: formatDayMonthBR(p.sentAt, ""),
         sentAt: p.sentAt?.toISOString() ?? null,
+        lastSendOutcome: p.events[0]?.eventName ?? null,
         firstViewedAtLabel: formatDayMonthBR(p.firstViewedAt, ""),
         prazo: { label: prazo.shortLabel, tone: prazo.tone },
         convertedDealId: p.convertedDealId,
