@@ -73,6 +73,12 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
   return NextResponse.json({
     status: proposal.status,
+    // O cliente gateia o botão Excluir por status+sentAt (ver
+    // isFalhaEnvioAlreadyDelivered). Sem o sentAt AQUI, o gate usava o prop do
+    // servidor congelado na carga da página — e uma proposta que enviou e foi
+    // cancelada em outra aba oferecia Excluir com a API respondendo 409, a
+    // versão em miniatura do bug que este payload existe pra evitar.
+    sentAt: proposal.sentAt?.toISOString() ?? null,
     dossierUrl: proposal.dossierUrl,
     convertedDealId: proposal.convertedDealId,
     lastReminderAt: proposal.lastReminderAt?.toISOString() ?? null,

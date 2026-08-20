@@ -17,6 +17,9 @@ export interface ProposalSignerStatus {
 
 export interface ProposalStatusPayload {
   status: string;
+  /** `Proposal.sentAt` em ISO — o gating de Excluir precisa dele AO VIVO,
+   *  senão diverge do `status` que este mesmo payload atualiza. */
+  sentAt: string | null;
   dossierUrl: string | null;
   convertedDealId: string | null;
   envelopes: { id: string; via: string; status: string }[];
