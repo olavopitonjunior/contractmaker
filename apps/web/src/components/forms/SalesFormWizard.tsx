@@ -645,6 +645,21 @@ export function SalesFormWizard({
           // Roda o trigger pra cobrir refines/min(N) que o non-empty não pega.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const triggerValid = await form.trigger(stepFields as any);
+          // `trigger` REESCREVE os erros dos paths que valida, então ele apaga
+          // os `setError` manuais de todo campo que o schema considera válido
+          // — e a maioria dos paths de DadosContrato é `.optional()`, onde ""
+          // passa. Sem reaplicar, o campo obrigatório APENAS pelo preset (ou
+          // pela condicional da matrícula) some do destaque: o toast nomeia e a
+          // bolha conta, mas a borda vermelha e o scroll-até-o-campo não
+          // acontecem. Campo com regra própria no schema (rua, descrição) não
+          // sofria disso, o que escondia a falha.
+          for (const path of missingPaths) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            form.setError(path as any, {
+              type: "required",
+              message: "Campo obrigatório",
+            });
+          }
           if (missingPaths.length > 0 || !triggerValid) {
             setFailedTriggerCount((n) => n + 1);
             // NOMEIA o que falta: "etapa 3" mandava o cliente caçar o campo
