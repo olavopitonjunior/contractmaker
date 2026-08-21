@@ -114,6 +114,13 @@ export function MatriculaSituacaoField({
 
   const setSituacao = (value: string) => {
     form.setValue(`${prefix}.matricula_situacao`, value, { shouldDirty: true });
+    // Sair de "solicitar" tira a obrigatoriedade dos dois campos. O erro de
+    // uma tentativa anterior de avançar não pode sobreviver a isso: o operador
+    // veria "Campo obrigatório" em campo que o próprio sistema acabou de
+    // tornar opcional.
+    if (value !== "solicitar") {
+      form.clearErrors([`${prefix}.matricula`, `${prefix}.cartorio`] as never);
+    }
   };
 
   // Ids que ESTE bloco acabou de subir. Se o refetch seguinte falhar (rede

@@ -170,6 +170,9 @@ describe("computeDocWrites + limpeza da reatribuição", () => {
       getValues: vi.fn((path?: string) =>
         path === undefined ? Object.fromEntries(store) : store.get(path)
       ),
+      // O autofill limpa o erro do campo que preenche; sem este mock o stub
+      // mentiria sobre a interface que o código usa.
+      clearErrors: vi.fn(),
     } as unknown as UseFormReturn<Record<string, unknown>>;
     return { form, store };
   }

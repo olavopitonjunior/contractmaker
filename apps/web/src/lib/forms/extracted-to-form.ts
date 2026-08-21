@@ -412,6 +412,12 @@ export function mapExtractedToForm(
       if (current !== undefined && current !== null && current !== "") return;
     }
     form.setValue(fullPath, value as never, { shouldDirty: true, shouldTouch: true });
+    // O campo acabou de receber valor, então qualquer erro de "obrigatório"
+    // pendurado nele é obsoleto — e `setValue` sozinho não o limpa. Sem isso o
+    // campo preenchido pela IA continuava com borda vermelha e mensagem de
+    // vazio, enquanto o mesmo campo preenchido à mão ficava limpo: a extração
+    // parecia não ter funcionado justamente onde funcionou.
+    form.clearErrors(fullPath as never);
     filled += 1;
   };
 

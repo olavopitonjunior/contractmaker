@@ -72,6 +72,10 @@ export function applyExtractedToDataJson(
   const formAdapter = {
     getValues: (path?: string) => (path ? getByPath(merged, path) : merged),
     setValue: (path: string, value: unknown) => setByPath(merged, path, value),
+    // O mapper limpa o erro do campo que preenche. Aqui não existe UI nem
+    // estado de erro — só um objeto JSON —, então é no-op; o adaptador precisa
+    // dele para não quebrar quando roda no servidor.
+    clearErrors: () => {},
   } as unknown as UseFormReturn<Record<string, unknown>>;
 
   // Locação tem basePaths próprios (locadores.{i}/locatarios.{i}/garantia.fiador/
