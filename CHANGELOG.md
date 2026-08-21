@@ -20,6 +20,16 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 - **Preview renderizava a amostra errada**: pedir "financiamento" caía na fixture de à vista — o linter aprovava cláusula quebrada.
 - **`groupCode` legado "none"** deixava a cláusula insalvável em silêncio (Select mascarava como "Nenhum"); partição das abas agora é exaustiva (cláusula variável sem grupo não some mais da UI); página envia ao browser só os campos que a UI usa (colunas internas do KnowledgeItem não vazam mais).
 
+## [Unreleased] - 2026-08-21 - Campos obrigatórios visíveis no formulário público
+
+### Corrigido
+
+- **O formulário não mostrava o que era obrigatório, e não marcava o que faltava.** A configuração por org (`OrgFormSettings` presets, tela `/settings/formulario`) já existia e já barrava o avanço — mas nada disso chegava à tela do cliente. Três defeitos somados: o asterisco era string fixa em ~14 labels, sem relação nenhuma com o preset (com preset `completo`, "RG" e "Nome da mãe" apareciam idênticos a campos opcionais e o cliente só descobria ao tentar avançar); nenhum input recebia `aria-invalid`, então o `setError` do wizard rodava e **nada acontecia na tela** — a borda vermelha de `ui/input.tsx` nunca acendia e o scroll-até-a-pendência do `RequiredFieldMarker`, que procura `[aria-invalid="true"]`, era código morto desde que foi escrito; e a mensagem de erro inline existia em ~5 campos por step, escrita à mão.
+
+  O `FormField` compartilhado (`components/forms/fields/FormField.tsx`) liga os três ao path do campo: asterisco vindo do preset via `RequiredFieldsContext` (com índice normalizado — o preset declara em `.0.` e a exigência vale pra toda parte da lista, incluindo o path guarda-chuva que cobre nome/razão social do titular), `aria-invalid` injetado no filho e mensagem inline. **124 campos migrados** em 9 steps das duas esteiras. `NativeSelect`, `UFSelect` e `MoneyInput` aceitavam `aria-invalid` e **descartavam** — passam a repassar.
+
+- **Toast de venda dizia só "etapa 3"** e mandava o cliente caçar o campo numa tela com 20. Agora nomeia até 4 campos e resume o resto, como a locação já fazia — com o vocabulário unificado em `lib/forms/field-labels.ts`, que absorveu o catálogo da tela de configuração e o mapa inline do wizard de locação (a venda não tinha nenhum). **Locação ganha a paridade que faltava**: bolha "N de M pendências" e contagem reativa da etapa, que só a venda tinha.
+
 ## [Unreleased] - 2026-08-20 - Recriar proposta enviada
 
 ### Adicionado
