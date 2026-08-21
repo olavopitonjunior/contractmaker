@@ -13,12 +13,11 @@ import { createHmac } from "node:crypto";
  */
 
 const db = vi.hoisted(() => ({
-  dealNotificationLog: { findFirst: vi.fn(), update: vi.fn() },
-  userNotificationDelivery: { findFirst: vi.fn(), update: vi.fn() },
+  $executeRaw: vi.fn(),
 }));
 vi.mock("@/lib/db/prisma", () => ({ prisma: db }));
 
-const { verifyMaxWebhook, parseDeliveryOutcome, applyDeliveryOutcome } =
+const { verifyMaxWebhook, parseDeliveryOutcome, applyDeliveryOutcome, rankCaseSql } =
   await import("../delivery-webhook");
 const { POST } = await import("@/app/api/webhooks/max/route");
 
@@ -40,8 +39,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
   vi.stubEnv("MAX_WEBHOOK_SECRET", SECRET);
-  db.dealNotificationLog.findFirst.mockResolvedValue(null);
-  db.userNotificationDelivery.findFirst.mockResolvedValue(null);
+  db.$executeRaw.mockResolvedValue(0);
 });
 
 describe("verifyMaxWebhook", () => {
@@ -97,52 +95,37 @@ describe("parseDeliveryOutcome", () => {
 });
 
 describe("applyDeliveryOutcome", () => {
-  it("casa pelo ID da linha de log (o dedupeKey do payload É o logId) e faz MERGE do detail", async () => {
-    db.dealNotificationLog.findFirst.mockResolvedValue(
-      { id: "log-abc", detail: { skipReason: "ja-existente" } }
-    );
+  it("um UPDATE atômico por tabela, com merge e guarda de rank no WHERE", async () => {
+    db.$executeRaw.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
 
     const r = await applyDeliveryOutcome(parseDeliveryOutcome(OUTCOME)!);
-    expect(r.dealLogs).toBe(1);
+    expect(r).toEqual({ dealLogs: 1, userDeliveries: 0 });
+    expect(db.$executeRaw).toHaveBeenCalledTimes(2);
 
-    // O match é por id — a coluna dedupeKey dos modelos guarda chave de
-    // EVENTO e casaria zero linhas.
-    expect(db.dealNotificationLog.findFirst).toHaveBeenCalledWith({
-      where: { id: "log-abc", orgId: "org-1", channel: "whatsapp" },
-    });
-    const data = db.dealNotificationLog.update.mock.calls[0][0].data;
-    // O que o trilho gravou sobrevive; a marca entra ao lado.
-    expect(data.detail.skipReason).toBe("ja-existente");
-    expect(data.detail.maxDelivery).toMatchObject({ status: "read", at: OUTCOME.at });
+    // O SQL carrega: match por id (o dedupeKey do payload É o logId — a
+    // coluna dedupeKey dos modelos guarda chave de EVENTO), cerca de org,
+    // escrita na coluna PRÓPRIA (fora do alcance dos settles) e a guarda de
+    // rank — a monotonicidade mora no WHERE, não em check-then-act de app.
+    const sql = db.$executeRaw.mock.calls[0][0].join("?");
+    expect(sql).toContain('UPDATE "DealNotificationLog"');
+    expect(sql).toContain('SET "maxDeliveryJson" = ');
+    expect(sql).toContain('"orgId" = ');
+    expect(sql).toContain("channel = 'whatsapp'");
+    const params = db.$executeRaw.mock.calls[0].slice(1);
+    expect(params).toContain("log-abc");
+    expect(params).toContain("org-1");
+    // rank de read = 3, e a marca serializada viaja como json
+    expect(params).toContain(3);
+    expect(params.some((x) => typeof x === "string" && x.includes('"status":"read"'))).toBe(true);
   });
 
-  it("é monotônico e idempotente: read existente não regride nem regrava", async () => {
-    db.userNotificationDelivery.findFirst.mockResolvedValue(
-      { id: "u1", detail: { maxDelivery: { status: "read", at: "x" } } }
-    );
-
-    const delivered = await applyDeliveryOutcome(
-      parseDeliveryOutcome({ ...OUTCOME, status: "delivered" })!
-    );
-    expect(delivered.userDeliveries).toBe(0);
-    expect(db.userNotificationDelivery.update).not.toHaveBeenCalled();
-
-    // Upgrade de verdade passa: delivered gravado → read chega.
-    db.userNotificationDelivery.findFirst.mockResolvedValue(
-      { id: "u1", detail: { maxDelivery: { status: "delivered", at: "x" } } }
-    );
-    const read = await applyDeliveryOutcome(parseDeliveryOutcome(OUTCOME)!);
-    expect(read.userDeliveries).toBe(1);
-  });
-
-  it("unconfirmed é notícia fraca: delivered atrasado a corrige", async () => {
-    db.dealNotificationLog.findFirst.mockResolvedValue(
-      { id: "d1", detail: { maxDelivery: { status: "unconfirmed", at: "x" } } }
-    );
-    const r = await applyDeliveryOutcome(
-      parseDeliveryOutcome({ ...OUTCOME, status: "delivered" })!
-    );
-    expect(r.dealLogs).toBe(1);
+  it("o CASE de rank é derivado do mapa — sem cópia sincronizada à mão", () => {
+    const sql = rankCaseSql();
+    expect(sql).toContain("WHEN 'read' THEN 3");
+    expect(sql).toContain("WHEN 'delivered' THEN 2");
+    expect(sql).toContain("WHEN 'unconfirmed' THEN 1");
+    expect(sql).toContain("WHEN 'failed' THEN 1");
+    expect(sql).toContain("ELSE 0");
   });
 });
 

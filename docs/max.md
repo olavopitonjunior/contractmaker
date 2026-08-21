@@ -249,8 +249,9 @@ some com o assunto.
   `POST /api/webhooks/max`, costurado por `(orgId, id da linha de log)` — o
   `dedupeKey` do payload É o `logId`/`deliveryId` que viajou no `/notify`;
   a coluna `dedupeKey` dos modelos guarda chave de EVENTO e não entra no
-  match — e gravado em
-  `detail.maxDelivery` dos dois logs (merge; o `status` da linha não muda —
+  match — e gravado na coluna
+  própria `maxDeliveryJson` dos dois logs (fora do `detail`, que os settles
+  substituem a cada tentativa; o `status` da linha não muda —
   ele significa "processado pelo trilho", não "entregue"). Contrato:
   `{orgId, dedupeKey, status, at, providerMessageId}`, HMAC
   `${timestamp}.${rawBody}` com `MAX_WEBHOOK_SECRET` (§6). Idempotente e
@@ -260,6 +261,8 @@ some com o assunto.
   `split_recipient_completion:<id>:<exp>`) ficam fora — o desfecho reportado
   casa zero linhas, responde 200 e o Max o dá por entregue (sem retry). Para
   cobrir um canal novo, crie a linha de log e mande o id como dedupeKey.
+  O `maxDeliveryJson` ainda não tem CONSUMIDOR de UI — o fechamento aqui é
+  no dado; expor no painel de notificações é etapa seguinte.
 - **`supports` do `max` segue `false`** no registry: o serviço ainda não lê o
   perfil, e a tela não deve prometer controle que o runtime não honra. Virar
   `true` campo a campo, conforme o serviço passar a honrar cada um.

@@ -295,7 +295,7 @@ Todos com auth + cross-org guard via `deal.pipeline.orgId` + audit + bloqueio qu
 - `/f/[token]` (form vendas) + `/api/forms/[token]` (auto-save) e subrotas attachments
 - `/pay/[token]` (Asaas) · `/financeiro/completar-cadastro?token=` (split recipient magic link)
 - `/login`, `/register`, `/forgot-password`, `/reset-password`, `/logout` (cleanup completo)
-- `/privacy`, `/terms` (LGPD) · `/api/webhooks/{asaas,clicksign,google-drive}` (HMAC validado)
+- `/privacy`, `/terms` (LGPD) · `/api/webhooks/{asaas,clicksign,google-drive,max}` (HMAC validado; `max` = desfecho de entrega do agente Max, `MAX_WEBHOOK_SECRET`)
 
 ## Export PDF/DOCX
 

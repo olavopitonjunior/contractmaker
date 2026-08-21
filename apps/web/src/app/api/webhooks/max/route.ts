@@ -40,8 +40,10 @@ export async function POST(req: NextRequest) {
     secret,
   });
   if (!valido) {
-    // Sem detalhe: assinatura inválida e timestamp vencido são indistinguíveis
-    // para quem não tem o segredo.
+    // Sem detalhe NO CORPO — mas com log: drift de secret entre os dois
+    // projetos Vercel produziria 401s indistinguíveis de "o Max nunca chamou"
+    // (convenção dos webhooks vizinhos: clicksign loga toda recusa).
+    console.warn("[webhook/max] assinatura recusada");
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -57,6 +59,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "bad_request" }, { status: 400 });
   }
 
-  const applied = await applyDeliveryOutcome(outcome);
-  return NextResponse.json({ ok: true, applied });
+  try {
+    const applied = await applyDeliveryOutcome(outcome);
+    if (applied.dealLogs === 0 && applied.userDeliveries === 0) {
+      // Não é erro (canais sem linha de log existem — §8), mas é o sinal que
+      // o operador precisa quando a costura falhar de verdade.
+      console.log(
+        `[webhook/max] desfecho sem linha de log (${outcome.orgId}, ${outcome.dedupeKey}, ${outcome.status})`
+      );
+    }
+    return NextResponse.json({ ok: true, applied });
+  } catch (err) {
+    // 500 deliberado, como o asaas: o cliente do Max trata 5xx como
+    // "integração fora" — retenta sem queimar tentativa. Engolir num 200
+    // carimbaria reported_at com o desfecho perdido.
+    console.error(
+      "[webhook/max] falha ao aplicar desfecho:",
+      err instanceof Error ? err.message : String(err)
+    );
+    return NextResponse.json({ error: "apply_failed" }, { status: 500 });
+  }
 }

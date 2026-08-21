@@ -1,6 +1,8 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { signMaxRequest } from "./hmac";
+import { timingSafeEqualStr } from "@/lib/security/crypto";
 
 /**
  * Recepção do desfecho de entrega vindo do Max — a volta do laço que o
@@ -19,9 +21,11 @@ import { prisma } from "@/lib/db/prisma";
  * não nomeou — o mesmo defeito que o `/admin/status` do Max corrigiu na
  * direção oposta.
  *
- * O desfecho vai em `detail.maxDelivery` (MERGE, nunca replace — `detail` já
- * carrega motivo de skip/falha dos trilhos). O `status` da linha NÃO muda:
- * naqueles modelos ele significa "processado pelo trilho", não "entregue" —
+ * O desfecho vai na coluna PRÓPRIA `maxDeliveryJson` — não numa chave de
+ * `detail`: os settles dos trilhos substituem `detail` inteiro a cada
+ * tentativa (sweep/retry) e apagariam a marca (achado de code review). Só o
+ * webhook escreve nesta coluna. O `status` da linha NÃO muda: naqueles
+ * modelos ele significa "processado pelo trilho", não "entregue" —
  * sobrescrevê-lo quebraria claim/sweep.
  */
 
@@ -69,13 +73,10 @@ export function verifyMaxWebhook(params: {
   const now = params.now ?? Date.now();
   if (Math.abs(now - ts) > SKEW_MS) return false;
 
-  const expected = createHmac("sha256", secret)
-    .update(`${timestamp}.${rawBody}`)
-    .digest("hex");
-  const a = Buffer.from(expected, "utf8");
-  const b = Buffer.from(signature, "utf8");
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
+  // O MESMO `signMaxRequest` do /notify — o doc de hmac.ts proíbe duplicar
+  // justamente porque o formato é contrato de dois repos: divergir uma cópia
+  // faria todo webhook 401 em silêncio. Comparação pelo helper da casa.
+  return timingSafeEqualStr(signMaxRequest(timestamp, rawBody, secret), signature);
 }
 
 /**
@@ -92,19 +93,23 @@ const RANK: Record<DeliveryOutcome["status"], number> = {
   read: 3,
 };
 
+/**
+ * O CASE do SQL é DERIVADO do mapa — mesma regra do lado do Max: duas cópias
+ * sincronizadas à mão de um ranking é corrupção silenciosa esperando drift.
+ * Exportado para o teste travar o formato.
+ */
+export function rankCaseSql(): string {
+  const whens = Object.entries(RANK)
+    .map(([status, rank]) => `WHEN '${status}' THEN ${rank}`)
+    .join(" ");
+  return `CASE "maxDeliveryJson"->>'status' ${whens} ELSE 0 END`;
+}
+
 interface MaxDeliveryDetail {
   status: string;
   at: string;
-  providerMessageId?: string | null;
+  providerMessageId: string | null;
   receivedAt: string;
-}
-
-function shouldApply(existing: unknown, incoming: DeliveryOutcome): boolean {
-  const atual = (existing as { maxDelivery?: { status?: string } } | null)
-    ?.maxDelivery?.status;
-  if (!atual) return true;
-  const rankAtual = RANK[atual as DeliveryOutcome["status"]] ?? 0;
-  return RANK[incoming.status] > rankAtual;
 }
 
 export interface ApplyResult {
@@ -115,10 +120,15 @@ export interface ApplyResult {
 /**
  * Grava o desfecho no trilho dono da linha. O id (`dedupeKey` do payload) é
  * PK numa das duas tabelas — no máximo UMA linha no total; o Max não sabe de
- * qual trilho a notificação nasceu, então tenta as duas. Read-modify-write
- * porque `update` de Json não faz merge. Id desconhecido devolve zeros e o
- * chamador responde 200 mesmo assim: para quem tem o secret a contagem não é
- * segredo; para o resto, a rota nem autentica.
+ * qual trilho a notificação nasceu, então tenta as duas.
+ *
+ * UM UPDATE atômico por tabela, com a guarda de rank no próprio WHERE — não
+ * é read-modify-write em código de app de propósito (achado do code review):
+ * duas requisições concorrentes (cron sobreposto do Max, retentativa lenta)
+ * liam o mesmo pré-estado e a última escrita vencia, regredindo read →
+ * delivered para sempre. É a mesma defesa que o REMETENTE usa (rank no WHERE
+ * do reported_at). Id desconhecido devolve zeros e o chamador responde 200
+ * mesmo assim.
  */
 export async function applyDeliveryOutcome(
   outcome: DeliveryOutcome
@@ -129,41 +139,25 @@ export async function applyDeliveryOutcome(
     providerMessageId: outcome.providerMessageId ?? null,
     receivedAt: new Date().toISOString(),
   };
-  // Match pelo ID da linha de log (ver doc do módulo) + cercas de org/canal.
-  const where = {
-    id: outcome.dedupeKey,
-    orgId: outcome.orgId,
-    channel: "whatsapp",
-  };
-  const result: ApplyResult = { dealLogs: 0, userDeliveries: 0 };
+  const marcaJson = JSON.stringify(marca);
+  const rank = RANK[outcome.status];
+  const guarda = Prisma.raw(rankCaseSql());
 
-  const dealLog = await prisma.dealNotificationLog.findFirst({ where });
-  if (dealLog && shouldApply(dealLog.detail, outcome)) {
-    await prisma.dealNotificationLog.update({
-      where: { id: dealLog.id },
-      data: {
-        detail: {
-          ...((dealLog.detail as Record<string, unknown> | null) ?? {}),
-          maxDelivery: { ...marca },
-        },
-      },
-    });
-    result.dealLogs += 1;
-  }
+  const dealLogs = await prisma.$executeRaw`
+    UPDATE "DealNotificationLog"
+       SET "maxDeliveryJson" = ${marcaJson}::jsonb
+     WHERE id = ${outcome.dedupeKey}
+       AND "orgId" = ${outcome.orgId}
+       AND channel = 'whatsapp'
+       AND (${guarda}) < ${rank}`;
 
-  const delivery = await prisma.userNotificationDelivery.findFirst({ where });
-  if (delivery && shouldApply(delivery.detail, outcome)) {
-    await prisma.userNotificationDelivery.update({
-      where: { id: delivery.id },
-      data: {
-        detail: {
-          ...((delivery.detail as Record<string, unknown> | null) ?? {}),
-          maxDelivery: { ...marca },
-        },
-      },
-    });
-    result.userDeliveries += 1;
-  }
+  const userDeliveries = await prisma.$executeRaw`
+    UPDATE "UserNotificationDelivery"
+       SET "maxDeliveryJson" = ${marcaJson}::jsonb
+     WHERE id = ${outcome.dedupeKey}
+       AND "orgId" = ${outcome.orgId}
+       AND channel = 'whatsapp'
+       AND (${guarda}) < ${rank}`;
 
-  return result;
+  return { dealLogs, userDeliveries };
 }
