@@ -104,10 +104,13 @@ interface Proposal {
   convertedDealId: string | null;
   /** Já recriada — o ActionBar esconde "Recriar" e o card mostra o link. */
   supersededById: string | null;
-  /** Thread de recriação: de onde veio / quem a substituiu (label = code ou título). */
+  /**
+   * Thread de recriação: de onde veio / quem a substituiu. `id: null` = a outra
+   * ponta está fora do escopo do visitante — mostra o fato, sem link nem code.
+   */
   thread: {
-    parent: { id: string; label: string } | null;
-    supersededBy: { id: string; label: string } | null;
+    parent: { id: string | null; label: string } | null;
+    supersededBy: { id: string | null; label: string } | null;
   };
   dossierUrl: string | null;
   resumo: { proponente: string | null; imovel: string | null; valorLabel: string | null };
@@ -541,30 +544,8 @@ export function ProposalDetailClient({
             <Row label="Criada por" value={proposal.creatorName ?? "—"} />
             <Row label="Modelo" value={proposal.templateName ?? "—"} />
             <Row label="Criada" value={proposal.createdAtLabel} />
-            {proposal.thread.parent && (
-              <div className="flex justify-between gap-2 text-sm">
-                <span className="shrink-0 text-muted-foreground">Recriação de</span>
-                <Link
-                  href={`/pipeline/propostas/${proposal.thread.parent.id}`}
-                  className="min-w-0 truncate font-medium text-primary hover:underline"
-                  title={proposal.thread.parent.label}
-                >
-                  {proposal.thread.parent.label}
-                </Link>
-              </div>
-            )}
-            {proposal.thread.supersededBy && (
-              <div className="flex justify-between gap-2 text-sm">
-                <span className="shrink-0 text-muted-foreground">Recriada como</span>
-                <Link
-                  href={`/pipeline/propostas/${proposal.thread.supersededBy.id}`}
-                  className="min-w-0 truncate font-medium text-primary hover:underline"
-                  title={proposal.thread.supersededBy.label}
-                >
-                  {proposal.thread.supersededBy.label}
-                </Link>
-              </div>
-            )}
+            <ThreadRow label="Recriação de" target={proposal.thread.parent} />
+            <ThreadRow label="Recriada como" target={proposal.thread.supersededBy} />
           </div>
         </Card>
 
@@ -922,6 +903,37 @@ export function ProposalDetailClient({
         proposalId={proposal.id}
         currentTitle={proposal.title}
       />
+    </div>
+  );
+}
+
+/**
+ * Uma ponta da thread de recriação. Sem `id` (outra ponta fora do escopo do
+ * visitante) o fato aparece como texto — link levaria ao notFound() do guard
+ * da própria página.
+ */
+function ThreadRow({
+  label,
+  target,
+}: {
+  label: string;
+  target: { id: string | null; label: string } | null;
+}) {
+  if (!target) return null;
+  return (
+    <div className="flex justify-between gap-2 text-sm">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      {target.id ? (
+        <Link
+          href={`/pipeline/propostas/${target.id}`}
+          className="min-w-0 truncate font-medium text-primary hover:underline"
+          title={target.label}
+        >
+          {target.label}
+        </Link>
+      ) : (
+        <span className="min-w-0 truncate text-muted-foreground">{target.label}</span>
+      )}
     </div>
   );
 }

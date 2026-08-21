@@ -242,6 +242,7 @@ export default async function PropostasPage({
     // é quem cria OU envia. VIEW_ALL sozinho é LEITURA e não entra aqui.
     write:
       can(eff, PERMISSION.PROPOSAL_CREATE) || can(eff, PERMISSION.PROPOSAL_SEND),
+    create: can(eff, PERMISSION.PROPOSAL_CREATE),
     convert: can(eff, PERMISSION.PROPOSAL_CONVERT),
     cancel: can(eff, PERMISSION.PROPOSAL_CANCEL),
     delete: can(eff, PERMISSION.PROPOSAL_DELETE),

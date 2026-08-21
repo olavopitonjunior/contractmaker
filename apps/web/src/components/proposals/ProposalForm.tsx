@@ -82,6 +82,9 @@ export interface SchemaOption {
  * Observações e Comissão & testemunhas colapsadas com resumo no header —
  * nenhum campo delas é obrigatório, então o caminho rápido continua curto.
  */
+/** Sentinel do Select pro responsável externo herdado (não é um userId). */
+const EXTERNAL_RESPONSIBLE = "__external__";
+
 export function ProposalForm({
   mode,
   proposalId,
@@ -92,6 +95,7 @@ export function ProposalForm({
   hasIList = false,
   parentProposalId,
   initialResponsibleUserId = "",
+  initialResponsibleName,
 }: {
   mode: "create" | "edit";
   proposalId?: string;
@@ -115,13 +119,18 @@ export function ProposalForm({
   parentProposalId?: string;
   /** Responsável herdado da proposta de origem (só chega com PROPOSAL_ASSIGN). */
   initialResponsibleUserId?: string;
+  /** Responsável EXTERNO herdado (nome livre, sem userId) — vira opção própria
+   *  no Select; se o usuário trocar, a herança é descartada. */
+  initialResponsibleName?: string;
 }) {
   const router = useRouter();
   const [v, setV] = useState<ProposalFormValues>(initial);
   // Responsável comercial na criação (admin cria e atribui num passo só).
   // Fora do ProposalFormValues de propósito: o PATCH de edição não aceita o
   // campo — lá a troca é pelo ProposalAssigneeControl do detalhe.
-  const [responsibleUserId, setResponsibleUserId] = useState(initialResponsibleUserId);
+  const [responsibleUserId, setResponsibleUserId] = useState(
+    initialResponsibleUserId || (initialResponsibleName ? EXTERNAL_RESPONSIBLE : "")
+  );
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -198,7 +207,9 @@ export function ProposalForm({
         comissaoIncluida: v.comissao,
         hiddenPaths: buildHiddenPaths(v),
         ...(mode === "create" && canAssign && responsibleUserId
-          ? { responsibleUserId }
+          ? responsibleUserId === EXTERNAL_RESPONSIBLE
+            ? { responsibleName: initialResponsibleName }
+            : { responsibleUserId }
           : {}),
         ...(mode === "create" && parentProposalId ? { parentProposalId } : {}),
       };
@@ -593,6 +604,11 @@ export function ProposalForm({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Eu mesmo</SelectItem>
+                      {initialResponsibleName && (
+                        <SelectItem value={EXTERNAL_RESPONSIBLE}>
+                          {initialResponsibleName} (externo)
+                        </SelectItem>
+                      )}
                       {members.map((m) => (
                         <SelectItem key={m.id} value={m.id}>
                           {m.name}

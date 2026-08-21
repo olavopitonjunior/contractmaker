@@ -176,20 +176,54 @@ export default async function PropostaDetailPage({
   // schema — adicionar uma seria migration); o lookup é por findUnique. O
   // sentido inverso tem a relation `parentProposal`, mas o findUnique uniforme
   // evita mexer no include principal.
-  const [parentRef, supersededRef] = await Promise.all([
+  const [parentRow, supersededRow] = await Promise.all([
     proposal.parentProposalId
       ? prisma.proposal.findUnique({
           where: { id: proposal.parentProposalId },
-          select: { id: true, code: true, title: true },
+          select: {
+            id: true,
+            code: true,
+            title: true,
+            userId: true,
+            responsibleUserId: true,
+          },
         })
       : Promise.resolve(null),
     proposal.supersededById
       ? prisma.proposal.findUnique({
           where: { id: proposal.supersededById },
-          select: { id: true, code: true, title: true },
+          select: {
+            id: true,
+            code: true,
+            title: true,
+            userId: true,
+            responsibleUserId: true,
+          },
         })
       : Promise.resolve(null),
   ]);
+
+  /**
+   * A outra ponta da thread passa pelo MESMO escopo da página. Fora dele, o
+   * fato continua visível (explica o botão "Recriar" ausente) mas sem code,
+   * título ou link — que levaria ao notFound() do guard acima e ainda vazaria
+   * metadado de proposta que o visitante não pode abrir.
+   */
+  const threadRef = (
+    row: { id: string; code: string | null; title: string; userId: string; responsibleUserId: string | null } | null
+  ): { id: string | null; label: string } | null => {
+    if (!row) return null;
+    const visible = canAccessProposal({
+      effective: eff,
+      ownerUserId: row.userId,
+      responsibleUserId: row.responsibleUserId,
+    });
+    return visible
+      ? { id: row.id, label: row.code ?? row.title }
+      : { id: null, label: "outra proposta" };
+  };
+  const parentRef = threadRef(parentRow);
+  const supersededRef = threadRef(supersededRow);
 
   const d = (proposal.dataJson ?? {}) as Record<string, unknown>;
   // Mesmo resumo da listagem (lib compartilhada) — o local `summarize()` que
@@ -241,6 +275,7 @@ export default async function PropostaDetailPage({
     // é quem cria OU envia. VIEW_ALL sozinho é LEITURA e não entra aqui.
     write:
       can(eff, PERMISSION.PROPOSAL_CREATE) || can(eff, PERMISSION.PROPOSAL_SEND),
+    create: can(eff, PERMISSION.PROPOSAL_CREATE),
     convert: can(eff, PERMISSION.PROPOSAL_CONVERT),
     cancel: can(eff, PERMISSION.PROPOSAL_CANCEL),
     delete: can(eff, PERMISSION.PROPOSAL_DELETE),
@@ -272,14 +307,7 @@ export default async function PropostaDetailPage({
         updatedAtIso: proposal.updatedAt.toISOString(),
         convertedDealId: proposal.convertedDealId,
         supersededById: proposal.supersededById,
-        thread: {
-          parent: parentRef
-            ? { id: parentRef.id, label: parentRef.code ?? parentRef.title }
-            : null,
-          supersededBy: supersededRef
-            ? { id: supersededRef.id, label: supersededRef.code ?? supersededRef.title }
-            : null,
-        },
+        thread: { parent: parentRef, supersededBy: supersededRef },
         dossierUrl: proposal.dossierUrl,
         resumo,
         detalhes: summarizeProposalDetails(d, proposal.kind),

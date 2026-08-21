@@ -27,7 +27,7 @@ import { ProposalActionBar } from "../ProposalActionBar";
 import type { ProposalPermissions } from "../ProposalRowActions";
 
 const ALL: ProposalPermissions = {
-  send: true, write: true, convert: true, cancel: true,
+  send: true, write: true, create: true, convert: true, cancel: true,
   delete: true, resend: true, assign: true,
 };
 
@@ -62,6 +62,16 @@ describe("ActionBar: gating do Recriar", () => {
   it("já recriada (supersededById) → some", () => {
     render(
       <ProposalActionBar proposal={proposal({ supersededById: "p2" })} permissions={ALL} />
+    );
+    expect(screen.queryByRole("button", { name: /Recriar proposta/ })).toBeNull();
+  });
+
+  it("SEND sem CREATE → some (a ação termina num POST de criação; write não basta)", () => {
+    render(
+      <ProposalActionBar
+        proposal={proposal()}
+        permissions={{ ...ALL, create: false }}
+      />
     );
     expect(screen.queryByRole("button", { name: /Recriar proposta/ })).toBeNull();
   });

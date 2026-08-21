@@ -25,6 +25,10 @@ import {
   kindForSchema,
   defaultValidUntil,
 } from "@/lib/proposals/create-schema";
+import {
+  RECREATABLE_STATUSES,
+  TERMINAL_STATUSES,
+} from "@/lib/proposals/status-sets";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
 import { summarizeProposalData } from "@/lib/proposals/summarize";
@@ -177,8 +181,11 @@ export async function POST(req: NextRequest) {
   // pai (supersededById + evento) — sem ele, um VIEW_OWN_ONLY com o cuid de
   // proposta de colega marcaria a proposta alheia como recriada. 404 único nos
   // três casos pra não vazar existência. Nenhum status é exigido: a filha
-  // nasce rascunho inofensivo; quem gateia a AÇÃO é a UI (RECREATABLE_STATUSES)
-  // e o cancel que a precede.
+  // nasce rascunho inofensivo, mas a ESCRITA no pai não é — por isso o status
+  // do pai é gateado AQUI também (como cancel/convert fazem): só terminal
+  // recriável. No fluxo da UI o pai já chega cancelado (o diálogo passa pelo
+  // /cancel antes); recriar uma proposta VIVA por API criaria duas ativas na
+  // mesma thread, com envelope ClickSign rodando na "superada".
   //
   // TOCTOU consciente (v1): o pai é lido AQUI, fora da transação — duas
   // recriações simultâneas do mesmo pai podem duplicar o `round` da thread.
@@ -193,6 +200,7 @@ export async function POST(req: NextRequest) {
         orgId: true,
         code: true,
         round: true,
+        status: true,
         userId: true,
         responsibleUserId: true,
       },
@@ -212,6 +220,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "Proposta de origem não encontrada." },
         { status: 404 }
+      );
+    }
+    // Terminal recriável = RECREATABLE ∩ TERMINAL (cancelada/expirada/
+    // recusadas). Viva → 409 acionável, espelhando cancel (409) e convert
+    // (400) que já enforçam status server-side a partir dos mesmos sets.
+    if (!RECREATABLE_STATUSES.has(row.status) || !TERMINAL_STATUSES.has(row.status)) {
+      return NextResponse.json(
+        { error: "Cancele a proposta de origem antes de recriá-la." },
+        { status: 409 }
       );
     }
     parent = { id: row.id, code: row.code, round: row.round };

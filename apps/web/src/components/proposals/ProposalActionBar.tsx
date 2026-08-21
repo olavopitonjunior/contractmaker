@@ -36,7 +36,6 @@ import {
   CONVERT_UNSIGNED_STATUSES,
   SEND_VENDEDOR_STATUSES,
   AWAITING_DECISION_STATUSES,
-  RECREATABLE_STATUSES,
 } from "@/lib/proposals/status-sets";
 import { useConvertProposal } from "@/lib/proposals/use-convert-proposal";
 import { parseProposalApiError } from "@/lib/proposals/api-errors";
@@ -44,6 +43,12 @@ import {
   EnviarProprietarioDialog,
   type PlanVendedor,
 } from "./EnviarProprietarioDialog";
+import {
+  RecreateProposalDialog,
+  canRecreateProposal,
+  recreateNeedsCancel,
+  recreateHref,
+} from "./RecreateProposalDialog";
 
 export function ProposalActionBar({
   proposal,
@@ -128,14 +133,10 @@ export function ProposalActionBar({
   // Some depois de recriada (supersededById) — evita ramificação acidental; o
   // detalhe mostra o link "Recriada como" no lugar. No caminho vivo o cancel é
   // parte da ação, então `permissions.cancel` também é exigida.
-  const recreateNeedsCancel = CANCELLABLE_STATUSES.has(status);
-  const canRecreate =
-    permissions.write &&
-    RECREATABLE_STATUSES.has(status) &&
-    !proposal.supersededById &&
-    !proposal.convertedDealId &&
-    (!recreateNeedsCancel || permissions.cancel);
-  const recreateHref = `/pipeline/propostas/nova?fromId=${proposal.id}`;
+  const canRecreate = canRecreateProposal(
+    { status, convertedDealId: proposal.convertedDealId, supersededById: proposal.supersededById },
+    permissions
+  );
   // Espelha o guard do DELETE, igual à lista — ver ProposalRowActions.
   const canDelete =
     permissions.delete &&
@@ -234,8 +235,8 @@ export function ProposalActionBar({
           variant="outline"
           disabled={busy}
           onClick={() => {
-            if (recreateNeedsCancel) setDialog("recreate");
-            else router.push(recreateHref);
+            if (recreateNeedsCancel(status)) setDialog("recreate");
+            else router.push(recreateHref(proposal.id));
           }}
         >
           <CopyPlus className="mr-1.5 h-4 w-4" /> Recriar proposta
@@ -292,52 +293,12 @@ export function ProposalActionBar({
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Recriar (cancela a atual com motivo e abre o rascunho pré-preenchido) */}
-      <AlertDialog open={dialog === "recreate"} onOpenChange={(o) => !o && setDialog(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Recriar proposta</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta proposta será <strong>cancelada</strong> (assinaturas em curso
-              na ClickSign são canceladas junto) e um novo rascunho abre
-              pré-preenchido com os mesmos dados, pronto pra revisar e reenviar.
-              {partialSigned && (
-                <>
-                  {" "}
-                  <strong>Atenção:</strong> o proponente já assinou esta via — a
-                  assinatura dele será descartada e precisará ser colhida de novo
-                  na proposta nova.
-                </>
-              )}{" "}
-              Documentos anexados não são copiados. Informe o motivo — fica no
-              histórico.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <Textarea
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="Motivo (ex.: dados preenchidos errados, cliente não recebeu)"
-            rows={3}
-          />
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={busy}>Voltar</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={busy || reason.trim().length < 3}
-              onClick={(e) => {
-                e.preventDefault();
-                run(
-                  `/api/proposals/${proposal.id}/cancel`,
-                  jsonPost({ reason }),
-                  "Proposta cancelada — abrindo a recriação",
-                  { redirectPath: recreateHref }
-                );
-              }}
-            >
-              Cancelar e recriar
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <RecreateProposalDialog
+        open={dialog === "recreate"}
+        onOpenChange={(o) => !o && setDialog(null)}
+        proposalId={proposal.id}
+        status={status}
+      />
 
       {/* Cancelar (com motivo) */}
       <AlertDialog open={dialog === "cancel"} onOpenChange={(o) => !o && setDialog(null)}>

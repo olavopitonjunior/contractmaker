@@ -11,11 +11,10 @@ import { ProposalForm } from "@/components/proposals/ProposalForm";
 import { ProposalsNoAccess } from "@/components/proposals/ProposalsNoAccess";
 import {
   emptyProposalForm,
-  parseProposalForm,
+  parseProposalFormFromRow,
   PROPOSAL_SCHEMA_OPTIONS,
   type ProposalFormValues,
 } from "@/lib/proposals/form-data";
-import { TERMINAL_STATUSES } from "@/lib/proposals/status-sets";
 import { getIListConnection } from "@/lib/ilist/connection";
 
 export const dynamic = "force-dynamic";
@@ -45,9 +44,13 @@ export default async function NovaPropostaPage({
   // tipo — o kind dela sobrepõe `?tipo=`. Guard de org + escopo espelha o do
   // /editar; sem match, ignora o fromId e abre o form vazio (não é notFound de
   // propósito: a página continua útil pra criar do zero).
+  // `searchParams` cru pode trazer array (`?fromId=a&fromId=b`) apesar do tipo
+  // declarado — array no `where.id` estoura o Prisma em 500.
+  const fromId =
+    typeof searchParams.fromId === "string" ? searchParams.fromId : undefined;
   let fromProposal: Awaited<ReturnType<typeof prisma.proposal.findUnique>> = null;
-  if (searchParams.fromId) {
-    const row = await prisma.proposal.findUnique({ where: { id: searchParams.fromId } });
+  if (fromId) {
+    const row = await prisma.proposal.findUnique({ where: { id: fromId } });
     if (row && row.orgId === orgId) fromProposal = row;
   }
 
@@ -109,40 +112,43 @@ export default async function NovaPropostaPage({
   let initial: ProposalFormValues = emptyProposalForm(tipo, schemaOptions[0].value);
   let parentProposalId: string | undefined;
   let initialResponsibleUserId: string | undefined;
+  let initialResponsibleName: string | undefined;
   if (fromProposal) {
     const signers = await prisma.proposalSigner.findMany({
       where: { proposalId: fromProposal.id },
       orderBy: { signingGroup: "asc" },
     });
-    // Validade: null quando já venceu ou a proposta é terminal —
-    // `parseProposalForm` reconstituiria "0 dias" e a recriação nasceria
-    // expirável no ato; null faz o form voltar ao default de 7 dias.
-    const validadeViva =
-      fromProposal.validUntil &&
-      fromProposal.validUntil.getTime() > Date.now() &&
-      !TERMINAL_STATUSES.has(fromProposal.status);
-    initial = parseProposalForm({
-      kind: fromProposal.kind,
-      schemaType: fromProposal.schemaType,
-      title: fromProposal.title,
-      dataJson: fromProposal.dataJson,
-      validUntil: validadeViva ? fromProposal.validUntil!.toISOString() : null,
-      comissaoIncluida: fromProposal.comissaoIncluida,
-      hiddenPaths: fromProposal.hiddenPaths,
-      signers: signers.map((s) => ({
-        role: s.role ?? "",
-        name: s.name,
-        email: s.email,
-        cpf: s.cpf,
-        phone: s.phone,
-        notifyChannel: s.notifyChannel,
-      })),
+    // Validade: preserva a JANELA original (createdAt→validUntil do pai),
+    // recontada a partir de agora. O instante cru não serve: no fluxo normal o
+    // pai já chega TERMINAL aqui (o diálogo cancelou antes de navegar), e uma
+    // validade custom de 30 dias resetaria em silêncio pro default de 7 —
+    // contradizendo o "mesmos dados" do diálogo. Janela inválida/ausente →
+    // null (form volta ao default).
+    const janelaMs = fromProposal.validUntil
+      ? fromProposal.validUntil.getTime() - fromProposal.createdAt.getTime()
+      : null;
+    const janelaDias =
+      janelaMs && janelaMs > 0 ? Math.round(janelaMs / 86_400_000) : null;
+    initial = parseProposalFormFromRow(fromProposal, signers, {
+      validUntil: janelaDias
+        ? new Date(Date.now() + janelaDias * 86_400_000).toISOString()
+        : null,
     });
     parentProposalId = fromProposal.id;
     // Sem PROPOSAL_ASSIGN o POST recusaria o campo — o responsável cai pro
     // criador, que é o comportamento padrão da criação.
     if (canAssign && fromProposal.responsibleUserId) {
-      initialResponsibleUserId = fromProposal.responsibleUserId;
+      // Ex-membro (membership removida não anula responsibleUserId) ficaria
+      // INVISÍVEL no Select e estouraria 400 no POST — só herda se ainda for
+      // membro; senão cai no criador, como na criação comum.
+      if (members.some((m) => m.id === fromProposal!.responsibleUserId)) {
+        initialResponsibleUserId = fromProposal.responsibleUserId;
+      }
+    } else if (canAssign && fromProposal.responsibleName) {
+      // Responsável EXTERNO (nome livre, sem userId) — estado suportado pelo
+      // schema e pelo PATCH /assignee; sem repassar, a recriação trocaria o
+      // dono da atribuição em silêncio.
+      initialResponsibleName = fromProposal.responsibleName;
     }
   }
 
@@ -156,6 +162,7 @@ export default async function NovaPropostaPage({
       hasIList={hasIList}
       parentProposalId={parentProposalId}
       initialResponsibleUserId={initialResponsibleUserId}
+      initialResponsibleName={initialResponsibleName}
     />
   );
 }

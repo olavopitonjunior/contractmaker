@@ -6,7 +6,7 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { EDITABLE_STATUSES } from "@/lib/proposals/status-sets";
 import { ProposalForm } from "@/components/proposals/ProposalForm";
-import { parseProposalForm, PROPOSAL_SCHEMA_OPTIONS } from "@/lib/proposals/form-data";
+import { parseProposalFormFromRow, PROPOSAL_SCHEMA_OPTIONS } from "@/lib/proposals/form-data";
 import { getIListConnection } from "@/lib/ilist/connection";
 
 export const dynamic = "force-dynamic";
@@ -69,22 +69,8 @@ export default async function EditarPropostaPage({
   const hasIList = (await getIListConnection(org.id)) !== null;
 
   const tipo = proposal.kind === "locacao" ? "locacao" : "venda";
-  const initial = parseProposalForm({
-    kind: proposal.kind,
-    schemaType: proposal.schemaType,
-    title: proposal.title,
-    dataJson: proposal.dataJson,
+  const initial = parseProposalFormFromRow(proposal, signers, {
     validUntil: proposal.validUntil?.toISOString() ?? null,
-    comissaoIncluida: proposal.comissaoIncluida,
-    hiddenPaths: proposal.hiddenPaths,
-    signers: signers.map((s) => ({
-      role: s.role ?? "",
-      name: s.name,
-      email: s.email,
-      cpf: s.cpf,
-      phone: s.phone,
-      notifyChannel: s.notifyChannel,
-    })),
   });
 
   return (

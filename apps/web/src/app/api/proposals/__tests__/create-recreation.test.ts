@@ -58,6 +58,7 @@ const parentRow = {
   orgId: "org-1",
   code: "PROP-2026-0006",
   round: 2,
+  status: "cancelada",
   userId: "dono-1",
   responsibleUserId: null,
 };
@@ -110,6 +111,19 @@ describe("POST /api/proposals — parentProposalId (recriação)", () => {
         responsibleUserId: null,
       })
     );
+    expect(mockPrisma.proposal.create).not.toHaveBeenCalled();
+    expect(mockPrisma.proposal.update).not.toHaveBeenCalled();
+  });
+
+  it("pai ainda VIVO (enviada) → 409 acionável; recriar sem cancelar deixaria duas ativas na thread", async () => {
+    mockPrisma.proposal.findUnique.mockResolvedValue({
+      ...parentRow,
+      status: "enviada",
+    } as never);
+
+    const res = await POST(req({ ...baseBody, parentProposalId: "parent-1" }));
+
+    expect(res.status).toBe(409);
     expect(mockPrisma.proposal.create).not.toHaveBeenCalled();
     expect(mockPrisma.proposal.update).not.toHaveBeenCalled();
   });
