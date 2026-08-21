@@ -25,6 +25,13 @@ import {
 import { buildAssignmentOptions } from "@/components/forms/steps/build-assignment-options";
 import { MAX_ASSIGNMENT_INDEX } from "@/lib/forms/assignment-scope";
 import { mapAttachmentStatusToCard } from "@/lib/forms/attachment-status";
+import {
+  ACCEPTED_MIMES,
+  IMAGE_MIMES,
+  MAX_BYTES,
+  RESIZE_MAX_SIDE,
+  resizeImage,
+} from "@/lib/forms/attachment-upload";
 
 interface DocumentosStepProps {
   form: UseFormReturn<any>;
@@ -65,14 +72,6 @@ interface DocumentosStepProps {
   viewerIsMember?: boolean;
 }
 
-// 20MB de verdade: o upload agora é client-direct pro Blob
-// (`attachments/blob-upload` + `/finalize`), então o arquivo não passa mais
-// pelo corpo da função e o teto de ~4.5MB da Vercel deixou de valer.
-const MAX_BYTES = 20 * 1024 * 1024;
-const RESIZE_MAX_SIDE = 1500;
-const IMAGE_JPEG_QUALITY = 0.8;
-const IMAGE_MIMES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
-const ACCEPTED_MIMES = [...IMAGE_MIMES, "application/pdf"];
 // Upload pool: 4 concurrent HTTP uploads to Blob/S3. Não toca Gemini.
 // OCR é ON-DEMAND: o POST /attachments cria o anexo com status
 // "awaiting_user" e NÃO enfileira worker — o usuário clica "Extrair com IA"
@@ -112,31 +111,6 @@ function pLimit(concurrency: number) {
       if (active < concurrency) run();
       else queue.push(run);
     });
-}
-
-async function resizeImage(file: File, maxSide: number): Promise<File> {
-  try {
-    const bitmap = await createImageBitmap(file);
-    const { width, height } = bitmap;
-    const longest = Math.max(width, height);
-    if (longest <= maxSide) return file;
-    const ratio = maxSide / longest;
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(width * ratio);
-    canvas.height = Math.round(height * ratio);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return file;
-    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    const blob: Blob | null = await new Promise((resolve) =>
-      canvas.toBlob((b) => resolve(b), "image/jpeg", IMAGE_JPEG_QUALITY)
-    );
-    if (!blob) return file;
-    return new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), {
-      type: "image/jpeg",
-    });
-  } catch {
-    return file;
-  }
 }
 
 /**
