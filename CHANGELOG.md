@@ -4,6 +4,21 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-20 - Cadastro de corretores: validação, design system e canais
+
+### Adicionado
+
+- **Importar corretores dos contratos**: o endpoint `uncadastrados` (corretores citados em contratos dos últimos 90 dias sem cadastro) ganhou UI — diálogo com seleção múltipla na tela `/corretores`. Dados raspados de formulário são saneados antes do POST estrito; doc com dígito verificador inválido não é selecionável (evitaria loop de 422) e aponta pro cadastro manual.
+- **Pedir dados por WhatsApp**: o magic link de completar cadastro (`request-completion`) aceita `{channels}` e envia também pelo agente de WhatsApp do tenant (Newton/Max), com gate de `notifyOptOut` e janela 7h–22h do Newton. Resposta reporta o resultado POR CANAL; `ok=false` (e audit `FAILURE`) quando nada foi enviado — os três call-sites de UI mostram o desfecho real em vez do "Email enviado" incondicional.
+- **Bulk-import completo**: o CSV aceita `phone`, `creci`, `papel`, `tipoPessoa` e flags de notificação — o import em massa não nasce mais incompleto.
+
+### Corrigido
+
+- **Validação e formato canônico de contato do corretor** nos 5 pontos de escrita (POST/PATCH admin, registry do form público/finalize, bulk-import): CPF/CNPJ com dígito verificador, CRECI por formato, email lowercase e **telefone gravado em E.164 via `normalizeBrPhone`** — o mesmo normalizador que o Max (`broker-scope`), o notify-trigger e o deal-events usam na leitura; formato livre no banco fazia o Max não reconhecer corretor. PATCH ganhou dedupe por documento (editar rascunho pro doc de corretor existente criava duplicata silenciosa) e valida apenas campos ALTERADOS — registros legados gravados soft continuam editáveis. Backfill `backfill-split-recipient-contacts.ts` normaliza os existentes (colisão no universo do Max reporta e não sobrescreve).
+- **Tela `/corretores` no design system**: monólito de 927 linhas explodido em `components/corretores/` com RHF+Zod espelhando o server, tokens/Tooltip no lugar de cores hardcoded e `title=`, combobox compartilhado substituindo as 3 buscas duplicadas (form público usa o endpoint token-scoped; browse-all ao abrir), e lente por entitlement: com a pagadoria desligada, pendência de PIX não alarma (badge neutra) — a chave PIX segue disponível na criação (sem ela o registro nasceria rascunho sem caminho de ativação). "Desativar" agora também silencia notificações (`notifyOptOut`) — o diálogo prometia isso e o resolvedor continuava notificando rascunhos.
+- **Doc mascarado não vaza mais pro contrato**: selecionar corretor cadastrado no form público persistia o documento MASCARADO (`390***05`) em `dataJson` — envenenava ClickSign, DIMOB e a qualificação. O vínculo é `splitRecipientId`; o campo fica pra preencher.
+- **Menu "Corretores" com gate de permissão** (`SPLIT_VIEW`/`SPLIT_CONFIGURE`): o papel `sales` via o item e batia num 403 da API.
+
 ## [Unreleased] - 2026-08-20 - Cancelamento externo da 1ª via libera a proposta
 
 ### Corrigido

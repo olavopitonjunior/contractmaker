@@ -58,6 +58,17 @@ export const CANCELLABLE_STATUSES = new Set<string>([
   "falha_envio",
 ]);
 
+/**
+ * Status em que a landing pública `/p/[token]` responde notFound() — e,
+ * portanto, em que o detalhe NÃO deve oferecer o link pra copiar. Fonte única
+ * dos dois lados (gate da page pública + render do botão no detalhe).
+ */
+export const PUBLIC_LINK_BLOCKED_STATUSES = new Set<string>([
+  "rascunho",
+  "aguardando_aprovacao",
+  "cancelada",
+]);
+
 /** Estados FRIOS (sem envelope/aceite ativo) onde excluir é seguro. */
 export const DELETABLE_STATUSES = new Set<string>([
   "rascunho",
