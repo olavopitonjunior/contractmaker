@@ -33,22 +33,72 @@ export function pendenciasDeMatricula(dataJson: unknown): MatriculaPendencia[] {
     .filter(Boolean) as MatriculaPendencia[];
 }
 
+/** Anexo do negócio, só o que este módulo lê. */
+export interface AttachmentLite {
+  category: string | null;
+  source: string | null;
+  /** OCR do anexo — `analyzeManualCertidaoForDeal` grava os campos direto. */
+  extractedData?: unknown;
+}
+
+const soDigitos = (v: unknown) =>
+  typeof v === "string" ? v.replace(/\D/g, "") : "";
+
 /**
- * A matrícula atualizada foi obtida DEPOIS do formulário?
- *
- * O que resolve a pendência é um documento novo — upload manual pelo corretor
- * ou certidão emitida (ONR/Infosimples) —, não o anexo que o cliente subiu no
- * formulário e que motivou o pedido. Daí o corte por `source`: sem ele o banner
- * nasceria já resolvido, porque o finalize copia o anexo do form pro deal.
+ * Anexo capaz de resolver uma pendência: matrícula que chegou DEPOIS do
+ * formulário — upload manual do corretor ou certidão emitida (ONR/Infosimples).
+ * O anexo que veio do próprio formulário não conta: foi ele que motivou o
+ * pedido, e sem o corte por `source` o banner nasceria já resolvido, porque o
+ * finalize copia o anexo do form pro negócio.
  */
-export function matriculaJaObtida(
-  attachments: readonly { category: string | null; source: string | null }[],
-): boolean {
-  return attachments.some(
-    (a) =>
-      (a.category === "matricula" || a.category === "matricula_anexada") &&
-      a.source !== "form",
+function resolveMatricula(a: AttachmentLite): boolean {
+  return (
+    (a.category === "matricula" || a.category === "matricula_anexada") &&
+    a.source !== "form"
   );
+}
+
+/** Número da matrícula que o OCR leu no anexo, só dígitos, ou "". */
+function numeroDoAnexo(a: AttachmentLite): string {
+  const raw = (a.extractedData ?? {}) as Record<string, unknown>;
+  // `analyzeManualCertidaoForDeal` grava os campos do OCR no nível de cima;
+  // shapes vindos do formulário embrulham em `{ fields }`.
+  const fields = (
+    raw.fields && typeof raw.fields === "object" ? raw.fields : raw
+  ) as Record<string, unknown>;
+  return soDigitos(fields.matricula_numero ?? fields.matricula);
+}
+
+/**
+ * Quais pendências continuam de pé depois de olhar os anexos do negócio.
+ *
+ * Um negócio pode ter VÁRIOS imóveis à espera, e anexo não carrega o índice do
+ * imóvel a que pertence. Resolver tudo no primeiro upload — que é o que um
+ * `.some()` sobre a lista faria — apagaria o aviso do imóvel 2 assim que a
+ * matrícula do imóvel 1 chegasse, bem no caso em que o aviso mais importa.
+ *
+ * O vínculo real disponível é o número: o OCR da matrícula extrai
+ * `matricula_numero`, e o formulário já pediu o número de cada pendência. Casou
+ * o número, a pendência daquele imóvel específico está resolvida. Anexo sem
+ * número legível não diz QUAL imóvel atendeu, então cada um apenas abate uma
+ * pendência do total em vez de zerar o banner — a contagem fica certa mesmo
+ * quando a identidade não dá pra saber.
+ */
+export function pendenciasNaoResolvidas(
+  pendencias: readonly MatriculaPendencia[],
+  attachments: readonly AttachmentLite[],
+): MatriculaPendencia[] {
+  const resolvers = attachments.filter(resolveMatricula);
+  if (resolvers.length === 0) return [...pendencias];
+
+  const numeros = new Set(resolvers.map(numeroDoAnexo).filter(Boolean));
+  const restantes = pendencias.filter((p) => {
+    const n = soDigitos(p.matricula);
+    return !(n && numeros.has(n));
+  });
+
+  const genericos = resolvers.filter((a) => !numeroDoAnexo(a)).length;
+  return genericos > 0 ? restantes.slice(genericos) : restantes;
 }
 
 /**

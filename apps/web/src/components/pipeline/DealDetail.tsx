@@ -16,8 +16,8 @@ import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
 import { LostDealBanner } from "@/components/pipeline/LostDealBanner";
 import {
   MatriculaPendenteBanner,
-  matriculaJaObtida,
   pendenciasDeMatricula,
+  pendenciasNaoResolvidas,
 } from "@/components/pipeline/MatriculaPendenteBanner";
 import { cn } from "@/lib/utils";
 import type { DocumentCardData } from "@/components/forms/DocumentCard";
@@ -743,7 +743,12 @@ export function DealDetail({
   }
 
   const formData = deal.form?.dataJson as Record<string, unknown> | null;
-  const matriculaPendencias = pendenciasDeMatricula(formData);
+  // Pendência é POR IMÓVEL: um negócio com dois imóveis à espera não pode
+  // perder o aviso do segundo quando a matrícula do primeiro chega.
+  const matriculaPendencias = pendenciasNaoResolvidas(
+    pendenciasDeMatricula(formData),
+    deal.attachments
+  );
   const vendedores = (formData?.vendedores as Parte[]) || [];
   const compradores = (formData?.compradores as Parte[]) || [];
   const testemunhas =
@@ -1133,7 +1138,7 @@ export function DealDetail({
           formulário. Some sozinho quando a matrícula chega (upload manual ou
           certidão emitida), e não aparece em negócio perdido: lá a pendência
           não é acionável. */}
-      {!isLost && !matriculaJaObtida(deal.attachments) && (
+      {!isLost && (
         <MatriculaPendenteBanner
           pendencias={matriculaPendencias}
           onVerAnexos={() => setActiveTab("anexos")}

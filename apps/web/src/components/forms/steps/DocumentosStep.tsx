@@ -28,8 +28,8 @@ import { mapAttachmentStatusToCard } from "@/lib/forms/attachment-status";
 import {
   ACCEPTED_MIMES,
   IMAGE_MIMES,
-  MAX_BYTES,
   RESIZE_MAX_SIDE,
+  rejectFileReason,
   resizeImage,
 } from "@/lib/forms/attachment-upload";
 
@@ -654,12 +654,11 @@ export function DocumentosStep({
       // blowing up Gemini concurrency or the browser's per-origin fetch limit.
       const validFiles: Array<{ rawFile: File; tempId: string }> = [];
       for (const rawFile of arr) {
-        if (!ACCEPTED_MIMES.includes(rawFile.type)) {
-          toast.error(`Tipo não suportado: ${rawFile.name}`);
-          continue;
-        }
-        if (rawFile.size > MAX_BYTES) {
-          toast.error(`${rawFile.name} excede 20 MB`);
+        // Mesma checagem que o bloco da matrícula usa. Duplicar a regra aqui
+        // era o caminho para as duas telas divergirem sem ninguém notar.
+        const recusa = rejectFileReason(rawFile);
+        if (recusa) {
+          toast.error(recusa);
           continue;
         }
         const tempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;

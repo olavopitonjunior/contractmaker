@@ -3,7 +3,7 @@ import { matriculaConditionalPaths } from "@/lib/forms/party-required";
 import { dadosContratoSchema } from "@/lib/forms/validation";
 import {
   pendenciasDeMatricula,
-  matriculaJaObtida,
+  pendenciasNaoResolvidas,
 } from "@/components/pipeline/MatriculaPendenteBanner";
 
 /**
@@ -142,28 +142,72 @@ describe("pendência de matrícula na tela do negócio", () => {
   });
 });
 
-describe("matriculaJaObtida — o que resolve a pendência", () => {
+describe("pendenciasNaoResolvidas — o que apaga o aviso", () => {
+  const pend = (label: string, matricula = "") => ({
+    label,
+    matricula,
+    cartorio: "1º RI",
+  });
+  const anexo = (
+    category: string | null,
+    source: string | null,
+    numero?: string
+  ) => ({
+    category,
+    source,
+    extractedData: numero ? { matricula_numero: numero } : null,
+  });
+
   it("anexo copiado DO FORMULÁRIO não resolve (foi ele que motivou o pedido)", () => {
-    expect(matriculaJaObtida([{ category: "matricula", source: "form" }])).toBe(false);
+    const p = [pend("Rua A")];
+    expect(pendenciasNaoResolvidas(p, [anexo("matricula", "form")])).toEqual(p);
   });
 
-  it("upload manual do corretor resolve", () => {
-    expect(matriculaJaObtida([{ category: "matricula", source: "manual" }])).toBe(true);
+  it("upload manual e certidão emitida resolvem; outra categoria não", () => {
+    const p = [pend("Rua A")];
+    expect(pendenciasNaoResolvidas(p, [anexo("matricula", "manual")])).toEqual([]);
+    expect(pendenciasNaoResolvidas(p, [anexo("matricula", "infosimples")])).toEqual([]);
+    expect(pendenciasNaoResolvidas(p, [anexo("matricula_anexada", "manual")])).toEqual([]);
+    expect(pendenciasNaoResolvidas(p, [anexo("iptu", "manual")])).toEqual(p);
   });
 
-  it("certidão emitida (ONR/Infosimples) resolve", () => {
+  /**
+   * O caso que motivou este bloco: um `.some()` sobre a lista de anexos apagava
+   * o aviso do imóvel 2 assim que a matrícula do imóvel 1 chegava — justamente
+   * quando o aviso mais importa.
+   */
+  it("matrícula do imóvel 1 NÃO apaga a pendência do imóvel 2", () => {
+    const p = [pend("Rua A", "111"), pend("Rua B", "222")];
+    const restantes = pendenciasNaoResolvidas(p, [
+      anexo("matricula", "manual", "111"),
+    ]);
+    expect(restantes).toEqual([pend("Rua B", "222")]);
+  });
+
+  it("casa por número mesmo com máscara diferente", () => {
+    const p = [pend("Rua A", "12.345")];
+    expect(pendenciasNaoResolvidas(p, [anexo("matricula", "manual", "12345")])).toEqual(
+      []
+    );
+  });
+
+  it("anexo sem número legível abate UMA pendência, não todas", () => {
+    const p = [pend("Rua A", "111"), pend("Rua B", "222")];
+    expect(pendenciasNaoResolvidas(p, [anexo("matricula", "manual")])).toHaveLength(1);
+  });
+
+  it("dois anexos genéricos para dois imóveis zeram o aviso", () => {
+    const p = [pend("Rua A", "111"), pend("Rua B", "222")];
     expect(
-      matriculaJaObtida([{ category: "matricula", source: "infosimples" }])
-    ).toBe(true);
+      pendenciasNaoResolvidas(p, [
+        anexo("matricula", "manual"),
+        anexo("matricula", "manual"),
+      ])
+    ).toEqual([]);
   });
 
-  it("categoria legada matricula_anexada também resolve", () => {
-    expect(
-      matriculaJaObtida([{ category: "matricula_anexada", source: "manual" }])
-    ).toBe(true);
-  });
-
-  it("anexo de outra categoria não resolve", () => {
-    expect(matriculaJaObtida([{ category: "iptu", source: "manual" }])).toBe(false);
+  it("sem anexo nenhum, todas as pendências ficam de pé", () => {
+    const p = [pend("Rua A"), pend("Rua B")];
+    expect(pendenciasNaoResolvidas(p, [])).toEqual(p);
   });
 });

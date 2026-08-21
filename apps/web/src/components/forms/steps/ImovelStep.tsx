@@ -41,6 +41,11 @@ export function ImovelStep({ form, attachmentsEndpoint }: ImovelStepProps) {
   const inflightRef = useRef<Promise<MatriculaAttachmentOption[] | null> | null>(
     null
   );
+  // Ordem de chegada não é ordem de saída. Sem este contador, um GET antigo de
+  // outro imóvel podia responder DEPOIS do GET forçado logo após um upload e
+  // sobrescrever a lista com dados anteriores ao anexo — o bloco então acusaria
+  // "anexo removido" para um arquivo que acabou de subir.
+  const seqRef = useRef(0);
 
   const loadAttachments = useCallback(
     async (force = false): Promise<MatriculaAttachmentOption[] | null> => {
@@ -50,6 +55,7 @@ export function ImovelStep({ form, attachmentsEndpoint }: ImovelStepProps) {
       // encontraria o próprio arquivo.
       if (!force && inflightRef.current) return inflightRef.current;
 
+      const seq = ++seqRef.current;
       const run = (async () => {
         try {
           const res = await fetch(attachmentsEndpoint);
@@ -58,7 +64,9 @@ export function ImovelStep({ form, attachmentsEndpoint }: ImovelStepProps) {
           const list: MatriculaAttachmentOption[] = Array.isArray(data?.attachments)
             ? data.attachments
             : [];
-          setAttachments(list);
+          // Resposta atrasada ainda serve a quem a pediu (o retorno), mas não
+          // pode virar o estado compartilhado por cima de uma mais nova.
+          if (seq === seqRef.current) setAttachments(list);
           return list;
         } catch {
           // Falha de rede não pode derrubar a etapa — o operador ainda consegue

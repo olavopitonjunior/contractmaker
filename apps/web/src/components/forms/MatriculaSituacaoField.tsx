@@ -116,6 +116,12 @@ export function MatriculaSituacaoField({
     form.setValue(`${prefix}.matricula_situacao`, value, { shouldDirty: true });
   };
 
+  // Ids que ESTE bloco acabou de subir. Se o refetch seguinte falhar (rede
+  // instável é a regra em visita de imóvel), a lista antiga não conteria o
+  // arquivo novo e o bloco acusaria "anexo removido" para algo que subiu com
+  // sucesso — mentira pior que o silêncio.
+  const enviadosAquiRef = useRef<Set<string>>(new Set());
+
   const selected =
     attachments?.find((a) => a.id === attachmentId) ?? null;
   // Anexo apagado depois de escolhido: o id continua no dataJson mas sumiu do
@@ -123,7 +129,10 @@ export function MatriculaSituacaoField({
   // mentiria sobre qual documento está vinculado), mantemos o id como opção
   // rotulada — o operador vê que precisa escolher outro.
   const selectionMissing =
-    attachments !== null && attachmentId !== "" && selected === null;
+    attachments !== null &&
+    attachmentId !== "" &&
+    selected === null &&
+    !enviadosAquiRef.current.has(attachmentId);
 
   const groups: SelectGroup[] = [];
   if (selectionMissing) {
@@ -207,6 +216,7 @@ export function MatriculaSituacaoField({
     try {
       const att = await uploadFormAttachment(attachmentsEndpoint, file);
       created = { id: att.id, filename: att.filename };
+      enviadosAquiRef.current.add(att.id);
       // Vincula na hora: se o OCR falhar depois, o documento certo já está
       // apontado e o operador só digita os campos à mão.
       select(att.id, att.filename);
