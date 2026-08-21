@@ -16,6 +16,7 @@ import {
   type ProposalFormValues,
 } from "@/lib/proposals/form-data";
 import { getIListConnection } from "@/lib/ilist/connection";
+import { resolveRecreationAssignee } from "@/lib/proposals/recreate-assignee";
 
 export const dynamic = "force-dynamic";
 
@@ -77,27 +78,10 @@ export default async function NovaPropostaPage({
 
   const schemaOptions = PROPOSAL_SCHEMA_OPTIONS[tipo];
 
-  // iList (RE/MAX): botão de busca no catálogo só quando o tenant tem conexão
-  // provisionada pelo super-admin — mesmo gate do dropdown do pipeline.
-  const hasIList = (await getIListConnection(orgId)) !== null;
-
-  // Admin/gestor cria já atribuindo (select "Responsável" no form). Sem
-  // PROPOSAL_ASSIGN o select nem aparece e a lista não é carregada.
-  const canAssign = can(eff, PERMISSION.PROPOSAL_ASSIGN);
-  const members = canAssign
-    ? (
-        await prisma.orgMembership.findMany({
-          where: { orgId },
-          select: { user: { select: { id: true, name: true } } },
-          orderBy: { user: { name: "asc" } },
-        })
-      )
-        .map((m) => ({ id: m.user.id, name: m.user.name ?? "Sem nome" }))
-        .filter((m) => m.id)
-    : [];
-
   // Escopo (dono/responsável/VIEW_ALL) — mesmo corte do /editar. Fora dele o
-  // fromId é ignorado silenciosamente (form vazio).
+  // fromId é ignorado silenciosamente (form vazio). Resolvido ANTES das buscas
+  // abaixo: é decisão pura, e decidi-la primeiro evita buscar os signatários de
+  // uma proposta que o escopo vai descartar.
   if (
     fromProposal &&
     !canAccessProposal({
@@ -109,15 +93,41 @@ export default async function NovaPropostaPage({
     fromProposal = null;
   }
 
+  // Admin/gestor cria já atribuindo (select "Responsável" no form). Sem
+  // PROPOSAL_ASSIGN o select nem aparece e a lista não é carregada.
+  const canAssign = can(eff, PERMISSION.PROPOSAL_ASSIGN);
+
+  // As três buscas não dependem uma da outra — serializá-las somava três idas
+  // ao banco na abertura da página, cada uma esperando a anterior sem motivo.
+  // iList (RE/MAX): botão de busca no catálogo só quando o tenant tem conexão
+  // provisionada pelo super-admin — mesmo gate do dropdown do pipeline.
+  const [ilistConnection, memberRows, signers] = await Promise.all([
+    getIListConnection(orgId),
+    canAssign
+      ? prisma.orgMembership.findMany({
+          where: { orgId },
+          select: { user: { select: { id: true, name: true } } },
+          orderBy: { user: { name: "asc" } },
+        })
+      : Promise.resolve([]),
+    fromProposal
+      ? prisma.proposalSigner.findMany({
+          where: { proposalId: fromProposal.id },
+          orderBy: { signingGroup: "asc" },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  const hasIList = ilistConnection !== null;
+  const members = memberRows
+    .map((m) => ({ id: m.user.id, name: m.user.name ?? "Sem nome" }))
+    .filter((m) => m.id);
+
   let initial: ProposalFormValues = emptyProposalForm(tipo, schemaOptions[0].value);
   let parentProposalId: string | undefined;
   let initialResponsibleUserId: string | undefined;
   let initialResponsibleName: string | undefined;
   if (fromProposal) {
-    const signers = await prisma.proposalSigner.findMany({
-      where: { proposalId: fromProposal.id },
-      orderBy: { signingGroup: "asc" },
-    });
     // Validade: preserva a JANELA original (createdAt→validUntil do pai),
     // recontada a partir de agora. O instante cru não serve: no fluxo normal o
     // pai já chega TERMINAL aqui (o diálogo cancelou antes de navegar), e uma
@@ -135,21 +145,17 @@ export default async function NovaPropostaPage({
         : null,
     });
     parentProposalId = fromProposal.id;
-    // Sem PROPOSAL_ASSIGN o POST recusaria o campo — o responsável cai pro
-    // criador, que é o comportamento padrão da criação.
-    if (canAssign && fromProposal.responsibleUserId) {
-      // Ex-membro (membership removida não anula responsibleUserId) ficaria
-      // INVISÍVEL no Select e estouraria 400 no POST — só herda se ainda for
-      // membro; senão cai no criador, como na criação comum.
-      if (members.some((m) => m.id === fromProposal!.responsibleUserId)) {
-        initialResponsibleUserId = fromProposal.responsibleUserId;
-      }
-    } else if (canAssign && fromProposal.responsibleName) {
-      // Responsável EXTERNO (nome livre, sem userId) — estado suportado pelo
-      // schema e pelo PATCH /assignee; sem repassar, a recriação trocaria o
-      // dono da atribuição em silêncio.
-      initialResponsibleName = fromProposal.responsibleName;
-    }
+    // Regra em `lib/proposals/recreate-assignee`: sem permissão de atribuir,
+    // ex-membro e responsável externo são três casos de borda distintos, e
+    // aqui dentro não davam pra exercitar sem levantar Prisma e sessão.
+    const assignee = resolveRecreationAssignee({
+      canAssign,
+      responsibleUserId: fromProposal.responsibleUserId,
+      responsibleName: fromProposal.responsibleName,
+      memberIds: members.map((m) => m.id),
+    });
+    initialResponsibleUserId = assignee.responsibleUserId;
+    initialResponsibleName = assignee.responsibleName;
   }
 
   return (

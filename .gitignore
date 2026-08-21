@@ -1,5 +1,8 @@
 # dependencies
-node_modules/
+# Sem a barra: `node_modules/` casa APENAS diretório, e worktree com
+# node_modules ligado por symlink escapava do ignore — um `git add -A`
+# distraído comitaria um link pro node_modules de outra sessão.
+node_modules
 .pnp
 .pnp.js
 
