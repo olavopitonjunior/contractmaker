@@ -176,6 +176,32 @@ export function effectiveRequiredPaths(
 }
 
 /**
+ * Obrigatoriedade CONDICIONAL da matrícula (venda).
+ *
+ * Quando o cliente marca "a matrícula atualizada deverá ser solicitada", número
+ * e cartório deixam de ser opcionais: são eles que identificam o que pedir ao
+ * registro — sem os dois, a pendência que vai parar na tela do negócio é
+ * inacionável ("solicitar matrícula de qual imóvel, em que cartório?").
+ *
+ * Vive aqui, junto do resto da resolução de obrigatórios, porque precisa ser
+ * somada em TODOS os consumidores da lista — gate de navegação, contagem de
+ * pendências e asterisco. Um consumidor que esqueça de somar mostra uma
+ * verdade diferente dos outros, que é o defeito clássico deste módulo.
+ */
+export function matriculaConditionalPaths(
+  getValue: (path: string) => unknown,
+): string[] {
+  const imoveis = getValue("imoveis");
+  const n = Array.isArray(imoveis) && imoveis.length > 0 ? imoveis.length : 1;
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    if (getValue(`imoveis.${i}.matricula_situacao`) !== "solicitar") continue;
+    out.push(`imoveis.${i}.matricula`, `imoveis.${i}.cartorio`);
+  }
+  return out;
+}
+
+/**
  * Conveniência: paths efetivos que estão vazios no form. `getValue` lê o valor
  * atual de cada path.
  */
