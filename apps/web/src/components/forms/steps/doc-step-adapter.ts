@@ -182,6 +182,9 @@ export function computeDocWrites(
     setValue: (path: string, value: unknown) => {
       writes.set(path, value);
     },
+    // Sonda: só COLETA os writes, sem tocar o form real — por isso não pode
+    // repassar o clearErrors do mapper, que mexeria no estado de verdade.
+    clearErrors: () => {},
   } as unknown as UseFormReturn<Record<string, unknown>>;
   adapter.apply(extraction, assignment, probe, { skipIfDirty: false });
   return writes;

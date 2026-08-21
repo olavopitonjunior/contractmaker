@@ -219,7 +219,8 @@ some com o assunto.
 | Var | Efeito |
 |---|---|
 | `MAX_NOTIFY_URL` | Base do serviço do Max. Ausente → WhatsApp `skipped` (`max_service_ausente`). É o estado de staging, por desenho. |
-| `MAX_NOTIFY_SECRET` | Segredo do HMAC. Ausente → mesmo `skipped`. |
+| `MAX_NOTIFY_SECRET` | Segredo do HMAC das chamadas PARA o Max. Ausente → mesmo `skipped`. |
+| `MAX_WEBHOOK_SECRET` | Segredo do HMAC na direção OPOSTA: o Max reportando desfecho de entrega em `POST /api/webhooks/max`. Secret próprio de propósito — compartilhar o valor com `MAX_NOTIFY_SECRET` deixaria qualquer um dos lados forjar o outro. Ausente → rota responde 503 e o Max segue retentando. Mesmo valor no projeto Vercel do `max-agent`. |
 | `MAX_DISABLED=true` | Kill switch global, antes de qualquer leitura de módulo. |
 
 ## 7. Rollout e runbook
@@ -242,18 +243,37 @@ some com o assunto.
 
 ## 8. Lacunas conhecidas
 
-- **Entrega pós-202 é ponto cego.** Falha real (número sem WhatsApp, bloqueio,
-  instância desconectada) só aparece nos callbacks do Z-API, hoje visíveis
-  apenas dentro do Max. A reconciliação de volta (`POST /api/webhooks/max` atualizando
-  as tabelas de log) é Fase 4.
+- ~~**Entrega pós-202 é ponto cego.**~~ **Fechada (Fase 4, 2026-08-20).** O Max
+  consome os callbacks de status da Z-API (`SENT/RECEIVED/READ`) e reporta o
+  desfecho (`delivered | read | unconfirmed | failed`) em
+  `POST /api/webhooks/max`, costurado por `(orgId, id da linha de log)` — o
+  `dedupeKey` do payload É o `logId`/`deliveryId` que viajou no `/notify`;
+  a coluna `dedupeKey` dos modelos guarda chave de EVENTO e não entra no
+  match — e gravado na coluna
+  própria `maxDeliveryJson` dos dois logs (fora do `detail`, que os settles
+  substituem a cada tentativa; o `status` da linha não muda —
+  ele significa "processado pelo trilho", não "entregue"). Contrato:
+  `{orgId, dedupeKey, status, at, providerMessageId}`, HMAC
+  `${timestamp}.${rawBody}` com `MAX_WEBHOOK_SECRET` (§6). Idempotente e
+  monotônico dos dois lados; `sent` puro não é reportado. **Cobertura**: só
+  canais cuja `dedupeKey` é o ID de uma linha de log. Canais com dedupeKey
+  SEMÂNTICA e sem linha de log (ex.: request-completion de split-recipients,
+  `split_recipient_completion:<id>:<exp>`) ficam fora — o desfecho reportado
+  casa zero linhas, responde 200 e o Max o dá por entregue (sem retry). Para
+  cobrir um canal novo, crie a linha de log e mande o id como dedupeKey.
+  O `maxDeliveryJson` ainda não tem CONSUMIDOR de UI — o fechamento aqui é
+  no dado; expor no painel de notificações é etapa seguinte.
 - **`supports` do `max` segue `false`** no registry: o serviço ainda não lê o
   perfil, e a tela não deve prometer controle que o runtime não honra. Virar
   `true` campo a campo, conforme o serviço passar a honrar cada um.
 - **Não documentado no `openapi.json`** — consistente com `/api/agents/profile`
   e `/api/agents/usage`, que também não estão. Vale documentar os três juntos.
-- **Corretor não-`User` não tem lookup por telefone.** Só `User.phone` resolve
-  via `/api/users/by-phone`. Estender pra `SplitRecipient` é Fase 4, se a demanda
-  aparecer.
+- ~~**Corretor não-`User` não tem lookup por telefone.**~~ **Fechada** — por
+  rota NOVA, não estendendo `/api/users/by-phone` (que segue sem
+  `SplitRecipient`): `GET /api/agents/broker-scope?phone=` resolve o corretor
+  atribuído (`maxEnabled`) da org do token, com 404 indistinto para
+  desconhecido/não-atribuído/inativo/duplicado. O Max consome na identidade e
+  na semeadura de `corretorIds`.
 
 ## 9. O que reaproveitar do `.openclaw` (auditado em 2026-08-01)
 

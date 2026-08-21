@@ -87,13 +87,22 @@ export async function persistDealDocument(
     },
   });
 
-  // Quando a category é certidão ou matrícula anexada, dispara análise
-  // fire-and-forget (OCR estruturado → crossCheckCertidoes → ContractComment).
-  // Não bloqueia a resposta. `waitUntil` (não `void`) evita que a Vercel cancele
-  // o fire-and-forget após o response retornar (#76 Fase 3+4).
+  // Quando a category é certidão ou matrícula, dispara análise fire-and-forget
+  // (OCR estruturado → crossCheckCertidoes → ContractComment). Não bloqueia a
+  // resposta. `waitUntil` (não `void`) evita que a Vercel cancele o
+  // fire-and-forget após o response retornar (#76 Fase 3+4).
+  //
+  // `"matricula"` entrou em 2026-08-21: o guard só aceitava
+  // `"matricula_anexada"`, categoria que NENHUM produtor do repo grava — o
+  // finalize do formulário copia `"matricula"` (PROPERTY_CATEGORIES) e o
+  // upload manual idem. Ou seja: a análise de matrícula nunca rodou, desde
+  // sempre. O guard gêmeo em `manual-certidao-analysis` precisou do mesmo
+  // conserto, senão isto aqui dispararia e a análise morreria três linhas
+  // adentro — bug sumindo sem o efeito aparecer.
   if (
     attachment.category &&
     (attachment.category.startsWith("certidao_") ||
+      attachment.category === "matricula" ||
       attachment.category === "matricula_anexada")
   ) {
     waitUntil(

@@ -26,8 +26,11 @@ function makeFormStub(initial: Record<string, unknown> = {}) {
     }
     return store.get(path);
   });
+  // O autofill limpa o erro do campo que acabou de preencher; sem este
+  // mock o stub mentiria sobre a interface que o codigo usa.
+  const clearErrors = vi.fn();
   return {
-    form: { setValue, getValues } as unknown as UseFormReturn<Record<string, unknown>>,
+    form: { setValue, getValues, clearErrors } as unknown as UseFormReturn<Record<string, unknown>>,
     store,
   };
 }

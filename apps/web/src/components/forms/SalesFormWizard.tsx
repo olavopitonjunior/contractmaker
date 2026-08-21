@@ -23,6 +23,7 @@ import {
   PARTY_SUB_LABELS,
   isValueEmpty,
   getByPath,
+  matriculaConditionalPaths,
 } from "@/lib/forms/party-required";
 import { toast } from "sonner";
 import { useAutoSave } from "@/hooks/use-auto-save";
@@ -371,6 +372,9 @@ const defaultFormValues: Partial<DadosContratoForm> = {
       cidade: "",
       uf: "",
       cep: "",
+      matricula_situacao: "",
+      matricula_attachment_id: "",
+      matricula_attachment_filename: "",
       matricula: "",
       cartorio: "",
       inscricao_iptu: "",
@@ -504,10 +508,17 @@ export function SalesFormWizard({
   // pra que stepper/bolha de pendências recalculem a cada digitação.
   const readValue = (path: string): unknown => getByPath(watchedData, path);
 
+  // Condicionais que não vêm do preset: hoje só a matrícula (marcar "deverá
+  // ser solicitada" torna número e cartório obrigatórios). Somados aos TRÊS
+  // consumidores da lista abaixo — gate, contagem e asterisco —, senão cada
+  // um mostraria uma verdade diferente.
+  const conditionalRequired = matriculaConditionalPaths(readValue);
+  const isStep3 = currentTrueIndex === 3;
+
   // Required fields da etapa atual remapeados pelo tipo_pessoa vivo (PJ não
   // tem cpf/estado_civil/rg — vira cnpj/razão social ou é dispensado).
   const currentEffectiveRequired = effectiveRequiredPaths(
-    currentRequiredFields,
+    isStep3 ? [...currentRequiredFields, ...conditionalRequired] : currentRequiredFields,
     readValue,
   );
   const currentMissingCount = currentEffectiveRequired.filter((p) =>
@@ -520,7 +531,7 @@ export function SalesFormWizard({
   // ficava sem asterisco enquanto o "Próximo" barrava nele, e RG/estado civil
   // apareciam marcados numa ficha de empresa que não os renderiza.
   const allRequiredPaths = effectiveRequiredPaths(
-    effectiveRequiredFields.flat(),
+    [...effectiveRequiredFields.flat(), ...conditionalRequired],
     readValue,
   );
 
@@ -586,15 +597,20 @@ export function SalesFormWizard({
     if (target > currentStep) {
       for (let i = currentStep; i < target; i++) {
         const trueIndex = visibleStepIndexes[i] ?? i;
-        const rawStepFields = effectiveRequiredFields[trueIndex] ?? [];
+        // Condicionais da etapa 3 entram no gate junto do preset — ver
+        // `matriculaConditionalPaths`. Lidos por getValues (não pelo
+        // watchedData) porque aqui a decisão é sobre o valor no INSTANTE do
+        // clique, não sobre o render.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const readNow = (path: string): unknown => form.getValues(path as any);
+        const rawStepFields = [
+          ...(effectiveRequiredFields[trueIndex] ?? []),
+          ...(trueIndex === 3 ? matriculaConditionalPaths(readNow) : []),
+        ];
         // Remapeia pelo tipo_pessoa vivo: PJ não tem cpf/estado_civil/rg, então
         // exigi-los geraria pendência fantasma (campo nem renderiza). Vira
         // cnpj/razão social ou é dispensado. eslint: getValues tipado solto.
-        const stepFields = effectiveRequiredPaths(
-          rawStepFields,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (p) => form.getValues(p as any),
-        );
+        const stepFields = effectiveRequiredPaths(rawStepFields, readNow);
         // Marca step como visited antes de validar — quem visita primeiro
         // gera o sinal de "pendência conhecida" se faltar coisa.
         setVisitedSteps((prev) => {
@@ -629,6 +645,21 @@ export function SalesFormWizard({
           // Roda o trigger pra cobrir refines/min(N) que o non-empty não pega.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const triggerValid = await form.trigger(stepFields as any);
+          // `trigger` REESCREVE os erros dos paths que valida, então ele apaga
+          // os `setError` manuais de todo campo que o schema considera válido
+          // — e a maioria dos paths de DadosContrato é `.optional()`, onde ""
+          // passa. Sem reaplicar, o campo obrigatório APENAS pelo preset (ou
+          // pela condicional da matrícula) some do destaque: o toast nomeia e a
+          // bolha conta, mas a borda vermelha e o scroll-até-o-campo não
+          // acontecem. Campo com regra própria no schema (rua, descrição) não
+          // sofria disso, o que escondia a falha.
+          for (const path of missingPaths) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            form.setError(path as any, {
+              type: "required",
+              message: "Campo obrigatório",
+            });
+          }
           if (missingPaths.length > 0 || !triggerValid) {
             setFailedTriggerCount((n) => n + 1);
             // NOMEIA o que falta: "etapa 3" mandava o cliente caçar o campo
@@ -714,7 +745,10 @@ export function SalesFormWizard({
    */
   const stepHasPending = (stepIndex: number): boolean => {
     const trueIndex = visibleStepIndexes[stepIndex] ?? stepIndex;
-    const paths = effectiveRequiredFields[trueIndex] ?? [];
+    const paths = [
+      ...(effectiveRequiredFields[trueIndex] ?? []),
+      ...(trueIndex === 3 ? conditionalRequired : []),
+    ];
     if (paths.length === 0) return false;
     return findMissingRequired(paths, readValue).length > 0;
   };
@@ -809,7 +843,13 @@ export function SalesFormWizard({
     />,
     <VendedorStep key="step-1" form={form} />,
     <CompradorStep key="step-2" form={form} />,
-    <ImovelStep key="step-3" form={form} />,
+    <ImovelStep
+      key="step-3"
+      form={form}
+      attachmentsEndpoint={
+        finalizeMode === "main" ? `${autoSaveEndpoint}/attachments` : undefined
+      }
+    />,
     <StatusDebitosStep key="step-4" form={form} />,
     <PagamentoStep key="step-5" form={form} readOnly={readOnly} />,
     <ComissaoConfigStep

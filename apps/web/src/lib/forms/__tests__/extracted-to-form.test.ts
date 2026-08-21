@@ -32,9 +32,13 @@ function makeFormStub(initial: Record<string, unknown> = {}) {
     }
     return store.get(path);
   });
+  // O autofill limpa o erro do campo que acabou de preencher; sem este
+  // mock o stub mentiria sobre a interface que o codigo usa.
+  const clearErrors = vi.fn();
   return {
-    form: { setValue, getValues } as unknown as UseFormReturn<Record<string, unknown>>,
+    form: { setValue, getValues, clearErrors } as unknown as UseFormReturn<Record<string, unknown>>,
     store,
+    clearErrors,
   };
 }
 
@@ -352,5 +356,41 @@ describe("suggestAssignment — sub-slots", () => {
     expect(
       suggestAssignment("rg", { cpf_numero: "55566677788" }, snapshot)
     ).toEqual({ kind: "vendedor", index: 0 });
+  });
+});
+
+/**
+ * Achado na smoke em staging: o campo preenchido pela IA continuava com borda
+ * vermelha e "Campo obrigatório", enquanto o MESMO campo preenchido à mão
+ * ficava limpo — `setValue` não mexe em erro, digitação sim. A extração
+ * parecia não ter funcionado justamente onde funcionou.
+ */
+describe("autofill limpa o erro do campo que preencheu", () => {
+  const MATRICULA: ExtractedDoc = {
+    category: "matricula",
+    fields: { matricula_numero: "98.765", cartorio: "3º RI de São Paulo/SP" },
+  };
+  const alvo: Assignment = { kind: "imovel", index: 0 };
+
+  it("chama clearErrors para cada campo aplicado", () => {
+    const { form, clearErrors } = makeFormStub();
+    const filled = mapExtractedToForm(MATRICULA, alvo, form);
+    expect(filled).toBeGreaterThan(0);
+    const limpos = clearErrors.mock.calls.map((c) => c[0]);
+    expect(limpos).toContain("imoveis.0.matricula");
+    expect(limpos).toContain("imoveis.0.cartorio");
+    expect(clearErrors).toHaveBeenCalledTimes(filled);
+  });
+
+  it("campo pulado por skipIfDirty NAO tem o erro limpo", () => {
+    // O valor do usuário prevaleceu, então o estado de erro daquele campo
+    // continua sendo assunto do que ele digitou — não da extração.
+    const { form, clearErrors } = makeFormStub({
+      "imoveis.0.matricula": "ja digitado",
+    });
+    mapExtractedToForm(MATRICULA, alvo, form, { skipIfDirty: true });
+    expect(clearErrors.mock.calls.map((c) => c[0])).not.toContain(
+      "imoveis.0.matricula"
+    );
   });
 });
