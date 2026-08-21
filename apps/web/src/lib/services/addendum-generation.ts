@@ -161,8 +161,8 @@ export async function generateAddendumForDeal(
     googleDocUrl = uploaded.webViewLink;
 
     // Aplica DocumentStyle default herdando o que o CCV usa.
-    // Reusa `googleApplyStylePreset` de ai/google-tool-handlers (handler do
-    // tool apply_style_preset). Mesmo código, sem duplicação.
+    // Reusa `googleApplyStylePreset` de ai/google-tool-handlers. Mesmo
+    // código, sem duplicação (a tool de IA foi aposentada; a função fica).
     try {
       const { googleApplyStylePreset } = await import("@/lib/ai/google-tool-handlers");
       const defaultStyle = await prisma.documentStyle.findFirst({

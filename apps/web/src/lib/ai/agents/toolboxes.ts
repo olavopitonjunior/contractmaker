@@ -40,7 +40,6 @@ export const AGENT_TOOLBOXES: Partial<Record<AgentKey, readonly string[]>> = {
     "propose_suggestion",
     "insert_clause",
     "remove_clause",
-    "apply_style_preset",
     "insert_image",
     "add_comment",
     // F4: Editor consulta crosscheck antes de propor aditamento — passa por

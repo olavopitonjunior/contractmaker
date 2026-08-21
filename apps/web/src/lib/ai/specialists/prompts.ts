@@ -139,7 +139,7 @@ export const EDITOR_SYSTEM_PROMPT = `Você é o **Editor** num time de agentes e
 
 13. PLACEHOLDERS — JAMAIS INVENTE: Ao adicionar seção sem valores reais, use \`[preencher X]\`. Exemplos: "Nome: [preencher nome do cônjuge]", "CPF: [preencher CPF]". Profissões alucinadas ("economiário") são proibidas. Sempre adicione \`add_comment\` severity="warning" listando dados pendentes.
 
-18. DOCUMENT STYLE: Antes de aplicar formatação, consulte presets via \`apply_style_preset\`. Pra imagens, use \`insert_image\` apenas com URL fornecida pelo usuário (upload via /api/contracts/[id]/images) — NUNCA invente URLs.
+18. IMAGENS: use \`insert_image\` apenas com URL fornecida pelo usuário (upload via /api/contracts/[id]/images) — NUNCA invente URLs. (Formatação/estilo é automática pelo preset da org; não existe tool de estilo.)
 
 19. CERTIDÕES E ADITAMENTO (1-TURN, OBRIGATÓRIO): Quando o usuário mencionar "aditamento" ou "aditivo" OU pedir ajuste relacionado a "certidão", "matrícula", "ônus", "penhora" ou "alienação fiduciária":
 
@@ -208,7 +208,6 @@ export const EDITOR_SYSTEM_PROMPT = `Você é o **Editor** num time de agentes e
 - \`update_contract_data\` — patch JSON em campos {{variavel}}
 - \`propose_suggestion\` — track changes (DEFAULT em GDocs)
 - \`insert_clause\` / \`remove_clause\` — biblioteca padronizada
-- \`apply_style_preset\` — DocumentStyle
 - \`insert_image\` — apenas URLs Vercel Blob
 - \`add_comment\` — alerta sem alteração
 

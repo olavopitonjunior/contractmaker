@@ -4,6 +4,12 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-21 - Estilos de documento saem da configuração (soft removal)
+
+### Removido
+
+- **Tela `/settings/document-styles`, rotas `api/document-styles/*` e a tool de IA `apply_style_preset`** — a tela confundia com Templates (que carregam a própria formatação no engine google_docs) e virou superfície morta. O MOTOR fica 100% intacto: org nova continua nascendo com o preset padrão (seed), a geração Handlebars continua aplicando fonte/margens automaticamente (`googleApplyStylePreset`), e o export PDF/propostas continua usando o preset da org — a aparência de nenhum contrato muda. Compatibilidade: a entrada em `event-icons.ts` fica (timelines de chat antigas re-hidratam por ela); chamadas remanescentes ao nome caem no fallback genérico do dispatch (`Tool desconhecida`) e viram step `failed` gracioso no execute-plan — mesmo padrão da aposentadoria de `query_clauses`. ChatPlan PENDENTE antigo que contenha um step da tool falha esse step e pula dependentes (verificado zero casos em staging/prod na promoção). Ajustar preset passa a ser operação de banco (decisão consciente; reversível recriando a UI).
+
 ## [Unreleased] - 2026-08-21 - Banco de cláusulas: redesign, preview e IA com consulta ao acervo
 
 ### Adicionado
@@ -38,7 +44,6 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 - **Thread de recriação persistida**: a filha nasce com `parentProposalId` + `round` herdado (+1); o pai ganha `supersededById` (última recriação vence) e o botão "Recriar" some dele — o detalhe mostra "Recriação de PROP-X"/"Recriada como PROP-Y" com link (fora do escopo do visitante, o fato aparece sem code nem link: o link levaria ao próprio notFound da página), e a timeline ganha os eventos `superseded_by_recreation`/`recreated_from` (timeline apenas; decisão deliberada de não notificar — quem recria é o próprio corretor, na tela). Campos já existiam no schema desde a modelagem — sem migration.
 
   Guardas de estado que o review fechou: o POST valida status do pai server-side (só terminal recriável; recriar uma viva por API deixaria duas ativas na thread com envelope rodando na "superada"), o gate da UI é `PROPOSAL_CREATE` puro (com `write` — CREATE **ou** SEND — um SEND-sem-CREATE cancelava a proposta e batia em 403 na criação, executando só a metade destrutiva), e excluir o rascunho-filho limpa o `supersededById` do pai (o campo é escalar sem FK: o ponteiro pendurado escondia "Recriar" pra sempre). A validade **preserva a janela original** recontada de agora — resetar pro default de 7 dias contradizia o "mesmos dados" do diálogo —, o responsável externo (`responsibleName`) é herdado junto e um responsável que saiu da org não é copiado (viraria 400 no submit).
-
 ## [Unreleased] - 2026-08-20 - Cadastro de corretores: validação, design system e canais
 
 ### Adicionado

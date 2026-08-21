@@ -2,9 +2,10 @@ import { describe, it, expect } from "vitest";
 import { AGENT_TOOLS, getToolNames } from "../tools";
 
 describe("AGENT_TOOLS", () => {
-  it("has exactly 20 tools", () => {
+  it("has exactly 19 tools", () => {
+    // 2026-08-21 — apply_style_preset aposentada (soft removal DocumentStyle).
     // 2026-05-18 — query_clauses removida na unificação Clause→KnowledgeItem.
-    expect(AGENT_TOOLS).toHaveLength(20);
+    expect(AGENT_TOOLS).toHaveLength(19);
   });
 
   it("each tool has name, description, and input_schema", () => {
@@ -40,7 +41,6 @@ describe("AGENT_TOOLS", () => {
       "find_similar_contracts",
       "propose_new_clause",
       "propose_template_change",
-      "apply_style_preset",
       "insert_image",
       "propose_plan",
       "cross_check_certidoes",
@@ -89,9 +89,9 @@ describe("AGENT_TOOLS", () => {
 });
 
 describe("getToolNames", () => {
-  it("returns array of 20 tool names", () => {
+  it("returns array of 19 tool names", () => {
     const names = getToolNames();
-    expect(names).toHaveLength(20);
+    expect(names).toHaveLength(19);
     expect(names).not.toContain("query_clauses");
     expect(names).toContain("validate_contract");
     expect(names).toContain("add_comment");
@@ -101,7 +101,8 @@ describe("getToolNames", () => {
     expect(names).toContain("find_similar_contracts");
     expect(names).toContain("propose_new_clause");
     expect(names).toContain("propose_template_change");
-    expect(names).toContain("apply_style_preset");
+    // apply_style_preset foi aposentada (soft removal DocumentStyle 2026-08).
+    expect(names).not.toContain("apply_style_preset");
     expect(names).toContain("insert_image");
   });
 });
