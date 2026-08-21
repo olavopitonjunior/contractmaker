@@ -19,7 +19,6 @@ export const EDIT_TOOL_NAMES = new Set([
   "update_contract_data",
   "insert_clause",
   "remove_clause",
-  "apply_style_preset",
   "insert_image",
 ]);
 
@@ -45,7 +44,6 @@ export function mapToolToAction(toolName: string): string {
     find_similar_contracts: "ai_query",
     propose_new_clause: "ai_query",
     propose_template_change: "ai_query",
-    apply_style_preset: "ai_edit",
     insert_image: "ai_edit",
   };
   return map[toolName] || "ai_edit";

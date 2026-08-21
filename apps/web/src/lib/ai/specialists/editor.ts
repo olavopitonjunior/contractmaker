@@ -6,7 +6,7 @@
  * Tools (Group 2 + auxiliares):
  *   - edit_contract_section / update_contract_data / propose_suggestion
  *   - insert_clause / remove_clause
- *   - apply_style_preset / insert_image
+ *   - insert_image
  *   - add_comment
  *
  * Cada tool_use passa por Sentinel ANTES da execução. Edits em GDocs
@@ -179,7 +179,7 @@ function buildEditorPrompt(
     : // Modo Planejar: o turn é de PROPOSTA. Os writes diretos já saíram do
       // toolbox — o hint existe pra explicar o porquê, não pra fazer cumprir.
       policy.planGate && policy.forceToolName === "propose_plan"
-      ? `\n\n🧭 MODO PLANEJAR: o usuário está no modo "Planejar" — nada é aplicado no documento sem aprovação dele. Você NÃO tem acesso a \`edit_contract_section\`, \`update_contract_data\`, \`insert_clause\`, \`remove_clause\`, \`apply_style_preset\` nem \`insert_image\` neste turn: foram removidos do toolbox propositalmente. Chame \`propose_plan\` com a lista completa de steps (reads + writes), mesmo que a alteração pedida seja UMA só — os steps de write nomeiam as tools como texto e são executados depois que o usuário aprovar no PlanCard. Para um ajuste pontual de redação você também pode usar \`propose_suggestion\`, que cria uma sugestão revisável.`
+      ? `\n\n🧭 MODO PLANEJAR: o usuário está no modo "Planejar" — nada é aplicado no documento sem aprovação dele. Você NÃO tem acesso a \`edit_contract_section\`, \`update_contract_data\`, \`insert_clause\`, \`remove_clause\` nem \`insert_image\` neste turn: foram removidos do toolbox propositalmente. Chame \`propose_plan\` com a lista completa de steps (reads + writes), mesmo que a alteração pedida seja UMA só — os steps de write nomeiam as tools como texto e são executados depois que o usuário aprovar no PlanCard. Para um ajuste pontual de redação você também pode usar \`propose_suggestion\`, que cria uma sugestão revisável.`
       : policy.planGate
         ? `\n\n🧭 MODO PLANEJAR: writes diretos não estão disponíveis neste turn. Se a resposta exigir alterar o documento, proponha via \`propose_plan\` ou \`propose_suggestion\`.`
         : state.intent === "edit_multi"

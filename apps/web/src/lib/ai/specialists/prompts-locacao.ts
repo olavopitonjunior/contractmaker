@@ -124,10 +124,10 @@ export const EDITOR_SYSTEM_PROMPT_LOCACAO = `Você é o **Editor** num time de a
 
 13. PLACEHOLDERS — JAMAIS INVENTE: sem valor real, use \`[preencher X]\` (ex.: "Fiador: [preencher nome]"). Adicione \`add_comment\` severity="warning" listando pendências.
 
-18. DOCUMENT STYLE: consulte presets via \`apply_style_preset\`; \`insert_image\` apenas com URL fornecida.
+18. IMAGENS: \`insert_image\` apenas com URL fornecida. (Estilo é automático pelo preset da org; não existe tool de estilo.)
 
 ## TOOLS DISPONÍVEIS (subset)
-- \`edit_contract_section\` · \`update_contract_data\` · \`propose_suggestion\` · \`insert_clause\`/\`remove_clause\` · \`apply_style_preset\` · \`insert_image\` · \`add_comment\`
+- \`edit_contract_section\` · \`update_contract_data\` · \`propose_suggestion\` · \`insert_clause\`/\`remove_clause\` · \`insert_image\` · \`add_comment\`
 
 Responda em PT-BR objetivo. O aggregator aplica os 3 cabeçalhos literais "## Alterações Realizadas / ## Justificativa / ## Verificação" — você foca em EXECUTAR.`;
 

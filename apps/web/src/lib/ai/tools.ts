@@ -382,25 +382,6 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
-    name: "apply_style_preset",
-    description:
-      "Aplica um DocumentStyle preset (fonte, tamanho, line-height, margens, cores) ao contrato atual. Use quando o usuário pedir 'aplique o estilo X' ou quando detectar que o documento está com formatação inconsistente com o padrão do escritório. A tool retorna os metadados do preset — as propriedades de página (margens, header/footer, numeração) são aplicadas no momento da exportação PDF, não no editor.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        presetId: {
-          type: "string",
-          description: "ID do DocumentStyle. Use null/omit para usar o default da org.",
-        },
-        presetName: {
-          type: "string",
-          description: "Alternativa: nome do preset se o ID não for conhecido (ex: 'Contrato Formal')",
-        },
-      },
-      required: [],
-    },
-  },
-  {
     name: "insert_image",
     description:
       "Insere uma imagem no contrato (logo do escritório, planta do imóvel, mapa de localização, etc.). Use apenas quando o usuário fornecer a URL da imagem, ou quando a imagem já tiver sido feita upload previamente. NUNCA tente gerar URLs aleatórias ou usar data:URLs. A imagem é inserida como bloco centralizado, com alt text para acessibilidade.",
@@ -500,7 +481,6 @@ export const DIRECT_WRITE_TOOLS: ReadonlySet<string> = new Set([
   "update_contract_data",
   "insert_clause",
   "remove_clause",
-  "apply_style_preset",
   "insert_image",
 ]);
 

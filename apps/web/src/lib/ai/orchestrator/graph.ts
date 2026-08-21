@@ -685,7 +685,6 @@ async function persistChangeLogs(
         "update_contract_data",
         "insert_clause",
         "remove_clause",
-        "apply_style_preset",
         "insert_image",
       ].includes(c.name)
   );
@@ -707,7 +706,6 @@ const DOC_MUTATING_TOOLS = new Set([
   "edit_contract_section",
   "insert_clause",
   "remove_clause",
-  "apply_style_preset",
   "insert_image",
 ]);
 const PENDING_TOOLS = new Set(["propose_suggestion", "propose_plan"]);

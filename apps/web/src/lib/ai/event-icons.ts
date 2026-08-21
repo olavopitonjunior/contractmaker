@@ -65,6 +65,8 @@ const TOOL_REGISTRY: Record<string, ToolDescriptor> = {
   extract_document_data: { icon: FileSearch, label: "Extraiu dados de documento", kind: "analyze" },
 
   // ===== Design / mídia =====
+  // Tool aposentada (soft removal DocumentStyle 2026-08) — entrada PRESERVADA:
+  // ChatMessage.events históricos re-hidratam a timeline por este mapa.
   apply_style_preset: { icon: Palette, label: "Aplicou preset de estilo", kind: "design" },
   insert_image: { icon: ImageIcon, label: "Inseriu imagem", kind: "design" },
 

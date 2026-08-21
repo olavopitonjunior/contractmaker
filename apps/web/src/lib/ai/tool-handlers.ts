@@ -11,7 +11,6 @@ import {
   googleRemoveClause,
   googleAddComment,
   googleProposeSuggestion,
-  googleApplyStylePreset,
   googleInsertImage,
 } from "./google-tool-handlers";
 import type { AgentContext, ValidationIssue, ClauseSuggestion } from "./types";
@@ -98,8 +97,6 @@ export async function executeToolHandler(
       return handleProposeNewClause(input, context);
     case "propose_template_change":
       return handleProposeTemplateChange(input, context);
-    case "apply_style_preset":
-      return handleApplyStylePreset(input, context);
     case "insert_image":
       return handleInsertImage(input, context);
     case "propose_plan":
@@ -348,98 +345,6 @@ function summarizePlanReadResult(tool: string, result: Record<string, unknown>):
     return `${s} sugestão(ões)`;
   }
   return "OK";
-}
-
-async function handleApplyStylePreset(
-  input: Record<string, unknown>,
-  context: AgentContext
-): Promise<Record<string, unknown>> {
-  const presetId = typeof input.presetId === "string" ? input.presetId : null;
-  const presetName = typeof input.presetName === "string" ? input.presetName : null;
-
-  let style;
-  if (presetId) {
-    style = await prisma.documentStyle.findFirst({
-      where: { id: presetId, orgId: context.orgId },
-    });
-  } else if (presetName) {
-    style = await prisma.documentStyle.findFirst({
-      where: { orgId: context.orgId, name: { equals: presetName, mode: "insensitive" } },
-    });
-  } else {
-    style = await prisma.documentStyle.findFirst({
-      where: { orgId: context.orgId, isDefault: true },
-    });
-  }
-
-  if (!style) {
-    return {
-      error:
-        "Nenhum preset encontrado. Peça ao usuário para criar um em /settings/document-styles.",
-    };
-  }
-
-  // Google Docs path: aplica via updateTextStyle/updateParagraphStyle/updateDocumentStyle
-  if (context.googleDocId) {
-    const result = await googleApplyStylePreset(context.googleDocId, {
-      fontFamily: style.fontFamily,
-      fontSizeBase: style.fontSizeBase,
-      lineHeight: style.lineHeight,
-      colorPrimary: style.colorPrimary,
-      marginTopMm: style.marginTopMm,
-      marginBottomMm: style.marginBottomMm,
-      marginLeftMm: style.marginLeftMm,
-      marginRightMm: style.marginRightMm,
-    });
-    return {
-      ...result,
-      presetId: style.id,
-      presetName: style.name,
-    };
-  }
-
-  // Wrap the body in a container with inline style — works for both editor preview
-  // and PDF export. Page-level props (margins, header/footer) are applied at export time.
-  const openingTag = `<div class="document-style-preset" data-preset-id="${style.id}" style="font-family: ${style.fontFamily}; font-size: ${style.fontSizeBase}pt; line-height: ${style.lineHeight}; color: ${style.colorPrimary};">`;
-  const closingTag = `</div>`;
-
-  let newHtml = context.htmlContent;
-  const existingPresetMatch = newHtml.match(
-    /<div class="document-style-preset"[^>]*>([\s\S]*)<\/div>\s*$/
-  );
-  if (existingPresetMatch) {
-    newHtml = newHtml.replace(
-      /<div class="document-style-preset"[^>]*>([\s\S]*)<\/div>\s*$/,
-      `${openingTag}$1${closingTag}`
-    );
-  } else {
-    newHtml = `${openingTag}${newHtml}${closingTag}`;
-  }
-
-  context.htmlContent = newHtml;
-
-  return {
-    success: true,
-    presetId: style.id,
-    presetName: style.name,
-    appliedProps: {
-      fontFamily: style.fontFamily,
-      fontSizeBase: style.fontSizeBase,
-      lineHeight: style.lineHeight,
-      colorPrimary: style.colorPrimary,
-      colorAccent: style.colorAccent,
-    },
-    pageProps: {
-      marginTopMm: style.marginTopMm,
-      marginBottomMm: style.marginBottomMm,
-      marginLeftMm: style.marginLeftMm,
-      marginRightMm: style.marginRightMm,
-      pageNumbers: style.pageNumbers,
-      includeToc: style.includeToc,
-    },
-    note:
-      "Preset aplicado no corpo do contrato. Margens e cabeçalho/rodapé entram na próxima exportação PDF.",
-  };
 }
 
 async function handleInsertImage(
