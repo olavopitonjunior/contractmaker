@@ -4,6 +4,22 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-21 - Banco de cláusulas: redesign, preview e IA com consulta ao acervo
+
+### Adicionado
+
+- **Página `/clauses` redesenhada**: tabela com busca, filtros por grupo/status/tags e abas Padronizadas (G1–G6) / Cláusulas base / Plataforma, com coluna de uso POR TENANT (`KnowledgeItemUsage` — o contador global misturava orgs em cláusula de plataforma). Detalhe em painel lateral redimensionável com preview renderizado, fonte Handlebars colapsável e as ações de sempre (editar, adotar versão da plataforma, excluir).
+- **Preview de cláusula** (`POST /api/clauses/preview`): renderiza o Handlebars contra as amostras determinísticas de preview (6 modalidades, lista canônica única entre UI e rota), pelo mesmo caminho seguro do preview de templates; erro de sintaxe vira 422 com mensagem — um linter de graça no editor.
+- **Editor com RHF + Zod** (`clauseWriteSchema` compartilhado com o server): abas Conteúdo/Preview/Metadados, subcategoria com sugestões canônicas preservando valor legado, tags com sugestões de slots, e feedback de validação que troca pra aba do campo com erro (antes o Salvar ficava mudo com o erro numa aba desmontada).
+- **"Gerar com IA" consulta o acervo antes** (primeiro consumidor do `ai-generate`): similaridade alta devolve as cláusulas existentes ("usar existente" / "gerar mesmo assim"); as parecidas entram no prompt como "não duplique". A busca ignora arquivadas e fragmentos de chunk.
+
+### Corrigido
+
+- **Rotas `/api/clauses` com validação Zod compartilhada** (POST/PATCH parciais sem apagar campos ausentes) e o gate `ai-generated → pending` tornado inviolável (status vindo do client não fura mais a revisão humana — approved é filtro duro do RAG e da geração de contratos).
+- **Saída da IA validada pelo mesmo schema da escrita manual** — antes nasciam linhas que o editor recusava salvar.
+- **Preview renderizava a amostra errada**: pedir "financiamento" caía na fixture de à vista — o linter aprovava cláusula quebrada.
+- **`groupCode` legado "none"** deixava a cláusula insalvável em silêncio (Select mascarava como "Nenhum"); partição das abas agora é exaustiva (cláusula variável sem grupo não some mais da UI); página envia ao browser só os campos que a UI usa (colunas internas do KnowledgeItem não vazam mais).
+
 ## [Unreleased] - 2026-08-20 - Recriar proposta enviada
 
 ### Adicionado

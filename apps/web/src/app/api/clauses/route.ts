@@ -3,6 +3,7 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { createKnowledgeItem } from "@/lib/ai/knowledge";
 import { knowledgeScopeWhere } from "@/lib/ai/knowledge-scope";
+import { clauseWriteSchema, normalizeClauseBody } from "@/lib/clauses/schema";
 
 /**
  * /api/clauses — biblioteca de cláusulas padronizadas da org.
@@ -63,21 +64,36 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No organization" }, { status: 400 });
   }
 
-  const body = await req.json();
+  const body = await req.json().catch(() => ({}));
+  // Default do POST (a UI velha às vezes não mandava subcategoria).
+  const normalized = normalizeClauseBody(body);
+  if (normalized.subcategory === undefined) normalized.subcategory = "customizada";
+  const parsed = clauseWriteSchema.safeParse(normalized);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Body inválido", details: parsed.error.format() },
+      { status: 400 }
+    );
+  }
+  const data = parsed.data;
 
   const result = await createKnowledgeItem({
     orgId: org.id,
     category: "clause",
-    title: body.title,
-    content: body.content,
-    tags: Array.isArray(body.tags) ? body.tags : [],
-    source: body.source || "manual",
+    title: data.title,
+    content: data.content,
+    tags: data.tags ?? [],
+    source: data.source || "manual",
     createdBy: session.user.id,
-    subcategory: body.category || body.subcategory || "customizada",
-    groupCode: body.groupCode ?? null,
-    agentNotes: body.agentNotes ?? body.description ?? null,
-    isVariable: !!body.isVariable,
-    status: body.source === "ai-generated" ? "pending" : "approved",
+    subcategory: data.subcategory,
+    groupCode: data.groupCode ?? null,
+    agentNotes: data.agentNotes ?? null,
+    isVariable: !!data.isVariable,
+    // Invariante: origem ai-generated SEMPRE nasce pending (revisão humana) —
+    // status vindo do client não pode furar o gate (achado de review; approved
+    // é filtro duro do RAG/expert-context/resolveClauseSlots).
+    status:
+      data.source === "ai-generated" ? "pending" : (data.status ?? "approved"),
   });
 
   const created = await prisma.knowledgeItem.findUnique({
