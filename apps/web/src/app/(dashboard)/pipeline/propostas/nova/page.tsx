@@ -16,6 +16,7 @@ import {
   type ProposalFormValues,
 } from "@/lib/proposals/form-data";
 import { getIListConnection } from "@/lib/ilist/connection";
+import { resolveRecreationAssignee } from "@/lib/proposals/recreate-assignee";
 
 export const dynamic = "force-dynamic";
 
@@ -135,21 +136,17 @@ export default async function NovaPropostaPage({
         : null,
     });
     parentProposalId = fromProposal.id;
-    // Sem PROPOSAL_ASSIGN o POST recusaria o campo — o responsável cai pro
-    // criador, que é o comportamento padrão da criação.
-    if (canAssign && fromProposal.responsibleUserId) {
-      // Ex-membro (membership removida não anula responsibleUserId) ficaria
-      // INVISÍVEL no Select e estouraria 400 no POST — só herda se ainda for
-      // membro; senão cai no criador, como na criação comum.
-      if (members.some((m) => m.id === fromProposal!.responsibleUserId)) {
-        initialResponsibleUserId = fromProposal.responsibleUserId;
-      }
-    } else if (canAssign && fromProposal.responsibleName) {
-      // Responsável EXTERNO (nome livre, sem userId) — estado suportado pelo
-      // schema e pelo PATCH /assignee; sem repassar, a recriação trocaria o
-      // dono da atribuição em silêncio.
-      initialResponsibleName = fromProposal.responsibleName;
-    }
+    // Regra em `lib/proposals/recreate-assignee`: sem permissão de atribuir,
+    // ex-membro e responsável externo são três casos de borda distintos, e
+    // aqui dentro não davam pra exercitar sem levantar Prisma e sessão.
+    const assignee = resolveRecreationAssignee({
+      canAssign,
+      responsibleUserId: fromProposal.responsibleUserId,
+      responsibleName: fromProposal.responsibleName,
+      memberIds: members.map((m) => m.id),
+    });
+    initialResponsibleUserId = assignee.responsibleUserId;
+    initialResponsibleName = assignee.responsibleName;
   }
 
   return (
