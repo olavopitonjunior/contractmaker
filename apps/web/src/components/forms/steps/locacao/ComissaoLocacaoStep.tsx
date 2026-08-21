@@ -258,6 +258,7 @@ export function ComissaoLocacaoStep({
                     form={form}
                     name={`${base}.nome`}
                     label={tipoPessoa === "fisica" ? "Nome do corretor" : "Nome da imobiliária"}
+                    required
                   >
                     <Input {...form.register(`${base}.nome`)} placeholder="Nome completo" />
                   </FormField>

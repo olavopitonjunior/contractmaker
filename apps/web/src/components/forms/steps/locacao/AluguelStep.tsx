@@ -110,7 +110,7 @@ export function AluguelStep({ form }: { form: UseFormReturn<any> }) {
       </CardHeader>
       <CardContent className="space-y-4 pt-0">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <FormField form={form} name="aluguel.valor" label="Valor do aluguel (R$)">
+          <FormField form={form} name="aluguel.valor" label="Valor do aluguel (R$)" required>
             <MoneyField form={form} name="aluguel.valor" placeholder="Ex: 2.500,00" />
           </FormField>
           <FormField form={form} name="aluguel.dia_vencimento" label="Dia de vencimento">
@@ -201,7 +201,12 @@ export function AluguelStep({ form }: { form: UseFormReturn<any> }) {
             </FormField>
             {admImobiliaria === true && (
               <>
-                <FormField form={form} name="aluguel.encargos_repasse" label="Como a imobiliária trata os encargos?">
+                <FormField
+                  form={form}
+                  name="aluguel.encargos_repasse"
+                  label="Como a imobiliária trata os encargos?"
+                  required
+                >
                   <NativeSelect
                     value={form.watch("aluguel.encargos_repasse") || ""}
                     onChange={(v) =>
@@ -243,7 +248,12 @@ export function AluguelStep({ form }: { form: UseFormReturn<any> }) {
                 />
               </FormField>
               {individualizadas === false && (
-                <FormField form={form} name="aluguel.contas_no_condominio" label="Quais somam no boleto do condomínio?">
+                <FormField
+                  form={form}
+                  name="aluguel.contas_no_condominio"
+                  label="Quais somam no boleto do condomínio?"
+                  required
+                >
                   <div className="flex flex-wrap gap-4 pt-1">
                     {CONTAS_CONSUMO.map((c) => (
                       <label key={c.value} className="flex items-center gap-2 text-sm">

@@ -45,10 +45,20 @@ export function MoneyField({
   form,
   name,
   placeholder,
+  id,
+  "aria-invalid": ariaInvalid,
+  "aria-required": ariaRequired,
+  "aria-describedby": ariaDescribedBy,
 }: {
   form: UseFormReturn<any>;
   name: string;
   placeholder?: string;
+  id?: string;
+  "aria-required"?: boolean;
+  "aria-describedby"?: string;
+  /** Ver ControlledMoney: o FormField injeta por cloneElement e o wrapper tem
+   *  que repassar, senão o passthrough do MoneyInput não é alcançado. */
+  "aria-invalid"?: boolean;
 }) {
   return (
     <Controller
@@ -59,6 +69,10 @@ export function MoneyField({
           value={Number(field.value) || 0}
           onChange={(v) => field.onChange(v)}
           placeholder={placeholder}
+          id={id}
+          aria-invalid={ariaInvalid}
+          aria-required={ariaRequired}
+          aria-describedby={ariaDescribedBy}
         />
       )}
     />
@@ -79,7 +93,7 @@ export function PessoaFisicaLocacaoFields({
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <FormField form={form} name={`${prefix}.nome`} label="Nome Completo">
+        <FormField form={form} name={`${prefix}.nome`} label="Nome Completo" required>
           <Input
             {...form.register(`${prefix}.nome`, { validate: nomeCompletoRule })}
             placeholder="Nome completo"
@@ -233,6 +247,7 @@ export function PessoaJuridicaLocacaoFields({
           form={form}
           name={`${prefix}.razao_social`}
           label="Razão Social"
+          required
           className="md:col-span-2"
         >
           <Input {...form.register(`${prefix}.razao_social`)} placeholder="Razão Social da empresa" />

@@ -159,3 +159,52 @@ describe("FormField — erro chega ao input e à tela", () => {
     expect(screen.getByText("Somente números")).not.toBeNull();
   });
 });
+
+/**
+ * Regressão que o review pegou: campos que o wizard BARRA mas que nenhum preset
+ * declara. O preset legado de locação é seis arrays vazios — sem `required`
+ * explícito, "Valor do aluguel" e "Descrição do imóvel" perdiam o asterisco
+ * fixo e continuavam travando o "Próximo". Pior que antes da feature.
+ */
+describe("FormField — piso do wizard sem preset (preset legado vazio)", () => {
+  it("required explícito marca o campo mesmo com o Set de obrigatórios vazio", () => {
+    render(
+      <Harness paths={[]}>
+        {(form) => (
+          <FormField
+            form={form}
+            name="aluguel.valor"
+            label="Valor do aluguel (R$)"
+            required
+          >
+            <Input />
+          </FormField>
+        )}
+      </Harness>
+    );
+    expect(screen.getByText("*")).not.toBeNull();
+  });
+});
+
+describe("FormField — acessibilidade do rótulo e da mensagem", () => {
+  it("label aponta pro controle e o erro entra na descrição acessível", async () => {
+    render(
+      <Harness
+        paths={["vendedores.0.cpf"]}
+        errorAt={{ name: "vendedores.0.cpf", message: "Campo obrigatório" }}
+      >
+        {(form) => (
+          <FormField form={form} name="vendedores.0.cpf" label="CPF">
+            <Input />
+          </FormField>
+        )}
+      </Harness>
+    );
+    await screen.findByText("Campo obrigatório");
+    const input = screen.getByLabelText(/CPF/);
+    expect(input.getAttribute("aria-required")).toBe("true");
+    const describedBy = input.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy!)?.textContent).toBe("Campo obrigatório");
+  });
+});

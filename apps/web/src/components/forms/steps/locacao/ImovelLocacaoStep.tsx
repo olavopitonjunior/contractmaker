@@ -128,7 +128,7 @@ export function ImovelLocacaoStep({
           </FormField>
         </div>
 
-        <FormField form={form} name="imovel.descricao" label="Descrição do imóvel">
+        <FormField form={form} name="imovel.descricao" label="Descrição do imóvel" required>
           <Textarea
             {...form.register("imovel.descricao")}
             rows={3}

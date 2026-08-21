@@ -367,6 +367,7 @@ function PessoaFisicaFields({
               form={form}
               name={`${prefix}.socio_pj.cnpj`}
               label="CNPJ"
+              required
             >
               <Input
                 {...form.register(`${prefix}.socio_pj.cnpj`, {
@@ -385,6 +386,7 @@ function PessoaFisicaFields({
               form={form}
               name={`${prefix}.socio_pj.razao_social`}
               label="Razão Social"
+              required
             >
               <Input
                 {...form.register(`${prefix}.socio_pj.razao_social`)}

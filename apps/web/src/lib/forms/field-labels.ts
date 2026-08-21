@@ -149,6 +149,13 @@ export const LOCACAO_FIELD_CATALOG: ReadonlyArray<FieldCatalogGroup> = [
 
 /** Rótulo por NOME DE CAMPO (último segmento) — fallback comum às 2 esteiras. */
 const FIELD_LABELS: Record<string, string> = {
+  // Paths GUARDA-CHUVA das listas: chegam sem índice quando a lista está vazia
+  // (subtoken por parte, ou `missingRequired` do finalize). Sem estes, o toast
+  // dizia "Preencha: Locadores" — humanizado do path, com o acento perdido.
+  vendedores: "Vendedor",
+  compradores: "Comprador",
+  locadores: "Locador",
+  locatarios: "Locatário",
   nome: "Nome",
   razao_social: "Razão social",
   cpf: "CPF",

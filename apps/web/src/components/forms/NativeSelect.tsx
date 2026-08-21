@@ -24,6 +24,8 @@ interface NativeSelectProps {
   /** Repassado ao `<select>`: acende a borda de erro e deixa o campo achável
    *  pelo scroll-até-a-pendência do RequiredFieldMarker. */
   "aria-invalid"?: boolean;
+  "aria-required"?: boolean;
+  "aria-describedby"?: string;
 }
 
 function isGrouped(
@@ -41,6 +43,8 @@ export function NativeSelect({
   id,
   disabled = false,
   "aria-invalid": ariaInvalid,
+  "aria-required": ariaRequired,
+  "aria-describedby": ariaDescribedBy,
 }: NativeSelectProps) {
   const grouped = isGrouped(options);
   return (
@@ -49,6 +53,8 @@ export function NativeSelect({
       value={value ?? ""}
       disabled={disabled}
       aria-invalid={ariaInvalid}
+      aria-required={ariaRequired}
+      aria-describedby={ariaDescribedBy}
       onChange={(e) => onChange(e.target.value)}
       className={cn(
         "h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-hidden transition-[color,box-shadow]",

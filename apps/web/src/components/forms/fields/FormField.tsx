@@ -65,10 +65,16 @@ export function FormField({
   const configRequired = useRequiredField(name);
   const isRequired = required ?? configRequired;
   const message = typeof error?.message === "string" ? error.message : null;
+  // Id derivado do path (estável entre renders e único por campo) — liga o
+  // label ao controle e a mensagem à descrição acessível. Sem isso, quem usa
+  // leitor de tela continuava sem saber que o campo é obrigatório nem qual é o
+  // erro: exatamente a lacuna que este componente fecha no visual.
+  const fieldId = `ff-${name.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+  const describedBy = message ? `${fieldId}-msg` : hint ? `${fieldId}-hint` : undefined;
 
   return (
     <div className={`flex flex-col gap-1.5 ${className}`}>
-      <Label className="text-sm font-medium text-muted-foreground">
+      <Label htmlFor={fieldId} className="text-sm font-medium text-muted-foreground">
         {label}
         {isRequired && (
           <span className="text-destructive" aria-hidden>
@@ -78,16 +84,25 @@ export function FormField({
         {isRequired && <span className="sr-only">(obrigatório)</span>}
       </Label>
       {/* `cloneElement` exige elemento único — o guard evita quebrar em runtime
-          se alguém passar texto ou fragmento por engano. */}
+          se alguém passar texto ou fragmento por engano. O `id` do filho vence
+          o gerado: componente que já traz o próprio id continua mandando. */}
       {isValidElement(children)
         ? cloneElement(children as ReactElement<Record<string, unknown>>, {
+            id:
+              (children as ReactElement<Record<string, unknown>>).props.id ?? fieldId,
             "aria-invalid": error ? true : undefined,
+            "aria-required": isRequired || undefined,
+            "aria-describedby": describedBy,
           })
         : children}
       {message ? (
-        <p className="text-xs text-destructive">{message}</p>
+        <p id={`${fieldId}-msg`} className="text-xs text-destructive">
+          {message}
+        </p>
       ) : hint ? (
-        <p className="text-xs text-muted-foreground">{hint}</p>
+        <p id={`${fieldId}-hint`} className="text-xs text-muted-foreground">
+          {hint}
+        </p>
       ) : null}
     </div>
   );

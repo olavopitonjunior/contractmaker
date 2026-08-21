@@ -14,10 +14,7 @@ import {
 import { PrivacyConsent } from "@/components/legal/PrivacyConsent";
 import { RequiredFieldMarker } from "@/components/forms/RequiredFieldMarker";
 import { RequiredFieldsProvider } from "@/components/forms/RequiredFieldsContext";
-import {
-  describeLocacaoPath,
-  describeMissingPaths,
-} from "@/lib/forms/field-labels";
+import { describeMissingPaths } from "@/lib/forms/field-labels";
 import {
   PartyLinksPanel,
   SharePartyLinkButton,
@@ -213,7 +210,15 @@ export function LocacaoFormWizard({
   const currentMissingCount = currentEffectiveRequired.filter((p) =>
     isValueEmpty(getByPath(watchedData, p)),
   ).length;
-  const allRequiredPaths = (requiredFieldsByStep ?? []).flat();
+  // Remapeado por `tipo_pessoa` ANTES de virar asterisco: o preset declara
+  // `locadores.0.cpf`/`.email`, que numa PJ viram `cnpj` e
+  // `representante.email`. Sem o remap, o CNPJ ficava sem asterisco enquanto o
+  // wizard barrava nele, e campos PF-only (RG, estado civil) apareciam
+  // marcados numa ficha de empresa que nem os renderiza.
+  const allRequiredPaths = effectiveRequiredPaths(
+    (requiredFieldsByStep ?? []).flat(),
+    (path) => getByPath(watchedData, path),
+  );
 
   // "Pedir para esta pessoa preencher" — papel da etapa atual (índice REAL).
   // Só na visão do token principal (subtoken já É a visão da parte).
@@ -290,18 +295,27 @@ export function LocacaoFormWizard({
       const parties =
         (form.getValues(partyStep.list as never) as unknown as Array<Record<string, unknown>>) ??
         [];
-      for (const p of parties) {
+      // O PISO também marca `setError` e incrementa o trigger: sem isso os
+      // campos que ele barra (nome/razão social — e, no ramo abaixo, valor do
+      // aluguel e descrição do imóvel) ficavam sem borda vermelha, sem
+      // mensagem e sem scroll, porque a bolha procura `[aria-invalid="true"]`.
+      // Justo os campos do piso, que a org com preset legado NÃO tem no preset.
+      for (const [idx, p] of parties.entries()) {
         const pj = p?.tipo_pessoa === "juridica";
+        const field = pj ? "razao_social" : "nome";
         const name = pj ? p?.razao_social : p?.nome;
         if (!name || String(name).trim() === "") {
-          toast.error(
-            `Preencha ${pj ? "a razão social" : "o nome"} do ${partyStep.label} antes de avançar.`,
-          );
+          const path = `${partyStep.list}.${idx}.${field}`;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          form.setError(path as any, { type: "required", message: "Campo obrigatório" });
+          setFailedTriggerCount((n) => n + 1);
+          toast.error(`Preencha: ${describeMissingPaths([path])}`);
           return false;
         }
       }
     } else {
       const required = STEP_REQUIRED[step] ?? [];
+      const missingPiso: string[] = [];
       for (const path of required) {
         const raw = readValue(path);
         // `0` conta como vazio aqui (valor do aluguel nasce 0 no default).
@@ -309,11 +323,15 @@ export function LocacaoFormWizard({
           raw === undefined || raw === null || raw === "" || raw === 0 ||
           (Array.isArray(raw) && raw.length === 0);
         if (empty) {
-          toast.error(
-            `Preencha os campos obrigatórios da etapa ${step + 1} antes de avançar.`,
-          );
-          return false;
+          missingPiso.push(path);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          form.setError(path as any, { type: "required", message: "Campo obrigatório" });
         }
+      }
+      if (missingPiso.length > 0) {
+        setFailedTriggerCount((n) => n + 1);
+        toast.error(`Preencha: ${describeMissingPaths(missingPiso)}`);
+        return false;
       }
     }
 

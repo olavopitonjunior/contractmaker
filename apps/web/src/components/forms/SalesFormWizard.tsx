@@ -516,7 +516,13 @@ export function SalesFormWizard({
 
   // Paths obrigatórios de TODAS as etapas — alimenta o asterisco dos campos via
   // RequiredFieldsProvider (o gate de navegação segue usando os da etapa).
-  const allRequiredPaths = effectiveRequiredFields.flat();
+  // Passa pelo MESMO remap PF/PJ do gate: senão o CNPJ de uma parte jurídica
+  // ficava sem asterisco enquanto o "Próximo" barrava nele, e RG/estado civil
+  // apareciam marcados numa ficha de empresa que não os renderiza.
+  const allRequiredPaths = effectiveRequiredPaths(
+    effectiveRequiredFields.flat(),
+    readValue,
+  );
 
   // Guarda HÍBRIDA: nas etapas de parte (1=vendedor, 2=comprador), recomenda
   // (sem bloquear) os campos PF que as certidões precisam. O preset já cobre o

@@ -40,9 +40,19 @@ interface PagamentoStepProps {
 function ControlledMoney({
   name,
   form,
+  id,
+  "aria-invalid": ariaInvalid,
+  "aria-required": ariaRequired,
+  "aria-describedby": ariaDescribedBy,
 }: {
   name: string;
   form: UseFormReturn<any>;
+  id?: string;
+  "aria-required"?: boolean;
+  "aria-describedby"?: string;
+  /** Vem do FormField por cloneElement — sem repassar, o campo de dinheiro
+   *  fica invisível pra borda de erro e pro scroll-até-a-pendência. */
+  "aria-invalid"?: boolean;
 }) {
   return (
     <Controller
@@ -52,6 +62,10 @@ function ControlledMoney({
         <MoneyInput
           value={field.value || 0}
           onChange={(v) => field.onChange(v)}
+          id={id}
+          aria-invalid={ariaInvalid}
+          aria-required={ariaRequired}
+          aria-describedby={ariaDescribedBy}
         />
       )}
     />

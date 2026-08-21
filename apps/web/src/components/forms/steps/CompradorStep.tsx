@@ -256,7 +256,7 @@ function PessoaFisicaFields({
             serão extraídas automaticamente quando o formulário for finalizado.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField form={form} name={`${prefix}.socio_pj.cnpj`} label="CNPJ">
+            <FormField form={form} name={`${prefix}.socio_pj.cnpj`} label="CNPJ" required>
               <Input
                 {...form.register(`${prefix}.socio_pj.cnpj`, {
                   onChange: (e) =>
@@ -274,6 +274,7 @@ function PessoaFisicaFields({
               form={form}
               name={`${prefix}.socio_pj.razao_social`}
               label="Razão Social"
+              required
             >
               <Input
                 {...form.register(`${prefix}.socio_pj.razao_social`)}
