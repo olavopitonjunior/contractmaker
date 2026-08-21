@@ -142,7 +142,14 @@ export async function analyzeManualCertidaoForDeal(
     select: { id: true, dealId: true, category: true, url: true, mime: true, filename: true },
   });
   if (!attachment || attachment.dealId !== dealId) return;
-  if (!attachment.category?.startsWith("certidao_") && attachment.category !== "matricula_anexada") {
+  // Ver o comentário gêmeo em lib/deals/attachments.ts: `"matricula"` é a
+  // categoria que os produtores realmente gravam; `"matricula_anexada"` fica
+  // por retrocompatibilidade, caso exista linha antiga com ela.
+  if (
+    !attachment.category?.startsWith("certidao_") &&
+    attachment.category !== "matricula" &&
+    attachment.category !== "matricula_anexada"
+  ) {
     return;
   }
 
@@ -165,7 +172,8 @@ export async function analyzeManualCertidaoForDeal(
   let fields: Record<string, unknown> = {};
   let documentType = attachment.category;
   try {
-    // Resolve documentType: "matricula_anexada" → "matricula"; "certidao_*" → tipo
+    // Resolve documentType: "matricula_anexada" (legado) → "matricula";
+    // "matricula" e "certidao_*" já são o tipo que o OCR espera.
     const ocrCategory =
       attachment.category === "matricula_anexada" ? "matricula" : attachment.category;
 
