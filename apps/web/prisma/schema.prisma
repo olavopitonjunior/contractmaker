@@ -1088,6 +1088,11 @@ model DealNotificationLog {
   dedupeKey      String // por evento: stageId+dia, contractId, envelopeId, chargeId, formId+marco
   status         String   @default("sent") // pending (claim) | sent | skipped | failed
   detail         Json?
+  // Desfecho de ENTREGA reportado pelo Max (POST /api/webhooks/max). Coluna
+  // PRÓPRIA, não uma chave em `detail`: os settles substituem `detail`
+  // inteiro a cada tentativa e apagariam a marca (achado de code review).
+  // Só o webhook escreve aqui. Shape: {status, at, providerMessageId, receivedAt}.
+  maxDeliveryJson Json?
   createdAt      DateTime @default(now())
 
   org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
@@ -1145,6 +1150,8 @@ model UserNotificationDelivery {
   // estado re-tentável, senão qualquer adiamento viraria perda definitiva.
   status         String    @default("pending")
   detail         Json?
+  // Ver DealNotificationLog.maxDeliveryJson — mesma coluna, mesmo motivo.
+  maxDeliveryJson Json?
   createdAt      DateTime  @default(now())
   settledAt      DateTime?
   attempts       Int       @default(0)
