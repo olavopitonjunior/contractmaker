@@ -9,6 +9,21 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 ### Removido
 
 - **Tela `/settings/document-styles`, rotas `api/document-styles/*` e a tool de IA `apply_style_preset`** — a tela confundia com Templates (que carregam a própria formatação no engine google_docs) e virou superfície morta. O MOTOR fica 100% intacto: org nova continua nascendo com o preset padrão (seed), a geração Handlebars continua aplicando fonte/margens automaticamente (`googleApplyStylePreset`), e o export PDF/propostas continua usando o preset da org — a aparência de nenhum contrato muda. Compatibilidade: a entrada em `event-icons.ts` fica (timelines de chat antigas re-hidratam por ela); chamadas remanescentes ao nome caem no fallback genérico do dispatch (`Tool desconhecida`) e viram step `failed` gracioso no execute-plan — mesmo padrão da aposentadoria de `query_clauses`. ChatPlan PENDENTE antigo que contenha um step da tool falha esse step e pula dependentes (verificado zero casos em staging/prod na promoção). Ajustar preset passa a ser operação de banco (decisão consciente; reversível recriando a UI).
+## [Unreleased] - 2026-08-21 - Situação da matrícula no formulário de vendas
+
+### Adicionado
+
+- **O formulário pergunta se a matrícula atualizada existe ou precisa ser solicitada** (pedido RE/MAX LCeA). Na seção Imóvel › Dados Registrais, dois caminhos:
+  - **"Deverá ser solicitada"** → número e cartório viram obrigatórios (é o que identifica *o que pedir* ao registro; sem os dois a pendência que chega ao negócio é inacionável), com aviso âmbar explicando o porquê. A condicional entra por `matriculaConditionalPaths` e é somada aos QUATRO consumidores da lista de obrigatórios — gate do "Próximo", contagem de pendências, bullet do stepper e o asterisco do campo —, para que todos mostrem a mesma verdade.
+  - **"Possui"** → dropdown dos documentos já anexados ao formulário (agrupado, com as matrículas identificadas pelo OCR em cima) **ou upload ali mesmo**: quem está com o PDF em mãos envia sem ir até a etapa Documentos e voltar para vincular. O arquivo enviado já nasce vinculado ao imóvel, a extração por IA é pedida na hora (é o único ponto do produto onde ela é automática — aqui o pedido é explícito, então gastar o token é o que o operador quer) e o botão "Aplicar dados extraídos" preenche número, cartório e dados do imóvel preservando o que já foi digitado. Anexo removido depois do vínculo aparece como "anexo removido, selecione outro" em vez de cair calado na primeira opção. Sem rota de anexos (link por parte), o bloco orienta a anexar pelo link principal.
+- O pipeline de upload (limites, tipos, redimensionamento de foto, handshake do Blob) saiu do DocumentosStep para `lib/forms/attachment-upload.ts` e passou a ser o mesmo nas duas telas. Divergir ali produziria o pior tipo de bug: arquivo que passa na validação do cliente e morre no servidor com erro opaco.
+- **Sem notificação nova**: o finalize já dispara "Formulário concluído", que leva exatamente à tela onde o banner está. Um segundo ping para o mesmo evento seria ruído.
+- **Pendência visível na tela do negócio**: banner âmbar listando os imóveis à espera, com número e cartório do pedido, e atalho para a aba Anexos. Tem ciclo de vida — some quando a matrícula é obtida de fato (upload manual ou certidão emitida), e **não** com o anexo que veio do próprio formulário, que foi o que motivou o pedido. Linha correspondente no card Imóvel(is) e no PDF de resumo ("A ser solicitada" / "Anexada (arquivo)").
+- Formulário anterior ao campo não exige nada e não alerta: pendência retroativa em negócio que já rodou seria ruído, não informação.
+
+### Corrigido
+
+- **A análise automática de matrícula anexada nunca rodou** — desde sempre. Os dois guards (`lib/deals/attachments.ts` e `manual-certidao-analysis.ts`) só aceitavam a categoria `matricula_anexada`, que **nenhum produtor do repo grava**: o finalize do formulário e o upload manual gravam `matricula`. Corrigir só um dos guards faria o gatilho disparar e a análise morrer três linhas adentro — o sintoma sumiria sem o efeito aparecer. Os dois aceitam agora ambas as categorias, e o OCR estruturado + cross-check com as certidões volta a rodar para matrículas.
 
 ## [Unreleased] - 2026-08-21 - Banco de cláusulas: redesign, preview e IA com consulta ao acervo
 

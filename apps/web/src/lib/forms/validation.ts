@@ -156,6 +156,15 @@ export const step3Schema = z.object({
     cep: z.string().optional().default(""),
     matricula: z.string().optional().default(""),
     cartorio: z.string().optional().default(""),
+    // Situação da matrícula ATUALIZADA (validade de 30 dias — é o documento
+    // mais crítico da diligência). "" = formulário legado, anterior ao campo:
+    // não exige nada e não alerta, pra não acusar pendência retroativa em
+    // negócio que já rodou.
+    matricula_situacao: z.string().optional().default(""),
+    // Vínculo com o FormAttachment escolhido quando "possui". O filename vem
+    // junto pro PDF de resumo e pro card do deal não precisarem resolver o id.
+    matricula_attachment_id: z.string().optional().default(""),
+    matricula_attachment_filename: z.string().optional().default(""),
     inscricao_iptu: z.string().optional().default(""),
     sql: z.string().optional().default(""),
     inscricao_municipal: z.string().optional().default(""),
@@ -417,6 +426,29 @@ export const dadosContratoSchema = step1Schema
   .merge(step6Schema)
   .merge(step7Schema)
   .superRefine((data, ctx) => {
+    // Matrícula a solicitar: número e cartório identificam O QUE pedir ao
+    // registro — sem eles a pendência que vai pro negócio é inacionável.
+    // O enforcement que o cliente sente é o do wizard
+    // (`matriculaConditionalPaths`, que barra o "Próximo"); aqui é o relatório
+    // de issues do finalize e qualquer parse server-side do dataJson.
+    (data.imoveis ?? []).forEach((im, i) => {
+      if ((im as { matricula_situacao?: string }).matricula_situacao !== "solicitar") return;
+      if (!im.matricula?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Informe o número da matrícula para solicitar a atualizada",
+          path: ["imoveis", i, "matricula"],
+        });
+      }
+      if (!im.cartorio?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Informe o cartório para solicitar a matrícula atualizada",
+          path: ["imoveis", i, "cartorio"],
+        });
+      }
+    });
+
     const checkParte = (
       list: "vendedores" | "compradores",
       idx: number,

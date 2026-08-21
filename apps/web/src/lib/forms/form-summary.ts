@@ -190,11 +190,28 @@ function partyName(parte: AnyObj): string {
   return str(parte.razao_social) || str(parte.nome);
 }
 
+/**
+ * "A ser solicitada" / "Anexada (arquivo X)" / vazio no form legado.
+ * O filename vem gravado junto do id no dataJson justamente pra este resumo
+ * (e o card do deal) não precisarem resolver o anexo.
+ */
+function matriculaSituacaoLabel(imovel: AnyObj): string {
+  const situacao = str(imovel.matricula_situacao);
+  if (situacao === "solicitar") return "A ser solicitada";
+  if (situacao !== "possui") return "";
+  const arquivo = str(imovel.matricula_attachment_filename);
+  return arquivo ? `Anexada (${arquivo})` : "Anexada ao formulário";
+}
+
 function imovelSection(imovel: AnyObj, title: string): SummarySection | null {
   const rows: SummaryRow[] = [];
   pushIf(rows, "Endereço", endereco(imovel));
   pushIf(rows, "Matrícula", str(imovel.matricula));
   pushIf(rows, "Cartório", str(imovel.cartorio));
+  // Situação da matrícula ATUALIZADA. Entra no resumo porque é a informação
+  // que decide se a diligência pode seguir: sem matrícula atualizada e negativa
+  // de ônus, a escritura não sai. Ausente (form legado) não gera linha.
+  pushIf(rows, "Matrícula atualizada", matriculaSituacaoLabel(imovel));
   pushIf(rows, "Inscrição IPTU", str(imovel.inscricao_iptu));
   pushIf(rows, "SQL", str(imovel.sql));
   pushIf(rows, "Inscrição municipal", str(imovel.inscricao_municipal));

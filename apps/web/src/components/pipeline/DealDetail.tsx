@@ -14,6 +14,11 @@ import { buildPartySuggestions } from "@/lib/clicksign/party-suggestions";
 import { isExplicitlyUnmarried } from "@/lib/forms/estado-civil";
 import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
 import { LostDealBanner } from "@/components/pipeline/LostDealBanner";
+import {
+  MatriculaPendenteBanner,
+  matriculaJaObtida,
+  pendenciasDeMatricula,
+} from "@/components/pipeline/MatriculaPendenteBanner";
 import { cn } from "@/lib/utils";
 import type { DocumentCardData } from "@/components/forms/DocumentCard";
 import { ReopenFormButton } from "@/components/forms/ReopenFormButton";
@@ -177,6 +182,9 @@ type Imovel = {
   cep?: string;
   matricula?: string;
   cartorio?: string;
+  /** "" | "possui" | "solicitar" — ausente em formulário anterior ao campo. */
+  matricula_situacao?: string;
+  matricula_attachment_filename?: string;
   inscricao_iptu?: string;
   descricao?: string;
 };
@@ -735,6 +743,7 @@ export function DealDetail({
   }
 
   const formData = deal.form?.dataJson as Record<string, unknown> | null;
+  const matriculaPendencias = pendenciasDeMatricula(formData);
   const vendedores = (formData?.vendedores as Parte[]) || [];
   const compradores = (formData?.compradores as Parte[]) || [];
   const testemunhas =
@@ -1120,6 +1129,17 @@ export function DealDetail({
         <LostDealBanner lostAt={deal.lostAt} lostReason={deal.lostReason} />
       )}
 
+      {/* Matrícula atualizada a solicitar — declarada pelo cliente no
+          formulário. Some sozinho quando a matrícula chega (upload manual ou
+          certidão emitida), e não aparece em negócio perdido: lá a pendência
+          não é acionável. */}
+      {!isLost && !matriculaJaObtida(deal.attachments) && (
+        <MatriculaPendenteBanner
+          pendencias={matriculaPendencias}
+          onVerAnexos={() => setActiveTab("anexos")}
+        />
+      )}
+
       {/* Timeline horizontal — 6 stages do funil + datas-marco SLA */}
       {!isLost && (
         <DealProgressTimeline
@@ -1383,6 +1403,23 @@ export function DealDetail({
                           <p className="font-medium">{formatAddress(im)}</p>
                           {im.matricula && <p><span className="text-muted-foreground">Matrícula:</span> {im.matricula}</p>}
                           {im.cartorio && <p><span className="text-muted-foreground">Cartório:</span> {im.cartorio}</p>}
+                          {/* Situação da matrícula ATUALIZADA — o que decide se
+                              a diligência pode seguir. Âmbar quando pendente,
+                              pra puxar o olho junto do banner do topo. */}
+                          {im.matricula_situacao === "solicitar" && (
+                            <p className="text-amber-700 dark:text-amber-400">
+                              <span className="text-muted-foreground">Matrícula atualizada:</span>{" "}
+                              A ser solicitada
+                            </p>
+                          )}
+                          {im.matricula_situacao === "possui" && (
+                            <p>
+                              <span className="text-muted-foreground">Matrícula atualizada:</span>{" "}
+                              {im.matricula_attachment_filename
+                                ? `Anexada (${im.matricula_attachment_filename})`
+                                : "Anexada ao formulário"}
+                            </p>
+                          )}
                           {im.inscricao_iptu && <p><span className="text-muted-foreground">Inscrição IPTU:</span> {im.inscricao_iptu}</p>}
                           {im.descricao && <p className="text-muted-foreground text-xs">{im.descricao}</p>}
                         </div>
