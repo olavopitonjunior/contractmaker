@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 import { seedOutrosEncargos, sumEncargosMensais } from "@/lib/forms/validation-locacao";
 import { formatMoneyBR } from "@/lib/format/money";
-import { FormField, MoneyField } from "./_PartyFields";
+import { MoneyField } from "./_PartyFields";
+import { FormField } from "@/components/forms/fields/FormField";
 
 const INDICE_OPTIONS = [
   { value: "IGPM", label: "IGP-M (FGV)" },
@@ -109,10 +110,10 @@ export function AluguelStep({ form }: { form: UseFormReturn<any> }) {
       </CardHeader>
       <CardContent className="space-y-4 pt-0">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <FormField label="Valor do aluguel (R$) *">
+          <FormField form={form} name="aluguel.valor" label="Valor do aluguel (R$)" required>
             <MoneyField form={form} name="aluguel.valor" placeholder="Ex: 2.500,00" />
           </FormField>
-          <FormField label="Dia de vencimento">
+          <FormField form={form} name="aluguel.dia_vencimento" label="Dia de vencimento">
             <NativeSelect
               value={String(form.watch("aluguel.dia_vencimento") || 10)}
               onChange={(v) =>
@@ -121,24 +122,24 @@ export function AluguelStep({ form }: { form: UseFormReturn<any> }) {
               options={DIA_OPTIONS}
             />
           </FormField>
-          <FormField label="Forma de pagamento">
+          <FormField form={form} name="aluguel.meio_pagamento" label="Forma de pagamento">
             <NativeSelect
               value={form.watch("aluguel.meio_pagamento") || "pix"}
               onChange={(v) => form.setValue("aluguel.meio_pagamento", v, { shouldDirty: true })}
               options={MEIO_PAGAMENTO_OPTIONS}
             />
           </FormField>
-          <FormField label="Índice de reajuste">
+          <FormField form={form} name="aluguel.indice_reajuste" label="Índice de reajuste">
             <NativeSelect
               value={form.watch("aluguel.indice_reajuste") || "IGPM"}
               onChange={(v) => form.setValue("aluguel.indice_reajuste", v, { shouldDirty: true })}
               options={INDICE_OPTIONS}
             />
           </FormField>
-          <FormField label="Início da vigência">
+          <FormField form={form} name="aluguel.vigencia_inicio" label="Início da vigência">
             <Input {...form.register("aluguel.vigencia_inicio")} type="date" />
           </FormField>
-          <FormField label="Prazo (meses)">
+          <FormField form={form} name="aluguel.vigencia_meses" label="Prazo (meses)">
             <Input
               {...form.register("aluguel.vigencia_meses", { valueAsNumber: true })}
               type="number"
@@ -157,13 +158,13 @@ export function AluguelStep({ form }: { form: UseFormReturn<any> }) {
             </p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <FormField label="Condomínio (R$)">
+            <FormField form={form} name="aluguel.condominio_mensal" label="Condomínio (R$)">
               <MoneyField form={form} name="aluguel.condominio_mensal" placeholder="Ex: 450,00" />
             </FormField>
-            <FormField label="IPTU (R$)">
+            <FormField form={form} name="aluguel.iptu_mensal" label="IPTU (R$)">
               <MoneyField form={form} name="aluguel.iptu_mensal" placeholder="Ex: 120,00" />
             </FormField>
-            <FormField label="Outros encargos (R$)">
+            <FormField form={form} name="aluguel.outros_encargos" label="Outros encargos (R$)">
               <MoneyField form={form} name="aluguel.outros_encargos" placeholder="Ex: 60,00" />
             </FormField>
           </div>
@@ -185,7 +186,7 @@ export function AluguelStep({ form }: { form: UseFormReturn<any> }) {
             </p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="A locação terá administração pela imobiliária?">
+            <FormField form={form} name="aluguel.adm_imobiliaria" label="A locação terá administração pela imobiliária?">
               <NativeSelect
                 value={boolToSelect(admImobiliaria)}
                 onChange={(v) =>
@@ -200,7 +201,12 @@ export function AluguelStep({ form }: { form: UseFormReturn<any> }) {
             </FormField>
             {admImobiliaria === true && (
               <>
-                <FormField label="Como a imobiliária trata os encargos? *">
+                <FormField
+                  form={form}
+                  name="aluguel.encargos_repasse"
+                  label="Como a imobiliária trata os encargos?"
+                  required
+                >
                   <NativeSelect
                     value={form.watch("aluguel.encargos_repasse") || ""}
                     onChange={(v) =>
@@ -211,7 +217,7 @@ export function AluguelStep({ form }: { form: UseFormReturn<any> }) {
                     options={ENCARGOS_REPASSE_OPTIONS}
                   />
                 </FormField>
-                <FormField label="Taxa de administração (%)">
+                <FormField form={form} name="aluguel.taxa_admin_percent" label="Taxa de administração (%)">
                   <Input
                     {...form.register("aluguel.taxa_admin_percent", { valueAsNumber: true })}
                     type="number"
@@ -228,7 +234,7 @@ export function AluguelStep({ form }: { form: UseFormReturn<any> }) {
 
           {temCondominio && (
             <div className="space-y-3 border-t border-dashed border-border pt-3">
-              <FormField label="As contas de consumo (água, luz, gás) são individualizadas?">
+              <FormField form={form} name="aluguel.contas_consumo_individualizadas" label="As contas de consumo (água, luz, gás) são individualizadas?">
                 <NativeSelect
                   value={boolToSelect(individualizadas)}
                   onChange={(v) =>
@@ -242,7 +248,12 @@ export function AluguelStep({ form }: { form: UseFormReturn<any> }) {
                 />
               </FormField>
               {individualizadas === false && (
-                <FormField label="Quais somam no boleto do condomínio? *">
+                <FormField
+                  form={form}
+                  name="aluguel.contas_no_condominio"
+                  label="Quais somam no boleto do condomínio?"
+                  required
+                >
                   <div className="flex flex-wrap gap-4 pt-1">
                     {CONTAS_CONSUMO.map((c) => (
                       <label key={c.value} className="flex items-center gap-2 text-sm">

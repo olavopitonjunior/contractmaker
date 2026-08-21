@@ -13,6 +13,12 @@ interface UFSelectProps {
   onChange: (value: string) => void;
   placeholder?: string;
   className?: string;
+  /** Ver NativeSelect: sem repassar, a borda de erro e o scroll-até-a-pendência
+   *  não funcionam num campo que o preset pode marcar como obrigatório. */
+  "aria-invalid"?: boolean;
+  id?: string;
+  "aria-required"?: boolean;
+  "aria-describedby"?: string;
 }
 
 export function UFSelect({
@@ -20,14 +26,23 @@ export function UFSelect({
   onChange,
   placeholder = "UF",
   className,
+  id,
+  "aria-invalid": ariaInvalid,
+  "aria-required": ariaRequired,
+  "aria-describedby": ariaDescribedBy,
 }: UFSelectProps) {
   return (
     <select
+      id={id}
       value={value || ""}
+      aria-invalid={ariaInvalid}
+      aria-required={ariaRequired}
+      aria-describedby={ariaDescribedBy}
       onChange={(e) => onChange(e.target.value)}
       className={cn(
         "h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-hidden transition-[color,box-shadow]",
         "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
+        "aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40",
         "disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
         className
       )}

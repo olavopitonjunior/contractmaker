@@ -9,6 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { UFSelect } from "@/components/forms/UFSelect";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 import { MoneyInput } from "@/components/forms/MoneyInput";
+import { FormField } from "@/components/forms/fields/FormField";
 import { ConjugeFields } from "@/components/forms/steps/ConjugeFields";
 import {
   maskCPF,
@@ -22,7 +23,6 @@ import {
   dataNascimentoRule,
   nomeCompletoRule,
 } from "@/lib/forms/field-formats";
-import { getByPath } from "@/lib/forms/party-required";
 
 // Campos de parte (locador/locatário/fiador) bindados ao parteLocacaoSchema de
 // lib/forms/validation-locacao.ts. Reaproveitado por LocadorStep, LocatarioStep
@@ -37,38 +37,6 @@ const ESTADOS_CIVIS = [
   "Separado(a)",
 ];
 
-export function FieldError({ error }: { error?: { message?: string } }) {
-  if (!error?.message) return null;
-  return <p className="text-xs text-destructive mt-1">{error.message}</p>;
-}
-
-export function FormField({
-  label,
-  children,
-  className = "",
-}: {
-  label: string;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={`flex flex-col gap-1.5 ${className}`}>
-      <Label className="text-sm font-medium text-muted-foreground">{label}</Label>
-      {children}
-    </div>
-  );
-}
-
-/**
- * Erros da parte no path `prefix` (funciona pra array — `locadores.0` — e pro
- * fiador, que não é lista). Mesmo padrão do ConjugeFields.
- */
-function usePartyErrors(form: UseFormReturn<any>, prefix: string) {
-  return getByPath(form.formState.errors, prefix) as
-    | Record<string, { message?: string }>
-    | undefined;
-}
-
 /**
  * Campo monetário (R$) do form de locação. MoneyInput formata em pt-BR e
  * devolve NÚMERO — o shape que o schema espera. Compartilhado pelos steps.
@@ -77,10 +45,20 @@ export function MoneyField({
   form,
   name,
   placeholder,
+  id,
+  "aria-invalid": ariaInvalid,
+  "aria-required": ariaRequired,
+  "aria-describedby": ariaDescribedBy,
 }: {
   form: UseFormReturn<any>;
   name: string;
   placeholder?: string;
+  id?: string;
+  "aria-required"?: boolean;
+  "aria-describedby"?: string;
+  /** Ver ControlledMoney: o FormField injeta por cloneElement e o wrapper tem
+   *  que repassar, senão o passthrough do MoneyInput não é alcançado. */
+  "aria-invalid"?: boolean;
 }) {
   return (
     <Controller
@@ -91,6 +69,10 @@ export function MoneyField({
           value={Number(field.value) || 0}
           onChange={(v) => field.onChange(v)}
           placeholder={placeholder}
+          id={id}
+          aria-invalid={ariaInvalid}
+          aria-required={ariaRequired}
+          aria-describedby={ariaDescribedBy}
         />
       )}
     />
@@ -107,22 +89,28 @@ export function PessoaFisicaLocacaoFields({
   const estadoCivil = form.watch(`${prefix}.estado_civil`);
   const showConjuge =
     estadoCivil === "Casado(a)" || estadoCivil === "União Estável";
-  const errors = usePartyErrors(form, prefix);
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <FormField label="Nome Completo *">
+        <FormField form={form} name={`${prefix}.nome`} label="Nome Completo" required>
           <Input
             {...form.register(`${prefix}.nome`, { validate: nomeCompletoRule })}
             placeholder="Nome completo"
           />
-          <FieldError error={errors?.nome} />
         </FormField>
-        <FormField label="Nacionalidade">
+        <FormField
+          form={form}
+          name={`${prefix}.nacionalidade`}
+          label="Nacionalidade"
+        >
           <Input {...form.register(`${prefix}.nacionalidade`)} placeholder="Brasileiro(a)" />
         </FormField>
-        <FormField label="Estado Civil">
+        <FormField
+          form={form}
+          name={`${prefix}.estado_civil`}
+          label="Estado Civil"
+        >
           <NativeSelect
             value={form.watch(`${prefix}.estado_civil`) || ""}
             placeholder="Selecione…"
@@ -130,13 +118,13 @@ export function PessoaFisicaLocacaoFields({
             options={ESTADOS_CIVIS.map((ec) => ({ value: ec, label: ec }))}
           />
         </FormField>
-        <FormField label="Profissão">
+        <FormField form={form} name={`${prefix}.profissao`} label="Profissão">
           <Input {...form.register(`${prefix}.profissao`)} placeholder="Profissão" />
         </FormField>
-        <FormField label="RG">
+        <FormField form={form} name={`${prefix}.rg`} label="RG">
           <Input {...form.register(`${prefix}.rg`)} placeholder="RG" />
         </FormField>
-        <FormField label="CPF">
+        <FormField form={form} name={`${prefix}.cpf`} label="CPF">
           <Input
             {...form.register(`${prefix}.cpf`, {
               validate: cpfRule,
@@ -149,22 +137,32 @@ export function PessoaFisicaLocacaoFields({
             inputMode="numeric"
             placeholder="000.000.000-00"
           />
-          <FieldError error={errors?.cpf} />
         </FormField>
-        <FormField label="Data de Nascimento">
+        <FormField
+          form={form}
+          name={`${prefix}.data_nascimento`}
+          label="Data de Nascimento"
+        >
           <Input
             {...form.register(`${prefix}.data_nascimento`, { validate: dataNascimentoRule })}
             type="date"
           />
-          <FieldError error={errors?.data_nascimento} />
         </FormField>
-        <FormField label="Renda mensal (R$)">
+        <FormField
+          form={form}
+          name={`${prefix}.renda_mensal`}
+          label="Renda mensal (R$)"
+        >
           <MoneyField form={form} name={`${prefix}.renda_mensal`} placeholder="Ex: 8.000,00" />
         </FormField>
-        <FormField label="Email">
+        <FormField form={form} name={`${prefix}.email`} label="Email">
           <Input {...form.register(`${prefix}.email`)} type="email" placeholder="email@exemplo.com" />
         </FormField>
-        <FormField label="Celular (com DDD)">
+        <FormField
+          form={form}
+          name={`${prefix}.mobile_phone`}
+          label="Celular (com DDD)"
+        >
           <Input
             {...form.register(`${prefix}.mobile_phone`, {
               validate: telefoneRule,
@@ -178,35 +176,39 @@ export function PessoaFisicaLocacaoFields({
             inputMode="numeric"
             placeholder="(11) 99999-9999"
           />
-          <FieldError error={errors?.mobile_phone} />
         </FormField>
       </div>
 
       <Separator />
       <p className="text-sm font-semibold text-foreground">Endereço</p>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <FormField label="Logradouro" className="md:col-span-2">
+        <FormField
+          form={form}
+          name={`${prefix}.endereco`}
+          label="Logradouro"
+          className="md:col-span-2"
+        >
           <Input {...form.register(`${prefix}.endereco`)} placeholder="Rua, Avenida..." />
         </FormField>
-        <FormField label="Número">
+        <FormField form={form} name={`${prefix}.numero`} label="Número">
           <Input {...form.register(`${prefix}.numero`)} placeholder="123" />
         </FormField>
-        <FormField label="Complemento">
+        <FormField form={form} name={`${prefix}.complemento`} label="Complemento">
           <Input {...form.register(`${prefix}.complemento`)} placeholder="Apto, Sala..." />
         </FormField>
-        <FormField label="Bairro">
+        <FormField form={form} name={`${prefix}.bairro`} label="Bairro">
           <Input {...form.register(`${prefix}.bairro`)} placeholder="Bairro" />
         </FormField>
-        <FormField label="Cidade">
+        <FormField form={form} name={`${prefix}.cidade`} label="Cidade">
           <Input {...form.register(`${prefix}.cidade`)} placeholder="Cidade" />
         </FormField>
-        <FormField label="UF">
+        <FormField form={form} name={`${prefix}.uf`} label="UF">
           <UFSelect
             value={form.watch(`${prefix}.uf`)}
             onChange={(v) => form.setValue(`${prefix}.uf`, v, { shouldDirty: true })}
           />
         </FormField>
-        <FormField label="CEP">
+        <FormField form={form} name={`${prefix}.cep`} label="CEP">
           <Input
             {...form.register(`${prefix}.cep`, {
               validate: cepRule,
@@ -219,7 +221,6 @@ export function PessoaFisicaLocacaoFields({
             inputMode="numeric"
             placeholder="00000-000"
           />
-          <FieldError error={errors?.cep} />
         </FormField>
       </div>
 
@@ -239,18 +240,19 @@ export function PessoaJuridicaLocacaoFields({
   form: UseFormReturn<any>;
   prefix: string;
 }) {
-  const errors = usePartyErrors(form, prefix);
-  const repErrors = (errors?.representante ?? undefined) as
-    | Record<string, { message?: string }>
-    | undefined;
-
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <FormField label="Razão Social *" className="md:col-span-2">
+        <FormField
+          form={form}
+          name={`${prefix}.razao_social`}
+          label="Razão Social"
+          required
+          className="md:col-span-2"
+        >
           <Input {...form.register(`${prefix}.razao_social`)} placeholder="Razão Social da empresa" />
         </FormField>
-        <FormField label="CNPJ">
+        <FormField form={form} name={`${prefix}.cnpj`} label="CNPJ">
           <Input
             {...form.register(`${prefix}.cnpj`, {
               validate: cnpjRule,
@@ -263,37 +265,45 @@ export function PessoaJuridicaLocacaoFields({
             inputMode="numeric"
             placeholder="00.000.000/0000-00"
           />
-          <FieldError error={errors?.cnpj} />
         </FormField>
-        <FormField label="Faturamento mensal (R$)">
+        <FormField
+          form={form}
+          name={`${prefix}.faturamento_mensal`}
+          label="Faturamento mensal (R$)"
+        >
           <MoneyField
             form={form}
             name={`${prefix}.faturamento_mensal`}
             placeholder="Ex: 50.000,00"
           />
         </FormField>
-        <FormField label="Logradouro" className="md:col-span-2">
+        <FormField
+          form={form}
+          name={`${prefix}.endereco`}
+          label="Logradouro"
+          className="md:col-span-2"
+        >
           <Input {...form.register(`${prefix}.endereco`)} placeholder="Rua, Avenida..." />
         </FormField>
-        <FormField label="Número">
+        <FormField form={form} name={`${prefix}.numero`} label="Número">
           <Input {...form.register(`${prefix}.numero`)} placeholder="123" />
         </FormField>
-        <FormField label="Complemento">
+        <FormField form={form} name={`${prefix}.complemento`} label="Complemento">
           <Input {...form.register(`${prefix}.complemento`)} placeholder="Sala, Andar..." />
         </FormField>
-        <FormField label="Bairro">
+        <FormField form={form} name={`${prefix}.bairro`} label="Bairro">
           <Input {...form.register(`${prefix}.bairro`)} placeholder="Bairro" />
         </FormField>
-        <FormField label="Cidade">
+        <FormField form={form} name={`${prefix}.cidade`} label="Cidade">
           <Input {...form.register(`${prefix}.cidade`)} placeholder="Cidade" />
         </FormField>
-        <FormField label="UF">
+        <FormField form={form} name={`${prefix}.uf`} label="UF">
           <UFSelect
             value={form.watch(`${prefix}.uf`)}
             onChange={(v) => form.setValue(`${prefix}.uf`, v, { shouldDirty: true })}
           />
         </FormField>
-        <FormField label="CEP">
+        <FormField form={form} name={`${prefix}.cep`} label="CEP">
           <Input
             {...form.register(`${prefix}.cep`, {
               validate: cepRule,
@@ -306,21 +316,28 @@ export function PessoaJuridicaLocacaoFields({
             inputMode="numeric"
             placeholder="00000-000"
           />
-          <FieldError error={errors?.cep} />
         </FormField>
       </div>
 
       <Separator />
       <p className="text-sm font-semibold text-foreground">Representante Legal</p>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <FormField label="Nome" className="md:col-span-2">
+        <FormField
+          form={form}
+          name={`${prefix}.representante.nome`}
+          label="Nome"
+          className="md:col-span-2"
+        >
           <Input
             {...form.register(`${prefix}.representante.nome`, { validate: nomeCompletoRule })}
             placeholder="Nome completo"
           />
-          <FieldError error={repErrors?.nome} />
         </FormField>
-        <FormField label="CPF">
+        <FormField
+          form={form}
+          name={`${prefix}.representante.cpf`}
+          label="CPF"
+        >
           <Input
             {...form.register(`${prefix}.representante.cpf`, {
               validate: cpfRule,
@@ -333,12 +350,19 @@ export function PessoaJuridicaLocacaoFields({
             inputMode="numeric"
             placeholder="000.000.000-00"
           />
-          <FieldError error={repErrors?.cpf} />
         </FormField>
-        <FormField label="Email">
+        <FormField
+          form={form}
+          name={`${prefix}.representante.email`}
+          label="Email"
+        >
           <Input {...form.register(`${prefix}.representante.email`)} type="email" placeholder="email@exemplo.com" />
         </FormField>
-        <FormField label="Celular">
+        <FormField
+          form={form}
+          name={`${prefix}.representante.mobile_phone`}
+          label="Celular"
+        >
           <Input
             {...form.register(`${prefix}.representante.mobile_phone`, {
               validate: telefoneRule,
@@ -353,7 +377,6 @@ export function PessoaJuridicaLocacaoFields({
             inputMode="numeric"
             placeholder="(11) 99999-9999"
           />
-          <FieldError error={repErrors?.mobile_phone} />
         </FormField>
       </div>
     </div>

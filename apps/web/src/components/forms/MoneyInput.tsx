@@ -11,6 +11,11 @@ interface MoneyInputProps {
   className?: string;
   id?: string;
   min?: number;
+  /** Repassado ao Input interno — sem isto a borda de erro e o scroll-até-a-
+   *  pendência ignoram os campos de dinheiro (valor total, sinal, renda). */
+  "aria-invalid"?: boolean;
+  "aria-required"?: boolean;
+  "aria-describedby"?: string;
 }
 
 /**
@@ -44,6 +49,9 @@ export function MoneyInput({
   className,
   id,
   min = 0,
+  "aria-invalid": ariaInvalid,
+  "aria-required": ariaRequired,
+  "aria-describedby": ariaDescribedBy,
 }: MoneyInputProps) {
   const [focused, setFocused] = React.useState(false);
   const [rawInput, setRawInput] = React.useState<string>(() =>
@@ -85,6 +93,9 @@ export function MoneyInput({
         onFocus={() => setFocused(true)}
         onBlur={handleBlur}
         placeholder={placeholder}
+        aria-invalid={ariaInvalid}
+        aria-required={ariaRequired}
+        aria-describedby={ariaDescribedBy}
         className={`pl-9 ${className || ""}`}
       />
     </div>

@@ -9,10 +9,10 @@ import {
 } from "react-hook-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { MoneyInput } from "@/components/forms/MoneyInput";
 import { NativeSelect } from "@/components/forms/NativeSelect";
+import { FormField } from "@/components/forms/fields/FormField";
 import { Trash2, Plus } from "lucide-react";
 import {
   TIPO_LABELS,
@@ -37,29 +37,22 @@ interface PagamentoStepProps {
   readOnly?: boolean;
 }
 
-function FormField({
-  label,
-  children,
-  className = "",
-}: {
-  label: string;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={`flex flex-col gap-1.5 ${className}`}>
-      <Label className="text-sm font-medium text-muted-foreground">{label}</Label>
-      {children}
-    </div>
-  );
-}
-
 function ControlledMoney({
   name,
   form,
+  id,
+  "aria-invalid": ariaInvalid,
+  "aria-required": ariaRequired,
+  "aria-describedby": ariaDescribedBy,
 }: {
   name: string;
   form: UseFormReturn<any>;
+  id?: string;
+  "aria-required"?: boolean;
+  "aria-describedby"?: string;
+  /** Vem do FormField por cloneElement — sem repassar, o campo de dinheiro
+   *  fica invisível pra borda de erro e pro scroll-até-a-pendência. */
+  "aria-invalid"?: boolean;
 }) {
   return (
     <Controller
@@ -69,6 +62,10 @@ function ControlledMoney({
         <MoneyInput
           value={field.value || 0}
           onChange={(v) => field.onChange(v)}
+          id={id}
+          aria-invalid={ariaInvalid}
+          aria-required={ariaRequired}
+          aria-describedby={ariaDescribedBy}
         />
       )}
     />
@@ -139,11 +136,16 @@ function ParcelaCard({
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <FormField label="Valor" className="md:col-span-2">
+        <FormField
+          form={form}
+          name={`${base}.valor`}
+          label="Valor"
+          className="md:col-span-2"
+        >
           <ControlledMoney name={`${base}.valor`} form={form} />
         </FormField>
 
-        <FormField label="Tipo">
+        <FormField form={form} name={`${base}.tipo`} label="Tipo">
           <NativeSelect
             value={tipo || ""}
             onChange={(v) =>
@@ -153,7 +155,7 @@ function ParcelaCard({
           />
         </FormField>
 
-        <FormField label="Quando">
+        <FormField form={form} name={`${base}.momento`} label="Quando">
           <NativeSelect
             value={momento || "assinatura"}
             onChange={(v) =>
@@ -164,7 +166,12 @@ function ParcelaCard({
         </FormField>
 
         {showTipoOutros && (
-          <FormField label="Especificar tipo" className="md:col-span-2">
+          <FormField
+            form={form}
+            name={`${base}.tipo_outros_texto`}
+            label="Especificar tipo"
+            className="md:col-span-2"
+          >
             <Input
               {...form.register(`${base}.tipo_outros_texto`)}
               placeholder="Descreva o tipo de pagamento..."
@@ -173,7 +180,12 @@ function ParcelaCard({
         )}
 
         {showPermutaDesc && (
-          <FormField label="Descrição da permuta" className="md:col-span-2">
+          <FormField
+            form={form}
+            name={`${base}.permuta_descricao`}
+            label="Descrição da permuta"
+            className="md:col-span-2"
+          >
             <textarea
               {...form.register(`${base}.permuta_descricao`)}
               placeholder={
@@ -189,6 +201,8 @@ function ParcelaCard({
 
         {showDias && (
           <FormField
+            form={form}
+            name={`${base}.dias`}
             label={
               momento === "contrato_financiamento"
                 ? "Prazo para assinar o financiamento (dias)"
@@ -206,7 +220,12 @@ function ParcelaCard({
         )}
 
         {showDataExata && (
-          <FormField label="Data específica" className="md:col-span-2">
+          <FormField
+            form={form}
+            name={`${base}.data_exata`}
+            label="Data específica"
+            className="md:col-span-2"
+          >
             <Input
               type="date"
               {...form.register(`${base}.data_exata`)}
@@ -357,7 +376,11 @@ export function PagamentoStep({ form, readOnly = false }: PagamentoStepProps) {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <FormField label="Valor total ajustado">
+          <FormField
+            form={form}
+            name="pagamento.valor_total"
+            label="Valor total ajustado"
+          >
             <ControlledMoney name="pagamento.valor_total" form={form} />
           </FormField>
         </CardContent>
@@ -372,7 +395,11 @@ export function PagamentoStep({ form, readOnly = false }: PagamentoStepProps) {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <FormField label="Banco do financiamento">
+            <FormField
+              form={form}
+              name="pagamento.banco_financiamento"
+              label="Banco do financiamento"
+            >
               <NativeSelect
                 value={pagamento?.banco_financiamento || ""}
                 onChange={(v) =>
@@ -469,7 +496,11 @@ export function PagamentoStep({ form, readOnly = false }: PagamentoStepProps) {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <FormField label="O que está incluso no preço de venda">
+          <FormField
+            form={form}
+            name="incluso_no_preco"
+            label="O que está incluso no preço de venda"
+          >
             <textarea
               {...form.register("incluso_no_preco")}
               placeholder="Ex: móveis planejados, eletrodomésticos, vaga de garagem..."
