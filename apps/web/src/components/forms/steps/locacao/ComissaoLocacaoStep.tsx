@@ -8,7 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Plus, Trash2, UserPlus, Building2, Search } from "lucide-react";
 import { NativeSelect } from "@/components/forms/NativeSelect";
-import { MoneyField, FormField } from "./_PartyFields";
+import { MoneyField } from "./_PartyFields";
+import { FormField } from "@/components/forms/fields/FormField";
 import { maskCPF, maskCNPJ, maskTelefone } from "@/lib/forms/field-formats";
 import { CadastroRecebimento } from "../CadastroRecebimento";
 
@@ -100,7 +101,7 @@ export function ComissaoLocacaoStep({
         </CardHeader>
         <CardContent className="space-y-4 pt-0">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="Taxa de locação (% sobre o 1º aluguel)">
+            <FormField form={form} name="comissao.taxa_locacao_percent" label="Taxa de locação (% sobre o 1º aluguel)">
               <Input
                 {...form.register("comissao.taxa_locacao_percent", { valueAsNumber: true })}
                 type="number"
@@ -254,12 +255,14 @@ export function ComissaoLocacaoStep({
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <FormField
-                    label={tipoPessoa === "fisica" ? "Nome do corretor *" : "Nome da imobiliária *"}
+                    form={form}
+                    name={`${base}.nome`}
+                    label={tipoPessoa === "fisica" ? "Nome do corretor" : "Nome da imobiliária"}
                   >
                     <Input {...form.register(`${base}.nome`)} placeholder="Nome completo" />
                   </FormField>
                   {tipoPessoa === "fisica" ? (
-                    <FormField label="CPF">
+                    <FormField form={form} name={`${base}.cpf`} label="CPF">
                       <Input
                         value={form.watch(`${base}.cpf`) || ""}
                         onChange={(e) =>
@@ -271,7 +274,7 @@ export function ComissaoLocacaoStep({
                       />
                     </FormField>
                   ) : (
-                    <FormField label="CNPJ">
+                    <FormField form={form} name={`${base}.cnpj`} label="CNPJ">
                       <Input
                         value={form.watch(`${base}.cnpj`) || ""}
                         onChange={(e) =>
@@ -283,17 +286,17 @@ export function ComissaoLocacaoStep({
                       />
                     </FormField>
                   )}
-                  <FormField label="CRECI">
+                  <FormField form={form} name={`${base}.creci`} label="CRECI">
                     <Input {...form.register(`${base}.creci`)} placeholder="Ex: 123456-F" />
                   </FormField>
-                  <FormField label="E-mail">
+                  <FormField form={form} name={`${base}.email`} label="E-mail">
                     <Input
                       {...form.register(`${base}.email`)}
                       type="email"
                       placeholder="email@exemplo.com"
                     />
                   </FormField>
-                  <FormField label="Celular (com DDD)">
+                  <FormField form={form} name={`${base}.mobile_phone`} label="Celular (com DDD)">
                     <Input
                       value={form.watch(`${base}.mobile_phone`) || ""}
                       onChange={(e) =>
@@ -304,7 +307,11 @@ export function ComissaoLocacaoStep({
                       placeholder="(11) 99999-9999"
                     />
                   </FormField>
-                  <FormField label="Forma da comissão recorrente">
+                  <FormField
+                    form={form}
+                    name={`${base}.forma_comissao`}
+                    label="Forma da comissão recorrente"
+                  >
                     <NativeSelect
                       value={formaComissao}
                       onChange={(v) =>
@@ -314,11 +321,11 @@ export function ComissaoLocacaoStep({
                     />
                   </FormField>
                   {formaComissao === "valor_fixo" ? (
-                    <FormField label="Valor fixo mensal (R$)">
+                    <FormField form={form} name={`${base}.valor_fixo`} label="Valor fixo mensal (R$)">
                       <MoneyField form={form} name={`${base}.valor_fixo`} placeholder="Ex: 150,00" />
                     </FormField>
                   ) : (
-                    <FormField label="Percentual do aluguel (%)">
+                    <FormField form={form} name={`${base}.percentual`} label="Percentual do aluguel (%)">
                       <Input
                         {...form.register(`${base}.percentual`, { valueAsNumber: true })}
                         type="number"
@@ -330,7 +337,7 @@ export function ComissaoLocacaoStep({
                       />
                     </FormField>
                   )}
-                  <FormField label="Duração (meses; vazio = todo o contrato)">
+                  <FormField form={form} name={`${base}.meses_comissao`} label="Duração (meses; vazio = todo o contrato)">
                     <Input
                       {...form.register(`${base}.meses_comissao`, { valueAsNumber: true })}
                       type="number"
