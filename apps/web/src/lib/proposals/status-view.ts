@@ -166,6 +166,11 @@ const EVENT_LABEL: Record<string, string> = {
   envelope_canceled: "Envelope cancelado",
   primeira_via_canceled: "Envio cancelado — liberada pra reenvio",
   send_failed: "Envio não completou — liberada pra reenvio",
+  // Thread de recriação (2026-08-20): o pai registra quem o substituiu e a
+  // filha registra de onde veio. São eventos de timeline apenas (nenhum canal
+  // externo — ver comentário no POST /api/proposals).
+  superseded_by_recreation: "Substituída por recriação",
+  recreated_from: "Criada por recriação de proposta anterior",
   // Gravado pelo cron de claim órfão LOGO APÓS o send_failed do releaseClaim —
   // sem rótulo ele aparecia cru ao lado de um evento bem-rotulado.
   send_claim_recovered: "Recuperação automática — envio interrompido",

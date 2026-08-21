@@ -518,6 +518,53 @@ export function buildValidUntil(v: ProposalFormValues): string | undefined {
 }
 
 /**
+ * Row de `Proposal` + linhas de `ProposalSigner` → input do `parseProposalForm`.
+ *
+ * Fonte única do prefill das DUAS páginas que hidratam o form de uma proposta
+ * existente (/editar e /nova?fromId=) — a fiação campo-a-campo duplicada era
+ * exatamente onde um campo novo seria esquecido num lado só (a recriação
+ * dropando o campo em silêncio, /editar seguindo ok). Só o `validUntil` difere
+ * entre as duas, por isso é parâmetro.
+ */
+export function parseProposalFormFromRow(
+  row: {
+    kind: string;
+    schemaType: string;
+    title: string | null;
+    dataJson: unknown;
+    comissaoIncluida: boolean;
+    hiddenPaths: string[];
+  },
+  signers: {
+    role: string | null;
+    name: string;
+    email: string | null;
+    cpf: string | null;
+    phone: string | null;
+    notifyChannel: string | null;
+  }[],
+  opts: { validUntil: string | null }
+): ProposalFormValues {
+  return parseProposalForm({
+    kind: row.kind,
+    schemaType: row.schemaType,
+    title: row.title,
+    dataJson: row.dataJson,
+    validUntil: opts.validUntil,
+    comissaoIncluida: row.comissaoIncluida,
+    hiddenPaths: row.hiddenPaths,
+    signers: signers.map((s) => ({
+      role: s.role ?? "",
+      name: s.name,
+      email: s.email,
+      cpf: s.cpf,
+      phone: s.phone,
+      notifyChannel: s.notifyChannel,
+    })),
+  });
+}
+
+/**
  * `dataJson` (+ metadados persistidos) → formulário. Inverso de
  * `buildProposalDataJson` — é o prefill da página /editar.
  *

@@ -283,3 +283,73 @@ describe("DELETE /api/proposals/[id] — proposta que já circulou não se apaga
     expect(res.status).not.toBe(409);
   });
 });
+
+/**
+ * Thread de recriação no DELETE.
+ *
+ * `Proposal.supersededById` é escalar puro — não tem relation nem
+ * `onDelete: SetNull` como o `parentProposalId`. Sem a limpeza explícita,
+ * apagar o rascunho-filho deixa o pai apontando pra uma linha que não existe
+ * mais, e o gate `!supersededById` esconde o botão "Recriar" PRA SEMPRE, sem
+ * erro, sem log e sem caminho de UI pra recuperar. É regressão silenciosa —
+ * daí o teste.
+ */
+describe("DELETE /api/proposals/[id] — limpa o ponteiro da recriação no pai", () => {
+  function scopedChild(over: Record<string, unknown> = {}) {
+    mockLoad.mockResolvedValue({
+      auth: { org: { id: "org-1" }, actor: { effectiveUserId: "u1" } },
+      eff: { permissions: { [PERMISSION.PROPOSAL_DELETE]: true } },
+      proposal: {
+        id: "child-1",
+        orgId: "org-1",
+        status: "rascunho",
+        convertedDealId: null,
+        sentAt: null,
+        parentProposalId: "parent-1",
+        ...over,
+      },
+    } as never);
+  }
+
+  function req() {
+    return new NextRequest("http://localhost/api/proposals/child-1", { method: "DELETE" });
+  }
+
+  beforeEach(() => {
+    mockPrisma.envelope.findMany.mockResolvedValue([] as never);
+    (prisma as unknown as { proposal: { delete: ReturnType<typeof vi.fn> } }).proposal.delete =
+      vi.fn().mockResolvedValue({});
+    mockPrisma.proposal.updateMany.mockResolvedValue({ count: 1 } as never);
+  });
+
+  it("filho de uma recriação: o pai perde o supersededById e recupera o botão", async () => {
+    scopedChild();
+    const res = await DELETE(req(), { params: { id: "child-1" } });
+
+    expect(res.status).toBe(200);
+    expect(mockPrisma.proposal.updateMany).toHaveBeenCalledWith({
+      where: { id: "parent-1", supersededById: "child-1" },
+      data: { supersededById: null },
+    });
+  });
+
+  it("o where é CONDICIONAL: pai que já aponta pra recriação mais nova não é limpo", async () => {
+    // O `supersededById: <este filho>` no where é o que impede clobber. Recriar
+    // duas vezes e apagar a filha ANTIGA não pode apagar o ponteiro pra nova.
+    scopedChild();
+    await DELETE(req(), { params: { id: "child-1" } });
+
+    const call = mockPrisma.proposal.updateMany.mock.calls[0][0] as {
+      where: Record<string, unknown>;
+    };
+    expect(call.where.supersededById).toBe("child-1");
+  });
+
+  it("proposta sem pai não dispara escrita nenhuma em outra linha", async () => {
+    scopedChild({ parentProposalId: null });
+    const res = await DELETE(req(), { params: { id: "child-1" } });
+
+    expect(res.status).toBe(200);
+    expect(mockPrisma.proposal.updateMany).not.toHaveBeenCalled();
+  });
+});

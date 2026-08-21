@@ -4,6 +4,41 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-21 - Banco de cláusulas: redesign, preview e IA com consulta ao acervo
+
+### Adicionado
+
+- **Página `/clauses` redesenhada**: tabela com busca, filtros por grupo/status/tags e abas Padronizadas (G1–G6) / Cláusulas base / Plataforma, com coluna de uso POR TENANT (`KnowledgeItemUsage` — o contador global misturava orgs em cláusula de plataforma). Detalhe em painel lateral redimensionável com preview renderizado, fonte Handlebars colapsável e as ações de sempre (editar, adotar versão da plataforma, excluir).
+- **Preview de cláusula** (`POST /api/clauses/preview`): renderiza o Handlebars contra as amostras determinísticas de preview (6 modalidades, lista canônica única entre UI e rota), pelo mesmo caminho seguro do preview de templates; erro de sintaxe vira 422 com mensagem — um linter de graça no editor.
+- **Editor com RHF + Zod** (`clauseWriteSchema` compartilhado com o server): abas Conteúdo/Preview/Metadados, subcategoria com sugestões canônicas preservando valor legado, tags com sugestões de slots, e feedback de validação que troca pra aba do campo com erro (antes o Salvar ficava mudo com o erro numa aba desmontada).
+- **"Gerar com IA" consulta o acervo antes** (primeiro consumidor do `ai-generate`): similaridade alta devolve as cláusulas existentes ("usar existente" / "gerar mesmo assim"); as parecidas entram no prompt como "não duplique". A busca ignora arquivadas e fragmentos de chunk.
+
+### Corrigido
+
+- **Rotas `/api/clauses` com validação Zod compartilhada** (POST/PATCH parciais sem apagar campos ausentes) e o gate `ai-generated → pending` tornado inviolável (status vindo do client não fura mais a revisão humana — approved é filtro duro do RAG e da geração de contratos).
+- **Saída da IA validada pelo mesmo schema da escrita manual** — antes nasciam linhas que o editor recusava salvar.
+- **Preview renderizava a amostra errada**: pedir "financiamento" caía na fixture de à vista — o linter aprovava cláusula quebrada.
+- **`groupCode` legado "none"** deixava a cláusula insalvável em silêncio (Select mascarava como "Nenhum"); partição das abas agora é exaustiva (cláusula variável sem grupo não some mais da UI); página envia ao browser só os campos que a UI usa (colunas internas do KnowledgeItem não vazam mais).
+
+## [Unreleased] - 2026-08-21 - Campos obrigatórios visíveis no formulário público
+
+### Corrigido
+
+- **O formulário não mostrava o que era obrigatório, e não marcava o que faltava.** A configuração por org (`OrgFormSettings` presets, tela `/settings/formulario`) já existia e já barrava o avanço — mas nada disso chegava à tela do cliente. Três defeitos somados: o asterisco era string fixa em ~14 labels, sem relação nenhuma com o preset (com preset `completo`, "RG" e "Nome da mãe" apareciam idênticos a campos opcionais e o cliente só descobria ao tentar avançar); nenhum input recebia `aria-invalid`, então o `setError` do wizard rodava e **nada acontecia na tela** — a borda vermelha de `ui/input.tsx` nunca acendia e o scroll-até-a-pendência do `RequiredFieldMarker`, que procura `[aria-invalid="true"]`, era código morto desde que foi escrito; e a mensagem de erro inline existia em ~5 campos por step, escrita à mão.
+
+  O `FormField` compartilhado (`components/forms/fields/FormField.tsx`) liga os três ao path do campo: asterisco vindo do preset via `RequiredFieldsContext` (com índice normalizado — o preset declara em `.0.` e a exigência vale pra toda parte da lista, incluindo o path guarda-chuva que cobre nome/razão social do titular), `aria-invalid` injetado no filho e mensagem inline. **124 campos migrados** em 9 steps das duas esteiras. `NativeSelect`, `UFSelect` e `MoneyInput` aceitavam `aria-invalid` e **descartavam** — passam a repassar.
+
+- **Toast de venda dizia só "etapa 3"** e mandava o cliente caçar o campo numa tela com 20. Agora nomeia até 4 campos e resume o resto, como a locação já fazia — com o vocabulário unificado em `lib/forms/field-labels.ts`, que absorveu o catálogo da tela de configuração e o mapa inline do wizard de locação (a venda não tinha nenhum). **Locação ganha a paridade que faltava**: bolha "N de M pendências" e contagem reativa da etapa, que só a venda tinha.
+
+## [Unreleased] - 2026-08-20 - Recriar proposta enviada
+
+### Adicionado
+
+- **"Recriar proposta"** no detalhe e na linha da lista, para preenchimento errado ou não-recebimento (pedido RE/MAX LCeA): cancela a proposta atual (envelopes ClickSign junto, motivo obrigatório no histórico) e abre `nova?fromId=` com TUDO pré-preenchido via `parseProposalForm` — partes, valores, condições, comissão, signatários, título e responsável (com `PROPOSAL_ASSIGN`). Nos terminais (recusadas/expirada/cancelada) navega direto, sem cancelar de novo. Validade vencida/terminal volta ao default de 7 dias — senão a recriação nasceria expirável no ato. Gate `RECREATABLE_STATUSES` (fonte única UI+predicado): rascunho/aguardando_aprovacao ficam de fora (basta editar), convertida/completa também (desfecho fechado). Quando o proponente já assinou, o diálogo avisa que a assinatura será descartada; documentos anexados NÃO são copiados (avisado no diálogo e no banner do form).
+- **Thread de recriação persistida**: a filha nasce com `parentProposalId` + `round` herdado (+1); o pai ganha `supersededById` (última recriação vence) e o botão "Recriar" some dele — o detalhe mostra "Recriação de PROP-X"/"Recriada como PROP-Y" com link (fora do escopo do visitante, o fato aparece sem code nem link: o link levaria ao próprio notFound da página), e a timeline ganha os eventos `superseded_by_recreation`/`recreated_from` (timeline apenas; decisão deliberada de não notificar — quem recria é o próprio corretor, na tela). Campos já existiam no schema desde a modelagem — sem migration.
+
+  Guardas de estado que o review fechou: o POST valida status do pai server-side (só terminal recriável; recriar uma viva por API deixaria duas ativas na thread com envelope rodando na "superada"), o gate da UI é `PROPOSAL_CREATE` puro (com `write` — CREATE **ou** SEND — um SEND-sem-CREATE cancelava a proposta e batia em 403 na criação, executando só a metade destrutiva), e excluir o rascunho-filho limpa o `supersededById` do pai (o campo é escalar sem FK: o ponteiro pendurado escondia "Recriar" pra sempre). A validade **preserva a janela original** recontada de agora — resetar pro default de 7 dias contradizia o "mesmos dados" do diálogo —, o responsável externo (`responsibleName`) é herdado junto e um responsável que saiu da org não é copiado (viraria 400 no submit).
+
 ## [Unreleased] - 2026-08-20 - Cadastro de corretores: validação, design system e canais
 
 ### Adicionado

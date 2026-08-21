@@ -8,9 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { OBSERVACOES_MAX } from "@/lib/forms/validation";
 import { NativeSelect } from "@/components/forms/NativeSelect";
+import { FormField } from "@/components/forms/fields/FormField";
 import {
-  FormField,
-  FieldError,
   MoneyField,
   PessoaFisicaLocacaoFields,
   PessoaJuridicaLocacaoFields,
@@ -98,7 +97,7 @@ export function GarantiaStep({
         <CardTitle className="text-base font-semibold">Garantia locatícia</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4 pt-0">
-        <FormField label="Modalidade de garantia">
+        <FormField form={form} name="garantia.tipo" label="Modalidade de garantia">
           <NativeSelect
             value={selectedValue}
             onChange={onChoiceChange}
@@ -107,7 +106,7 @@ export function GarantiaStep({
         </FormField>
 
         {showProviderInput && (
-          <FormField label="Garantidor / seguradora">
+          <FormField form={form} name="garantia.provider" label="Garantidor / seguradora">
             <Input
               {...form.register("garantia.provider")}
               placeholder="Nome da seguradora ou garantidora"
@@ -116,7 +115,7 @@ export function GarantiaStep({
         )}
 
         {tipo === "caucao" && (
-          <FormField label="Caução: nº de aluguéis (máx. 3)">
+          <FormField form={form} name="garantia.caucao_meses" label="Caução: nº de aluguéis (máx. 3)">
             <Input
               {...form.register("garantia.caucao_meses", { valueAsNumber: true })}
               type="number"
@@ -125,7 +124,6 @@ export function GarantiaStep({
               inputMode="numeric"
               placeholder="3"
             />
-            <FieldError error={(form.formState.errors?.garantia as any)?.caucao_meses} />
           </FormField>
         )}
 
@@ -133,10 +131,10 @@ export function GarantiaStep({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Subscritora saiu daqui: vem da escolha do catálogo (ou do campo
                 "Outro garantidor…" acima). */}
-            <FormField label="Valor nominal do título (R$)">
+            <FormField form={form} name="garantia.titulo_valor" label="Valor nominal do título (R$)">
               <MoneyField form={form} name="garantia.titulo_valor" placeholder="Ex: 15.000,00" />
             </FormField>
-            <FormField label="Nº da proposta/formulário">
+            <FormField form={form} name="garantia.titulo_proposta" label="Nº da proposta/formulário">
               <Input {...form.register("garantia.titulo_proposta")} placeholder="Ex.: 1234567-001" />
             </FormField>
           </div>
@@ -145,7 +143,7 @@ export function GarantiaStep({
         {(tipo === "seguro_fianca" || tipo === "garantia_digital") && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Seguradora saiu daqui: é a própria escolha da modalidade. */}
-            <FormField label="Cobertura (meses)">
+            <FormField form={form} name="garantia.cobertura_meses" label="Cobertura (meses)">
               <Input
                 {...form.register("garantia.cobertura_meses", { valueAsNumber: true })}
                 type="number"
@@ -153,7 +151,7 @@ export function GarantiaStep({
                 placeholder="30"
               />
             </FormField>
-            <FormField label="Quem contrata o seguro?">
+            <FormField form={form} name="garantia.seguro_tomador" label="Quem contrata o seguro?">
               <NativeSelect
                 value={tomador ?? ""}
                 onChange={(v) =>
@@ -163,7 +161,7 @@ export function GarantiaStep({
                 options={TOMADOR_OPTIONS}
               />
             </FormField>
-            <FormField label="Vigência da apólice">
+            <FormField form={form} name="garantia.seguro_vigencia" label="Vigência da apólice">
               <NativeSelect
                 value={vigencia ?? ""}
                 onChange={(v) =>
@@ -211,7 +209,13 @@ export function GarantiaStep({
             ) : (
               <PessoaFisicaLocacaoFields form={form} prefix="garantia.fiador" />
             )}
-            <FieldError error={(form.formState.errors?.garantia as any)?.fiador} />
+            {/* Erro do BLOCO fiador (não de um campo): o FormField cobre
+                campo a campo, este é o refine do objeto inteiro. */}
+            {typeof (form.formState.errors?.garantia as any)?.fiador?.message === "string" && (
+              <p className="mt-1 text-xs text-destructive">
+                {(form.formState.errors?.garantia as any).fiador.message}
+              </p>
+            )}
           </>
         )}
       </CardContent>
@@ -228,7 +232,7 @@ export function GarantiaStep({
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="O contrato terá cláusula rescisória (multa por rescisão antecipada)?">
+            <FormField form={form} name="config.clausula_rescisoria" label="O contrato terá cláusula rescisória (multa por rescisão antecipada)?">
               <NativeSelect
                 value={form.watch("config.clausula_rescisoria") === false ? "nao" : "sim"}
                 onChange={(v) =>
@@ -243,7 +247,7 @@ export function GarantiaStep({
               />
             </FormField>
             {form.watch("config.clausula_rescisoria") !== false && (
-              <FormField label="Multa rescisória (nº de aluguéis)">
+              <FormField form={form} name="config.multa_rescisoria_meses" label="Multa rescisória (nº de aluguéis)">
                 <Input
                   {...form.register("config.multa_rescisoria_meses", { valueAsNumber: true })}
                   type="number"
@@ -275,7 +279,7 @@ export function GarantiaStep({
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <FormField label="Algo mais que a imobiliária precise saber? (opcional)">
+          <FormField form={form} name="observacoes" label="Algo mais que a imobiliária precise saber? (opcional)">
             <Textarea
               {...form.register("observacoes")}
               rows={5}

@@ -82,6 +82,9 @@ export interface SchemaOption {
  * Observações e Comissão & testemunhas colapsadas com resumo no header —
  * nenhum campo delas é obrigatório, então o caminho rápido continua curto.
  */
+/** Sentinel do Select pro responsável externo herdado (não é um userId). */
+const EXTERNAL_RESPONSIBLE = "__external__";
+
 export function ProposalForm({
   mode,
   proposalId,
@@ -90,6 +93,9 @@ export function ProposalForm({
   members = [],
   canAssign = false,
   hasIList = false,
+  parentProposalId,
+  initialResponsibleUserId = "",
+  initialResponsibleName,
 }: {
   mode: "create" | "edit";
   proposalId?: string;
@@ -106,13 +112,25 @@ export function ProposalForm({
    * sem iList não pode ver a porta abrir num diálogo de "não habilitado".
    */
   hasIList?: boolean;
+  /**
+   * Recriação (`nova?fromId=`): id da proposta de origem. Vai no POST pra rota
+   * gravar a thread (round, supersededById, eventos) e liga o banner de revisão.
+   */
+  parentProposalId?: string;
+  /** Responsável herdado da proposta de origem (só chega com PROPOSAL_ASSIGN). */
+  initialResponsibleUserId?: string;
+  /** Responsável EXTERNO herdado (nome livre, sem userId) — vira opção própria
+   *  no Select; se o usuário trocar, a herança é descartada. */
+  initialResponsibleName?: string;
 }) {
   const router = useRouter();
   const [v, setV] = useState<ProposalFormValues>(initial);
   // Responsável comercial na criação (admin cria e atribui num passo só).
   // Fora do ProposalFormValues de propósito: o PATCH de edição não aceita o
   // campo — lá a troca é pelo ProposalAssigneeControl do detalhe.
-  const [responsibleUserId, setResponsibleUserId] = useState("");
+  const [responsibleUserId, setResponsibleUserId] = useState(
+    initialResponsibleUserId || (initialResponsibleName ? EXTERNAL_RESPONSIBLE : "")
+  );
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -189,8 +207,11 @@ export function ProposalForm({
         comissaoIncluida: v.comissao,
         hiddenPaths: buildHiddenPaths(v),
         ...(mode === "create" && canAssign && responsibleUserId
-          ? { responsibleUserId }
+          ? responsibleUserId === EXTERNAL_RESPONSIBLE
+            ? { responsibleName: initialResponsibleName }
+            : { responsibleUserId }
           : {}),
+        ...(mode === "create" && parentProposalId ? { parentProposalId } : {}),
       };
       const res = await fetch(
         mode === "create" ? "/api/proposals" : `/api/proposals/${proposalId}`,
@@ -355,6 +376,22 @@ export function ProposalForm({
             : "Preencha e crie o rascunho. Nada é enviado ao cliente até você clicar em “Enviar para assinatura”."}
         </p>
       </div>
+
+      {/* Banner de recriação: o form nasceu pré-preenchido de outra proposta.
+          O aviso dos anexos é deliberado — sem ele o corretor assume que os
+          documentos vieram junto (v1 não copia). */}
+      {mode === "create" && parentProposalId && (
+        <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 dark:border-amber-700 dark:bg-amber-950/40">
+          <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+            Recriação de proposta
+          </p>
+          <p className="mt-0.5 text-xs text-amber-800/80 dark:text-amber-300/80">
+            Os dados abaixo vieram da proposta anterior — revise antes de criar
+            (contatos errados costumam ser a causa do reenvio). Documentos
+            anexados na proposta original <strong>não são copiados</strong>.
+          </p>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* Título fica FORA do accordion: é o rótulo da proposta inteira, não
@@ -567,6 +604,11 @@ export function ProposalForm({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Eu mesmo</SelectItem>
+                      {initialResponsibleName && (
+                        <SelectItem value={EXTERNAL_RESPONSIBLE}>
+                          {initialResponsibleName} (externo)
+                        </SelectItem>
+                      )}
                       {members.map((m) => (
                         <SelectItem key={m.id} value={m.id}>
                           {m.name}

@@ -282,6 +282,19 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   }
 
   await prisma.proposal.delete({ where: { id: params.id } });
+  // Thread de recriação: `supersededById` é escalar SEM relation/FK (não há
+  // onDelete: SetNull como no parentProposalId) — apagar a filha deixaria o
+  // pai com ponteiro pendurado, escondendo o botão "Recriar" pra sempre e
+  // sem link "Recriada como" no detalhe. O where condicional não clobbera um
+  // pai que já aponta pra recriação mais nova.
+  if (proposal.parentProposalId) {
+    await prisma.proposal
+      .updateMany({
+        where: { id: proposal.parentProposalId, supersededById: params.id },
+        data: { supersededById: null },
+      })
+      .catch(() => {});
+  }
   await audit(
     extractAuditContextFromRequest(req, auth.org.id, auth.actor.effectiveUserId),
     {

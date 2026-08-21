@@ -1,11 +1,20 @@
 import { prisma } from "@/lib/db/prisma";
 import { requireAnyFeaturePage } from "@/lib/modules/page-guard";
 import { FEATURE } from "@/lib/modules/catalog";
-import { getEffectivePermissions, can } from "@/lib/security/rbac/check";
+import {
+  getEffectivePermissions,
+  canAccessProposal,
+  can,
+} from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { ProposalForm } from "@/components/proposals/ProposalForm";
 import { ProposalsNoAccess } from "@/components/proposals/ProposalsNoAccess";
-import { emptyProposalForm, PROPOSAL_SCHEMA_OPTIONS } from "@/lib/proposals/form-data";
+import {
+  emptyProposalForm,
+  parseProposalFormFromRow,
+  PROPOSAL_SCHEMA_OPTIONS,
+  type ProposalFormValues,
+} from "@/lib/proposals/form-data";
 import { getIListConnection } from "@/lib/ilist/connection";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +30,7 @@ export const dynamic = "force-dynamic";
 export default async function NovaPropostaPage({
   searchParams,
 }: {
-  searchParams: { tipo?: string };
+  searchParams: { tipo?: string; fromId?: string };
 }) {
   const { userId, orgId, enabled } = await requireAnyFeaturePage([
     FEATURE.VENDAS_PROPOSTAS,
@@ -30,11 +39,31 @@ export default async function NovaPropostaPage({
 
   const vendasOn = enabled[FEATURE.VENDAS_PROPOSTAS];
   const locacaoOn = enabled[FEATURE.LOCACAO_PROPOSTAS];
-  const requested = searchParams.tipo === "locacao" ? "locacao" : "venda";
+
+  // Recriação (`?fromId=`): carrega a proposta de origem ANTES de resolver o
+  // tipo — o kind dela sobrepõe `?tipo=`. Guard de org + escopo espelha o do
+  // /editar; sem match, ignora o fromId e abre o form vazio (não é notFound de
+  // propósito: a página continua útil pra criar do zero).
+  // `searchParams` cru pode trazer array (`?fromId=a&fromId=b`) apesar do tipo
+  // declarado — array no `where.id` estoura o Prisma em 500.
+  const fromId =
+    typeof searchParams.fromId === "string" ? searchParams.fromId : undefined;
+  let fromProposal: Awaited<ReturnType<typeof prisma.proposal.findUnique>> = null;
+  if (fromId) {
+    const row = await prisma.proposal.findUnique({ where: { id: fromId } });
+    if (row && row.orgId === orgId) fromProposal = row;
+  }
+
+  const requested =
+    (fromProposal ? fromProposal.kind : searchParams.tipo) === "locacao"
+      ? "locacao"
+      : "venda";
   // Tipo pedido mas desabilitado no tenant cai no que está ligado (o guard acima
   // já garantiu que ao menos um está).
   const tipo: "venda" | "locacao" =
     requested === "locacao" ? (locacaoOn ? "locacao" : "venda") : vendasOn ? "venda" : "locacao";
+  // Kind da origem indisponível no tenant → prefill não faz sentido.
+  if (fromProposal && fromProposal.kind !== tipo) fromProposal = null;
 
   const eff = await getEffectivePermissions(userId, orgId);
   if (!eff || !can(eff, PERMISSION.PROPOSAL_CREATE)) {
@@ -67,14 +96,73 @@ export default async function NovaPropostaPage({
         .filter((m) => m.id)
     : [];
 
+  // Escopo (dono/responsável/VIEW_ALL) — mesmo corte do /editar. Fora dele o
+  // fromId é ignorado silenciosamente (form vazio).
+  if (
+    fromProposal &&
+    !canAccessProposal({
+      effective: eff,
+      ownerUserId: fromProposal.userId,
+      responsibleUserId: fromProposal.responsibleUserId,
+    })
+  ) {
+    fromProposal = null;
+  }
+
+  let initial: ProposalFormValues = emptyProposalForm(tipo, schemaOptions[0].value);
+  let parentProposalId: string | undefined;
+  let initialResponsibleUserId: string | undefined;
+  let initialResponsibleName: string | undefined;
+  if (fromProposal) {
+    const signers = await prisma.proposalSigner.findMany({
+      where: { proposalId: fromProposal.id },
+      orderBy: { signingGroup: "asc" },
+    });
+    // Validade: preserva a JANELA original (createdAt→validUntil do pai),
+    // recontada a partir de agora. O instante cru não serve: no fluxo normal o
+    // pai já chega TERMINAL aqui (o diálogo cancelou antes de navegar), e uma
+    // validade custom de 30 dias resetaria em silêncio pro default de 7 —
+    // contradizendo o "mesmos dados" do diálogo. Janela inválida/ausente →
+    // null (form volta ao default).
+    const janelaMs = fromProposal.validUntil
+      ? fromProposal.validUntil.getTime() - fromProposal.createdAt.getTime()
+      : null;
+    const janelaDias =
+      janelaMs && janelaMs > 0 ? Math.round(janelaMs / 86_400_000) : null;
+    initial = parseProposalFormFromRow(fromProposal, signers, {
+      validUntil: janelaDias
+        ? new Date(Date.now() + janelaDias * 86_400_000).toISOString()
+        : null,
+    });
+    parentProposalId = fromProposal.id;
+    // Sem PROPOSAL_ASSIGN o POST recusaria o campo — o responsável cai pro
+    // criador, que é o comportamento padrão da criação.
+    if (canAssign && fromProposal.responsibleUserId) {
+      // Ex-membro (membership removida não anula responsibleUserId) ficaria
+      // INVISÍVEL no Select e estouraria 400 no POST — só herda se ainda for
+      // membro; senão cai no criador, como na criação comum.
+      if (members.some((m) => m.id === fromProposal!.responsibleUserId)) {
+        initialResponsibleUserId = fromProposal.responsibleUserId;
+      }
+    } else if (canAssign && fromProposal.responsibleName) {
+      // Responsável EXTERNO (nome livre, sem userId) — estado suportado pelo
+      // schema e pelo PATCH /assignee; sem repassar, a recriação trocaria o
+      // dono da atribuição em silêncio.
+      initialResponsibleName = fromProposal.responsibleName;
+    }
+  }
+
   return (
     <ProposalForm
       mode="create"
-      initial={emptyProposalForm(tipo, schemaOptions[0].value)}
+      initial={initial}
       schemaOptions={schemaOptions}
       members={members}
       canAssign={canAssign}
       hasIList={hasIList}
+      parentProposalId={parentProposalId}
+      initialResponsibleUserId={initialResponsibleUserId}
+      initialResponsibleName={initialResponsibleName}
     />
   );
 }

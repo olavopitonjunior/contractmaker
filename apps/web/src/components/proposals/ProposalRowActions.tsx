@@ -15,6 +15,7 @@ import {
   UserRound,
   Briefcase,
   Pencil,
+  CopyPlus,
 } from "lucide-react";
 import { ProposalAssigneeDialog } from "./ProposalAssigneeControl";
 import { RenameProposalDialog } from "./RenameProposalDialog";
@@ -47,6 +48,12 @@ import {
   TERMINAL_STATUSES,
 } from "@/lib/proposals/status-sets";
 import {
+  RecreateProposalDialog,
+  canRecreateProposal,
+  recreateNeedsCancel,
+  recreateHref,
+} from "./RecreateProposalDialog";
+import {
   useConvertProposal,
   dealPathForKind,
 } from "@/lib/proposals/use-convert-proposal";
@@ -57,6 +64,10 @@ export interface ProposalPermissions {
   /** Pode ESCREVER na proposta (renomear, editar). CREATE ou SEND — VIEW_ALL
    *  sozinho é leitura e não conta. Espelha o guard das rotas PATCH. */
   write: boolean;
+  /** PROPOSAL_CREATE puro. Gate do "Recriar": a ação TERMINA num POST de
+   *  criação — `write` deixaria um SEND-sem-CREATE cancelar a proposta e
+   *  esbarrar no 403 da criação, um beco sem saída destrutivo. */
+  create: boolean;
   convert: boolean;
   cancel: boolean;
   delete: boolean;
@@ -81,6 +92,8 @@ export interface RowProposal {
    * compilação.
    */
   sentAt: string | null;
+  /** Já recriada (aponta pra filha) → "Recriar" some da linha. */
+  supersededById: string | null;
 }
 
 export function ProposalRowActions({
@@ -95,9 +108,9 @@ export function ProposalRowActions({
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const [dialog, setDialog] = useState<null | "cancel" | "delete" | "assign" | "rename">(
-    null
-  );
+  const [dialog, setDialog] = useState<
+    null | "cancel" | "delete" | "assign" | "rename" | "recreate"
+  >(null);
   const [reason, setReason] = useState("");
   const { convert, busy: convertBusy } = useConvertProposal();
 
@@ -127,6 +140,7 @@ export function ProposalRowActions({
     DELETABLE_STATUSES.has(proposal.status) &&
     !isFalhaEnvioAlreadyDelivered(proposal) &&
     !proposal.convertedDealId;
+  const canRecreate = canRecreateProposal(proposal, permissions);
 
   async function run(url: string, init: RequestInit, okMsg: string) {
     setBusy(true);
@@ -248,6 +262,17 @@ export function ProposalRowActions({
             </DropdownMenuItem>
           )}
 
+          {canRecreate && (
+            <DropdownMenuItem
+              onClick={() => {
+                if (recreateNeedsCancel(proposal.status)) setDialog("recreate");
+                else router.push(recreateHref(proposal.id));
+              }}
+            >
+              <CopyPlus className="mr-2 h-4 w-4" /> Recriar proposta…
+            </DropdownMenuItem>
+          )}
+
           {(canCancel || canDelete) && <DropdownMenuSeparator />}
           {canCancel && (
             <DropdownMenuItem
@@ -267,6 +292,13 @@ export function ProposalRowActions({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <RecreateProposalDialog
+        open={dialog === "recreate"}
+        onOpenChange={(o) => !o && setDialog(null)}
+        proposalId={proposal.id}
+        status={proposal.status}
+      />
 
       <AlertDialog open={dialog === "cancel"} onOpenChange={(o) => !o && setDialog(null)}>
         <AlertDialogContent>

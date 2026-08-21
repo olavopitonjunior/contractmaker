@@ -9,6 +9,11 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Loader2, Settings2, Lock, Mail } from "lucide-react";
 import {
+  VENDA_FIELD_CATALOG,
+  LOCACAO_FIELD_CATALOG,
+  type FieldCatalogGroup,
+} from "@/lib/forms/field-labels";
+import {
   legacyPresetToModuleKey,
   type FormModule,
   type ModulePresetKey,
@@ -34,141 +39,13 @@ interface CustomPathItem {
   path: string;
 }
 
-type StepCatalog = ReadonlyArray<{
-  step: number;
-  label: string;
-  paths: ReadonlyArray<{ path: string; label: string }>;
-}>;
+type StepCatalog = ReadonlyArray<FieldCatalogGroup>;
 
-// Catálogo dos paths editáveis no override fino. Não é exaustivo — só os
-// campos onde faz sentido permitir override de obrigatoriedade por org. Paths
-// fora desta lista podem ser adicionados manualmente via API se necessário.
-const VENDA_CATALOG: StepCatalog = [
-  {
-    step: 1,
-    label: "Vendedor",
-    paths: [
-      { path: "vendedores.0.cpf", label: "CPF" },
-      { path: "vendedores.0.rg", label: "RG" },
-      { path: "vendedores.0.data_nascimento", label: "Data de nascimento" },
-      { path: "vendedores.0.nome_mae", label: "Nome da mãe (TJSP/PGFN)" },
-      { path: "vendedores.0.estado_civil", label: "Estado civil" },
-      { path: "vendedores.0.profissao", label: "Profissão" },
-      { path: "vendedores.0.email", label: "Email" },
-      { path: "vendedores.0.mobile_phone", label: "Celular" },
-      { path: "vendedores.0.endereco", label: "Endereço (rua)" },
-      { path: "vendedores.0.cidade", label: "Cidade" },
-      { path: "vendedores.0.uf", label: "UF" },
-      { path: "vendedores.0.cep", label: "CEP" },
-    ],
-  },
-  {
-    step: 2,
-    label: "Comprador",
-    paths: [
-      { path: "compradores.0.cpf", label: "CPF" },
-      { path: "compradores.0.rg", label: "RG" },
-      { path: "compradores.0.data_nascimento", label: "Data de nascimento" },
-      { path: "compradores.0.nome_mae", label: "Nome da mãe (TJSP/PGFN)" },
-      { path: "compradores.0.estado_civil", label: "Estado civil" },
-      { path: "compradores.0.profissao", label: "Profissão" },
-      { path: "compradores.0.email", label: "Email" },
-      { path: "compradores.0.mobile_phone", label: "Celular" },
-      { path: "compradores.0.endereco", label: "Endereço (rua)" },
-      { path: "compradores.0.cidade", label: "Cidade" },
-      { path: "compradores.0.uf", label: "UF" },
-      { path: "compradores.0.cep", label: "CEP" },
-    ],
-  },
-  {
-    step: 3,
-    label: "Imóvel",
-    paths: [
-      { path: "imoveis.0.numero", label: "Número" },
-      { path: "imoveis.0.bairro", label: "Bairro" },
-      { path: "imoveis.0.cep", label: "CEP" },
-      { path: "imoveis.0.matricula", label: "Matrícula" },
-      { path: "imoveis.0.cartorio", label: "Cartório" },
-      { path: "imoveis.0.inscricao_iptu", label: "Inscrição IPTU" },
-      { path: "imoveis.0.sql", label: "SQL (Setor.Quadra.Lote)" },
-    ],
-  },
-  {
-    step: 5,
-    label: "Pagamento",
-    paths: [
-      { path: "modalidade", label: "Modalidade (à vista / financiamento)" },
-      { path: "pagamento.sinal_arras", label: "Sinal/Arras" },
-    ],
-  },
-];
-
-// Steps do wizard de locação (LOCACAO_STEP_LABELS). Garantia fica de fora: o
-// fiador só existe quando a garantia é fiança, e a exigência dele já é
-// condicional no servidor (collectLocacaoFinalizeIssues).
-const LOCACAO_CATALOG: StepCatalog = [
-  {
-    step: 1,
-    label: "Locador",
-    paths: [
-      { path: "locadores.0.cpf", label: "CPF / CNPJ" },
-      { path: "locadores.0.rg", label: "RG" },
-      { path: "locadores.0.data_nascimento", label: "Data de nascimento" },
-      { path: "locadores.0.nacionalidade", label: "Nacionalidade" },
-      { path: "locadores.0.estado_civil", label: "Estado civil" },
-      { path: "locadores.0.profissao", label: "Profissão" },
-      { path: "locadores.0.email", label: "E-mail" },
-      { path: "locadores.0.mobile_phone", label: "Celular" },
-      { path: "locadores.0.endereco", label: "Endereço (rua)" },
-      { path: "locadores.0.numero", label: "Número" },
-      { path: "locadores.0.bairro", label: "Bairro" },
-      { path: "locadores.0.cidade", label: "Cidade" },
-      { path: "locadores.0.uf", label: "UF" },
-      { path: "locadores.0.cep", label: "CEP" },
-    ],
-  },
-  {
-    step: 2,
-    label: "Locatário",
-    paths: [
-      { path: "locatarios.0.cpf", label: "CPF / CNPJ" },
-      { path: "locatarios.0.rg", label: "RG" },
-      { path: "locatarios.0.data_nascimento", label: "Data de nascimento" },
-      { path: "locatarios.0.nacionalidade", label: "Nacionalidade" },
-      { path: "locatarios.0.estado_civil", label: "Estado civil" },
-      { path: "locatarios.0.profissao", label: "Profissão" },
-      { path: "locatarios.0.email", label: "E-mail" },
-      { path: "locatarios.0.mobile_phone", label: "Celular" },
-      { path: "locatarios.0.endereco", label: "Endereço (rua)" },
-      { path: "locatarios.0.numero", label: "Número" },
-      { path: "locatarios.0.bairro", label: "Bairro" },
-      { path: "locatarios.0.cidade", label: "Cidade" },
-      { path: "locatarios.0.uf", label: "UF" },
-      { path: "locatarios.0.cep", label: "CEP" },
-    ],
-  },
-  {
-    step: 3,
-    label: "Imóvel",
-    paths: [
-      { path: "imovel.numero", label: "Número" },
-      { path: "imovel.bairro", label: "Bairro" },
-      { path: "imovel.cep", label: "CEP" },
-      { path: "imovel.matricula", label: "Matrícula" },
-      { path: "imovel.cartorio", label: "Cartório" },
-      { path: "imovel.inscricao_iptu", label: "Inscrição IPTU" },
-    ],
-  },
-  {
-    step: 4,
-    label: "Aluguel e Reajuste",
-    paths: [
-      { path: "aluguel.vigencia_inicio", label: "Início da vigência" },
-      { path: "aluguel.dia_vencimento", label: "Dia de vencimento" },
-      { path: "aluguel.indice_reajuste", label: "Índice de reajuste" },
-    ],
-  },
-];
+// Catálogo e rótulos vivem em lib/forms/field-labels.ts: os wizards precisam do
+// MESMO vocabulário pra nomear as pendências no toast, e mantê-lo aqui dentro
+// deixava o formulário público sem acesso a ele.
+const VENDA_CATALOG: StepCatalog = VENDA_FIELD_CATALOG;
+const LOCACAO_CATALOG: StepCatalog = LOCACAO_FIELD_CATALOG;
 
 const MODULE_LABEL: Record<FormModule, string> = {
   venda: "Vendas",

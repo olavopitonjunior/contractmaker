@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { updateKnowledgeItem } from "@/lib/ai/knowledge";
+import { clauseWriteSchema, normalizeClauseBody } from "@/lib/clauses/schema";
 import { resolveUserOrgId } from "@/lib/security/org-scope";
 
 /**
@@ -56,18 +57,26 @@ export async function PATCH(
     return NextResponse.json({ error: "Clause not found" }, { status: 404 });
   }
 
-  const body = await req.json();
-
+  const body = await req.json().catch(() => ({}));
   // `category` aqui no body é a subcategoria semântica (partes/objeto/...).
+  // `.partial()`: PATCH só valida o que veio — campo ausente mantém o atual.
+  const parsed = clauseWriteSchema.partial().safeParse(normalizeClauseBody(body));
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Body inválido", details: parsed.error.format() },
+      { status: 400 }
+    );
+  }
+  const data = parsed.data;
   await updateKnowledgeItem(params.id, clause.orgId, {
-    title: body.title ?? clause.title,
-    content: body.content ?? clause.content,
-    tags: body.tags ?? clause.tags,
-    subcategory: body.category ?? body.subcategory ?? clause.subcategory,
-    groupCode: body.groupCode ?? clause.groupCode,
-    isVariable: body.isVariable ?? clause.isVariable,
-    agentNotes: body.agentNotes ?? body.description ?? clause.agentNotes,
-    status: body.status ?? clause.status,
+    title: data.title ?? clause.title,
+    content: data.content ?? clause.content,
+    tags: data.tags ?? clause.tags,
+    subcategory: data.subcategory ?? clause.subcategory,
+    groupCode: data.groupCode === undefined ? clause.groupCode : data.groupCode,
+    isVariable: data.isVariable ?? clause.isVariable,
+    agentNotes: data.agentNotes === undefined ? clause.agentNotes : data.agentNotes,
+    status: data.status ?? clause.status,
   });
 
   const updated = await prisma.knowledgeItem.findUnique({ where: { id: params.id } });

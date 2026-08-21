@@ -12,6 +12,9 @@ import {
   stepLabelsForLocacaoType,
 } from "@/lib/forms/validation-locacao";
 import { PrivacyConsent } from "@/components/legal/PrivacyConsent";
+import { RequiredFieldMarker } from "@/components/forms/RequiredFieldMarker";
+import { RequiredFieldsProvider } from "@/components/forms/RequiredFieldsContext";
+import { describeMissingPaths } from "@/lib/forms/field-labels";
 import {
   PartyLinksPanel,
   SharePartyLinkButton,
@@ -97,58 +100,10 @@ const STEP_REQUIRED: Record<number, string[]> = {
   4: ["aluguel.valor"],
 };
 
-// Rótulos pro toast de campos faltando. O wizard de locação não renderiza
-// <FieldError> em todos os campos (só nos que têm regra de formato), então o
-// toast precisa DIZER o que falta — senão a trava vira "não avança e não
-// explica".
-const LOCACAO_FIELD_LABELS: Record<string, string> = {
-  locadores: "Locador",
-  locatarios: "Locatário",
-  nome: "Nome",
-  razao_social: "Razão social",
-  cpf: "CPF",
-  cnpj: "CNPJ",
-  rg: "RG",
-  data_nascimento: "Data de nascimento",
-  nacionalidade: "Nacionalidade",
-  estado_civil: "Estado civil",
-  profissao: "Profissão",
-  email: "E-mail",
-  mobile_phone: "Celular",
-  endereco: "Endereço",
-  rua: "Logradouro",
-  numero: "Número",
-  bairro: "Bairro",
-  cidade: "Cidade",
-  uf: "UF",
-  cep: "CEP",
-  matricula: "Matrícula",
-  descricao: "Descrição do imóvel",
-  valor: "Valor do aluguel",
-  vigencia_inicio: "Início da vigência",
-  dia_vencimento: "Dia de vencimento",
-  adm_imobiliaria: "Administração pela imobiliária",
-  encargos_repasse: "Tratamento dos encargos (paga e retém / repassa integral)",
-  taxa_admin_percent: "Taxa de administração",
-  contas_consumo_individualizadas: "Contas de consumo individualizadas",
-  contas_no_condominio: "Contas no boleto do condomínio",
-  clausula_rescisoria: "Cláusula rescisória",
-  multa_rescisoria_meses: "Multa rescisória (nº de aluguéis)",
-};
-
-const PARTY_LIST_RE = /^(locadores|locatarios)\.(\d+)\.(.+)$/;
-
-/** "locadores.1.cpf" → "Locador 2 — CPF". Usado só na mensagem de erro. */
-function describeLocacaoPath(path: string): string {
-  const m = PARTY_LIST_RE.exec(path);
-  if (m) {
-    const who = m[1] === "locadores" ? "Locador" : "Locatário";
-    const field = m[3].split(".").pop() ?? m[3];
-    return `${who} ${Number(m[2]) + 1} — ${LOCACAO_FIELD_LABELS[field] ?? field}`;
-  }
-  const last = path.split(".").pop() ?? path;
-  return LOCACAO_FIELD_LABELS[path] ?? LOCACAO_FIELD_LABELS[last] ?? path;
-}
+// Os rótulos de campo (e o `describeLocacaoPath`) mudaram pra
+// lib/forms/field-labels.ts: a tela de configuração e o wizard de VENDA
+// precisam do mesmo vocabulário, e mantê-lo aqui dentro deixava a venda sem
+// nenhum (o toast dela dizia só "etapa 3").
 
 function defaultValues(comercial: boolean): Record<string, unknown> {
   const parte = {
@@ -218,6 +173,9 @@ export function LocacaoFormWizard({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  // Paridade com a venda: incrementa a cada "Próximo" barrado e dispara o
+  // scroll/focus do RequiredFieldMarker até a primeira pendência.
+  const [failedTriggerCount, setFailedTriggerCount] = useState(0);
 
   const form = useForm({
     defaultValues: { ...defaultValues(comercial), ...initialData },
@@ -239,6 +197,28 @@ export function LocacaoFormWizard({
   });
 
   const isLastStep = currentStep === TOTAL - 1;
+
+  // Obrigatórios da etapa (bolha de pendências) e de todas as etapas (asterisco
+  // dos campos). Leitura reativa via `watchedData` — a contagem tem que cair
+  // conforme o cliente digita, não só quando ele tenta avançar.
+  const currentRequiredRaw =
+    requiredFieldsByStep?.[visibleStepIndexes[currentStep] ?? currentStep] ?? [];
+  const currentEffectiveRequired = effectiveRequiredPaths(
+    currentRequiredRaw,
+    (path) => getByPath(watchedData, path),
+  );
+  const currentMissingCount = currentEffectiveRequired.filter((p) =>
+    isValueEmpty(getByPath(watchedData, p)),
+  ).length;
+  // Remapeado por `tipo_pessoa` ANTES de virar asterisco: o preset declara
+  // `locadores.0.cpf`/`.email`, que numa PJ viram `cnpj` e
+  // `representante.email`. Sem o remap, o CNPJ ficava sem asterisco enquanto o
+  // wizard barrava nele, e campos PF-only (RG, estado civil) apareciam
+  // marcados numa ficha de empresa que nem os renderiza.
+  const allRequiredPaths = effectiveRequiredPaths(
+    (requiredFieldsByStep ?? []).flat(),
+    (path) => getByPath(watchedData, path),
+  );
 
   // "Pedir para esta pessoa preencher" — papel da etapa atual (índice REAL).
   // Só na visão do token principal (subtoken já É a visão da parte).
@@ -315,18 +295,27 @@ export function LocacaoFormWizard({
       const parties =
         (form.getValues(partyStep.list as never) as unknown as Array<Record<string, unknown>>) ??
         [];
-      for (const p of parties) {
+      // O PISO também marca `setError` e incrementa o trigger: sem isso os
+      // campos que ele barra (nome/razão social — e, no ramo abaixo, valor do
+      // aluguel e descrição do imóvel) ficavam sem borda vermelha, sem
+      // mensagem e sem scroll, porque a bolha procura `[aria-invalid="true"]`.
+      // Justo os campos do piso, que a org com preset legado NÃO tem no preset.
+      for (const [idx, p] of parties.entries()) {
         const pj = p?.tipo_pessoa === "juridica";
+        const field = pj ? "razao_social" : "nome";
         const name = pj ? p?.razao_social : p?.nome;
         if (!name || String(name).trim() === "") {
-          toast.error(
-            `Preencha ${pj ? "a razão social" : "o nome"} do ${partyStep.label} antes de avançar.`,
-          );
+          const path = `${partyStep.list}.${idx}.${field}`;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          form.setError(path as any, { type: "required", message: "Campo obrigatório" });
+          setFailedTriggerCount((n) => n + 1);
+          toast.error(`Preencha: ${describeMissingPaths([path])}`);
           return false;
         }
       }
     } else {
       const required = STEP_REQUIRED[step] ?? [];
+      const missingPiso: string[] = [];
       for (const path of required) {
         const raw = readValue(path);
         // `0` conta como vazio aqui (valor do aluguel nasce 0 no default).
@@ -334,11 +323,15 @@ export function LocacaoFormWizard({
           raw === undefined || raw === null || raw === "" || raw === 0 ||
           (Array.isArray(raw) && raw.length === 0);
         if (empty) {
-          toast.error(
-            `Preencha os campos obrigatórios da etapa ${step + 1} antes de avançar.`,
-          );
-          return false;
+          missingPiso.push(path);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          form.setError(path as any, { type: "required", message: "Campo obrigatório" });
         }
+      }
+      if (missingPiso.length > 0) {
+        setFailedTriggerCount((n) => n + 1);
+        toast.error(`Preencha: ${describeMissingPaths(missingPiso)}`);
+        return false;
       }
     }
 
@@ -355,11 +348,8 @@ export function LocacaoFormWizard({
       else form.clearErrors(p as any);
     }
     if (missing.length > 0) {
-      const labels = missing.slice(0, 4).map(describeLocacaoPath);
-      const extra = missing.length > labels.length ? ` (+${missing.length - labels.length})` : "";
-      toast.error(
-        `Preencha os campos obrigatórios da etapa ${step + 1}: ${labels.join(", ")}${extra}`,
-      );
+      setFailedTriggerCount((n) => n + 1);
+      toast.error(`Preencha: ${describeMissingPaths(missing)}`);
       return false;
     }
     return true;
@@ -420,12 +410,9 @@ export function LocacaoFormWizard({
         const missing: string[] = Array.isArray(data?.missingRequired)
           ? data.missingRequired
           : [];
-        const labels = missing.slice(0, 4).map(describeLocacaoPath);
         toast.error(
-          labels.length > 0
-            ? `Faltam campos obrigatórios: ${labels.join(", ")}${
-                missing.length > labels.length ? ` (+${missing.length - labels.length})` : ""
-              }`
+          missing.length > 0
+            ? `Faltam campos obrigatórios: ${describeMissingPaths(missing)}`
             : "Faltam campos obrigatórios para finalizar.",
         );
       } else {
@@ -590,9 +577,21 @@ export function LocacaoFormWizard({
         </div>
       )}
 
-      <fieldset disabled={readOnly} className="m-0 border-0 p-0 min-w-0 disabled:opacity-70">
-        {steps[visibleStepIndexes[currentStep] ?? currentStep]}
-      </fieldset>
+      {/* Bolha de pendências — a locação não tinha (assimetria com a venda):
+          value-driven, some sozinha conforme preenche, e é ela que leva o foco
+          até a primeira pendência depois de um "Próximo" barrado. */}
+      <RequiredFieldMarker
+        missing={currentMissingCount}
+        total={currentEffectiveRequired.length}
+        visible={failedTriggerCount > 0}
+        trigger={failedTriggerCount}
+      />
+
+      <RequiredFieldsProvider paths={allRequiredPaths}>
+        <fieldset disabled={readOnly} className="m-0 border-0 p-0 min-w-0 disabled:opacity-70">
+          {steps[visibleStepIndexes[currentStep] ?? currentStep]}
+        </fieldset>
+      </RequiredFieldsProvider>
 
       {isLastStep && !readOnly && (
         <div className="mt-6">
