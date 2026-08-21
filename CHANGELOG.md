@@ -9,6 +9,17 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 ### Removido
 
 - **Tela `/settings/document-styles`, rotas `api/document-styles/*` e a tool de IA `apply_style_preset`** — a tela confundia com Templates (que carregam a própria formatação no engine google_docs) e virou superfície morta. O MOTOR fica 100% intacto: org nova continua nascendo com o preset padrão (seed), a geração Handlebars continua aplicando fonte/margens automaticamente (`googleApplyStylePreset`), e o export PDF/propostas continua usando o preset da org — a aparência de nenhum contrato muda. Compatibilidade: a entrada em `event-icons.ts` fica (timelines de chat antigas re-hidratam por ela); chamadas remanescentes ao nome caem no fallback genérico do dispatch (`Tool desconhecida`) e viram step `failed` gracioso no execute-plan — mesmo padrão da aposentadoria de `query_clauses`. ChatPlan PENDENTE antigo que contenha um step da tool falha esse step e pula dependentes (verificado zero casos em staging/prod na promoção). Ajustar preset passa a ser operação de banco (decisão consciente; reversível recriando a UI).
+## [Unreleased] - 2026-08-21 - Reconciliação de entrega do Max (fim do ponto cego pós-202)
+
+### Adicionado
+
+- **`POST /api/webhooks/max`** — o agente Max passa a reportar o DESFECHO de cada notificação WhatsApp (`delivered` | `read` | `unconfirmed` | `failed`), fechando a lacuna que o `docs/max.md` §8 chamava de ponto cego: depois do 202 do `/notify`, falha real (número sem WhatsApp, bloqueio, instância desconectada) só existia dentro do Max. Agora o desfecho chega e fica gravado no log da notificação.
+  - **Costura pelo ID da linha de log** — o `dedupeKey` que viajou no `/notify` É o `logId`/`deliveryId` (os call-sites mandam a linha de log de propósito, "para estender a idempotência até dentro do Max"); a coluna `dedupeKey` dos modelos guarda chave de EVENTO e casaria zero linhas. O `orgId` é obrigatório no payload como cerca: webhook autenticado por secret global não escreve em linha de tenant que ele não nomeou.
+  - **Coluna própria `maxDeliveryJson`** (migration `20260821020000`, aditiva) nas duas tabelas de log, e não uma chave em `detail`: os settles dos trilhos substituem `detail` inteiro a cada retentativa e apagariam a marca — com o Max já tendo carimbado `reported_at`, a perda seria permanente. O `status` da linha NÃO muda (lá ele significa "processado pelo trilho", não "entregue").
+  - **Monotônico e idempotente por construção**: um UPDATE atômico por tabela com a guarda de rank no próprio `WHERE` (`read` nunca regride para `delivered`; reentrega não duplica). HMAC `timestamp.rawBody` com secret PRÓPRIO desta direção (`MAX_WEBHOOK_SECRET`) — reusar o `MAX_NOTIFY_SECRET` deixaria qualquer lado forjar o outro.
+  - **Nasce inerte**: sem `MAX_WEBHOOK_SECRET` a rota responde 503, e o cliente do Max classifica 503/404 como "integração fora" — não conta tentativa e não acumula fila. Ligar a integração é passo próprio, com smoke próprio.
+  - **Cobertura**: só canais cuja `dedupeKey` é ID de linha de log. Canal com dedupeKey semântica e sem linha (ex.: request-completion de split-recipients) fica fora — o desfecho casa zero linhas, responde 200 e o Max o dá por entregue.
+
 ## [Unreleased] - 2026-08-21 - Situação da matrícula no formulário de vendas
 
 ### Adicionado
