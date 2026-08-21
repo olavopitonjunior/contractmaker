@@ -37,6 +37,8 @@ import { PagamentoStep } from "@/components/forms/steps/PagamentoStep";
 import { ComissaoConfigStep } from "@/components/forms/steps/ComissaoConfigStep";
 import { PrivacyConsent } from "@/components/legal/PrivacyConsent";
 import { RequiredFieldMarker } from "@/components/forms/RequiredFieldMarker";
+import { RequiredFieldsProvider } from "@/components/forms/RequiredFieldsContext";
+import { describeMissingPaths } from "@/lib/forms/field-labels";
 import { VoiceInputButton } from "@/components/forms/VoiceInputButton";
 
 // Apenas steps com schema definido em `lib/ai/voice-extract.ts` ativam o
@@ -512,6 +514,10 @@ export function SalesFormWizard({
     isValueEmpty(readValue(p)),
   ).length;
 
+  // Paths obrigatórios de TODAS as etapas — alimenta o asterisco dos campos via
+  // RequiredFieldsProvider (o gate de navegação segue usando os da etapa).
+  const allRequiredPaths = effectiveRequiredFields.flat();
+
   // Guarda HÍBRIDA: nas etapas de parte (1=vendedor, 2=comprador), recomenda
   // (sem bloquear) os campos PF que as certidões precisam. O preset já cobre o
   // mínimo de assinatura (email/cpf); aqui é só aviso pra não travar TJSP/
@@ -597,12 +603,12 @@ export function SalesFormWizard({
           // — string vazia passa no schema. Pra "obrigatório" funcionar
           // de verdade, checamos null/undefined/"" diretamente nos values
           // e marcamos `setError` pra aria-invalid + RequiredFieldMarker.
-          let firstMissing: string | null = null;
+          const missingPaths: string[] = [];
           for (const path of stepFields) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const raw = form.getValues(path as any) as unknown;
             if (isValueEmpty(raw)) {
-              if (!firstMissing) firstMissing = path;
+              missingPaths.push(path);
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               form.setError(path as any, {
                 type: "required",
@@ -617,10 +623,14 @@ export function SalesFormWizard({
           // Roda o trigger pra cobrir refines/min(N) que o non-empty não pega.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const triggerValid = await form.trigger(stepFields as any);
-          if (firstMissing !== null || !triggerValid) {
+          if (missingPaths.length > 0 || !triggerValid) {
             setFailedTriggerCount((n) => n + 1);
+            // NOMEIA o que falta: "etapa 3" mandava o cliente caçar o campo
+            // numa tela com 20. Mesma mensagem que a locação já dava.
             toast.error(
-              `Preencha os campos obrigatórios da etapa ${i + 1} antes de avançar.`,
+              missingPaths.length > 0
+                ? `Preencha: ${describeMissingPaths(missingPaths)}`
+                : `Revise os campos da etapa ${i + 1} antes de avançar.`,
             );
             setCurrentStep(i);
             window.scrollTo({ top: 0, behavior: "smooth" });
@@ -980,9 +990,14 @@ export function SalesFormWizard({
       {/* Step Content — resolve trueIndex pra mapear no array de 8 components.
           fieldset[disabled] desabilita todos os inputs nativos descendentes
           quando o form está travado; a navegação (fora do fieldset) continua. */}
-      <fieldset disabled={readOnly} className="m-0 border-0 p-0 min-w-0 disabled:opacity-70">
-        {stepComponents[currentTrueIndex]}
-      </fieldset>
+      {/* União de TODAS as etapas, não só a atual: o campo é obrigatório
+          independentemente de onde renderiza, e um step que mostra dado de
+          outra etapa (sub-partes, por exemplo) marcaria asterisco de menos. */}
+      <RequiredFieldsProvider paths={allRequiredPaths}>
+        <fieldset disabled={readOnly} className="m-0 border-0 p-0 min-w-0 disabled:opacity-70">
+          {stepComponents[currentTrueIndex]}
+        </fieldset>
+      </RequiredFieldsProvider>
 
       {/* LGPD consent — exibido só na última etapa (não em somente-leitura) */}
       {isLastStep && !readOnly && (
