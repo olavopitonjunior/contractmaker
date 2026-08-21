@@ -281,20 +281,28 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     );
   }
 
-  await prisma.proposal.delete({ where: { id: params.id } });
   // Thread de recriação: `supersededById` é escalar SEM relation/FK (não há
   // onDelete: SetNull como no parentProposalId) — apagar a filha deixaria o
-  // pai com ponteiro pendurado, escondendo o botão "Recriar" pra sempre e
-  // sem link "Recriada como" no detalhe. O where condicional não clobbera um
-  // pai que já aponta pra recriação mais nova.
-  if (proposal.parentProposalId) {
-    await prisma.proposal
-      .updateMany({
-        where: { id: proposal.parentProposalId, supersededById: params.id },
-        data: { supersededById: null },
-      })
-      .catch(() => {});
-  }
+  // pai com ponteiro pendurado, escondendo o botão "Recriar" pra sempre e sem
+  // link "Recriada como" no detalhe. O where condicional não clobbera um pai
+  // que já aponta pra recriação mais nova.
+  //
+  // Limpeza e exclusão andam na MESMA transação: separadas, uma falha
+  // transitória de banco entre as duas produzia exatamente o ponteiro
+  // pendurado que esta limpeza existe pra evitar — e o `.catch(() => {})` que
+  // havia aqui engolia o erro em silêncio, então ninguém ficava sabendo.
+  // Agora ou as duas acontecem ou nenhuma, e a falha sobe pro handler.
+  await prisma.$transaction([
+    ...(proposal.parentProposalId
+      ? [
+          prisma.proposal.updateMany({
+            where: { id: proposal.parentProposalId, supersededById: params.id },
+            data: { supersededById: null },
+          }),
+        ]
+      : []),
+    prisma.proposal.delete({ where: { id: params.id } }),
+  ]);
   await audit(
     extractAuditContextFromRequest(req, auth.org.id, auth.actor.effectiveUserId),
     {

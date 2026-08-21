@@ -352,4 +352,40 @@ describe("DELETE /api/proposals/[id] — limpa o ponteiro da recriação no pai"
     expect(res.status).toBe(200);
     expect(mockPrisma.proposal.updateMany).not.toHaveBeenCalled();
   });
+
+  /**
+   * Limpeza e exclusão precisam ser ATÔMICAS. Enquanto eram duas chamadas
+   * soltas — com um `.catch(() => {})` na segunda —, uma falha transitória de
+   * banco entre elas produzia exatamente o ponteiro pendurado que a limpeza
+   * existe pra evitar, e em silêncio. Este teste fixa a estrutura: uma
+   * transação só, contendo as duas operações.
+   */
+  it("limpeza e exclusão vão na MESMA transação", async () => {
+    scopedChild();
+    await DELETE(req(), { params: { id: "child-1" } });
+
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+    const ops = mockPrisma.$transaction.mock.calls[0][0] as unknown[];
+    expect(Array.isArray(ops)).toBe(true);
+    expect(ops).toHaveLength(2);
+  });
+
+  it("sem pai, a transação carrega só a exclusão", async () => {
+    scopedChild({ parentProposalId: null });
+    await DELETE(req(), { params: { id: "child-1" } });
+
+    const ops = mockPrisma.$transaction.mock.calls[0][0] as unknown[];
+    expect(ops).toHaveLength(1);
+  });
+
+  it("falha da transação NÃO vira 200 silencioso", async () => {
+    // O `.catch(() => {})` anterior engolia o erro: o cliente recebia sucesso
+    // enquanto o banco ficava inconsistente. Agora a falha tem que aparecer.
+    scopedChild();
+    mockPrisma.$transaction.mockRejectedValueOnce(new Error("deadlock"));
+
+    await expect(DELETE(req(), { params: { id: "child-1" } })).rejects.toThrow(
+      "deadlock"
+    );
+  });
 });
