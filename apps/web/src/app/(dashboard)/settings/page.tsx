@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
-import { BellRing, Bot, BookOpen, Palette, Lightbulb, ShieldCheck, Sparkles, KeyRound, Users, UserCog, UsersRound, Split, FileSignature, Wallet, ListChecks, UserRound, Receipt, FileText, Rocket, Timer, type LucideIcon } from "lucide-react";
+import { BellRing, Bot, BookOpen, Lightbulb, ShieldCheck, Sparkles, KeyRound, Users, UserCog, UsersRound, Split, FileSignature, Wallet, ListChecks, UserRound, Receipt, FileText, Rocket, Timer, type LucideIcon } from "lucide-react";
 
 /** `requires` espelha o gate da sidebar: item some quando a feature da org está off. */
 type SettingsLink = { href: string; label: string; icon: LucideIcon; requires?: FeatureKey };
@@ -25,7 +25,6 @@ const SETTINGS_GROUPS: { title: string; items: SettingsLink[] }[] = [
     title: "Conteúdo & documentos",
     items: [
       { href: "/settings/knowledge-base", label: "Base de conhecimento", icon: BookOpen },
-      { href: "/settings/document-styles", label: "Estilos de documento", icon: Palette },
       { href: "/settings/formulario", label: "Formulário", icon: ListChecks },
       { href: "/settings/notificacoes", label: "Notificações do processo", icon: BellRing },
       { href: "/settings/sla", label: "SLA do pipeline", icon: Timer },

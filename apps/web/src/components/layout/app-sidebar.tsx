@@ -247,11 +247,6 @@ const NAV: NavEntry[] = [
         permission: PERMISSION.ORG_SETTINGS_READ,
       },
       {
-        title: "Estilos de documento",
-        url: "/settings/document-styles",
-        permission: PERMISSION.ORG_SETTINGS_READ,
-      },
-      {
         title: "Formulário",
         url: "/settings/formulario",
         permission: PERMISSION.ORG_SETTINGS_READ,
