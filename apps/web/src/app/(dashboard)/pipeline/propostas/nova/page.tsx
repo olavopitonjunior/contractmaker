@@ -78,27 +78,10 @@ export default async function NovaPropostaPage({
 
   const schemaOptions = PROPOSAL_SCHEMA_OPTIONS[tipo];
 
-  // iList (RE/MAX): botão de busca no catálogo só quando o tenant tem conexão
-  // provisionada pelo super-admin — mesmo gate do dropdown do pipeline.
-  const hasIList = (await getIListConnection(orgId)) !== null;
-
-  // Admin/gestor cria já atribuindo (select "Responsável" no form). Sem
-  // PROPOSAL_ASSIGN o select nem aparece e a lista não é carregada.
-  const canAssign = can(eff, PERMISSION.PROPOSAL_ASSIGN);
-  const members = canAssign
-    ? (
-        await prisma.orgMembership.findMany({
-          where: { orgId },
-          select: { user: { select: { id: true, name: true } } },
-          orderBy: { user: { name: "asc" } },
-        })
-      )
-        .map((m) => ({ id: m.user.id, name: m.user.name ?? "Sem nome" }))
-        .filter((m) => m.id)
-    : [];
-
   // Escopo (dono/responsável/VIEW_ALL) — mesmo corte do /editar. Fora dele o
-  // fromId é ignorado silenciosamente (form vazio).
+  // fromId é ignorado silenciosamente (form vazio). Resolvido ANTES das buscas
+  // abaixo: é decisão pura, e decidi-la primeiro evita buscar os signatários de
+  // uma proposta que o escopo vai descartar.
   if (
     fromProposal &&
     !canAccessProposal({
@@ -110,15 +93,41 @@ export default async function NovaPropostaPage({
     fromProposal = null;
   }
 
+  // Admin/gestor cria já atribuindo (select "Responsável" no form). Sem
+  // PROPOSAL_ASSIGN o select nem aparece e a lista não é carregada.
+  const canAssign = can(eff, PERMISSION.PROPOSAL_ASSIGN);
+
+  // As três buscas não dependem uma da outra — serializá-las somava três idas
+  // ao banco na abertura da página, cada uma esperando a anterior sem motivo.
+  // iList (RE/MAX): botão de busca no catálogo só quando o tenant tem conexão
+  // provisionada pelo super-admin — mesmo gate do dropdown do pipeline.
+  const [ilistConnection, memberRows, signers] = await Promise.all([
+    getIListConnection(orgId),
+    canAssign
+      ? prisma.orgMembership.findMany({
+          where: { orgId },
+          select: { user: { select: { id: true, name: true } } },
+          orderBy: { user: { name: "asc" } },
+        })
+      : Promise.resolve([]),
+    fromProposal
+      ? prisma.proposalSigner.findMany({
+          where: { proposalId: fromProposal.id },
+          orderBy: { signingGroup: "asc" },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  const hasIList = ilistConnection !== null;
+  const members = memberRows
+    .map((m) => ({ id: m.user.id, name: m.user.name ?? "Sem nome" }))
+    .filter((m) => m.id);
+
   let initial: ProposalFormValues = emptyProposalForm(tipo, schemaOptions[0].value);
   let parentProposalId: string | undefined;
   let initialResponsibleUserId: string | undefined;
   let initialResponsibleName: string | undefined;
   if (fromProposal) {
-    const signers = await prisma.proposalSigner.findMany({
-      where: { proposalId: fromProposal.id },
-      orderBy: { signingGroup: "asc" },
-    });
     // Validade: preserva a JANELA original (createdAt→validUntil do pai),
     // recontada a partir de agora. O instante cru não serve: no fluxo normal o
     // pai já chega TERMINAL aqui (o diálogo cancelou antes de navegar), e uma
