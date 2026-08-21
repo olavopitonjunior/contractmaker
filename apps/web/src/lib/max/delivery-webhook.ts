@@ -87,6 +87,10 @@ export function verifyMaxWebhook(params: {
  * `reported_at`, então o mesmo desfecho pode chegar duas vezes.
  */
 const RANK: Record<DeliveryOutcome["status"], number> = {
+  // failed e unconfirmed empatam DE PROPÓSITO: no remetente eles nascem de
+  // estados mutuamente exclusivos (failed = envio nunca aceito, sem provider
+  // id; unconfirmed = aceito e sem notícia) — a sequência unconfirmed→failed
+  // é inalcançável, e desempatar quebraria delivered-depois-de-failed.
   failed: 1,
   unconfirmed: 1,
   delivered: 2,
@@ -133,31 +137,33 @@ export interface ApplyResult {
 export async function applyDeliveryOutcome(
   outcome: DeliveryOutcome
 ): Promise<ApplyResult> {
-  const marca: MaxDeliveryDetail = {
+  const mark: MaxDeliveryDetail = {
     status: outcome.status,
     at: outcome.at,
     providerMessageId: outcome.providerMessageId ?? null,
     receivedAt: new Date().toISOString(),
   };
-  const marcaJson = JSON.stringify(marca);
+  const markJson = JSON.stringify(mark);
   const rank = RANK[outcome.status];
-  const guarda = Prisma.raw(rankCaseSql());
+  const rankGuard = Prisma.raw(rankCaseSql());
 
-  const dealLogs = await prisma.$executeRaw`
-    UPDATE "DealNotificationLog"
-       SET "maxDeliveryJson" = ${marcaJson}::jsonb
-     WHERE id = ${outcome.dedupeKey}
-       AND "orgId" = ${outcome.orgId}
-       AND channel = 'whatsapp'
-       AND (${guarda}) < ${rank}`;
-
-  const userDeliveries = await prisma.$executeRaw`
-    UPDATE "UserNotificationDelivery"
-       SET "maxDeliveryJson" = ${marcaJson}::jsonb
-     WHERE id = ${outcome.dedupeKey}
-       AND "orgId" = ${outcome.orgId}
-       AND channel = 'whatsapp'
-       AND (${guarda}) < ${rank}`;
+  // Independentes (o id é PK em no máximo UMA das tabelas) — em paralelo.
+  const [dealLogs, userDeliveries] = await Promise.all([
+    prisma.$executeRaw`
+      UPDATE "DealNotificationLog"
+         SET "maxDeliveryJson" = ${markJson}::jsonb
+       WHERE id = ${outcome.dedupeKey}
+         AND "orgId" = ${outcome.orgId}
+         AND channel = 'whatsapp'
+         AND (${rankGuard}) < ${rank}`,
+    prisma.$executeRaw`
+      UPDATE "UserNotificationDelivery"
+         SET "maxDeliveryJson" = ${markJson}::jsonb
+       WHERE id = ${outcome.dedupeKey}
+         AND "orgId" = ${outcome.orgId}
+         AND channel = 'whatsapp'
+         AND (${rankGuard}) < ${rank}`,
+  ]);
 
   return { dealLogs, userDeliveries };
 }

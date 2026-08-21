@@ -33,13 +33,13 @@ export async function POST(req: NextRequest) {
   // reserializar o JSON quebraria na primeira diferença de ordem de chave.
   const rawBody = await req.text();
 
-  const valido = verifyMaxWebhook({
+  const isValid = verifyMaxWebhook({
     timestamp: req.headers.get("x-max-timestamp"),
     signature: req.headers.get("x-max-signature"),
     rawBody,
     secret,
   });
-  if (!valido) {
+  if (!isValid) {
     // Sem detalhe NO CORPO — mas com log: drift de secret entre os dois
     // projetos Vercel produziria 401s indistinguíveis de "o Max nunca chamou"
     // (convenção dos webhooks vizinhos: clicksign loga toda recusa).
@@ -62,10 +62,13 @@ export async function POST(req: NextRequest) {
   try {
     const applied = await applyDeliveryOutcome(outcome);
     if (applied.dealLogs === 0 && applied.userDeliveries === 0) {
-      // Não é erro (canais sem linha de log existem — §8), mas é o sinal que
-      // o operador precisa quando a costura falhar de verdade.
+      // Zero linhas cobre DOIS casos que o UPDATE atômico não distingue:
+      // canal sem linha de log (§8) e retry idempotente de desfecho já
+      // aplicado (rank igual). O log diz os dois — chamar tudo de "sem linha"
+      // mascararia órfãos reais atrás do ruído dos retries.
       console.log(
-        `[webhook/max] desfecho sem linha de log (${outcome.orgId}, ${outcome.dedupeKey}, ${outcome.status})`
+        `[webhook/max] desfecho sem efeito — linha inexistente OU já aplicado ` +
+          `(${outcome.orgId}, ${outcome.dedupeKey}, ${outcome.status})`
       );
     }
     return NextResponse.json({ ok: true, applied });
