@@ -181,6 +181,7 @@ export default async function PropostasPage({
         firstViewedAt: true,
         lastReminderAt: true,
         convertedDealId: true,
+        supersededById: true,
         dataJson: true,
         user: { select: { name: true } },
         responsibleName: true,
@@ -241,6 +242,7 @@ export default async function PropostasPage({
     // é quem cria OU envia. VIEW_ALL sozinho é LEITURA e não entra aqui.
     write:
       can(eff, PERMISSION.PROPOSAL_CREATE) || can(eff, PERMISSION.PROPOSAL_SEND),
+    create: can(eff, PERMISSION.PROPOSAL_CREATE),
     convert: can(eff, PERMISSION.PROPOSAL_CONVERT),
     cancel: can(eff, PERMISSION.PROPOSAL_CANCEL),
     delete: can(eff, PERMISSION.PROPOSAL_DELETE),
@@ -280,6 +282,7 @@ export default async function PropostasPage({
         firstViewedAtLabel: formatDayMonthBR(p.firstViewedAt, ""),
         prazo: { label: prazo.shortLabel, tone: prazo.tone },
         convertedDealId: p.convertedDealId,
+        supersededById: p.supersededById,
         responsible: resp,
         resumo: summarizeProposalData(p.dataJson, p.kind),
         round: proposalRoundView({

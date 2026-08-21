@@ -507,6 +507,7 @@ vi.mock("@/lib/db/prisma", () => {
     },
     proposalEvent: {
       create: vi.fn().mockResolvedValue({}),
+      createMany: vi.fn().mockResolvedValue({ count: 0 }),
       findMany: vi.fn().mockResolvedValue([]),
     },
     proposalSigner: {

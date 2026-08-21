@@ -4,6 +4,15 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-20 - Recriar proposta enviada
+
+### Adicionado
+
+- **"Recriar proposta"** no detalhe e na linha da lista, para preenchimento errado ou não-recebimento (pedido RE/MAX LCeA): cancela a proposta atual (envelopes ClickSign junto, motivo obrigatório no histórico) e abre `nova?fromId=` com TUDO pré-preenchido via `parseProposalForm` — partes, valores, condições, comissão, signatários, título e responsável (com `PROPOSAL_ASSIGN`). Nos terminais (recusadas/expirada/cancelada) navega direto, sem cancelar de novo. Validade vencida/terminal volta ao default de 7 dias — senão a recriação nasceria expirável no ato. Gate `RECREATABLE_STATUSES` (fonte única UI+predicado): rascunho/aguardando_aprovacao ficam de fora (basta editar), convertida/completa também (desfecho fechado). Quando o proponente já assinou, o diálogo avisa que a assinatura será descartada; documentos anexados NÃO são copiados (avisado no diálogo e no banner do form).
+- **Thread de recriação persistida**: a filha nasce com `parentProposalId` + `round` herdado (+1); o pai ganha `supersededById` (última recriação vence) e o botão "Recriar" some dele — o detalhe mostra "Recriação de PROP-X"/"Recriada como PROP-Y" com link (fora do escopo do visitante, o fato aparece sem code nem link: o link levaria ao próprio notFound da página), e a timeline ganha os eventos `superseded_by_recreation`/`recreated_from` (timeline apenas; decisão deliberada de não notificar — quem recria é o próprio corretor, na tela). Campos já existiam no schema desde a modelagem — sem migration.
+
+  Guardas de estado que o review fechou: o POST valida status do pai server-side (só terminal recriável; recriar uma viva por API deixaria duas ativas na thread com envelope rodando na "superada"), o gate da UI é `PROPOSAL_CREATE` puro (com `write` — CREATE **ou** SEND — um SEND-sem-CREATE cancelava a proposta e batia em 403 na criação, executando só a metade destrutiva), e excluir o rascunho-filho limpa o `supersededById` do pai (o campo é escalar sem FK: o ponteiro pendurado escondia "Recriar" pra sempre). A validade **preserva a janela original** recontada de agora — resetar pro default de 7 dias contradizia o "mesmos dados" do diálogo —, o responsável externo (`responsibleName`) é herdado junto e um responsável que saiu da org não é copiado (viraria 400 no submit).
+
 ## [Unreleased] - 2026-08-20 - Cadastro de corretores: validação, design system e canais
 
 ### Adicionado

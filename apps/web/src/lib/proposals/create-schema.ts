@@ -60,6 +60,9 @@ export const createSchema = z.object({
   // livre de corretor externo. Exigem PROPOSAL_ASSIGN — a rota valida.
   responsibleUserId: z.string().min(1).optional(),
   responsibleName: z.string().min(2).max(120).optional(),
+  // Recriação: id da proposta que este rascunho substitui. A rota valida a org
+  // do pai, herda round+1 e grava supersededById + eventos de thread no pai.
+  parentProposalId: z.string().min(1).optional(),
 });
 
 /**

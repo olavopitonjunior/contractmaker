@@ -20,7 +20,7 @@ vi.mock("sonner", () => ({
 import { ProposalRowActions, type ProposalPermissions } from "../ProposalRowActions";
 
 const ALL: ProposalPermissions = {
-  send: true, write: true, convert: true, cancel: true,
+  send: true, write: true, create: true, convert: true, cancel: true,
   delete: true, resend: true, assign: true,
 };
 

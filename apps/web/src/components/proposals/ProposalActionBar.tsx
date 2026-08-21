@@ -3,7 +3,16 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Send, Bell, CheckCircle2, FileSignature, Ban, Trash2, UserCheck } from "lucide-react";
+import {
+  Send,
+  Bell,
+  CheckCircle2,
+  FileSignature,
+  Ban,
+  Trash2,
+  UserCheck,
+  CopyPlus,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -34,6 +43,12 @@ import {
   EnviarProprietarioDialog,
   type PlanVendedor,
 } from "./EnviarProprietarioDialog";
+import {
+  RecreateProposalDialog,
+  canRecreateProposal,
+  recreateNeedsCancel,
+  recreateHref,
+} from "./RecreateProposalDialog";
 
 export function ProposalActionBar({
   proposal,
@@ -50,6 +65,8 @@ export function ProposalActionBar({
     convertedDealId: string | null;
     /** `Proposal.sentAt` em ISO — ver RowProposal.sentAt. */
     sentAt: string | null;
+    /** Já recriada (aponta pra filha) → o botão "Recriar" some. */
+    supersededById?: string | null;
   };
   permissions: ProposalPermissions;
   /** venda | locacao — só muda a copy (proprietário × locador). */
@@ -60,7 +77,13 @@ export function ProposalActionBar({
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<
-    null | "cancel" | "delete" | "convertUnsigned" | "convertManager" | "complete"
+    | null
+    | "cancel"
+    | "delete"
+    | "convertUnsigned"
+    | "convertManager"
+    | "complete"
+    | "recreate"
   >(null);
   const [sendVendedorOpen, setSendVendedorOpen] = useState(false);
   const [reason, setReason] = useState("");
@@ -106,6 +129,14 @@ export function ProposalActionBar({
   const canConvertUnsigned =
     permissions.convert && !canConvert && CONVERT_UNSIGNED_STATUSES.has(status);
   const canCancel = permissions.cancel && CANCELLABLE_STATUSES.has(status);
+  // Recriar = cancelar (quando ainda viva) + novo rascunho pré-preenchido.
+  // Some depois de recriada (supersededById) — evita ramificação acidental; o
+  // detalhe mostra o link "Recriada como" no lugar. No caminho vivo o cancel é
+  // parte da ação, então `permissions.cancel` também é exigida.
+  const canRecreate = canRecreateProposal(
+    { status, convertedDealId: proposal.convertedDealId, supersededById: proposal.supersededById },
+    permissions
+  );
   // Espelha o guard do DELETE, igual à lista — ver ProposalRowActions.
   const canDelete =
     permissions.delete &&
@@ -199,6 +230,18 @@ export function ProposalActionBar({
           {partialSigned ? "Converter sem assinatura completa" : "Converter sem assinatura"}
         </Button>
       )}
+      {canRecreate && (
+        <Button
+          variant="outline"
+          disabled={busy}
+          onClick={() => {
+            if (recreateNeedsCancel(status)) setDialog("recreate");
+            else router.push(recreateHref(proposal.id));
+          }}
+        >
+          <CopyPlus className="mr-1.5 h-4 w-4" /> Recriar proposta
+        </Button>
+      )}
       {canCancel && (
         <Button variant="outline" className="text-destructive hover:text-destructive" disabled={busy} onClick={() => setDialog("cancel")}>
           <Ban className="mr-1.5 h-4 w-4" /> Cancelar
@@ -249,6 +292,13 @@ export function ProposalActionBar({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <RecreateProposalDialog
+        open={dialog === "recreate"}
+        onOpenChange={(o) => !o && setDialog(null)}
+        proposalId={proposal.id}
+        status={status}
+      />
 
       {/* Cancelar (com motivo) */}
       <AlertDialog open={dialog === "cancel"} onOpenChange={(o) => !o && setDialog(null)}>

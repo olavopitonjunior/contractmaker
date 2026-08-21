@@ -102,6 +102,16 @@ interface Proposal {
   /** ISO do updatedAt do servidor — desempata prop fresco × polling parado. */
   updatedAtIso: string;
   convertedDealId: string | null;
+  /** Já recriada — o ActionBar esconde "Recriar" e o card mostra o link. */
+  supersededById: string | null;
+  /**
+   * Thread de recriação: de onde veio / quem a substituiu. `id: null` = a outra
+   * ponta está fora do escopo do visitante — mostra o fato, sem link nem code.
+   */
+  thread: {
+    parent: { id: string | null; label: string } | null;
+    supersededBy: { id: string | null; label: string } | null;
+  };
   dossierUrl: string | null;
   resumo: { proponente: string | null; imovel: string | null; valorLabel: string | null };
   /** Partes completas + condições/comissão/corretor, tudo formatado no server. */
@@ -391,6 +401,7 @@ export function ProposalDetailClient({
               instrument: proposal.instrument,
               convertedDealId: proposal.convertedDealId,
               sentAt: liveSentAt,
+              supersededById: proposal.supersededById,
             }}
             permissions={permissions}
             kind={proposal.kind}
@@ -533,6 +544,8 @@ export function ProposalDetailClient({
             <Row label="Criada por" value={proposal.creatorName ?? "—"} />
             <Row label="Modelo" value={proposal.templateName ?? "—"} />
             <Row label="Criada" value={proposal.createdAtLabel} />
+            <ThreadRow label="Recriação de" target={proposal.thread.parent} />
+            <ThreadRow label="Recriada como" target={proposal.thread.supersededBy} />
           </div>
         </Card>
 
@@ -890,6 +903,37 @@ export function ProposalDetailClient({
         proposalId={proposal.id}
         currentTitle={proposal.title}
       />
+    </div>
+  );
+}
+
+/**
+ * Uma ponta da thread de recriação. Sem `id` (outra ponta fora do escopo do
+ * visitante) o fato aparece como texto — link levaria ao notFound() do guard
+ * da própria página.
+ */
+function ThreadRow({
+  label,
+  target,
+}: {
+  label: string;
+  target: { id: string | null; label: string } | null;
+}) {
+  if (!target) return null;
+  return (
+    <div className="flex justify-between gap-2 text-sm">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      {target.id ? (
+        <Link
+          href={`/pipeline/propostas/${target.id}`}
+          className="min-w-0 truncate font-medium text-primary hover:underline"
+          title={target.label}
+        >
+          {target.label}
+        </Link>
+      ) : (
+        <span className="min-w-0 truncate text-muted-foreground">{target.label}</span>
+      )}
     </div>
   );
 }
