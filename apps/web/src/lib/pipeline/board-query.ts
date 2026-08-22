@@ -47,9 +47,12 @@ export async function getBoardStages(params: {
   nowMs: number;
 }): Promise<BoardData | null> {
   const { orgId, kind, filters, extraWhere, orderBy, nowMs } = params;
+  // AND explícito, não spread: `boardFiltersWhere` e o escopo RBAC
+  // (`dealScopeWhere`, que para gerente restrito é `{ OR: [...] }`) podem
+  // ambos trazer `OR`/`AND` — no spread o segundo apagava o primeiro e o
+  // gerente com visão restrita via busca recebia o board errado.
   const dealWhere: Prisma.DealWhereInput = {
-    ...boardFiltersWhere(filters, new Date(nowMs)),
-    ...(extraWhere ?? {}),
+    AND: [boardFiltersWhere(filters, new Date(nowMs)), extraWhere ?? {}],
   };
 
   const pipeline = await prisma.pipeline.findFirst({
