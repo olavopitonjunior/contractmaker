@@ -116,7 +116,7 @@ export function renderMaxAlert(alert: MaxAlert): { subject: string; html: string
         `<p><strong>A instância Z-API do Max voltou.</strong></p>`,
         `<p>Ficou fora por <strong>${escapeHtml(fora)}</strong>. Reconectou em ${escapeHtml(quando)}.</p>`,
         `<p>A fila represada volta a sair sozinha — o cron do outbox despacha a cada minuto, respeitando a janela 7h–22h.</p>`,
-        `<p style="color:#888">Conferir em /admin/max.</p>`,
+        `<p style="color:#888">Estado ao vivo em /admin/max.</p>`,
       ].join("\n"),
     };
   }
@@ -138,7 +138,7 @@ export function renderMaxAlert(alert: MaxAlert): { subject: string; html: string
       `<p><strong>Nada se perde.</strong> O outbox represa e volta a despachar na reconexão. O que para de verdade é a conversa: quem escrever para o Max agora não recebe resposta.</p>`,
       `<p>Detectado em ${escapeHtml(quando)}.</p>`,
       `<p><strong>O que fazer:</strong> abrir o painel da Z-API e repárear a instância pelo QR code. Um novo e-mail sai automaticamente quando ela voltar, com o tempo que ficou fora.</p>`,
-      `<p style="color:#888">Estado ao vivo em /admin/max. Histórico em /admin/metrics → Auditoria.</p>`,
+      `<p style="color:#888">Estado ao vivo em /admin/max. O incidente também entra no resumo diário de alertas da plataforma.</p>`,
     ].join("\n"),
   };
 }
@@ -152,30 +152,40 @@ export function renderMaxAlert(alert: MaxAlert): { subject: string; html: string
  * tabela `connection_state` do OUTRO lado (transição, com debounce de 1 h), e
  * um segundo incidente no mesmo dia seria engolido pelo re-arm. Então o e-mail
  * sai direto por `sendEmail`, e o motor de alertas é chamado em modo
- * `"digest"` — que registra em `PlatformAlertEvent` (aparece em
- * `/admin/metrics → Auditoria`) sem e-mailar de novo.
+ * `"digest"` — que registra em `PlatformAlertEvent` sem e-mailar de novo.
+ *
+ * Onde esse registro aparece, hoje: só no **resumo diário**
+ * (`/api/cron/alerts/digest`). Não há tela que leia `PlatformAlertEvent` —
+ * conferido, e por isso o corpo do e-mail não manda ninguém para
+ * `/admin/metrics` atrás dele.
  *
  * Devolve `false` quando o e-mail NÃO saiu. A rota transforma isso em 500, e o
  * Max retenta na passada seguinte — o carimbo dele só acontece no sucesso, e é
  * daí que sai o retry sem fila nova.
  */
 export async function deliverMaxAlert(alert: MaxAlert): Promise<boolean> {
-  const to = await maxAlertRecipients();
-  if (to.length === 0) {
-    console.error("[webhook/max-alert] nenhum destinatário — alerta não enviado");
-    return false;
-  }
-
   const { subject, html } = renderMaxAlert(alert);
   const caiu = alert.evento === "zapi_desconectada";
 
-  // Registro primeiro: se o provedor de e-mail estiver fora, o incidente ainda
-  // fica gravado em algum lugar. Fire-and-forget, nunca lança.
+  /**
+   * Registro ANTES de qualquer coisa que possa desistir — inclusive antes de
+   * resolver destinatário. Se o e-mail não puder sair, por qualquer motivo, o
+   * incidente ainda tem que ficar gravado em algum lugar; deixar este `report`
+   * depois do `return false` de "nenhum destinatário" anularia a garantia
+   * justamente na única falha PERMANENTE que existe aqui. Fire-and-forget,
+   * nunca lança.
+   */
   reportPlatformAlert({
     kind: "agent_channel_down",
-    // Assinatura fixa: é uma instância só. O motor INCREMENTA `count` em vez de
-    // criar linha, então o histórico vira "quantas vezes o canal do Max caiu".
-    signature: `max:zapi:${alert.evento}`,
+    /**
+     * A assinatura inclui o `at` do EVENTO — que o max-agent mantém estável
+     * entre retentativas do mesmo incidente (é o instante da queda, não o do
+     * envio). Com isso: **uma linha por incidente**, e o `count` dela conta as
+     * TENTATIVAS de entrega daquele incidente. A assinatura fixa que estava
+     * aqui antes somava tudo numa linha só, e um SMTP fora por quatro horas
+     * faria o digest anunciar "240×" para uma queda única.
+     */
+    signature: `max:zapi:${alert.evento}:${alert.at}`,
     severity: caiu ? "critical" : "info",
     title: subject.replace(/^\[imobpro\] [^ ]+ /, ""),
     payload: caiu
@@ -183,6 +193,12 @@ export async function deliverMaxAlert(alert: MaxAlert): Promise<boolean> {
       : { at: alert.at, foraPor: formatDuracao(alert.foraPorMs) },
     notify: "digest",
   });
+
+  const to = await maxAlertRecipients();
+  if (to.length === 0) {
+    console.error("[webhook/max-alert] nenhum destinatário — alerta não enviado");
+    return false;
+  }
 
   // `sendEmail` NÃO lança — devolve `{ok:false}`. Ler o `ok` é obrigatório:
   // um try/catch sozinho não vê a recusa do provedor.

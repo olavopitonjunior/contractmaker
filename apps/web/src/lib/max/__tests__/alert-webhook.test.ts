@@ -89,11 +89,31 @@ describe("parseMaxAlert", () => {
   });
 
   /**
-   * Discriminated union: os campos NÃO se misturam. `foraPorMs` numa queda
-   * indicaria que um dos lados mudou o contrato pela metade.
+   * O que a união garante é que o campo OBRIGATÓRIO da variante esteja lá —
+   * uma queda sem `represadas` é recusada, mesmo trazendo o campo da outra
+   * variante no lugar.
    */
-  it("recusa campo do outro evento", () => {
+  it("recusa a variante sem o campo obrigatório dela", () => {
     expect(parseMaxAlert({ evento: "zapi_desconectada", at: CAIU.at, foraPorMs: 1 })).toBeNull();
+  });
+
+  /**
+   * E o que ela NÃO garante, afirmado explicitamente para ninguém supor o
+   * contrário: chave desconhecida é **descartada**, não rejeitada (zod só
+   * rejeita com `.strict()`).
+   *
+   * Fica solto de propósito. Com `.strict()`, um campo novo no emissor
+   * derrubaria TODO alerta com 400 até o receptor subir — e a falha que este
+   * canal existe para matar é justamente "ninguém foi avisado". Aqui, degradar
+   * ignorando um campo extra é infinitamente melhor que não entregar. Quem
+   * protege contra divergência de contrato é o vetor fixo de paridade, no CI
+   * dos dois repos, antes do deploy.
+   */
+  it("chave desconhecida é DESCARTADA, não rejeitada — robustez de propósito", () => {
+    const r = parseMaxAlert({ ...CAIU, foraPorMs: 1, campoNovo: "x" });
+    expect(r).toEqual(CAIU);
+    expect(r).not.toHaveProperty("foraPorMs");
+    expect(r).not.toHaveProperty("campoNovo");
   });
 });
 
@@ -196,7 +216,24 @@ describe("POST /api/webhooks/max/alert", () => {
     expect(arg.kind).toBe("agent_channel_down");
     expect(arg.notify).toBe("digest");
     expect(arg.severity).toBe("critical");
+    // A assinatura carrega o `at` do incidente: uma LINHA por queda, e o
+    // `count` dela contando tentativas de entrega. Com assinatura fixa, um
+    // SMTP fora por 4h faria o digest anunciar "240×" para uma queda só.
+    expect(arg.signature).toBe(`max:zapi:zapi_desconectada:${CAIU.at}`);
     expect(email.sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * A única falha PERMANENTE deste caminho. Se o registro ficasse depois do
+   * `return false` de "sem destinatário", o incidente não deixaria rastro
+   * nenhum do lado da plataforma — só um console.error num log serverless.
+   */
+  it("sem destinatário o incidente AINDA fica registrado", async () => {
+    vi.stubEnv("MAX_ALERT_EMAIL", "");
+    alerts.alertRecipients.mockResolvedValue([]);
+    const res = await POST(assinado(CAIU));
+    expect(res.status).toBe(500);
+    expect(alerts.reportPlatformAlert).toHaveBeenCalledTimes(1);
   });
 
   /**

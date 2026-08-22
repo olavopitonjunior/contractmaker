@@ -14,11 +14,24 @@ export const runtime = "nodejs";
  * tenant). Reusa `verifyMaxWebhook` em vez de repetir a verificação: código de
  * cripto duplicado é onde um conserto futuro esquece uma cópia.
  *
- * Os códigos de erro conversam com o cliente do outro lado, que classifica
- * 404/408/429/401/403/5xx como "integração fora" (retenta) e 4xx de payload
- * como "recusado" (desiste). Por isso e-mail não enviado é **500** e não 200:
- * o carimbo do Max só acontece no sucesso, então o 500 vira reenvio na passada
- * seguinte, sem fila nova nem código de retry.
+ * **O cliente deste endpoint trata QUALQUER não-2xx como "retenta"** — não é o
+ * tri-estado do `/api/webhooks/max` vizinho, que classifica 4xx como recusa e
+ * desiste. `reportAlert` (`max-agent/src/lib/cm.ts`) não tem contador de
+ * tentativas para proteger: o retry é simplesmente a passada seguinte do cron.
+ *
+ * Duas consequências que importam para quem mexer aqui:
+ *
+ *  · e-mail não enviado é **500**, nunca 200 — o carimbo do Max só acontece no
+ *    sucesso, então o 500 vira reenvio, sem fila nova nem código de retry;
+ *  · um **400** por divergência de contrato (campo renomeado de um lado só)
+ *    vira laço de uma tentativa por minuto até alguém consertar. Ruidoso, e
+ *    ruidoso é o lado certo de errar num alerta — mas a defesa de verdade
+ *    contra isso é o vetor fixo de paridade, que quebra no CI dos dois repos
+ *    antes de qualquer deploy.
+ *
+ * O receptor faz o envio SMTP inline, antes de responder; o chamador reserva
+ * um teto próprio e mais largo para isso (`IMOBPRO_ALERT_TIMEOUT_MS`, 25 s).
+ * Encurtar um sem o outro produz e-mail duplicado em série, não perdido.
  */
 export async function POST(req: NextRequest) {
   const secret = process.env.MAX_WEBHOOK_SECRET;
