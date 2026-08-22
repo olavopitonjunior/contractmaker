@@ -1,5 +1,5 @@
-import { createHmac } from "node:crypto";
 import { maxServiceUrl } from "@/lib/max/endpoint";
+import { signMaxAdminRequest } from "@/lib/max/hmac";
 
 /**
  * Leitura do estado do serviço do Max, para o Mission Control do admin.
@@ -10,9 +10,35 @@ import { maxServiceUrl } from "@/lib/max/endpoint";
  * olhar. Então o painel dele vive aqui, e o serviço só expõe este endpoint.
  *
  * Autentica com o MESMO HMAC do `/notify`: um segredo compartilhado a menos.
- * Em GET o corpo é vazio, mas o timestamp continua limitando por quanto tempo
- * uma requisição capturada vale.
+ *
+ * ── O que é assinado, e por que mudou ─────────────────────────────────────
+ *
+ * Assinava `${timestamp}.` — corpo vazio, porque em GET não há corpo. O
+ * problema é que isso deixava a QUERY de fora: uma assinatura capturada valia
+ * cinco minutos para **qualquer `?orgId=`**, e o painel de um tenant abria o
+ * de outro. O serviço fechou essa porta assinando
+ * `${timestamp}.${método}.${caminho com query}` e passou a tolerar o formato
+ * antigo só enquanto este cliente não migrasse — com um log de sunset
+ * apontando para cá (`max-agent/src/lib/auth.ts`, "issue #347").
+ *
+ * Este arquivo é a migração. Com ela, o `allowLegacyEmptyBody` do lado de lá
+ * pode cair assim que o log parar de aparecer.
  */
+
+/**
+ * A assinatura vem do `lib/max/hmac.ts`, e não de um `createHmac` local.
+ *
+ * O cabeçalho daquele arquivo é explícito: duplicar a função cria duas chances
+ * de divergir do outro repositório em vez de uma. Este cliente era citado lá
+ * como usuário do módulo sem nunca ter sido — agora é de verdade.
+ */
+function assinar(secret: string, method: string, pathComQuery: string) {
+  const timestamp = String(Date.now());
+  return {
+    timestamp,
+    signature: signMaxAdminRequest(timestamp, method, pathComQuery, secret),
+  };
+}
 
 const NOTIFY_URL = process.env.MAX_NOTIFY_URL;
 const NOTIFY_SECRET = process.env.MAX_NOTIFY_SECRET;
@@ -54,13 +80,17 @@ export async function fetchMaxStatus(orgId?: string): Promise<MaxStatusResult> {
     return { ok: false, reason: "not_configured" };
   }
 
-  const timestamp = String(Date.now());
-  const signature = createHmac("sha256", NOTIFY_SECRET)
-    .update(`${timestamp}.`)
-    .digest("hex");
-
   const url = maxServiceUrl(NOTIFY_URL, "/api/admin/status");
   if (orgId) url.searchParams.set("orgId", orgId);
+
+  // Depois de montar a URL: a query entra na assinatura, então assinar antes
+  // de acrescentar `orgId` devolveria 401 — e é justamente o `orgId` que a
+  // assinatura precisa cobrir.
+  const { timestamp, signature } = assinar(
+    NOTIFY_SECRET,
+    "GET",
+    `${url.pathname}${url.search}`
+  );
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
