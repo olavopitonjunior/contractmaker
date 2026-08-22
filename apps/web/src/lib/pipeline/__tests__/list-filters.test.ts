@@ -64,9 +64,41 @@ describe("boardFiltersWhere", () => {
 
   it("q busca em title + clientName (insensitive)", () => {
     const where = boardFiltersWhere(parseBoardFilters({ q: "maria" }), NOW);
-    expect(where.OR).toEqual([
-      { title: { contains: "maria", mode: "insensitive" } },
-      { clientName: { contains: "maria", mode: "insensitive" } },
+    expect(where.AND).toEqual([
+      {
+        OR: [
+          { title: { contains: "maria", mode: "insensitive" } },
+          { clientName: { contains: "maria", mode: "insensitive" } },
+        ],
+      },
+    ]);
+  });
+
+  it("responsavel casa criador OU gerente", () => {
+    const where = boardFiltersWhere(parseBoardFilters({ responsavel: "u1" }), NOW);
+    expect(where.AND).toEqual([
+      { OR: [{ userId: "u1" }, { managerUserId: "u1" }] },
+    ]);
+    // O filtro NÃO pode virar um `userId` escalar: o card exibe o gerente.
+    expect(where.userId).toBeUndefined();
+  });
+
+  // Regressão: os dois filtros usam OR e antes moravam na mesma chave
+  // `where.OR` — o segundo apagava o primeiro e a busca sumia em silêncio.
+  it("q + responsavel convivem (não se sobrescrevem)", () => {
+    const where = boardFiltersWhere(
+      parseBoardFilters({ q: "maria", responsavel: "u1" }),
+      NOW
+    );
+    expect(where.AND).toHaveLength(2);
+    expect(where.AND).toEqual([
+      {
+        OR: [
+          { title: { contains: "maria", mode: "insensitive" } },
+          { clientName: { contains: "maria", mode: "insensitive" } },
+        ],
+      },
+      { OR: [{ userId: "u1" }, { managerUserId: "u1" }] },
     ]);
   });
 
@@ -80,7 +112,9 @@ describe("boardFiltersWhere", () => {
       }),
       NOW
     );
-    expect(where.userId).toBe("u1");
+    expect(where.AND).toEqual([
+      { OR: [{ userId: "u1" }, { managerUserId: "u1" }] },
+    ]);
     expect(where.sourceChannel).toBe("manual");
     expect(where.createdAt).toEqual({
       gte: new Date(NOW.getTime() - PERIODO_DAYS["7d"] * 86_400_000),
