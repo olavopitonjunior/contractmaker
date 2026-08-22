@@ -186,7 +186,7 @@ produto: **notificação de sistema por e-mail passa a sair de madrugada**.
 | Rota | Escopo | Fase |
 |---|---|---|
 | `GET /api/agents/profile?agentKey=max` | `agents:r` | 1 — persona, modelo, `ragScope`, budget, kill switch |
-| `POST /api/agents/usage` | `agents:rw` (**só Bearer**) | 2 — custo por turn, uma linha **por modelo** |
+| `POST /api/agents/usage` | `agents:rw` (**só Bearer**) | 2 — custo por turn, uma linha **por modelo**. Aceita `costUsd` do provedor quando `provider: "openrouter"` (§9.1) |
 | `POST /api/agents/knowledge/search` | `agents:r` | 2 — RAG escopado pelo `ragScope` do perfil |
 | `GET /api/users/by-phone?phone=` | `metrics:r` | 1 — telefone → org/usuário |
 | `POST /api/forms` | `documents:rw` | 3 — form de vendas (já existia) |
@@ -386,6 +386,45 @@ Detecção do lado do Max: **push** (callbacks `connected`/`disconnected` da Z-A
 apontados para `POST /api/zapi-connection/<secret>`, latência de segundos) com o
 **cron do outbox como rede de segurança** para o callback que se perde na rede —
 duas passadas discordando do estado gravado alertam assim mesmo.
+
+## 9.1 Custo REPORTADO vs estimado (2026-08-22)
+
+`POST /api/agents/usage` passa a aceitar **`costUsd`** — o crédito que o
+provedor de fato cobrou — e só quando `provider === "openrouter"`.
+
+Isso parece contrariar a regra da própria rota (*"custo informado por quem
+gasta não é medição"*), e não contraria: o número **não é auto-declarado pelo
+agente**. Ele vem inline na resposta do OpenRouter (`usage.cost`); o Max só
+transporta. De qualquer outro provider o campo é **descartado em silêncio** —
+não 400, porque o campo é aditivo e um cliente antigo que o mande por engano
+não deve quebrar.
+
+**Por que a exceção existe.** Medido em 21/08 contra o `gpt-5.4-nano`:
+
+| turno | prompt | cacheado | custo real | tabela de preços | erro |
+|---|---|---|---|---|---|
+| sem cache | 1956 | 0 | $0,00042870 | $0,00042870 | **0,0%** |
+| com cache | 1956 | **1792** | **$0,00010614** | $0,00042870 | **+304%** |
+
+A tabela de preços está exata — o preço nunca foi o problema. O problema é que
+ela não enxerga o cache de prefixo do provedor, e o tenant via uma conta que
+não existe. Com o copiloto (catálogo de tools e resultado de `scope-query` no
+prompt) todo turn passa dos ~1024 tokens que ligam o cache, e o caso raro vira
+o caso comum.
+
+**Onde o número fica.** Em `AIUsage.estimatedCostUsd`, que passa a guardar *o
+melhor número disponível*, com `AIUsage.costSource` (`"reported"` |
+`"estimated"`) dizendo qual é. Uma coluna paralela obrigaria os ~60 pontos que
+somam custo (budget por contrato, teto mensal, painéis) a fazer COALESCE, e o
+primeiro esquecido daria total errado em silêncio.
+
+`null` e ausência significam "o provedor não informou"; **zero não** — zero é
+um número, e um turn que custou zero de verdade tem que ser distinguível de um
+que ninguém mediu. Teto de sanidade próprio: US$ 1,00 por turn.
+
+A resposta 202 devolve `costUsd`, `costSource` e **sempre** `estimatedCostUsd`
+— este último para quem integra conseguir medir o erro da tabela sem acesso ao
+banco. `/settings/ai-usage` mostra a divisão medido/estimado.
 
 ## 10. O que reaproveitar do `.openclaw` (auditado em 2026-08-01)
 

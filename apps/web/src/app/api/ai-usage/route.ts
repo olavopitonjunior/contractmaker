@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { agentLabel } from "@/lib/ai/agents/store";
+import { dividirPorProcedencia } from "@/lib/ai/usage";
 
 /**
  * GET /api/ai-usage?from=YYYY-MM-DD&to=YYYY-MM-DD
@@ -56,6 +57,7 @@ export async function GET(req: NextRequest) {
           cacheReadTokens: true,
           cacheWriteTokens: true,
           estimatedCostUsd: true,
+          costSource: true,
           latencyMs: true,
           success: true,
           createdAt: true,
@@ -122,6 +124,16 @@ export async function GET(req: NextRequest) {
     (acc, r) => acc + Number(r.estimatedCostUsd ?? 0),
     0
   );
+  /**
+   * Quanto do custo é MEDIDO e quanto é estimativa da tabela de preços.
+   *
+   * Sem isso o painel mostra um número só e quem lê não tem como saber que a
+   * parte estimada pode estar 304% acima do real (é o erro medido em 21/08
+   * num turn com cache de prefixo). Duas confianças diferentes não podem
+   * virar uma barra só em silêncio.
+   */
+  const procedencia = dividirPorProcedencia(allRows);
+
   const totalPromptTokens = allRows.reduce((acc, r) => acc + r.promptTokens, 0);
   const totalCompletionTokens = allRows.reduce(
     (acc, r) => acc + r.completionTokens,
@@ -228,6 +240,8 @@ export async function GET(req: NextRequest) {
     range: { from: from.toISOString(), to: to.toISOString() },
     totals: {
       costUsd: Number(totalCost.toFixed(4)),
+      /** Procedência do total acima — ver `costSource` em AIUsage. */
+      cost: procedencia,
       calls: totalCalls,
       promptTokens: totalPromptTokens,
       completionTokens: totalCompletionTokens,

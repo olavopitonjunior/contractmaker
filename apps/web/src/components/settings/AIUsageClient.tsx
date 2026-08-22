@@ -30,6 +30,16 @@ interface AgentStat {
 
 interface Totals {
   costUsd: number;
+  /**
+   * Procedência do `costUsd`. Opcional porque a rota só passou a mandar
+   * agora — uma aba aberta antes do deploy não pode quebrar.
+   */
+  cost?: {
+    reportedUsd: number;
+    estimatedUsd: number;
+    reportedCalls: number;
+    estimatedCalls: number;
+  };
   calls: number;
   promptTokens: number;
   completionTokens: number;
@@ -480,6 +490,18 @@ export function AIUsageClient() {
                 <p className="text-[10px] text-muted-foreground mt-0.5">
                   {data.totals.calls} chamadas
                 </p>
+                {/* Medido vs estimado. Um total sem procedência esconde que a
+                    parte estimada pode estar bem acima do real quando há cache
+                    de prefixo — 304% no caso medido em 21/08. */}
+                {data.totals.cost && data.totals.cost.reportedCalls > 0 && (
+                  <p
+                    className="text-[10px] text-muted-foreground mt-1 leading-snug"
+                    title="Medido = crédito real cobrado pelo provedor. Estimado = tabela de preços interna, que não enxerga cache de prefixo."
+                  >
+                    {formatUsd(data.totals.cost.reportedUsd)} medido ·{" "}
+                    {formatUsd(data.totals.cost.estimatedUsd)} estimado
+                  </p>
+                )}
               </CardContent>
             </Card>
             <Card>

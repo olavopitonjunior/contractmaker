@@ -31,6 +31,17 @@ export const dynamic = "force-dynamic";
 const MAX_TOKENS_POR_TURN = 500_000;
 const MAX_LATENCIA_MS = 600_000;
 
+/**
+ * Teto do custo REPORTADO por turn, pelo mesmo motivo dos tetos acima: este é
+ * o único campo que entra na tabela de custo SEM passar pela tabela de preços,
+ * então ele precisa da sua própria cerca.
+ *
+ * US$ 1,00 é ordem de grandeza absurda para um turn — os turns reais do Max
+ * custam frações de centavo (US$ 0,0004 sem cache) — e ainda assim contém o
+ * estrago bem abaixo do budget de um contrato.
+ */
+const MAX_CUSTO_USD_POR_TURN = 1;
+
 const bodySchema = z.object({
   agentKey: z.string().min(1),
   provider: z
@@ -42,6 +53,17 @@ const bodySchema = z.object({
   cacheReadTokens: z.number().int().min(0).max(MAX_TOKENS_POR_TURN).optional(),
   cacheWriteTokens: z.number().int().min(0).max(MAX_TOKENS_POR_TURN).optional(),
   latencyMs: z.number().int().min(0).max(MAX_LATENCIA_MS),
+  /**
+   * Crédito REAL cobrado pelo provedor. Honrado só quando
+   * `provider === "openrouter"` — ver a exceção no docblock do POST.
+   *
+   * `.nullable()` de propósito: o emissor manda `null` quando o provedor não
+   * informou, e null tem que ser aceito como "não informado" em vez de virar
+   * 400. Zero é aceito como valor legítimo no schema, mas o `recordAIUsage`
+   * trata `0` como número medido — o emissor manda `null`, nunca `0`, quando
+   * não sabe.
+   */
+  costUsd: z.number().min(0).max(MAX_CUSTO_USD_POR_TURN).nullable().optional(),
   toolsUsed: z.array(z.string().max(64)).max(50).optional(),
   iterations: z.number().int().min(1).max(50).optional(),
   success: z.boolean().optional(),
@@ -76,8 +98,28 @@ const bodySchema = z.object({
  *  - `operation` vem do registry (do contrário um token gravaria linhas como
  *    `specialist_editor` e sujaria o custo por operação);
  *  - `orgId`/`userId` vêm do token;
- *  - o custo em dólar é calculado aqui pela tabela de preços — custo informado
- *    por quem gasta não é medição.
+ *  - os tetos de sanidade por turn.
+ *
+ * ── A exceção do `costUsd`, e por que ela não fura a regra ───────────────
+ *
+ * Este bloco dizia, sem exceção: *"o custo em dólar é calculado aqui pela
+ * tabela de preços — custo informado por quem gasta não é medição"*. A regra
+ * continua valendo para tudo, MENOS para `provider === "openrouter"`, e a
+ * diferença é de natureza: **aquele número não é auto-declarado pelo agente,
+ * é o crédito que a fatura do provedor cobrou** (`usage.cost`, que vem inline
+ * na resposta do OpenRouter). Quem "informa" é o OpenRouter; o Max só
+ * transporta.
+ *
+ * Sem a exceção, o painel erra feio e para MAIS, não para menos. Medido em
+ * 21/08 contra o `gpt-5.4-nano`: sem cache de prefixo a tabela acerta com erro
+ * de 0,0%; num turn com 1792 de 1956 tokens vindos do cache, o custo real foi
+ * US$ 0,00010614 contra US$ 0,00042870 da tabela — **superestimativa de
+ * 304%**. Como `cached_tokens` não chegava até aqui, o tenant via uma conta
+ * que não existe, e a otimização que mais economiza era invisível.
+ *
+ * De outro provider, `costUsd` é **ignorado em silêncio** (não é 400): o campo
+ * é aditivo e um cliente antigo que o mande por engano não deve quebrar. O que
+ * protege contra número absurdo é o teto de sanidade, igual ao dos tokens.
  */
 export const POST = withApi("POST /api/agents/usage", async (req: NextRequest) => {
   const authed = await requireApiAuth(req, { scope: "agents:rw" });
@@ -149,6 +191,18 @@ export const POST = withApi("POST /api/agents/usage", async (req: NextRequest) =
     }
   }
 
+  /**
+   * A exceção, num lugar só: fora do OpenRouter, `costUsd` é descartado aqui e
+   * a tabela de preços decide. Ignorar em silêncio (e não 400) é deliberado —
+   * o campo é aditivo, e um cliente que o mande por engano não deve quebrar.
+   */
+  const custoReportado = body.provider === "openrouter" ? body.costUsd ?? null : null;
+  if (body.costUsd != null && custoReportado === null) {
+    console.warn(
+      `[agents/usage] costUsd ignorado: só vale para openrouter (veio de ${body.provider})`
+    );
+  }
+
   const operation = AGENT_REGISTRY[body.agentKey].operations[0];
   if (!operation) {
     // Agente externo sem operation no registry é erro de configuração nossa,
@@ -178,6 +232,7 @@ export const POST = withApi("POST /api/agents/usage", async (req: NextRequest) =
     iterations: body.iterations,
     success: body.success,
     errorMessage: body.errorMessage,
+    costUsd: custoReportado,
   });
 
   const estimatedCostUsd = calcCostUsd(
@@ -187,6 +242,7 @@ export const POST = withApi("POST /api/agents/usage", async (req: NextRequest) =
     body.cacheReadTokens ?? 0,
     body.cacheWriteTokens ?? 0
   );
+  const costUsd = custoReportado ?? estimatedCostUsd;
 
   // Era a única rota M2M de ESCRITA sem rastro no AuditLog — e é escrita numa
   // tabela de CUSTO que alimenta teto por agente. O rastro diz quem (token →
@@ -199,6 +255,8 @@ export const POST = withApi("POST /api/agents/usage", async (req: NextRequest) =
     metadata: {
       model: body.model,
       totalTokens: body.promptTokens + (body.completionTokens ?? 0),
+      costUsd,
+      costSource: custoReportado !== null ? "reported" : "estimated",
       estimatedCostUsd,
     },
   }).catch(() => {});
@@ -211,9 +269,23 @@ export const POST = withApi("POST /api/agents/usage", async (req: NextRequest) =
       agentKey: body.agentKey,
       operation,
       orgId,
+      /** O que de fato foi gravado — reportado quando houve, estimado quando não. */
+      costUsd,
+      costSource: custoReportado !== null ? "reported" : "estimated",
+      /** A estimativa, SEMPRE, mesmo quando o reportado venceu: é o que deixa
+       *  quem integra medir o tamanho do erro da tabela de preços sem
+       *  precisar de acesso ao banco. */
       estimatedCostUsd,
-      // 0 aqui significa modelo fora da tabela de preços (lib/ai/usage.ts::PRICING),
-      // não turn de graça — quem integra precisa conseguir notar isso.
+      /**
+       * `priced` continua sendo sobre a TABELA DE PREÇOS: false = modelo fora
+       * de `lib/ai/usage.ts::PRICING`, não turn de graça.
+       *
+       * Deliberadamente NÃO passou a olhar `costUsd`. Um modelo `:free` do
+       * OpenRouter reporta custo real **0**, e aí `costUsd > 0` diria
+       * `priced: false` — que quem integra leria como "modelo fora da tabela".
+       * Dois fatos diferentes não podem dividir a mesma flag; a procedência
+       * quem responde é `costSource`.
+       */
       priced: estimatedCostUsd > 0,
     },
     { status: 202 }

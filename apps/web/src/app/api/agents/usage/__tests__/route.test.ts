@@ -184,4 +184,115 @@ describe("POST /api/agents/usage", () => {
     expect(json.estimatedCostUsd).toBeGreaterThan(0);
     expect(json.estimatedCostUsd).toBeLessThan(1);
   });
+
+  /**
+   * A EXCEÇÃO do `costUsd`, e ela vale só para o OpenRouter porque ali o
+   * número não é auto-declarado pelo agente: é o crédito que a fatura do
+   * provedor cobrou (`usage.cost`, inline na resposta). O Max só transporta.
+   */
+  describe("costUsd — crédito real do provedor", () => {
+    const openrouter = {
+      ...corpoValido,
+      provider: "openrouter",
+      model: "openai/gpt-5.4-nano",
+    };
+
+    it("do openrouter, o reportado VENCE a tabela de preços", async () => {
+      tokenComEscopos(["agents:rw"]);
+      // Os números medidos em 21/08 no turn com cache de prefixo.
+      const res = await POST(
+        req({ ...openrouter, promptTokens: 1956, cacheReadTokens: 1792, costUsd: 0.00010614 }, "cmt_x")
+      );
+      const json = await res.json();
+
+      expect(json.costSource).toBe("reported");
+      expect(json.costUsd).toBeCloseTo(0.00010614, 8);
+      // A estimativa continua exposta: é o que permite medir o erro da tabela
+      // sem acesso ao banco. Aqui ela é MAIOR que o real — o tal dos 304%.
+      expect(json.estimatedCostUsd).toBeGreaterThan(json.costUsd);
+
+      const data = mockPrisma.aIUsage.create.mock.calls[0][0].data;
+      expect(Number(data.estimatedCostUsd)).toBeCloseTo(0.00010614, 8);
+      expect(data.costSource).toBe("reported");
+    });
+
+    it("sem costUsd, cai na tabela e marca como estimado", async () => {
+      tokenComEscopos(["agents:rw"]);
+      const json = await (await POST(req(openrouter, "cmt_x"))).json();
+      expect(json.costSource).toBe("estimated");
+      expect(json.costUsd).toBeGreaterThan(0);
+      expect(mockPrisma.aIUsage.create.mock.calls[0][0].data.costSource).toBe("estimated");
+    });
+
+    /**
+     * `null` é o jeito do emissor dizer "o provedor não informou". Tem que ser
+     * aceito como ausência, não virar 400 — senão todo turn sem custo do
+     * provedor pararia de ser contabilizado.
+     */
+    it("costUsd null é ausência, não erro", async () => {
+      tokenComEscopos(["agents:rw"]);
+      const res = await POST(req({ ...openrouter, costUsd: null }, "cmt_x"));
+      expect(res.status).toBe(202);
+      expect((await res.json()).costSource).toBe("estimated");
+    });
+
+    /**
+     * A asserção mais sutil do contrato, e a que mais fácil se quebra sem
+     * querer: **`0` é um custo MEDIDO, não ausência.** Um modelo `:free` do
+     * OpenRouter cobra zero de verdade, e essa linha tem que nascer
+     * `reported` — tratá-la como ausência a mandaria para a tabela de preços,
+     * que cobraria um modelo gratuito a preço cheio.
+     *
+     * Quem diz "não sei" é `null`, e só ele.
+     */
+    it("costUsd ZERO é medido, não ausência (modelo :free cobra zero de verdade)", async () => {
+      tokenComEscopos(["agents:rw"]);
+      const json = await (
+        await POST(req({ ...openrouter, costUsd: 0 }, "cmt_x"))
+      ).json();
+
+      expect(json.costSource).toBe("reported");
+      expect(json.costUsd).toBe(0);
+      expect(Number(mockPrisma.aIUsage.create.mock.calls[0][0].data.estimatedCostUsd)).toBe(0);
+      expect(mockPrisma.aIUsage.create.mock.calls[0][0].data.costSource).toBe("reported");
+    });
+
+    /**
+     * `priced` é sobre a TABELA DE PREÇOS, não sobre o custo gravado. Se ele
+     * passasse a olhar `costUsd`, o modelo gratuito acima apareceria como
+     * "fora da tabela" — dois fatos diferentes na mesma flag.
+     */
+    it("custo real zero NÃO faz o modelo parecer fora da tabela de preços", async () => {
+      tokenComEscopos(["agents:rw"]);
+      const json = await (
+        await POST(req({ ...openrouter, costUsd: 0 }, "cmt_x"))
+      ).json();
+      expect(json.priced).toBe(true);
+      expect(json.estimatedCostUsd).toBeGreaterThan(0);
+    });
+
+    /** De outro provider é descartado EM SILÊNCIO — o campo é aditivo. */
+    it("de outro provider é ignorado, sem quebrar", async () => {
+      tokenComEscopos(["agents:rw"]);
+      const res = await POST(
+        req({ ...corpoValido, provider: "anthropic", costUsd: 0.5 }, "cmt_x")
+      );
+      expect(res.status).toBe(202);
+      const json = await res.json();
+      expect(json.costSource).toBe("estimated");
+      expect(json.costUsd).toBeLessThan(0.5);
+      expect(mockPrisma.aIUsage.create.mock.calls[0][0].data.costSource).toBe("estimated");
+    });
+
+    /**
+     * O teto de sanidade próprio deste campo: é o único que entra na tabela de
+     * custo sem passar pela tabela de preços, então precisa da própria cerca.
+     */
+    it("400 em custo absurdo", async () => {
+      tokenComEscopos(["agents:rw"]);
+      const res = await POST(req({ ...openrouter, costUsd: 99 }, "cmt_x"));
+      expect(res.status).toBe(400);
+      expect(mockPrisma.aIUsage.create).not.toHaveBeenCalled();
+    });
+  });
 });
