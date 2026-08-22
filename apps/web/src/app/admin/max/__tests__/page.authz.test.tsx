@@ -14,21 +14,42 @@
  * "não aparece" passaria igual e protegeria menos.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
 
 // `vi.hoisted` porque as fábricas de `vi.mock` sobem para o topo do arquivo:
 // um `const` normal aqui não existiria ainda quando elas rodassem.
-const { getPlatformRole, fetchMaxConversations, fetchMaxStatus, auth, redirect } =
-  vi.hoisted(() => ({
-    getPlatformRole: vi.fn(),
-    fetchMaxConversations: vi.fn(),
-    fetchMaxStatus: vi.fn(),
-    auth: vi.fn(),
-    redirect: vi.fn(() => {
-      throw new Error("REDIRECT");
-    }),
-  }));
+const {
+  getPlatformRole,
+  fetchMaxConversations,
+  fetchMaxStatus,
+  auth,
+  redirect,
+  isFeatureEnabled,
+} = vi.hoisted(() => ({
+  getPlatformRole: vi.fn(),
+  fetchMaxConversations: vi.fn(),
+  fetchMaxStatus: vi.fn(),
+  auth: vi.fn(),
+  redirect: vi.fn(() => {
+    throw new Error("REDIRECT");
+  }),
+  isFeatureEnabled: vi.fn(),
+}));
 
 vi.mock("next/navigation", () => ({ redirect }));
+// `next/link` vira âncora simples: o que estes testes afirmam é o `href` que a
+// página produz, não o roteador do Next.
+vi.mock("next/link", () => ({
+  default: ({ href, children }: { href: string; children: React.ReactNode }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
+// Componente de cliente: usa `useRouter`, que não existe fora do Next. Ele não
+// tem nada a ver com o que este arquivo afirma — só aparece para `super_admin`
+// e derrubaria a renderização.
+vi.mock("../ReprovisionButton", () => ({
+  ReprovisionButton: () => <button type="button">reemitir</button>,
+}));
 vi.mock("@/lib/auth/auth", () => ({ auth }));
 vi.mock("@/lib/security/rbac/platform", () => ({ getPlatformRole }));
 vi.mock("@/lib/max/admin-client", () => ({
@@ -43,7 +64,7 @@ vi.mock("@/lib/db/prisma", () => ({
 }));
 vi.mock("@/lib/modules/read", () => ({
   getOrgModules: vi.fn().mockResolvedValue({}),
-  isFeatureEnabled: vi.fn().mockReturnValue(false),
+  isFeatureEnabled,
 }));
 
 import MaxMissionControlPage from "../page";
@@ -51,6 +72,9 @@ import MaxMissionControlPage from "../page";
 beforeEach(() => {
   vi.clearAllMocks();
   auth.mockResolvedValue({ user: { id: "u1" } });
+  // Default: nenhum tenant roteado. Os testes do seletor ligam explicitamente,
+  // porque só tenant roteado aparece na lista.
+  isFeatureEnabled.mockReturnValue(false);
   fetchMaxStatus.mockResolvedValue({ ok: false, reason: "not_configured" });
   fetchMaxConversations.mockResolvedValue({ ok: true, turns: [], nextCursor: null });
 });
@@ -93,6 +117,40 @@ describe("/admin/max — quem lê conversa", () => {
     await MaxMissionControlPage({ searchParams: {} });
 
     expect(fetchMaxConversations).not.toHaveBeenCalled();
+  });
+
+  /**
+   * O defeito que o smoke de produção pegou e a revisão de código não: a aba
+   * dizia "escolha uma imobiliária acima" e não havia nada acima que fizesse
+   * isso — o `orgId` só entrava editando a URL à mão. Cada pedaço da tela
+   * estava certo; o conjunto era inalcançável.
+   *
+   * O teste afirma o LINK, e não o texto, porque o texto já existia e não
+   * ajudava em nada.
+   */
+  it("cada tenant roteado vira link que carrega o orgId", async () => {
+    getPlatformRole.mockResolvedValue({ role: "support", scope: [] });
+    isFeatureEnabled.mockReturnValue(true);
+
+    const html = renderToStaticMarkup(
+      await MaxMissionControlPage({ searchParams: {} })
+    );
+
+    expect(html).toContain("/admin/max?orgId=org-1");
+  });
+
+  it("com tenant escolhido, existe caminho de volta para todos", async () => {
+    getPlatformRole.mockResolvedValue({ role: "super_admin", scope: [] });
+    isFeatureEnabled.mockReturnValue(true);
+
+    const html = renderToStaticMarkup(
+      await MaxMissionControlPage({ searchParams: { orgId: "org-1" } })
+    );
+
+    // O tenant escolhido deixa de ser link (não se navega para onde já se está)
+    // e aparece o "ver todos".
+    expect(html).not.toContain("/admin/max?orgId=org-1");
+    expect(html).toContain('href="/admin/max"');
   });
 
   it("sem PlatformRole nenhuma, a página redireciona antes de qualquer leitura", async () => {
