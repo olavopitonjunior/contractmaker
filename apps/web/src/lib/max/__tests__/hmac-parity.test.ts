@@ -89,5 +89,9 @@ describe("paridade do HMAC com o serviço do Max", () => {
 
   it("é hex minúsculo de 64 caracteres (sha256)", () => {
     expect(ASSINATURA).toMatch(/^[0-9a-f]{64}$/);
+    // O vetor do formato admin merece a mesma guarda: um literal truncado ou
+    // com maiúsculas passaria pelos testes de igualdade acima (eles comparam
+    // com ele mesmo) e só falharia contra o max-agent, em produção.
+    expect(ADMIN_ASSINATURA).toMatch(/^[0-9a-f]{64}$/);
   });
 });
