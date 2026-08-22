@@ -38,7 +38,8 @@ interface RecentEvent {
 
 interface MetricsResponse {
   range: { from: string; to: string };
-  /** Envelopes vivos enviados no mês corrente (independe do range do filtro). */
+  /** Consumo do plano no mês: envelopes ativados + Aceites WhatsApp. Independe
+   *  do range do filtro. */
   envelopesMonth: number;
   totalEnvelopes: number;
   byStatus: Record<string, number>;
@@ -237,7 +238,7 @@ export function SignaturesClient({ embedded = false }: { embedded?: boolean } = 
                   {data.envelopesMonth}
                 </p>
                 <p className="text-[10px] text-muted-foreground mt-0.5">
-                  enviados no mês corrente
+                  consumidos do plano no mês (inclui Aceites)
                 </p>
               </CardContent>
             </Card>

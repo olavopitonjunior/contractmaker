@@ -14,6 +14,11 @@ import { createAcceptanceWhatsapp } from "@/lib/clicksign/acceptance";
 import { getSignatureSettings, resolveClickSignCreds } from "@/lib/clicksign/account";
 import type { ClickSignCreds } from "@/lib/clicksign/account";
 import { ClicksignError } from "@/lib/clicksign/client";
+import {
+  EnvelopePlanLimitError,
+  isPlanQuotaError,
+  logClicksignFailure,
+} from "@/lib/clicksign/quota";
 import { normalizeSigningGroups } from "@/lib/clicksign/signing-groups";
 import { STAGING_MODE } from "@/lib/env/staging";
 import { buildAcceptanceMessage } from "./acceptance-proof";
@@ -609,11 +614,16 @@ async function runClickSignEnvelope(p: {
     return { envelopeId: envelope.id };
   } catch (err) {
     console.error("[proposals] falha no envio do envelope:", err);
+    logClicksignFailure("proposals/sendEnvelope", err);
     if (clicksignId) await deleteDraftEnvelope(clicksignId, p.creds).catch(() => {});
     await prisma.envelope.update({
       where: { id: envelope.id },
       data: { status: "failed", lastError: err instanceof Error ? err.message : String(err) },
     });
+    // Mesma classificação do envio de contrato: sem isto, plano esgotado no
+    // meio de um envio de proposta virava 500 e o Newton dizia "erro interno,
+    // tente de novo" — mandando o corretor bater de novo num plano vazio.
+    if (isPlanQuotaError(err)) throw new EnvelopePlanLimitError(err.status);
     throw err;
   }
 }
@@ -897,7 +907,6 @@ async function sendVendedorAceiteLocked(
     await notifyFailure("no_creds");
     return { ok: false, reason: "no_creds" };
   }
-  const settings = await getSignatureSettings(proposal.orgId);
 
   // Preflight: Aceite é 100% WhatsApp — telefone nacional válido + nome completo.
   const issues = checkProposalReadiness(
@@ -915,9 +924,6 @@ async function sendVendedorAceiteLocked(
     return { ok: false, reason: "preflight", detail: issues.map((i) => i.reason).join("; ") };
   }
 
-  // Custo do Aceite (~R$0,99/termo, cobrado na entrega) — vira histórico, não
-  // barra nada: o teto local deixou de existir.
-  const costCents = plannedAcceptanceCostCents(pending.length);
 
   const link = proposalPublicLink(proposal.token);
   const numero = proposalNumero(proposal);

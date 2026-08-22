@@ -30,9 +30,14 @@ interface RecentEvent {
 
 interface MetricsResponse {
   range: { from: string; to: string };
-  /** Envelopes vivos (running/closed) enviados no mês corrente — independe do
-   *  range do filtro. Substituiu "gasto vs orçamento": os dois valores saíam de
-   *  uma tabela de preços estimada no código, não do que a ClickSign cobra. */
+  /**
+   * Consumo do plano ClickSign no mês corrente: envelopes ativados
+   * (running/closed/canceled) + termos de Aceite WhatsApp, que não criam
+   * Envelope. Independe do range do filtro. Substituiu "gasto vs orçamento" —
+   * aqueles dois valores saíam de uma tabela de preços estimada no código, não
+   * do que a ClickSign cobra. Como não há mais teto, este é o único sinal de
+   * uso do plano dentro do app: subestimar aqui é pior que não mostrar.
+   */
   envelopesMonth: number;
   totalEnvelopes: number;
   byStatus: Record<string, number>;
@@ -87,7 +92,7 @@ export async function GET(req: NextRequest) {
   startOfMonth.setUTCDate(1);
   startOfMonth.setUTCHours(0, 0, 0, 0);
 
-  const [envelopes, recentEvents, envelopesMonth] = await Promise.all([
+  const [envelopes, recentEvents, envelopesMonth, aceitesMonth] = await Promise.all([
     prisma.envelope.findMany({
       where,
       orderBy: { createdAt: "desc" },
@@ -101,14 +106,29 @@ export async function GET(req: NextRequest) {
       orderBy: { receivedAt: "desc" },
       take: 30,
     }),
+    // Consumo do plano no mês. `canceled` ENTRA: o envelope já foi ativado na
+    // ClickSign antes de ser cancelado, ou seja, já foi consumido. Só `draft` e
+    // `failed` ficam de fora (nunca chegaram a existir lá).
     prisma.envelope.count({
       where: {
         orgId: org.id,
         sentAt: { gte: startOfMonth },
-        status: { in: ["running", "closed"] },
+        status: { in: ["running", "closed", "canceled"] },
+      },
+    }),
+    // Aceite via WhatsApp não cria Envelope — vive só na Proposal. O antigo
+    // getMonthlySpendCents somava isto de propósito; sem somar aqui, o card
+    // subestima o consumo, e ele é agora o ÚNICO sinal de uso do plano dentro
+    // do app (não há mais teto que avise).
+    prisma.proposal.count({
+      where: {
+        orgId: org.id,
+        instrument: "aceite",
+        sentAt: { gte: startOfMonth },
       },
     }),
   ]);
+  const consumoMes = envelopesMonth + aceitesMonth;
 
   const byStatus: Record<string, number> = {};
   const latencies: number[] = [];
@@ -149,7 +169,7 @@ export async function GET(req: NextRequest) {
 
   const body: MetricsResponse = {
     range: { from: from.toISOString(), to: to.toISOString() },
-    envelopesMonth,
+    envelopesMonth: consumoMes,
     totalEnvelopes: envelopes.length,
     byStatus,
     closeRate,

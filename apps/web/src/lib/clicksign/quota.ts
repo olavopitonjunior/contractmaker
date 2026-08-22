@@ -1,4 +1,5 @@
 import { ClicksignError } from "./client";
+import { maskPii } from "@/lib/security/pii";
 
 /**
  * Limite de plano da ClickSign — a ÚNICA negativa legítima por falta de
@@ -27,32 +28,44 @@ export class EnvelopePlanLimitError extends Error {
 }
 
 /**
- * Termos que a ClickSign usa para dizer "acabou" — em pt e en, porque a API
- * mistura os dois conforme o endpoint.
+ * "Acabou" — o verbo. Sozinho não basta: "excede o limite de 90 dias" (prazo do
+ * envelope) casa aqui e não é cota.
  */
-const QUOTA_TERMS =
-  /limite|limit|quota|cota|plano|plan|saldo|balance|exceed|excedid|insufficient|insuficiente|upgrade/i;
+const EXHAUSTION =
+  /esgotad|excedid|exceed|atingid|insufficient|insuficient|exhaust|sem\s+saldo|no\s+remaining/i;
 
-/** Status que podem carregar um erro de cota (402 é sempre; os outros dependem
- *  do texto — 422/403 também são validação e permissão comuns). */
+/**
+ * O QUE acabou. Deliberadamente NÃO inclui "limite" nem "plano" soltos: a
+ * ClickSign responde 422 com "não está disponível no seu plano" quando o método
+ * de autenticação não está habilitado na conta (ver o passo de requirements em
+ * executor.ts e o fallback já existente em proposals/send-execute.ts). Casar
+ * "plano" cru transformaria esse erro em "sem envelopes disponíveis" — que é
+ * exatamente a mensagem falsa que este módulo existe pra eliminar.
+ */
+const QUOTA_SUBJECT =
+  /envelope|documento|document|cota|quota|saldo|balance|cr[ée]dito|credit|assinatura(s)?\s+dispon/i;
+
 const AMBIGUOUS_STATUSES = new Set([403, 422]);
 
 /**
  * A ClickSign não documenta publicamente o código de "plano esgotado", então a
  * detecção é deliberadamente conservadora: 402 conta sozinho; 403/422 só contam
- * quando o texto do erro fala de limite. Qualquer outra coisa continua sendo
- * falha genérica — errar para o lado de "erro genérico" mostra uma mensagem
- * ruim; errar para o lado de "limite do plano" reintroduz o bug original,
- * mandando o corretor conferir um plano que está intacto.
+ * quando o texto traz o verbo E o objeto ("limite de DOCUMENTOS do plano
+ * ATINGIDO"). Qualquer outra coisa continua sendo falha genérica.
  *
- * Todo 4xx de envio é logado cru por `logClicksignFailure` para calibrar isto
- * com um caso real.
+ * O viés é proposital. Errar para "erro genérico" custa uma mensagem ruim;
+ * errar para "limite do plano" reintroduz o bug original, mandando o corretor
+ * conferir um plano que está intacto. Na dúvida, NÃO é cota.
+ *
+ * `logClicksignFailure` grava o corpo (com PII mascarada) de todo 4xx de envio
+ * pra que isto seja calibrado com um caso real em vez de com palpite.
  */
 export function isPlanQuotaError(err: unknown): err is ClicksignError {
   if (!(err instanceof ClicksignError)) return false;
   if (err.status === 402) return true;
   if (!AMBIGUOUS_STATUSES.has(err.status)) return false;
-  return QUOTA_TERMS.test(errorText(err));
+  const text = errorText(err);
+  return EXHAUSTION.test(text) && QUOTA_SUBJECT.test(text);
 }
 
 /** Mensagem + code/title/detail do corpo JSON:API, achatados para o regex. */
@@ -75,17 +88,31 @@ function errorText(err: ClicksignError): string {
 }
 
 /**
- * Log do erro CRU de envio. A classificação acima é uma aposta até vermos uma
- * recusa real de plano em produção — sem o corpo no log, não há como afinar o
- * regex depois.
+ * Log do erro CRU de envio, com PII mascarada. A classificação acima é uma
+ * aposta até vermos uma recusa real de plano em produção — sem o corpo no log
+ * não há como afinar os regexes depois.
+ *
+ * O mascaramento não é opcional: os 422 de validação da ClickSign ecoam o
+ * atributo recusado, então um erro em `addSigner` despejaria e-mail, telefone e
+ * CPF do signatário em texto puro no log do Vercel.
  */
 export function logClicksignFailure(context: string, err: unknown): void {
   if (!(err instanceof ClicksignError)) return;
   if (err.status < 400 || err.status >= 500) return;
   console.warn(`[clicksign] falha ${err.status} em ${context}`, {
     status: err.status,
-    message: err.message,
-    body: err.body,
+    message: maskPii(err.message),
+    body: maskPii(safeStringify(err.body)),
     classifiedAsPlanLimit: isPlanQuotaError(err),
   });
+}
+
+function safeStringify(body: unknown): string {
+  if (body == null) return "";
+  if (typeof body === "string") return body;
+  try {
+    return JSON.stringify(body);
+  } catch {
+    return "[corpo não serializável]";
+  }
 }

@@ -17,14 +17,15 @@ describe("isPlanQuotaError", () => {
     expect(isPlanQuotaError(csError(402, [{ detail: "qualquer coisa" }]))).toBe(true);
   });
 
-  it("422/403 contam quando o texto fala de limite de plano", () => {
+  // 403/422 exigem o VERBO ("acabou") E o OBJETO ("o quê").
+  it("422/403 contam quando o texto traz esgotamento E o objeto certo", () => {
     expect(
       isPlanQuotaError(
         csError(422, [{ detail: "Limite de documentos do plano atingido" }])
       )
     ).toBe(true);
     expect(
-      isPlanQuotaError(csError(403, [{ title: "Plan quota exceeded" }]))
+      isPlanQuotaError(csError(403, [{ title: "Envelope quota exceeded" }]))
     ).toBe(true);
     expect(
       isPlanQuotaError(csError(422, [{ code: "insufficient_balance" }]))
@@ -32,13 +33,36 @@ describe("isPlanQuotaError", () => {
   });
 
   // O ponto que não pode regredir: 422 é o status de validação comum da
-  // ClickSign. Classificar qualquer 422 como limite reintroduziria o bug —
-  // mandaria o corretor conferir um plano intacto.
+  // ClickSign. Classificar 422 largo reintroduziria o bug — mandaria o corretor
+  // conferir um plano intacto.
   it("422 de validação comum NÃO vira limite de plano", () => {
     expect(
       isPlanQuotaError(csError(422, [{ detail: "E-mail do signatário é inválido" }]))
     ).toBe(false);
     expect(isPlanQuotaError(csError(422))).toBe(false);
+  });
+
+  // Caso REAL do fluxo de envio: o passo de requirements pede `auth: selfie` e
+  // a ClickSign recusa 422 porque o método não está habilitado na conta. Tem a
+  // palavra "plano" e não é cota nenhuma — casar isso devolveria "sem envelopes
+  // disponíveis" para um problema de configuração de método.
+  it("método de auth indisponível 'no seu plano' NÃO vira limite de plano", () => {
+    expect(
+      isPlanQuotaError(
+        csError(422, [
+          { detail: "Autenticação por selfie não está disponível no seu plano" },
+        ])
+      )
+    ).toBe(false);
+  });
+
+  // "excede o LIMITE de 90 dias" no deadline: tem o verbo, não tem o objeto.
+  it("estouro de prazo do envelope NÃO vira limite de plano", () => {
+    expect(
+      isPlanQuotaError(
+        csError(422, [{ detail: "deadline_at excede o limite de 90 dias" }])
+      )
+    ).toBe(false);
   });
 
   it("outros status e erros não-Clicksign ficam de fora", () => {

@@ -4498,13 +4498,19 @@ model ClickSignAccount {
 model OrgSignatureSettings {
   id                 String   @id @default(cuid())
   orgId              String   @unique
-  // Orçamento/custo (fallback: CLICKSIGN_MONTHLY_BUDGET_CENTS / tabela hardcoded).
+  // ÓRFÃ desde 08/2026 — sem leitor e sem escritor. Era o teto mensal de gasto
+  // que barrava envio comparando um custo ESTIMADO contra um número que a
+  // plataforma inventava ("R$ 93 de R$ 100" com o plano intacto). O limite real
+  // é o do plano da conta ClickSign — ver lib/clicksign/quota.ts. Mantida só
+  // para não misturar migration com o fix.
   monthlyBudgetCents Int?
-  costOverridesJson  Json? // { email: 150, whatsapp: 250, ... } — override por método
-  // Sub-orçamento das PROPOSTAS, dentro do mensal. Proposta é especulativa (a
-  // maioria não fecha); contrato é receita. Sem este teto, uma enxurrada de
-  // propostas consome o orçamento e bloqueia o envio de um contrato assinado.
-  // Null = sem sub-teto (só o mensal vale).
+  // { email: 150, whatsapp: 250, ... } — override por método. CONTINUA SENDO
+  // LIDA (alimenta Envelope.costCents via lib/clicksign/costs.ts), mas perdeu o
+  // escritor: o card de custo saiu de Configurações em 08/2026. Ajuste hoje é
+  // por SQL. NÃO é órfã.
+  costOverridesJson  Json?
+  // ÓRFÃ desde 08/2026, junto com monthlyBudgetCents — era o sub-teto das
+  // propostas dentro do mensal. Sem leitor e sem escritor.
   proposalBudgetCents Int?
   // Aceite via WhatsApp (POST /acceptance_term/whatsapps, ~R$0,99, cobrado na
   // ENTREGA): depende do recurso estar habilitado na conta ClickSign do tenant.
