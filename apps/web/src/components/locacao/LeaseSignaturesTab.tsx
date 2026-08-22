@@ -107,9 +107,10 @@ export function LeaseSignaturesTab({
             `Partes sem e-mail: ${names || "verifique locador/locatário/fiador"}.`
           );
         }
+        // Limite do PLANO da conta ClickSign (recusa da própria ClickSign).
         if (res.status === 402) {
           throw new Error(
-            "Orçamento mensal ClickSign excedido — não foi possível enviar."
+            body.error || "A conta ClickSign está sem envelopes disponíveis."
           );
         }
         throw new Error(body.error || `HTTP ${res.status}`);

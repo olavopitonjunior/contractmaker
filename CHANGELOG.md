@@ -4,6 +4,18 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-22 - Custo de IA medido, não estimado (receptor)
+
+### Adicionado
+
+- **`POST /api/agents/usage` aceita `costUsd`** — o crédito que o provedor de fato cobrou — quando `provider: "openrouter"`. Isso parece contrariar a regra escrita na própria rota ("custo informado por quem gasta não é medição") e não contraria: o número **não é auto-declarado pelo agente**, vem inline na resposta do OpenRouter (`usage.cost`); o Max só transporta. Contrato em `docs/max.md` §9.1.
+  - **Por que importa, medido em 21/08 contra o `gpt-5.4-nano`:** sem cache de prefixo a tabela de preços acerta com erro de **0,0%** — o preço nunca foi o problema. Num turn com **1792 de 1956 tokens vindos do cache**, o custo real foi US$ 0,00010614 e a tabela dizia US$ 0,00042870: **superestimativa de 304%**. O tenant via uma conta que não existe, e a otimização que mais economiza era justamente a invisível.
+  - **O número fica em `AIUsage.estimatedCostUsd`**, que passa a guardar *o melhor número disponível*, com **`AIUsage.costSource`** (`"reported"` | `"estimated"`) dizendo qual é. Coluna paralela obrigaria os ~60 pontos que somam custo (budget por contrato, teto mensal por agente, painéis de admin) a fazer COALESCE — e o primeiro esquecido daria um total errado em silêncio, que é o pior modo de falha desta tabela. Assim, todo agregado existente fica mais correto sem uma linha de mudança.
+  - **`null` e ausência = "o provedor não informou"; zero NÃO.** Zero é um número, e um turn que custou zero de verdade precisa ser distinguível de um que ninguém mediu. Teto de sanidade próprio (US$ 1,00/turn), porque é o único campo que entra na tabela de custo sem passar pela tabela de preços.
+  - **De outro provider, `costUsd` é descartado em silêncio** — não 400: o campo é aditivo, e um cliente antigo que o mande por engano não deve quebrar.
+  - A resposta 202 devolve `costUsd`, `costSource` e **sempre** `estimatedCostUsd`, este último para quem integra medir o erro da tabela sem acesso ao banco. `/settings/ai-usage` passa a mostrar a divisão medido/estimado no card de custo.
+  - **Nasce inerte**: nenhum cliente manda `costUsd` ainda. O emissor é PR próprio, no repositório do max-agent.
+
 ## [Unreleased] - 2026-08-22 - Alerta de queda da instância Z-API do Max
 
 ### Adicionado
@@ -15,6 +27,36 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
   - **E-mail não enviado responde 500, não 200** — o max-agent só carimba "já avisei" em 2xx, então o 500 vira reenvio na passada seguinte do cron, sem fila nova nem código de retry. O 500 cobre uma causa transitória (provedor recusou) e uma permanente (nenhum destinatário); nesta última o incidente ainda fica registrado, porque o registro acontece antes de qualquer desistência.
   - **Registro e notificação por caminhos separados**: o e-mail sai por `sendEmail` direto, e `reportPlatformAlert` entra em modo `"digest"` — o re-arm de 24 h do motor de alertas engoliria um segundo incidente no mesmo dia. A assinatura carrega o instante do incidente, então é uma linha por queda e o `count` conta tentativas de entrega.
   - **Sem migration** (`PlatformAlertEvent.kind` é `String`) e **nasce inerte**: sem `MAX_WEBHOOK_SECRET` a rota responde 503. O emissor é PR próprio, no repositório do max-agent.
+
+## [Unreleased] - 2026-08-22 - Filtro "Responsável" do kanban
+
+### Corrigido
+
+- **O filtro "Responsável" listava o histórico, não a equipe.** As opções vinham de `user.findMany({ deals: { some: { pipelineId } } })` — só quem já tinha CRIADO um negócio naquele pipeline. Quem responde por negócio sem nunca ter aberto um simplesmente não existia no select, e não havia como filtrar por ele (reportado na Newcore). A lista passa a nascer da membership da org, como já fazia a tela de Propostas, unida a quem ainda figura como criador ou gerente de algum negócio do pipeline — sem essa união, o negócio de quem saiu da imobiliária ficaria não-filtrável. Usuário de serviço (`isSystem`) e conta removida (`deletedAt`) ficam de fora.
+- **Filtrar por uma pessoa escondia os negócios que a tela atribuía a ela.** O filtro casava `Deal.userId` (o criador, imutável) enquanto o card do kanban exibe o GERENTE (`Deal.managerUserId`, reatribuível): filtrar pelo nome que a própria coluna mostrava devolvia menos negócio do que ela anunciava. Passa a casar criador OU gerente. **A contagem de "N negócios" muda para quem já usava o filtro** — é a correção, não regressão.
+- **A busca sumia em silêncio quando combinada com outro filtro.** `q` e `responsavel` produzem `OR` e moravam na mesma chave `where.OR`: o segundo apagava o primeiro. Pela mesma razão, `getBoardStages` montava o `where` por spread, e o `OR` do escopo RBAC (gerente com visão restrita) sobrescrevia o dos filtros — a busca quebrava justamente para quem tem menos visão. Ambos passam a compor por `AND`. Nenhum dos dois vazou negócio: na colisão, quem sobrevivia era o escopo.
+
+## [Unreleased] - 2026-08-22 - Fim do orçamento de gasto da ClickSign
+
+### Removido
+
+- **O teto mensal de gasto em R$ da ClickSign, inteiro.** A plataforma barrava envio comparando um gasto acumulado contra um orçamento que ela mesma inventava: a conta saía de uma tabela de preços *hardcoded* e nunca conferida (`CLICKSIGN_COST_CENTS`: e-mail R$1,50, WhatsApp R$2,50, selfie R$9,00, ICP R$3,50) contra um default de R$100 (`getMonthlyBudgetCents`). O envio foi recusado com **"R$ 93 de R$ 100"** numa conta cujo plano ClickSign estava intacto — número inventado, bloqueio inventado. Saem: o gate no `executor`, o `EnvelopeBudgetError`, o sub-teto de propostas (`proposalBudgetCents`) e os dois gates das 2ªs vias encadeadas (envelope e Aceite).
+- **Todo valor em R$ do fluxo de assinatura**: os chips "Custo estimado" dos três diálogos de envio, o card "Orçamento e custo" em Configurações › Assinaturas, o `costCentsByMethod` de `/api/signatures/config`, o "(custo R$ X)" do resumo que vai a quem aprova envio por Bearer, e o valor por envelope na lista de recentes. O card "Gasto do mês / de R$ X de orçamento" do painel vira **"Envelopes no mês"** (contagem). Nenhuma coluna é apagada (limpeza é migration própria), mas o estado de cada uma difere: `monthlyBudgetCents` e `proposalBudgetCents` ficam **sem leitor**; **`costOverridesJson` continua sendo lida** (alimenta `Envelope.costCents`) e só perdeu o **escritor** — ajustar um override de custo virou operação de banco. Não confundir com coluna órfã.
+
+### Adicionado
+
+- **`lib/clicksign/quota.ts`** — a negativa por falta de envelope passa a nascer da resposta da própria ClickSign. `isPlanQuotaError` classifica HTTP 402 sozinho, e 403/422 só quando o texto do erro fala de limite/cota/plano/saldo; qualquer outra coisa segue como falha genérica. O critério é deliberadamente conservador: a ClickSign não documenta esse código publicamente, e errar para "limite do plano" reintroduziria o bug, mandando o corretor conferir um plano intacto. Todo 4xx de envio passa a logar o corpo cru (`[clicksign] falha 4xx`) para calibrar o regex com uma recusa real.
+- O erro vira `EnvelopePlanLimitError` (HTTP 402, `code: "CLICKSIGN_PLAN_LIMIT"`), com mensagem fixa e sem valores. O MCP do Newton/Max também para de dizer "orçamento do mês atingido" no 402.
+
+### Corrigido
+
+- **`CLAUDE.md` prometia um "ClickSign cap" sob `STAGING_MODE` que nunca existiu no código** — lá `STAGING_MODE` só prefixa `[STAGING]` no nome do envelope. O único freio real era o orçamento agora removido. Docs corrigidas: **staging não tem teto e cada envio consome um envelope real do plano, cobrado.**
+
+### Mantido de propósito
+
+- O **advisory lock por org** no `executor` continua: ele nasceu para o TOCTOU do orçamento, mas é o que serializa o re-check "1 envelope ativo por contrato" — sem ele, dois envios paralelos do mesmo contrato criam 2 envelopes (cobrança dobrada e 2 e-mails por signatário).
+- `Envelope.costCents` continua sendo gravado como telemetria interna, agora sem nenhum leitor em tela.
+- Os labels `chained_*_budget_exceeded` em `status-view.ts` ficam: eventos já gravados precisam continuar renderizando na timeline. Nada novo é emitido.
 
 ## [Unreleased] - 2026-08-21 - Estilos de documento saem da configuração (soft removal)
 

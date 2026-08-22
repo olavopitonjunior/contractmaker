@@ -163,6 +163,83 @@ export interface RecordUsageParams {
   iterations?: number;
   success?: boolean;
   errorMessage?: string;
+  /**
+   * Crédito REAL cobrado pelo provedor, quando ele informa. Hoje só o
+   * OpenRouter informa (`usage.cost` na resposta), e é o Max quem repassa.
+   *
+   * Quando vem, SOBREPÕE a tabela de preços e a linha nasce
+   * `costSource: "reported"`. Quando não vem, `calcCostUsd` entra e a linha é
+   * `"estimated"`.
+   *
+   * **`null` e `undefined` significam "não informado"; zero NÃO.** Zero é um
+   * número, e um número errado é pior que a ausência — uma chamada que de fato
+   * custou zero é indistinguível de uma que ninguém mediu, e a segunda tem que
+   * cair na estimativa.
+   */
+  costUsd?: number | null;
+}
+
+/** De onde veio o número em `estimatedCostUsd`. */
+export type CostSource = "reported" | "estimated";
+
+/**
+ * Resume a procedência do custo a partir de um `groupBy(["costSource"])`.
+ *
+ * **Recebe o groupBy, e não as linhas, de propósito.** A primeira versão desta
+ * função somava as linhas já carregadas pelo painel — que vêm com `take: 5000`.
+ * Numa org movimentada, a parte MEDIDA (os turns do Max, a fonte de maior
+ * volume) era truncada em silêncio, enquanto a tabela por provider na mesma
+ * tela vinha de um `groupBy` sem teto. As duas discordariam sem nenhum aviso,
+ * justamente numa linha que o usuário lê como sinal de confiança.
+ *
+ * Função pura e exportada porque é a única lógica do painel de custo que pode
+ * errar em silêncio; testar pela rota exigiria mockar sete queries paralelas.
+ *
+ * `Number(...)` porque o Prisma devolve `Decimal`, e somar Decimal com `+`
+ * daria concatenação de string.
+ */
+export function dividirPorProcedencia(
+  grupos: Array<{
+    costSource?: string | null;
+    _sum?: { estimatedCostUsd?: unknown };
+    _count?: { _all?: number } | number;
+  }>
+): {
+  reportedUsd: number;
+  estimatedUsd: number;
+  reportedCalls: number;
+  estimatedCalls: number;
+} {
+  let reportedUsd = 0;
+  let estimatedUsd = 0;
+  let reportedCalls = 0;
+  let estimatedCalls = 0;
+
+  for (const g of grupos) {
+    const v = Number(g._sum?.estimatedCostUsd ?? 0);
+    const custo = Number.isFinite(v) ? v : 0;
+    const n =
+      typeof g._count === "number" ? g._count : Number(g._count?._all ?? 0);
+    const calls = Number.isFinite(n) ? n : 0;
+
+    // Só `"reported"` conta como medido. Linha antiga (anterior à coluna) tem
+    // o default `"estimated"`, e `null`/valor desconhecido cai no mesmo lado —
+    // na dúvida sobre a procedência, o honesto é chamar de estimativa.
+    if (g.costSource === "reported") {
+      reportedUsd += custo;
+      reportedCalls += calls;
+    } else {
+      estimatedUsd += custo;
+      estimatedCalls += calls;
+    }
+  }
+
+  return {
+    reportedUsd: Number(reportedUsd.toFixed(4)),
+    estimatedUsd: Number(estimatedUsd.toFixed(4)),
+    reportedCalls,
+    estimatedCalls,
+  };
 }
 
 /**
@@ -179,13 +256,24 @@ export function recordAIUsage(params: RecordUsageParams): void {
   const cacheRead = params.cacheReadTokens ?? 0;
   const cacheWrite = params.cacheWriteTokens ?? 0;
   const total = params.promptTokens + completion;
-  const cost = calcCostUsd(
-    params.model,
-    params.promptTokens,
-    completion,
-    cacheRead,
-    cacheWrite
-  );
+
+  /**
+   * Medido vence calculado. `calcCostUsd` só roda quando não há número do
+   * provedor — não é fallback preguiçoso, é a ordem certa: a tabela de preços
+   * é uma boa aproximação do preço unitário e não tem como saber quanto do
+   * prompt veio do cache, que é onde mora o erro de 304%.
+   *
+   * `Number.isFinite` cerca NaN/Infinity: uma resposta malformada do provedor
+   * não pode virar um Decimal quebrado numa coluna que alimenta budget.
+   */
+  const reportado =
+    params.costUsd != null && Number.isFinite(params.costUsd) && params.costUsd >= 0
+      ? params.costUsd
+      : null;
+  const costSource: CostSource = reportado !== null ? "reported" : "estimated";
+  const cost =
+    reportado ??
+    calcCostUsd(params.model, params.promptTokens, completion, cacheRead, cacheWrite);
   // Truncate error messages to avoid leaking large prompts or PII.
   const errorMessage = params.errorMessage
     ? params.errorMessage.slice(0, 500)
@@ -215,6 +303,7 @@ export function recordAIUsage(params: RecordUsageParams): void {
         cacheWriteTokens: cacheWrite,
         totalTokens: total,
         estimatedCostUsd: cost,
+        costSource,
         latencyMs: params.latencyMs,
         toolsUsed: params.toolsUsed ?? [],
         iterations: params.iterations ?? 1,

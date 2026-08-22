@@ -10,6 +10,7 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { assertFeatureEnabled, ModuleDisabledError } from "@/lib/modules/guard";
 import { proposalFeatureForKind } from "@/lib/modules/catalog";
 import { requireApproval, approvalResponse } from "@/lib/api/intents";
+import { EnvelopePlanLimitError } from "@/lib/clicksign/quota";
 import { ensureIntentExecutorsRegistered } from "@/lib/api/intent-executors";
 import { executeProposalSend, blockToResponse } from "@/lib/proposals/send-execute";
 
@@ -74,7 +75,18 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // impedindo envio duplicado; some só o segundo humano.
     autoApprove: true,
     run: async () => {
-      const r = await executeProposalSend(params.id);
+      let r: Awaited<ReturnType<typeof executeProposalSend>>;
+      try {
+        r = await executeProposalSend(params.id);
+      } catch (err) {
+        // Plano da ClickSign esgotado precisa sair como 402 aqui também, não
+        // como 500: o 500 vira "erro interno, tente de novo" no Newton e manda
+        // o corretor bater de novo num plano vazio.
+        if (err instanceof EnvelopePlanLimitError) {
+          return { status: 402, body: { error: err.message, code: err.code } };
+        }
+        throw err;
+      }
       if (!r.ok) return blockToResponse(r.block);
       return {
         status: 200,

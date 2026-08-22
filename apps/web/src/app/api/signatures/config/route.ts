@@ -4,12 +4,7 @@ import {
   getSignatureSettings,
   isClickSignConfigured,
 } from "@/lib/clicksign/account";
-import { costCentsForMethod } from "@/lib/clicksign/costs";
-import type { AuthMethod } from "@/lib/clicksign/types";
-
 export const runtime = "nodejs";
-
-const AUTH_METHODS: AuthMethod[] = ["email", "whatsapp", "selfie", "icp_brasil"];
 
 /**
  * Config leve de assinatura pra os diálogos de envio (qualquer membro da org).
@@ -32,17 +27,12 @@ export async function GET() {
     isClickSignConfigured(org.id),
   ]);
 
-  // Custo por método (override per-org sobre a tabela global) — usado pelos
-  // diálogos de envio pra estimar o custo do método escolhido.
-  const overrides = settings.costOverridesJson as Record<string, unknown> | null;
-  const costCentsByMethod = Object.fromEntries(
-    AUTH_METHODS.map((m) => [m, costCentsForMethod(m, overrides)])
-  ) as Record<AuthMethod, number>;
-
+  // `costCentsByMethod` saiu: os diálogos de envio mostravam com ele um "custo
+  // estimado" tirado de uma tabela de preços chutada no código, que não
+  // correspondia ao que a conta ClickSign cobra.
   return NextResponse.json({
     configured,
     defaultAuthMethod: settings.defaultAuthMethod,
     allowedAuthMethods: settings.allowedAuthMethods,
-    costCentsByMethod,
   });
 }

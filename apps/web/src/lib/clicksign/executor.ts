@@ -27,26 +27,15 @@ import {
 } from "./account";
 import { moduleForDealKind, pipelineKind } from "@/lib/modules/resolve";
 import { MODULE } from "@/lib/modules/catalog";
+import { CLICKSIGN_COST_CENTS, envelopeCostCents } from "./costs";
 import {
-  CLICKSIGN_COST_CENTS,
-  envelopeCostCents,
-  getMonthlyBudgetCents,
-} from "./costs";
+  EnvelopePlanLimitError,
+  isPlanQuotaError,
+  logClicksignFailure,
+} from "./quota";
 import type { AuthMethod } from "./types";
 import type { OrgSignatureSettings } from "@prisma/client";
 import { STAGING_MODE } from "@/lib/env/staging";
-
-export class EnvelopeBudgetError extends Error {
-  constructor(
-    message: string,
-    public readonly spentCents: number,
-    public readonly budgetCents: number,
-    public readonly planCostCents: number
-  ) {
-    super(message);
-    this.name = "EnvelopeBudgetError";
-  }
-}
 
 export class MissingEmailsError extends Error {
   constructor(
@@ -142,42 +131,15 @@ export interface ExtraDocumentInput {
   sourceAttachmentId?: string | null;
 }
 
-export async function getMonthlySpendCents(orgId: string): Promise<number> {
-  const start = new Date();
-  start.setUTCDate(1);
-  start.setUTCHours(0, 0, 0, 0);
-  const [envelopes, aceites] = await Promise.all([
-    prisma.envelope.aggregate({
-      where: {
-        orgId,
-        sentAt: { gte: start },
-        status: { in: ["running", "closed"] },
-      },
-      _sum: { costCents: true },
-    }),
-    // Aceite via WhatsApp não cria Envelope — o custo fica em
-    // Proposal.reservedCostCents. Sem somar isto, aceites eram INVISÍVEIS ao
-    // teto mensal (gasto efetivamente ilimitado). Conta os enviados no mês.
-    prisma.proposal.aggregate({
-      where: {
-        orgId,
-        instrument: "aceite",
-        sentAt: { gte: start },
-      },
-      _sum: { reservedCostCents: true },
-    }),
-  ]);
-  return (envelopes._sum.costCents ?? 0) + (aceites._sum.reservedCostCents ?? 0);
-}
-
 /**
  * Executa o fluxo Clicksign a partir de um PDF já em buffer. Compartilhado
  * pelos dois entry-points: `sendEnvelopeForContract` (CCV aprovado) e
  * `sendEnvelopeForAttachment` (documento avulso da pasta Documentos).
  *
- * Faz: budget check → upload snapshot → cria Envelope local → cria envelope
- * remoto + document + signers + requirements → ativa. Em qualquer falha,
- * marca envelope local `failed` e tenta limpar o draft remoto.
+ * Faz: upload snapshot → cria Envelope local → cria envelope remoto + document
+ * + signers + requirements → ativa. Em qualquer falha, marca envelope local
+ * `failed` e tenta limpar o draft remoto; recusa por plano esgotado da própria
+ * ClickSign vira `EnvelopePlanLimitError`.
  */
 async function createEnvelopeFromBuffer(input: {
   orgId: string;
@@ -259,12 +221,13 @@ async function createEnvelopeFromBuffer(input: {
   // de vazamento + facilita identificar/filtrar no dashboard ClickSign.
   const name = STAGING_MODE ? `[STAGING] ${rawName}` : rawName;
 
+  // Estimativa interna que vira `Envelope.costCents` (histórico). Não barra
+  // envio nem aparece em tela — ver costs.ts.
   const overrides = settings.costOverridesJson as Record<string, unknown> | null;
   const planCost = envelopeCostCents(
     signers.map(() => authMethod),
     overrides
   );
-  const budget = getMonthlyBudgetCents(settings.monthlyBudgetCents);
 
   // 1. Snapshot do PDF (best-effort). Fora do lock — é rede/storage.
   let documentUrl: string | null = null;
@@ -300,14 +263,12 @@ async function createEnvelopeFromBuffer(input: {
     return { role, group };
   };
 
-  // 2. Cria row local com status=draft — sob advisory lock por org pra fechar
-  // o TOCTOU do budget: o check (soma running+closed+draft do mês) e o create
-  // acontecem atomicamente, então dois envios paralelos da mesma org não furam
-  // o teto. Drafts do mês entram na conta pra que um envio in-flight seja
-  // visível ao concorrente (draft órfão é limpo por deleteDraftEnvelope).
-  const start = new Date();
-  start.setUTCDate(1);
-  start.setUTCHours(0, 0, 0, 0);
+  // 2. Cria row local com status=draft — ainda sob advisory lock por org. O
+  // lock nasceu pro TOCTOU do orçamento (que não existe mais), mas continua
+  // indispensável: é ele que serializa o re-check "1 envelope ativo por
+  // contrato" logo abaixo. Sem ele, dois envios paralelos do mesmo contrato
+  // criam 2 envelopes na ClickSign — cobrança dobrada e 2 e-mails por
+  // signatário.
   const envelope = await withOrgBudgetLock("clicksign", orgId, async (tx) => {
     // Re-checa "1 envelope ativo por contrato" DENTRO do lock. O check no
     // entry-point (sendEnvelopeForContract) roda antes do lock, então dois
@@ -329,23 +290,6 @@ async function createEnvelopeFromBuffer(input: {
       }
     }
 
-    const agg = await tx.envelope.aggregate({
-      where: {
-        orgId,
-        sentAt: { gte: start },
-        status: { in: ["running", "closed", "draft"] },
-      },
-      _sum: { costCents: true },
-    });
-    const spent = agg._sum.costCents ?? 0;
-    if (spent + planCost > budget) {
-      throw new EnvelopeBudgetError(
-        "Orçamento mensal Clicksign excedido",
-        spent,
-        budget,
-        planCost
-      );
-    }
     return tx.envelope.create({
     data: {
       contractId,
@@ -576,6 +520,9 @@ async function createEnvelopeFromBuffer(input: {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[clicksign] falha durante o envio:", msg);
+    // Corpo cru de todo 4xx — é o que permite afinar a detecção de limite de
+    // plano quando uma recusa real aparecer (a ClickSign não documenta o código).
+    logClicksignFailure("createEnvelopeFromBuffer", err);
     if (clicksignEnvelopeId) {
       try {
         await deleteDraftEnvelope(clicksignEnvelopeId, creds);
@@ -587,6 +534,9 @@ async function createEnvelopeFromBuffer(input: {
       where: { id: envelope.id },
       data: { status: "failed", lastError: msg.slice(0, 4000) },
     });
+    // Só DEPOIS da limpeza: a recusa por plano esgotado vira erro próprio pra
+    // que as rotas mostrem "sem envelope disponível" em vez de um 502 opaco.
+    if (isPlanQuotaError(err)) throw new EnvelopePlanLimitError(err.status);
     throw err;
   }
 }

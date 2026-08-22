@@ -2256,7 +2256,7 @@ model AIUsage {
   // dealId = negócio associado. Nullable: operações sem chat/deal ficam null.
   sessionId        String?
   dealId           String?
-  provider         String // "anthropic" | "gemini" | "voyage"
+  provider         String // "anthropic" | "gemini" | "voyage" | "openrouter"
   model            String
   operation        String // union canônico em lib/ai/usage.ts::AIOperation (chat, passive_*, ocr_*, embed_*, specialist_*, sentinel_classify, intent_classify, ...)
   promptTokens     Int      @default(0)
@@ -2264,7 +2264,22 @@ model AIUsage {
   cacheReadTokens  Int      @default(0)
   cacheWriteTokens Int      @default(0)
   totalTokens      Int      @default(0)
+  /// O MELHOR número de custo que temos para esta linha — não necessariamente
+  /// uma estimativa. Quando o provedor informa o crédito REAL cobrado (hoje só
+  /// o OpenRouter, via `usage.cost`), é ele que fica aqui; senão, a tabela de
+  /// preços do `calcCostUsd`. `costSource` diz qual dos dois.
+  ///
+  /// A coluna guarda o melhor número, e não um segundo campo, de propósito:
+  /// ~60 pontos do produto somam `estimatedCostUsd` (budget por contrato, teto
+  /// mensal por agente, /settings/ai-usage, métricas de admin). Um campo
+  /// paralelo obrigaria todos a fazer COALESCE, e o primeiro esquecido daria
+  /// um total errado em silêncio — o pior modo de falha desta tabela.
   estimatedCostUsd Decimal  @default(0) @db.Decimal(12, 6)
+  /// "reported" = crédito real do provedor · "estimated" = tabela de preços.
+  /// Existe porque a diferença é grande e invisível: medido em 21/08, um turn
+  /// com 1792 de 1956 tokens vindos do cache de prefixo custou US$ 0,00010614
+  /// e a tabela dizia US$ 0,00042870 — superestimativa de 304%.
+  costSource       String   @default("estimated")
   latencyMs        Int      @default(0)
   toolsUsed        String[] @default([])
   iterations       Int      @default(1)
@@ -4498,13 +4513,19 @@ model ClickSignAccount {
 model OrgSignatureSettings {
   id                 String   @id @default(cuid())
   orgId              String   @unique
-  // Orçamento/custo (fallback: CLICKSIGN_MONTHLY_BUDGET_CENTS / tabela hardcoded).
+  // ÓRFÃ desde 08/2026 — sem leitor e sem escritor. Era o teto mensal de gasto
+  // que barrava envio comparando um custo ESTIMADO contra um número que a
+  // plataforma inventava ("R$ 93 de R$ 100" com o plano intacto). O limite real
+  // é o do plano da conta ClickSign — ver lib/clicksign/quota.ts. Mantida só
+  // para não misturar migration com o fix.
   monthlyBudgetCents Int?
-  costOverridesJson  Json? // { email: 150, whatsapp: 250, ... } — override por método
-  // Sub-orçamento das PROPOSTAS, dentro do mensal. Proposta é especulativa (a
-  // maioria não fecha); contrato é receita. Sem este teto, uma enxurrada de
-  // propostas consome o orçamento e bloqueia o envio de um contrato assinado.
-  // Null = sem sub-teto (só o mensal vale).
+  // { email: 150, whatsapp: 250, ... } — override por método. CONTINUA SENDO
+  // LIDA (alimenta Envelope.costCents via lib/clicksign/costs.ts), mas perdeu o
+  // escritor: o card de custo saiu de Configurações em 08/2026. Ajuste hoje é
+  // por SQL. NÃO é órfã.
+  costOverridesJson  Json?
+  // ÓRFÃ desde 08/2026, junto com monthlyBudgetCents — era o sub-teto das
+  // propostas dentro do mensal. Sem leitor e sem escritor.
   proposalBudgetCents Int?
   // Aceite via WhatsApp (POST /acceptance_term/whatsapps, ~R$0,99, cobrado na
   // ENTREGA): depende do recurso estar habilitado na conta ClickSign do tenant.

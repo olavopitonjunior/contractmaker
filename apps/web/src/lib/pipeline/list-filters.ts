@@ -32,7 +32,12 @@ export const SLA_FILTER_LABEL: Record<SlaStatus, string> = {
 export interface PipelineBoardFilters {
   /** Busca em title + clientName (insensitive). */
   q: string | null;
-  /** `Deal.userId` — quem criou/responde pelo negócio ("Responsável"). */
+  /**
+   * Id do usuário no filtro "Responsável". Casa `Deal.userId` (criador) OU
+   * `Deal.managerUserId` (gerente atribuído) — o card do kanban exibe o
+   * GERENTE, então filtrar só pelo criador escondia o negócio de quem a tela
+   * aponta como responsável.
+   */
   responsavel: string | null;
   sla: SlaStatus | null;
   /** Janela de criação do deal. */
@@ -78,20 +83,33 @@ export function boardFiltersWhere(
   now: Date
 ): Prisma.DealWhereInput {
   const where: Prisma.DealWhereInput = {};
+  // Filtros que precisam de OR entram em `AND` — dois `where.OR` no mesmo
+  // objeto se sobrescrevem em silêncio (a busca some quando há responsável).
+  const and: Prisma.DealWhereInput[] = [];
   if (!f.arquivados) where.archivedAt = null;
   if (f.q) {
-    where.OR = [
-      { title: { contains: f.q, mode: "insensitive" } },
-      { clientName: { contains: f.q, mode: "insensitive" } },
-    ];
+    and.push({
+      OR: [
+        { title: { contains: f.q, mode: "insensitive" } },
+        { clientName: { contains: f.q, mode: "insensitive" } },
+      ],
+    });
   }
-  if (f.responsavel) where.userId = f.responsavel;
+  if (f.responsavel) {
+    and.push({
+      OR: [{ userId: f.responsavel }, { managerUserId: f.responsavel }],
+    });
+  }
   if (f.canal) where.sourceChannel = f.canal;
   if (f.periodo) {
     where.createdAt = {
       gte: new Date(now.getTime() - PERIODO_DAYS[f.periodo] * 86_400_000),
     };
   }
-  if (f.sla) Object.assign(where, slaStatusWhere(f.sla, now));
+  // Também via AND: hoje `slaStatusWhere` só devolve escalares, mas se um dia
+  // devolver OR/AND o `Object.assign` de antes colidiria com o `where.AND`
+  // abaixo — a mesma classe de bug que este arquivo acabou de corrigir.
+  if (f.sla) and.push(slaStatusWhere(f.sla, now));
+  if (and.length > 0) where.AND = and;
   return where;
 }

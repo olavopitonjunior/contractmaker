@@ -64,7 +64,6 @@ interface SignerDraft {
   sourceIndex?: number;
 }
 
-const COST_PER_SIGNER_CENTS = 150;
 
 function newSignerDraft(role: ClicksignRole = "sign"): SignerDraft {
   return {
@@ -109,7 +108,6 @@ export function SendAttachmentEnvelopeDialog({
     configured: boolean;
     defaultAuthMethod: string;
     allowedAuthMethods: string[];
-    costCentsByMethod?: Record<string, number>;
   } | null>(null);
 
   useEffect(() => {
@@ -259,9 +257,8 @@ export function SendAttachmentEnvelopeDialog({
         } else if (res.status === 422 && data.missing) {
           toast.error(`${data.missing.length} signatário(s) sem e-mail válido`);
         } else if (res.status === 402) {
-          toast.error(
-            `Orçamento Clicksign do mês excedido (gasto ${(data.spentCents / 100).toFixed(2)})`
-          );
+          // Limite do PLANO da conta ClickSign (recusa da própria ClickSign).
+          toast.error(data.error || "A conta ClickSign está sem envelopes disponíveis.");
         } else {
           toast.error(data.error || "Falha ao enviar");
         }
@@ -285,9 +282,6 @@ export function SendAttachmentEnvelopeDialog({
   const validSignerCount = signers.filter(
     (s) => s.name.trim() && s.email.trim()
   ).length;
-  const perSignerCents =
-    sigConfig?.costCentsByMethod?.[authMethod] ?? COST_PER_SIGNER_CENTS;
-  const estimatedCost = (validSignerCount * perSignerCents) / 100;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -535,8 +529,8 @@ export function SendAttachmentEnvelopeDialog({
 
           {validSignerCount > 0 && (
             <p className="text-xs text-muted-foreground">
-              Custo estimado: R$ {estimatedCost.toFixed(2)} ({validSignerCount}{" "}
-              signatário(s) × R$ {(perSignerCents / 100).toFixed(2).replace(".", ",")})
+              {validSignerCount} signatário{validSignerCount === 1 ? "" : "s"} no
+              envelope.
             </p>
           )}
         </div>

@@ -1,17 +1,14 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   costCentsForMethod,
   envelopeCostCents,
-  getMonthlyBudgetCents,
   CLICKSIGN_COST_CENTS,
 } from "../costs";
 
-describe("costs — per-org overrides + budget", () => {
-  const origEnv = process.env.CLICKSIGN_MONTHLY_BUDGET_CENTS;
-  afterEach(() => {
-    process.env.CLICKSIGN_MONTHLY_BUDGET_CENTS = origEnv;
-  });
-
+// `getMonthlyBudgetCents` saiu junto com o teto mensal — o limite real é o do
+// plano da conta ClickSign (ver quota.test.ts). O que resta aqui só alimenta
+// `Envelope.costCents` (telemetria interna, nada em tela).
+describe("costs — estimativa interna por método", () => {
   it("costCentsForMethod usa override quando presente", () => {
     expect(costCentsForMethod("email")).toBe(CLICKSIGN_COST_CENTS.email);
     expect(costCentsForMethod("email", { email: 99 })).toBe(99);
@@ -31,14 +28,5 @@ describe("costs — per-org overrides + budget", () => {
     expect(envelopeCostCents(["email", "whatsapp"], { email: 100, whatsapp: 200 })).toBe(
       300
     );
-  });
-
-  it("getMonthlyBudgetCents: override per-org > env > default", () => {
-    process.env.CLICKSIGN_MONTHLY_BUDGET_CENTS = "5000";
-    expect(getMonthlyBudgetCents(12345)).toBe(12345); // per-org vence
-    expect(getMonthlyBudgetCents(null)).toBe(5000); // cai no env
-    expect(getMonthlyBudgetCents(0)).toBe(5000); // 0 não é válido → env
-    delete process.env.CLICKSIGN_MONTHLY_BUDGET_CENTS;
-    expect(getMonthlyBudgetCents(null)).toBe(10000); // default
   });
 });

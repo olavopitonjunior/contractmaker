@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { agentLabel } from "@/lib/ai/agents/store";
+import { dividirPorProcedencia } from "@/lib/ai/usage";
 
 /**
  * GET /api/ai-usage?from=YYYY-MM-DD&to=YYYY-MM-DD
@@ -40,7 +41,7 @@ export async function GET(req: NextRequest) {
   };
 
   // Fetch everything in parallel
-  const [allRows, modelStats, opStats, providerStats, agentStats, errorRows] =
+  const [allRows, modelStats, opStats, providerStats, agentStats, procedenciaRows, errorRows] =
     await Promise.all([
       // 1. All rows to compute totals + per-day aggregation in memory (simpler than DATE_TRUNC in Prisma raw)
       prisma.aIUsage.findMany({
@@ -56,6 +57,7 @@ export async function GET(req: NextRequest) {
           cacheReadTokens: true,
           cacheWriteTokens: true,
           estimatedCostUsd: true,
+          costSource: true,
           latencyMs: true,
           success: true,
           createdAt: true,
@@ -100,7 +102,19 @@ export async function GET(req: NextRequest) {
         _sum: { estimatedCostUsd: true, totalTokens: true },
         _count: { _all: true },
       }),
-      // 6. Recent errors
+      // 6b. Procedência do custo — groupBy, e NÃO as linhas do `take: 5000`.
+      //     A parte medida são os turns do Max, a fonte de maior volume: com
+      //     as linhas truncadas ela apareceria menor que a verdade, enquanto a
+      //     tabela por provider (groupBy, sem teto) mostraria o total cheio na
+      //     mesma tela. Dois números discordando sem aviso, justo na linha que
+      //     o usuário lê como sinal de confiança.
+      prisma.aIUsage.groupBy({
+        by: ["costSource"],
+        where,
+        _sum: { estimatedCostUsd: true },
+        _count: { _all: true },
+      }),
+      // 7. Recent errors
       prisma.aIUsage.findMany({
         where: { ...where, success: false },
         select: {
@@ -122,6 +136,16 @@ export async function GET(req: NextRequest) {
     (acc, r) => acc + Number(r.estimatedCostUsd ?? 0),
     0
   );
+  /**
+   * Quanto do custo é MEDIDO e quanto é estimativa da tabela de preços.
+   *
+   * Sem isso o painel mostra um número só e quem lê não tem como saber que a
+   * parte estimada pode estar 304% acima do real (é o erro medido em 21/08
+   * num turn com cache de prefixo). Duas confianças diferentes não podem
+   * virar uma barra só em silêncio.
+   */
+  const procedencia = dividirPorProcedencia(procedenciaRows);
+
   const totalPromptTokens = allRows.reduce((acc, r) => acc + r.promptTokens, 0);
   const totalCompletionTokens = allRows.reduce(
     (acc, r) => acc + r.completionTokens,
@@ -228,6 +252,8 @@ export async function GET(req: NextRequest) {
     range: { from: from.toISOString(), to: to.toISOString() },
     totals: {
       costUsd: Number(totalCost.toFixed(4)),
+      /** Procedência do total acima — ver `costSource` em AIUsage. */
+      cost: procedencia,
       calls: totalCalls,
       promptTokens: totalPromptTokens,
       completionTokens: totalCompletionTokens,

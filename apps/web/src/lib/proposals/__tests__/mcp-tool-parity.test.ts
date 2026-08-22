@@ -209,11 +209,16 @@ describe("explainApiError — nunca vaza interno pro WhatsApp", () => {
     }
   });
 
-  it("402 de orçamento explica a causa certa, não 'dados errados'", () => {
-    // body real: { error: "budget", ... } — token único, nunca repassado cru.
-    const out = explainApiError({ status: 402, body: { error: "budget", spentCents: 9900 } })!;
-    expect(out.message).toContain("orçamento");
+  it("402 explica limite do PLANO ClickSign, não 'dados errados'", () => {
+    // body real: { error: <msg>, code: "CLICKSIGN_PLAN_LIMIT" }. Não pode
+    // voltar a falar em orçamento: não existe teto de gasto na plataforma.
+    const out = explainApiError({
+      status: 402,
+      body: { error: "budget", code: "CLICKSIGN_PLAN_LIMIT" },
+    })!;
+    expect(out.message).toContain("ClickSign");
     expect(out.message).not.toContain("dados");
+    expect(out.message).not.toMatch(/orçamento/i);
   });
 
   it("dá mensagem específica pro 409 de contato duplicado", () => {

@@ -115,14 +115,21 @@ Cada cron tem switch. Em staging: default OFF; só rodam os ligados na UI. Em pr
 
 Crons marcados como **custo real** (badge vermelho) ligam APIs externas pagas — cuidado ao habilitar.
 
-## ClickSign budget cap
+## ClickSign em staging — SEM cap
 
-Conta ClickSign é a mesma de prod (sem sandbox). Em staging:
-- `Envelope.name` prefixado `[STAGING] `
-- `CLICKSIGN_MONTHLY_BUDGET_CENTS=3000` (R$30/mês cap)
-- Cada signer real custa R$1,50 — máximo ~20 signers/mês
+Conta ClickSign é a mesma de prod (sem sandbox). Em staging o único gate é
+cosmético: `Envelope.name` prefixado `[STAGING] `.
 
-Se estourar: `EnvelopeBudgetError` lançada. Aumentar cap via env (rebuild Vercel) ou esperar o mês virar.
+**Não há mais teto de envio.** Até 08/2026 existia `CLICKSIGN_MONTHLY_BUDGET_CENTS=3000`,
+que a plataforma comparava com um custo estimado por uma tabela de preços
+chutada no código — ele barrava envio com valor inventado (o caso que motivou a
+remoção: "R$ 93 de R$ 100" numa conta cujo plano estava intacto). A env não é
+mais lida por ninguém.
+
+Consequência prática: **cada envio de staging consome um envelope real do plano
+ClickSign, cobrado.** Não há freio automático — não faça smoke de assinatura em
+lote. O único bloqueio possível agora é o da própria ClickSign, quando o plano
+acaba (`EnvelopePlanLimitError`, HTTP 402 — ver `lib/clicksign/quota.ts`).
 
 ## ClickSign multitenant (per-org)
 
@@ -192,7 +199,7 @@ Aponte UptimeRobot ou similar pra esse endpoint, assert `status==="ok"`.
 
 **"Login não funciona"** — magic link cai no STAGING_EMAIL_OVERRIDE. Check Resend dashboard pra ver se enviou.
 
-**"ClickSign budget estourado"** — aumenta `CLICKSIGN_MONTHLY_BUDGET_CENTS` no Vercel staging env e redeploy.
+**"ClickSign sem envelopes disponíveis" (402)** — é o plano da CONTA ClickSign que acabou, não um teto da plataforma (esse não existe mais). Verifique o plano no painel da ClickSign. O corpo cru da recusa fica no log do Vercel como `[clicksign] falha 4xx`.
 
 **"Neon branch desync"** — `pnpm prisma migrate diff --from-schema-datamodel prisma/schema.prisma --to-url $DATABASE_URL_STAGING` mostra drift. Aplique manualmente ou rode CI weekly.
 
