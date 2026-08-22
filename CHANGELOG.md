@@ -4,6 +4,29 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-22 - O painel de custo volta a enxergar o dia de hoje
+
+### Corrigido
+
+- **`/settings/ai-usage` NUNCA mostrava o gasto do dia corrente.** O cliente manda `?to=2026-08-22` (data pura), o servidor lia `new Date("2026-08-22")` — que é **meia-noite** — e o filtro `lte` cortava o dia inteiro. Os três presets (7 dias, 30 dias, mês atual) exibiam uma janela terminando ontem, e uma chamada de IA feita agora só aparecia no dia seguinte.
+  - Silencioso da pior forma: o número exibido estava sempre **certo para o intervalo pedido**; o intervalo é que não era o que o botão prometia. Achado em 22/08 durante o smoke do custo reportado, quando três linhas recém-gravadas simplesmente não apareciam na tela.
+  - Data pura em `?to=` passa a significar **o dia inteiro**, que é a leitura natural de um intervalo de datas e o que o contrato da rota já dizia. Timestamp completo continua respeitado como veio. O corte é em UTC — para um tenant em UTC-3, uma chamada depois das 21h cai no "dia seguinte" desta conta; é o mesmo critério que o `from` sempre usou, e resolver de verdade exige o fuso do tenant, que a rota não conhece.
+- **A linha "medido · estimado" usava o formatador do KPI**, que colapsa tudo abaixo de um centavo em `$ <0,01` — inclusive zero. Como um turn do Max custa ~US$ 0,0004, o caso comum renderizava `$ <0,01 medido · $ <0,01 estimado`, escondendo exatamente a diferença que a linha existe para mostrar. Formatador próprio, com 6 casas, agora coberto por teste.
+
+### Nota de dado — linhas do Max com contagem de token sobreposta
+
+Entre o deploy do `efbd721` (22/08) e o deploy do emissor corrigido, as linhas do Max gravaram `promptTokens` **incluindo** os tokens de cache, porque o OpenAI/OpenRouter conta `cached_tokens` dentro de `prompt_tokens` enquanto esta base adota a convenção disjunta da Anthropic (`calcCostUsd` soma as parcelas).
+
+**O custo não é afetado** — `openai/gpt-5.4-nano` não tem `cacheRead` na `PRICING`, então a parcela zera. O que fica inflado é `totalCacheReadTokens` somado com `totalPromptTokens` no painel, só nessas linhas.
+
+Sem backfill, de propósito: reescrever linha marcada `costSource: "reported"` produziria o pior híbrido possível — pareceria medição e não seria. Para identificar as afetadas:
+
+```sql
+SELECT * FROM "AIUsage"
+ WHERE "agentKey" = 'max' AND "cacheReadTokens" > 0
+   AND "createdAt" < '<timestamp do deploy do emissor corrigido>';
+```
+
 ## [Unreleased] - 2026-08-22 - Custo de IA medido, não estimado (receptor)
 
 ### Adicionado

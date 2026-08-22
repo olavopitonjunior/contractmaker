@@ -132,7 +132,7 @@ interface UsageResponse {
  * `$ <0,01 · $ <0,01` — escondendo exatamente a diferença que a linha existe
  * para mostrar. E com zero estimado ela AFIRMARIA um custo que não existe.
  */
-function formatUsdPreciso(v: number): string {
+export function formatUsdPreciso(v: number): string {
   if (v === 0) return "$ 0";
   if (v < 0.01) return `$ ${v.toFixed(6).replace(".", ",")}`;
   return formatUsd(v);

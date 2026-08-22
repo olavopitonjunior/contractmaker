@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { agentLabel } from "@/lib/ai/agents/store";
-import { dividirPorProcedencia } from "@/lib/ai/usage";
+import { dividirPorProcedencia, limiteSuperior } from "@/lib/ai/usage";
 
 /**
  * GET /api/ai-usage?from=YYYY-MM-DD&to=YYYY-MM-DD
@@ -23,9 +23,7 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = new URL(req.url);
-  const to = searchParams.get("to")
-    ? new Date(searchParams.get("to")!)
-    : new Date();
+  const to = limiteSuperior(searchParams.get("to"));
   const from = searchParams.get("from")
     ? new Date(searchParams.get("from")!)
     : new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
