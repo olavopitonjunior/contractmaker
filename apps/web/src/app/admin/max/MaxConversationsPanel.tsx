@@ -1,4 +1,5 @@
 import type { MaxConversationsResult } from "@/lib/max/admin-client";
+import { horaSP } from "./hora";
 
 /**
  * Conversas do Max, por tenant.
@@ -128,7 +129,7 @@ export function MaxConversationsPanel({
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <div className="text-sm font-medium">{t.phone}</div>
                   <div className="text-xs text-muted-foreground">
-                    {new Date(t.createdAt).toLocaleString("pt-BR")}
+                    {horaSP(t.createdAt)}
                   </div>
                 </div>
 
