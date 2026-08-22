@@ -7,16 +7,6 @@ import { createMockSession, createMockOrg } from "@/__tests__/helpers";
 const mockSendAttachment = vi.fn();
 vi.mock("@/lib/clicksign/executor", () => ({
   sendEnvelopeForAttachment: (...args: unknown[]) => mockSendAttachment(...args),
-  EnvelopeBudgetError: class EnvelopeBudgetError extends Error {
-    constructor(
-      msg: string,
-      public spentCents: number,
-      public budgetCents: number,
-      public planCostCents: number
-    ) {
-      super(msg);
-    }
-  },
   MissingEmailsError: class MissingEmailsError extends Error {
     constructor(public missing: unknown[]) {
       super("missing");

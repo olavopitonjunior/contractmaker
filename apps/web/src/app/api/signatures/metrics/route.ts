@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
-import {
-  getMonthlySpendCents,
-} from "@/lib/clicksign/executor";
-import { getMonthlyBudgetCents } from "@/lib/clicksign/costs";
-import { getSignatureSettings } from "@/lib/clicksign/account";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +9,6 @@ interface RecentEnvelope {
   id: string;
   name: string;
   status: string;
-  costCents: number;
   sentAt: string | null;
   closedAt: string | null;
   contractId: string | null;
@@ -36,9 +30,10 @@ interface RecentEvent {
 
 interface MetricsResponse {
   range: { from: string; to: string };
-  spendCents: number;
-  spendMonthCents: number;
-  budgetCents: number;
+  /** Envelopes vivos (running/closed) enviados no mês corrente — independe do
+   *  range do filtro. Substituiu "gasto vs orçamento": os dois valores saíam de
+   *  uma tabela de preços estimada no código, não do que a ClickSign cobra. */
+  envelopesMonth: number;
   totalEnvelopes: number;
   byStatus: Record<string, number>;
   closeRate: number;
@@ -86,7 +81,13 @@ export async function GET(req: NextRequest) {
     createdAt: { gte: from, lte: to },
   };
 
-  const [envelopes, recentEvents, spendMonthCents] = await Promise.all([
+  // Início do mês corrente — o card "Envelopes no mês" é independente do
+  // range escolhido no filtro (que move `from`/`to`).
+  const startOfMonth = new Date();
+  startOfMonth.setUTCDate(1);
+  startOfMonth.setUTCHours(0, 0, 0, 0);
+
+  const [envelopes, recentEvents, envelopesMonth] = await Promise.all([
     prisma.envelope.findMany({
       where,
       orderBy: { createdAt: "desc" },
@@ -100,18 +101,19 @@ export async function GET(req: NextRequest) {
       orderBy: { receivedAt: "desc" },
       take: 30,
     }),
-    getMonthlySpendCents(org.id),
+    prisma.envelope.count({
+      where: {
+        orgId: org.id,
+        sentAt: { gte: startOfMonth },
+        status: { in: ["running", "closed"] },
+      },
+    }),
   ]);
-  const sigSettings = await getSignatureSettings(org.id);
 
   const byStatus: Record<string, number> = {};
-  let spendCents = 0;
   const latencies: number[] = [];
   for (const env of envelopes) {
     byStatus[env.status] = (byStatus[env.status] ?? 0) + 1;
-    if (env.status === "running" || env.status === "closed") {
-      spendCents += env.costCents;
-    }
     if (env.sentAt && env.closedAt) {
       latencies.push(env.closedAt.getTime() - env.sentAt.getTime());
     }
@@ -128,7 +130,6 @@ export async function GET(req: NextRequest) {
     id: e.id,
     name: e.name,
     status: e.status,
-    costCents: e.costCents,
     sentAt: e.sentAt ? e.sentAt.toISOString() : null,
     closedAt: e.closedAt ? e.closedAt.toISOString() : null,
     contractId: e.contractId,
@@ -148,9 +149,7 @@ export async function GET(req: NextRequest) {
 
   const body: MetricsResponse = {
     range: { from: from.toISOString(), to: to.toISOString() },
-    spendCents,
-    spendMonthCents,
-    budgetCents: getMonthlyBudgetCents(sigSettings.monthlyBudgetCents),
+    envelopesMonth,
     totalEnvelopes: envelopes.length,
     byStatus,
     closeRate,

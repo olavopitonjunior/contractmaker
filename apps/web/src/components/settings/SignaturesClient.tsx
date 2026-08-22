@@ -9,7 +9,6 @@ import {
   ArrowLeft,
   FileSignature,
   RefreshCw,
-  Wallet,
   Activity,
   Gauge,
   TrendingUp,
@@ -22,7 +21,6 @@ interface RecentEnvelope {
   id: string;
   name: string;
   status: string;
-  costCents: number;
   sentAt: string | null;
   closedAt: string | null;
   contractId: string;
@@ -40,9 +38,8 @@ interface RecentEvent {
 
 interface MetricsResponse {
   range: { from: string; to: string };
-  spendCents: number;
-  spendMonthCents: number;
-  budgetCents: number;
+  /** Envelopes vivos enviados no mês corrente (independe do range do filtro). */
+  envelopesMonth: number;
   totalEnvelopes: number;
   byStatus: Record<string, number>;
   closeRate: number;
@@ -71,13 +68,6 @@ const STATUS_VARIANT: Record<
   failed: "destructive",
 };
 
-function formatBrl(cents: number): string {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-    minimumFractionDigits: 2,
-  }).format(cents / 100);
-}
 
 function formatPct(v: number): string {
   return `${(v * 100).toFixed(1)}%`;
@@ -155,18 +145,14 @@ export function SignaturesClient({ embedded = false }: { embedded?: boolean } = 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preset]);
 
-  const budgetPct = data
-    ? Math.min(100, (data.spendMonthCents / data.budgetCents) * 100)
-    : 0;
-
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         {embedded ? (
           <div>
             <p className="text-sm text-muted-foreground max-w-2xl">
-              Gasto vs orçamento mensal, taxa de conclusão, latência e histórico
-              de eventos dos envelopes ClickSign.
+              Volume, taxa de conclusão, latência e histórico de eventos dos
+              envelopes ClickSign.
             </p>
           </div>
         ) : (
@@ -183,8 +169,8 @@ export function SignaturesClient({ embedded = false }: { embedded?: boolean } = 
             </h1>
             <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
               Visão consolidada dos envelopes Clicksign emitidos pela
-              organização: gasto vs orçamento mensal, taxa de conclusão,
-              latência e histórico de eventos.
+              organização: volume, taxa de conclusão, latência e histórico de
+              eventos.
             </p>
           </div>
         )}
@@ -245,26 +231,14 @@ export function SignaturesClient({ embedded = false }: { embedded?: boolean } = 
             <Card>
               <CardContent className="pt-5">
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Wallet className="h-3.5 w-3.5" /> Gasto do mês
+                  <FileSignature className="h-3.5 w-3.5" /> Envelopes no mês
                 </div>
                 <p className="text-2xl font-semibold mt-1 tabular-nums">
-                  {formatBrl(data.spendMonthCents)}
+                  {data.envelopesMonth}
                 </p>
                 <p className="text-[10px] text-muted-foreground mt-0.5">
-                  de {formatBrl(data.budgetCents)} de orçamento
+                  enviados no mês corrente
                 </p>
-                <div className="h-1.5 bg-muted rounded mt-2 overflow-hidden">
-                  <div
-                    className={`h-full rounded transition-all ${
-                      budgetPct >= 95
-                        ? "bg-destructive"
-                        : budgetPct >= 75
-                          ? "bg-amber-500"
-                          : "bg-primary"
-                    }`}
-                    style={{ width: `${budgetPct}%` }}
-                  />
-                </div>
               </CardContent>
             </Card>
             <Card>
@@ -354,9 +328,6 @@ export function SignaturesClient({ embedded = false }: { embedded?: boolean } = 
                             ` · concluído ${new Date(e.closedAt).toLocaleDateString("pt-BR")}`}
                         </div>
                       </div>
-                      <span className="text-xs tabular-nums text-muted-foreground shrink-0">
-                        {formatBrl(e.costCents)}
-                      </span>
                     </li>
                   ))}
                 </ul>

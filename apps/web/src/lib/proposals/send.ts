@@ -1,7 +1,5 @@
 import { prisma } from "@/lib/db/prisma";
 import { resolveClickSignCreds, getSignatureSettings } from "@/lib/clicksign/account";
-import { getMonthlySpendCents } from "@/lib/clicksign/executor";
-import { getMonthlyBudgetCents } from "@/lib/clicksign/costs";
 import type { ClickSignCreds } from "@/lib/clicksign/account";
 import {
   checkProposalReadiness,
@@ -41,8 +39,7 @@ export type PrepareBlock =
       signers: Array<{ name: string; role: string }>;
     }
   | { blocked: "collision"; message: string }
-  | { blocked: "routing"; message: string }
-  | { blocked: "budget"; spentCents: number; budgetCents: number; planCostCents: number };
+  | { blocked: "routing"; message: string };
 
 export interface PrepareOk {
   ok: true;
@@ -62,14 +59,12 @@ export async function prepareSend(
   proposalId: string,
   deps: {
     resolveCreds?: (orgId: string) => Promise<ClickSignCreds | null>;
-    getSpent?: (orgId: string) => Promise<number>;
     probeCaps?: (
       orgId: string
     ) => Promise<CapabilityResult | { error: "not_configured" }>;
   } = {}
 ): Promise<PrepareResult> {
   const resolveCreds = deps.resolveCreds ?? resolveClickSignCreds;
-  const getSpent = deps.getSpent ?? getMonthlySpendCents;
   const probeCaps = deps.probeCaps ?? detectAndCacheCapabilities;
 
   const proposal = await prisma.proposal.findUnique({
@@ -171,8 +166,9 @@ export async function prepareSend(
   });
   if (decision.blocked) return { blocked: "routing", message: decision.blocked };
 
-  // 4. Budget — reserva o custo total ANTES de gastar. Sub-teto de propostas
-  //    (proposalBudgetCents) tem precedência sobre o mensal.
+  // 4. Custo planejado — vira `reservedCostCents`/`costCents` (histórico).
+  //    Não há mais teto a comparar: o único limite legítimo é o do plano da
+  //    conta ClickSign, e ele só aparece na resposta dela (lib/clicksign/quota).
   const planCostCents =
     decision.instrument === "aceite"
       ? plannedAcceptanceCostCents(deduped.signers.length)
@@ -180,14 +176,6 @@ export async function prepareSend(
           signerCount: deduped.signers.length,
           costOverrides: settings.costOverridesJson as Record<string, unknown> | null,
         });
-  const budgetCents =
-    settings.proposalBudgetCents ??
-    getMonthlyBudgetCents(settings.monthlyBudgetCents);
-  const spentCents = await getSpent(proposal.orgId);
-  if (spentCents + planCostCents > budgetCents) {
-    return { blocked: "budget", spentCents, budgetCents, planCostCents };
-  }
-
   return {
     ok: true,
     instrument: decision.instrument,

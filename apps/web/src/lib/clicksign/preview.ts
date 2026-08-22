@@ -2,15 +2,18 @@ import { prisma } from "@/lib/db/prisma";
 import { dealDataToSigners, leaseDataToSigners } from "@/lib/clicksign/mapping";
 import { moduleForDealKind, pipelineKind } from "@/lib/modules/resolve";
 import { MODULE } from "@/lib/modules/catalog";
-import { envelopeCostCents, getMonthlyBudgetCents } from "@/lib/clicksign/costs";
-import { getMonthlySpendCents, mergeDefaultWitnesses } from "@/lib/clicksign/executor";
+import { mergeDefaultWitnesses } from "@/lib/clicksign/executor";
 import { getSignatureSettings } from "@/lib/clicksign/account";
 import type { AuthMethod } from "@/lib/clicksign/types";
 
 /**
  * Preview da operação `ENVELOPE_SEND` — usado em ActionIntent quando Bearer
- * dispara envio. Calcula signers, custo, budget restante SEM fazer chamadas
- * Clicksign (apenas leituras DB).
+ * dispara envio. Resolve os signatários SEM fazer chamadas Clicksign (apenas
+ * leituras DB).
+ *
+ * Sem valores: o custo/orçamento que aparecia aqui saía de uma tabela de preços
+ * estimada no código, então o número mostrado a quem aprova o envio não era o
+ * que a conta ClickSign cobraria.
  */
 
 export interface EnvelopeSendPreview {
@@ -23,9 +26,6 @@ export interface EnvelopeSendPreview {
       email: string | null;
       role: string;
     }>;
-    planCostCents: number;
-    monthlySpentCents: number;
-    monthlyBudgetCents: number;
     envelopeName: string | null;
     deadlineAt: string | null;
   };
@@ -95,14 +95,6 @@ export async function buildEnvelopeSendPreview(args: {
     };
   }
 
-  const overrides = settings.costOverridesJson as Record<string, unknown> | null;
-  const planCost = envelopeCostCents(
-    signers.map(() => authMethod),
-    overrides
-  );
-  const budget = getMonthlyBudgetCents(settings.monthlyBudgetCents);
-  const spent = await getMonthlySpendCents(args.orgId);
-
   // Descartes por e-mail repetido não podem passar em silêncio: quem sai da
   // lista continua com linha de assinatura no PDF, e quem aprova o envio
   // precisa ver isso antes de confirmar.
@@ -112,7 +104,7 @@ export async function buildEnvelopeSendPreview(args: {
       : "";
 
   return {
-    summary: `Enviar envelope ClickSign com ${signers.length} signatário(s) via ${authMethod} (custo R$ ${(planCost / 100).toFixed(2)}).${droppedNote}`,
+    summary: `Enviar envelope ClickSign com ${signers.length} signatário(s) via ${authMethod}.${droppedNote}`,
     details: {
       contractId: contract.id,
       authMethod,
@@ -121,9 +113,6 @@ export async function buildEnvelopeSendPreview(args: {
         email: s.email ?? null,
         role: s.sourceKind ?? "outro",
       })),
-      planCostCents: planCost,
-      monthlySpentCents: spent,
-      monthlyBudgetCents: budget,
       envelopeName: args.envelopeName ?? null,
       deadlineAt: args.deadlineAt ?? null,
     },

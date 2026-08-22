@@ -4,9 +4,9 @@ import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
 import {
   sendEnvelopeForContract,
-  EnvelopeBudgetError,
   MissingEmailsError,
 } from "@/lib/clicksign/executor";
+import { EnvelopePlanLimitError } from "@/lib/clicksign/quota";
 import { ClicksignError } from "@/lib/clicksign/client";
 import {
   ClickSignNotConfiguredError,
@@ -305,14 +305,9 @@ export async function POST(
         { status: 422 }
       );
     }
-    if (err instanceof EnvelopeBudgetError) {
+    if (err instanceof EnvelopePlanLimitError) {
       return NextResponse.json(
-        {
-          error: "Orçamento mensal Clicksign excedido",
-          spentCents: err.spentCents,
-          budgetCents: err.budgetCents,
-          planCostCents: err.planCostCents,
-        },
+        { error: err.message, code: err.code },
         { status: 402 }
       );
     }
@@ -351,16 +346,8 @@ function clicksignErrorToResponse(err: unknown): {
       body: { error: "Partes sem e-mail", missing: err.missing },
     };
   }
-  if (err instanceof EnvelopeBudgetError) {
-    return {
-      status: 402,
-      body: {
-        error: "Orçamento mensal Clicksign excedido",
-        spentCents: err.spentCents,
-        budgetCents: err.budgetCents,
-        planCostCents: err.planCostCents,
-      },
-    };
+  if (err instanceof EnvelopePlanLimitError) {
+    return { status: 402, body: { error: err.message, code: err.code } };
   }
   if (err instanceof ClicksignError) {
     return {
