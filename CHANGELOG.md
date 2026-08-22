@@ -16,6 +16,14 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
   - **Registro e notificação por caminhos separados**: o e-mail sai por `sendEmail` direto, e `reportPlatformAlert` entra em modo `"digest"` — o re-arm de 24 h do motor de alertas engoliria um segundo incidente no mesmo dia. A assinatura carrega o instante do incidente, então é uma linha por queda e o `count` conta tentativas de entrega.
   - **Sem migration** (`PlatformAlertEvent.kind` é `String`) e **nasce inerte**: sem `MAX_WEBHOOK_SECRET` a rota responde 503. O emissor é PR próprio, no repositório do max-agent.
 
+## [Unreleased] - 2026-08-22 - Filtro "Responsável" do kanban
+
+### Corrigido
+
+- **O filtro "Responsável" listava o histórico, não a equipe.** As opções vinham de `user.findMany({ deals: { some: { pipelineId } } })` — só quem já tinha CRIADO um negócio naquele pipeline. Quem responde por negócio sem nunca ter aberto um simplesmente não existia no select, e não havia como filtrar por ele (reportado na Newcore). A lista passa a nascer da membership da org, como já fazia a tela de Propostas, unida a quem ainda figura como criador ou gerente de algum negócio do pipeline — sem essa união, o negócio de quem saiu da imobiliária ficaria não-filtrável. Usuário de serviço (`isSystem`) e conta removida (`deletedAt`) ficam de fora.
+- **Filtrar por uma pessoa escondia os negócios que a tela atribuía a ela.** O filtro casava `Deal.userId` (o criador, imutável) enquanto o card do kanban exibe o GERENTE (`Deal.managerUserId`, reatribuível): filtrar pelo nome que a própria coluna mostrava devolvia menos negócio do que ela anunciava. Passa a casar criador OU gerente. **A contagem de "N negócios" muda para quem já usava o filtro** — é a correção, não regressão.
+- **A busca sumia em silêncio quando combinada com outro filtro.** `q` e `responsavel` produzem `OR` e moravam na mesma chave `where.OR`: o segundo apagava o primeiro. Pela mesma razão, `getBoardStages` montava o `where` por spread, e o `OR` do escopo RBAC (gerente com visão restrita) sobrescrevia o dos filtros — a busca quebrava justamente para quem tem menos visão. Ambos passam a compor por `AND`. Nenhum dos dois vazou negócio: na colisão, quem sobrevivia era o escopo.
+
 ## [Unreleased] - 2026-08-21 - Estilos de documento saem da configuração (soft removal)
 
 ### Removido
