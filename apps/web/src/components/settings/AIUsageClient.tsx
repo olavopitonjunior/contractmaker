@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { formatUsd, formatUsdPreciso } from "@/lib/ai/format";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -123,30 +124,6 @@ interface UsageResponse {
 // Formatters
 // ────────────────────────────────────────────────────────────────────────────
 
-/**
- * Valor pequeno com precisão de verdade.
- *
- * O `formatUsd` colapsa TUDO abaixo de um centavo em `"$ <0,01"` — inclusive
- * zero. Serve para o KPI, e não serve para a linha de procedência: um turn do
- * Max custa ~US$ 0,0004, então "medido vs estimado" apareceria como
- * `$ <0,01 · $ <0,01` — escondendo exatamente a diferença que a linha existe
- * para mostrar. E com zero estimado ela AFIRMARIA um custo que não existe.
- */
-export function formatUsdPreciso(v: number): string {
-  if (v === 0) return "$ 0";
-  if (v < 0.01) return `$ ${v.toFixed(6).replace(".", ",")}`;
-  return formatUsd(v);
-}
-
-function formatUsd(v: number): string {
-  if (v < 0.01) return "$ <0,01";
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(v);
-}
 
 function formatInt(v: number): string {
   return new Intl.NumberFormat("pt-BR").format(v);
@@ -344,15 +321,32 @@ function LineChart({ data }: { data: DayBucket[] }) {
 
 type RangePreset = "7d" | "30d" | "mtd" | "last_month";
 
+/**
+ * As janelas dos botões.
+ *
+ * ── Por que 6 e 29, e não 7 e 30 ─────────────────────────────────────────
+ *
+ * Os dois extremos são serializados como DATA PURA (`.slice(0,10)`), e desde
+ * que o `to` passou a significar o dia inteiro (ver `limiteSuperior` em
+ * `lib/ai/usage.ts`) a janela virou `[D_from 00:00Z, D_to 23:59:59.999Z]` —
+ * ou seja, **ambos os dias entram por completo**.
+ *
+ * Com `now − 7×24h`, isso dá 15/08 a 22/08: OITO dias-calendário sob um botão
+ * escrito "Últimos 7 dias". O erro é herdado — antes o `to` era meia-noite e a
+ * conta fechava por acidente, às custas de o dia corrente sumir. Consertar o
+ * dia corrente EXPÔS o rótulo.
+ *
+ * `now − 6×24h` fecha em sete dias de verdade. Mesma aritmética no de 30.
+ */
 function presetRange(preset: RangePreset): { from: Date; to: Date } {
   const now = new Date();
   const to = new Date(now);
   if (preset === "7d") {
-    const from = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const from = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
     return { from, to };
   }
   if (preset === "30d") {
-    const from = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const from = new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000);
     return { from, to };
   }
   if (preset === "mtd") {
