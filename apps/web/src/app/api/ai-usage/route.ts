@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { agentLabel } from "@/lib/ai/agents/store";
-import { dividirPorProcedencia, limiteSuperior } from "@/lib/ai/usage";
+import { dividirPorProcedencia } from "@/lib/ai/usage";
+import { limiteSuperior } from "@/lib/ui/date-range";
 
 /**
  * GET /api/ai-usage?from=YYYY-MM-DD&to=YYYY-MM-DD

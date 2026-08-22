@@ -179,39 +179,6 @@ export interface RecordUsageParams {
   costUsd?: number | null;
 }
 
-/**
- * Fim do intervalo, a partir do `to` da query.
- *
- * ── O bug que isto conserta ──────────────────────────────────────────────
- *
- * `?to=2026-08-22` vira `new Date("2026-08-22")`, que é **meia-noite** — e
- * como o filtro é `lte`, o dia 22 inteiro ficava de fora. O painel de custo
- * NUNCA mostrava o gasto do dia corrente: os três presets (`7d`, `30d`,
- * `mtd`) mandam a data de hoje e recebiam de volta uma janela terminando
- * ontem. Uma chamada feita agora só aparecia amanhã.
- *
- * Achado em 22/08 durante o smoke do custo reportado, quando três linhas
- * recém-gravadas simplesmente não apareciam na tela. É antigo e silencioso:
- * o número exibido estava sempre certo para o intervalo pedido — só que o
- * intervalo não era o que o botão prometia.
- *
- * Data pura ("YYYY-MM-DD") passa a significar **o dia inteiro**, que é a
- * leitura natural de um intervalo de datas e o que o contrato da rota já
- * dizia. Timestamp completo é respeitado como veio.
- *
- * Ressalva honesta: o corte é em UTC. Para um tenant em UTC-3, uma chamada
- * feita depois das 21h cai no "dia seguinte" desta conta. É o mesmo critério
- * que o `from` sempre usou, e consertar isso de verdade exige o fuso do
- * tenant — que esta rota não conhece.
- */
-export function limiteSuperior(param: string | null): Date {
-  if (!param) return new Date();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(param)) {
-    return new Date(`${param}T23:59:59.999Z`);
-  }
-  return new Date(param);
-}
-
 /** De onde veio o número em `estimatedCostUsd`. */
 export type CostSource = "reported" | "estimated";
 

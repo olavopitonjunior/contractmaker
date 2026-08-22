@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
-import { limiteSuperior } from "@/lib/ai/usage";
+import { limiteSuperior } from "@/lib/ui/date-range";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

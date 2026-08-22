@@ -1,7 +1,32 @@
-import { describe, it, expect } from "vitest";
-import { limiteSuperior } from "@/lib/ai/usage";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { limiteSuperior } from "@/lib/ui/date-range";
 import { formatUsdPreciso } from "@/lib/ai/format";
 import { presetRange } from "@/lib/ui/date-range";
+
+/**
+ * ── POR QUE ESTE ARQUIVO FIXA O FUSO ──────────────────────────────────────
+ *
+ * O defeito que estes testes protegem é local-vs-UTC: a conta era feita em
+ * horário local e serializada em UTC, o que desloca o limite um dia num fuso
+ * NEGATIVO. Em UTC os dois coincidem — e aí todas as asserções passam por
+ * acidente, **com o bug reintroduzido**.
+ *
+ * Medido: reintroduzindo o `new Date(ano, mes, 0, 23,59,59)` local, os testes
+ * quebram sob `TZ=America/Sao_Paulo` e ficam 15/15 VERDES sob `TZ=UTC` — que é
+ * o fuso do runner do GitHub Actions. Ou seja, o CI, que é quem barra o merge,
+ * era cego justamente para o defeito que este arquivo existe para travar.
+ *
+ * Fixado aqui e não no `vitest.config.ts` de propósito: pinar o fuso global
+ * mudaria os 4400+ testes de UTC para UTC-3 e poderia acordar falhas latentes
+ * que não são deste trabalho.
+ */
+const TZ_ORIGINAL = process.env.TZ;
+beforeAll(() => {
+  process.env.TZ = "America/Sao_Paulo";
+});
+afterAll(() => {
+  process.env.TZ = TZ_ORIGINAL;
+});
 
 /**
  * O fim da janela do painel de custo.
@@ -44,14 +69,6 @@ describe("limiteSuperior", () => {
   });
 });
 
-/**
- * O formatador da linha de procedência.
- *
- * O `formatUsd` do KPI colapsa tudo abaixo de um centavo em `"$ <0,01"`,
- * inclusive zero. Usá-lo aqui esconderia exatamente a diferença que a linha
- * existe para mostrar: um turn do Max custa ~US$ 0,0004, então medido e
- * estimado apareceriam como o mesmo `"$ <0,01"`.
- */
 /**
  * Os botões de período — testados na FUNÇÃO REAL, não numa réplica.
  *
