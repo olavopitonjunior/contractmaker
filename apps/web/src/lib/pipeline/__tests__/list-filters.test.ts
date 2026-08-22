@@ -114,13 +114,12 @@ describe("boardFiltersWhere", () => {
     );
     expect(where.AND).toEqual([
       { OR: [{ userId: "u1" }, { managerUserId: "u1" }] },
+      // Paridade com slaStatusWhere("atencao") — ver sla.test.ts.
+      { slaWarnAt: { lt: NOW }, slaDueAt: { gte: NOW } },
     ]);
     expect(where.sourceChannel).toBe("manual");
     expect(where.createdAt).toEqual({
       gte: new Date(NOW.getTime() - PERIODO_DAYS["7d"] * 86_400_000),
     });
-    // Paridade com slaStatusWhere("atencao") — ver sla.test.ts.
-    expect(where.slaWarnAt).toEqual({ lt: NOW });
-    expect(where.slaDueAt).toEqual({ gte: NOW });
   });
 });

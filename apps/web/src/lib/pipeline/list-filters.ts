@@ -106,7 +106,10 @@ export function boardFiltersWhere(
       gte: new Date(now.getTime() - PERIODO_DAYS[f.periodo] * 86_400_000),
     };
   }
-  if (f.sla) Object.assign(where, slaStatusWhere(f.sla, now));
+  // Também via AND: hoje `slaStatusWhere` só devolve escalares, mas se um dia
+  // devolver OR/AND o `Object.assign` de antes colidiria com o `where.AND`
+  // abaixo — a mesma classe de bug que este arquivo acabou de corrigir.
+  if (f.sla) and.push(slaStatusWhere(f.sla, now));
   if (and.length > 0) where.AND = and;
   return where;
 }
