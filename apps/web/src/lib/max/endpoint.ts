@@ -20,8 +20,18 @@
  * para o mesmo lugar. É o que o `admin-client` já fazia por acaso.
  */
 
-/** Caminhos do serviço, sempre a partir da raiz. */
-export type MaxPath = "/api/notify" | "/api/orgs" | "/api/admin/status";
+/**
+ * Caminhos do serviço, sempre a partir da raiz.
+ *
+ * União fechada de propósito: é ela que impede o próximo chamador de inventar
+ * a própria montagem de URL e reproduzir a divergência descrita acima. Rota
+ * nova entra AQUI, e o compilador cobra.
+ */
+export type MaxPath =
+  | "/api/notify"
+  | "/api/orgs"
+  | "/api/admin/status"
+  | "/api/admin/conversations";
 
 /**
  * @param base valor cru de `MAX_NOTIFY_URL` — com ou sem `/api`, com ou sem

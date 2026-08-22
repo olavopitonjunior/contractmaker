@@ -3,11 +3,12 @@ import Link from "next/link";
 import { auth } from "@/lib/auth/auth";
 import { getPlatformRole } from "@/lib/security/rbac/platform";
 import { prisma } from "@/lib/db/prisma";
-import { fetchMaxStatus } from "@/lib/max/admin-client";
+import { fetchMaxStatus, fetchMaxConversations } from "@/lib/max/admin-client";
 import { FEATURE } from "@/lib/modules/catalog";
 import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
 import { MAX_AGENT_KEY } from "@/lib/max/provisioning";
 import { MaxStatusPanel } from "./MaxStatusPanel";
+import { MaxConversationsPanel } from "./MaxConversationsPanel";
 import { ReprovisionButton } from "./ReprovisionButton";
 
 export const dynamic = "force-dynamic";
@@ -110,6 +111,20 @@ export default async function MaxMissionControlPage({
 
   const status = await fetchMaxStatus(searchParams.orgId);
 
+  /**
+   * Conversas só com tenant escolhido.
+   *
+   * A rota do serviço exige `orgId` (ou um `scope=all` explícito), e a tela
+   * respeita isso em vez de contornar: uma lista de conversa de gente real não
+   * deve aparecer porque alguém abriu o painel sem filtrar.
+   */
+  const conversas = searchParams.orgId
+    ? await fetchMaxConversations({ orgId: searchParams.orgId, limit: 20 })
+    : null;
+  const orgEscolhida = searchParams.orgId
+    ? orgs.find((o) => o.id === searchParams.orgId)?.name
+    : undefined;
+
   return (
     <div className="mx-auto max-w-5xl p-6">
       <header className="mb-6">
@@ -176,6 +191,8 @@ export default async function MaxMissionControlPage({
       </section>
 
       <MaxStatusPanel result={status} />
+
+      <MaxConversationsPanel result={conversas} orgName={orgEscolhida} />
     </div>
   );
 }
