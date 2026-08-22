@@ -78,6 +78,30 @@ export default async function MaxMissionControlPage({
   if (!platformRole) redirect("/");
   const podeReemitir = platformRole.role === "super_admin";
 
+  /**
+   * Conversa é só de super-admin. `support` e `billing` também têm
+   * `PlatformRole` e entram nesta página — e devem entrar: o painel de status é
+   * metadado de operação (fila, conexão, entregas), que é exatamente o que
+   * suporte precisa para responder "o Max está no ar?".
+   *
+   * Transcrição não é metadado. É o que o corretor escreveu e o que o agente
+   * respondeu — dado de pessoa real, de um tenant que o staff de plataforma não
+   * é membro. O PRD decidiu isto explicitamente ("transcrições, custos e logs
+   * de tools ficam só no super-admin"), e até aqui a página não implementava a
+   * decisão: bastava ter QUALQUER `PlatformRole`.
+   *
+   * O gate está sobre o **fetch**, não só sobre o render: negar na renderização
+   * deixaria a conversa atravessar a rede e existir no processo antes de ser
+   * descartada — proteção que um `console.log` mal colocado desfaz.
+   *
+   * Nota sobre `platformRole.scope`: ele existe e esta página não o consulta em
+   * lugar nenhum, nem para as orgs nem para o `orgId` da query. Restringir a
+   * `super_admin` torna isso inócuo AQUI (super-admin é irrestrito por
+   * definição), mas não resolve o desenho — quando `support` ganhar alguma
+   * leitura por tenant, o escopo precisa passar a ser consultado de verdade.
+   */
+  const podeLerConversas = platformRole.role === "super_admin";
+
   const orgs = await prisma.organization.findMany({
     select: { id: true, name: true },
     orderBy: { name: "asc" },
@@ -118,9 +142,10 @@ export default async function MaxMissionControlPage({
    * respeita isso em vez de contornar: uma lista de conversa de gente real não
    * deve aparecer porque alguém abriu o painel sem filtrar.
    */
-  const conversas = searchParams.orgId
-    ? await fetchMaxConversations({ orgId: searchParams.orgId, limit: 20 })
-    : null;
+  const conversas =
+    podeLerConversas && searchParams.orgId
+      ? await fetchMaxConversations({ orgId: searchParams.orgId, limit: 20 })
+      : null;
   const orgEscolhida = searchParams.orgId
     ? orgs.find((o) => o.id === searchParams.orgId)?.name
     : undefined;
@@ -192,7 +217,11 @@ export default async function MaxMissionControlPage({
 
       <MaxStatusPanel result={status} />
 
-      <MaxConversationsPanel result={conversas} orgName={orgEscolhida} />
+      <MaxConversationsPanel
+        result={conversas}
+        orgName={orgEscolhida}
+        permitido={podeLerConversas}
+      />
     </div>
   );
 }

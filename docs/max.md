@@ -75,7 +75,16 @@ motivo classificado quando o turn não chegou ao grafo.
 Nasceu de necessidade concreta: os dois primeiros turns reais em produção
 renderam quatro defeitos, e todos foram achados consultando o banco à mão.
 
-Três decisões que não são detalhe:
+Quatro decisões que não são detalhe:
+ - **Conversa é só de super-admin.** A página é aberta a qualquer
+   `PlatformRole` — `support` precisa do painel de status para responder "o Max
+   está no ar?", e isso é metadado de operação. Transcrição não é: é o que o
+   corretor escreveu, de um tenant do qual o staff de plataforma não é membro.
+   O gate está sobre o **fetch**, não sobre o render, para a conversa nem
+   atravessar a rede; `support`/`billing` veem a seção dizendo que é restrita.
+   (Ressalva registrada: `PlatformRole.scope` não é consultado nesta página.
+   Apertar para `super_admin` torna isso inócuo aqui, mas quando `support`
+   ganhar qualquer leitura por tenant o escopo precisa passar a valer.)
  - **Exige tenant escolhido.** A rota do serviço recusa sem `orgId` (a menos de
    um `scope=all` explícito) e a tela respeita em vez de contornar — lista de
    conversa de gente real não aparece porque ninguém filtrou.

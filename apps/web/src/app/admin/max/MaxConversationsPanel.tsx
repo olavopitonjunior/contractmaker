@@ -1,4 +1,5 @@
 import type { MaxConversationsResult } from "@/lib/max/admin-client";
+import { horaSP } from "./hora";
 
 /**
  * Conversas do Max, por tenant.
@@ -24,10 +25,31 @@ function Rotulo({ children }: { children: React.ReactNode }) {
 export function MaxConversationsPanel({
   result,
   orgName,
+  permitido,
 }: {
   result: MaxConversationsResult | null;
   orgName?: string;
+  permitido: boolean;
 }) {
+  /**
+   * Sem permissão, a seção diz o que é — não some e não finge estar vazia.
+   *
+   * O gate de verdade está na página, que nem chega a buscar a conversa; isto
+   * aqui é só a mensagem. E ela existe porque a alternativa (esconder) faria
+   * `support` ver uma tela onde a lista some sem explicação e abrir chamado
+   * dizendo que o painel quebrou.
+   */
+  if (!permitido) {
+    return (
+      <section className="mt-8">
+        <h2 className="mb-2 font-display text-lg font-semibold">Conversas</h2>
+        <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+          Transcrição de conversa é restrita ao super-admin da plataforma.
+        </p>
+      </section>
+    );
+  }
+
   // Sem tenant escolhido não há o que mostrar — e a rota do serviço exige
   // `orgId` de propósito: uma tela que lê conversa não deve mostrar todos os
   // tenants porque ninguém escolheu nenhum.
@@ -46,8 +68,18 @@ export function MaxConversationsPanel({
     const texto =
       result.reason === "not_configured"
         ? "O serviço do Max não está configurado (falta MAX_NOTIFY_URL/SECRET)."
-        : result.reason === "unauthorized"
-          ? "O serviço recusou a assinatura — segredo divergente entre os dois lados."
+        : /**
+           * Deliberadamente NÃO diz "segredo divergente".
+           *
+           * 401 aqui tem duas causas que esta tela não distingue: segredo
+           * diferente entre os dois lados, ou formato de assinatura divergente
+           * (o que acontece quando um dos repos avança sozinho). Nomear só a
+           * primeira manda quem está de plantão conferir variável de ambiente
+           * enquanto o problema é de versão — e no dia de um deploy é
+           * justamente a segunda que é provável.
+           */
+          result.reason === "unauthorized"
+          ? "O serviço recusou a assinatura. Pode ser segredo diferente entre os dois lados ou formato de assinatura divergente — confira o log do max-agent."
           : result.reason === "unreachable"
             ? "Serviço fora do ar ou sem resposta."
             : "Não foi possível ler as conversas.";
@@ -107,7 +139,7 @@ export function MaxConversationsPanel({
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <div className="text-sm font-medium">{t.phone}</div>
                   <div className="text-xs text-muted-foreground">
-                    {new Date(t.createdAt).toLocaleString("pt-BR")}
+                    {horaSP(t.createdAt)}
                   </div>
                 </div>
 
