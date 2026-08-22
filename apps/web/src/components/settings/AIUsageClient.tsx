@@ -30,6 +30,16 @@ interface AgentStat {
 
 interface Totals {
   costUsd: number;
+  /**
+   * Procedência do `costUsd`. Opcional porque a rota só passou a mandar
+   * agora — uma aba aberta antes do deploy não pode quebrar.
+   */
+  cost?: {
+    reportedUsd: number;
+    estimatedUsd: number;
+    reportedCalls: number;
+    estimatedCalls: number;
+  };
   calls: number;
   promptTokens: number;
   completionTokens: number;
@@ -112,6 +122,21 @@ interface UsageResponse {
 // ────────────────────────────────────────────────────────────────────────────
 // Formatters
 // ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Valor pequeno com precisão de verdade.
+ *
+ * O `formatUsd` colapsa TUDO abaixo de um centavo em `"$ <0,01"` — inclusive
+ * zero. Serve para o KPI, e não serve para a linha de procedência: um turn do
+ * Max custa ~US$ 0,0004, então "medido vs estimado" apareceria como
+ * `$ <0,01 · $ <0,01` — escondendo exatamente a diferença que a linha existe
+ * para mostrar. E com zero estimado ela AFIRMARIA um custo que não existe.
+ */
+function formatUsdPreciso(v: number): string {
+  if (v === 0) return "$ 0";
+  if (v < 0.01) return `$ ${v.toFixed(6).replace(".", ",")}`;
+  return formatUsd(v);
+}
 
 function formatUsd(v: number): string {
   if (v < 0.01) return "$ <0,01";
@@ -480,6 +505,28 @@ export function AIUsageClient() {
                 <p className="text-[10px] text-muted-foreground mt-0.5">
                   {data.totals.calls} chamadas
                 </p>
+                {/* Medido vs estimado. Um total sem procedência esconde que a
+                    parte estimada pode estar bem acima do real quando há cache
+                    de prefixo — 304% no caso medido em 21/08. */}
+                {data.totals.cost && data.totals.cost.reportedCalls > 0 && (
+                  <p
+                    className="text-[10px] text-muted-foreground mt-1 leading-snug"
+                    title="Medido = crédito real cobrado pelo provedor. Estimado = tabela de preços interna, que não enxerga cache de prefixo e pode superestimar."
+                  >
+                    {formatUsdPreciso(data.totals.cost.reportedUsd)} medido em{" "}
+                    {data.totals.cost.reportedCalls}
+                    {/* A metade estimada só aparece quando existe: com tudo
+                        medido, escrever "$ 0 estimado" afirmaria um custo que
+                        não há. */}
+                    {data.totals.cost.estimatedCalls > 0 && (
+                      <>
+                        {" · "}
+                        {formatUsdPreciso(data.totals.cost.estimatedUsd)} estimado em{" "}
+                        {data.totals.cost.estimatedCalls}
+                      </>
+                    )}
+                  </p>
+                )}
               </CardContent>
             </Card>
             <Card>

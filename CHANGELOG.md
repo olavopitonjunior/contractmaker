@@ -4,6 +4,18 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-22 - Custo de IA medido, não estimado (receptor)
+
+### Adicionado
+
+- **`POST /api/agents/usage` aceita `costUsd`** — o crédito que o provedor de fato cobrou — quando `provider: "openrouter"`. Isso parece contrariar a regra escrita na própria rota ("custo informado por quem gasta não é medição") e não contraria: o número **não é auto-declarado pelo agente**, vem inline na resposta do OpenRouter (`usage.cost`); o Max só transporta. Contrato em `docs/max.md` §9.1.
+  - **Por que importa, medido em 21/08 contra o `gpt-5.4-nano`:** sem cache de prefixo a tabela de preços acerta com erro de **0,0%** — o preço nunca foi o problema. Num turn com **1792 de 1956 tokens vindos do cache**, o custo real foi US$ 0,00010614 e a tabela dizia US$ 0,00042870: **superestimativa de 304%**. O tenant via uma conta que não existe, e a otimização que mais economiza era justamente a invisível.
+  - **O número fica em `AIUsage.estimatedCostUsd`**, que passa a guardar *o melhor número disponível*, com **`AIUsage.costSource`** (`"reported"` | `"estimated"`) dizendo qual é. Coluna paralela obrigaria os ~60 pontos que somam custo (budget por contrato, teto mensal por agente, painéis de admin) a fazer COALESCE — e o primeiro esquecido daria um total errado em silêncio, que é o pior modo de falha desta tabela. Assim, todo agregado existente fica mais correto sem uma linha de mudança.
+  - **`null` e ausência = "o provedor não informou"; zero NÃO.** Zero é um número, e um turn que custou zero de verdade precisa ser distinguível de um que ninguém mediu. Teto de sanidade próprio (US$ 1,00/turn), porque é o único campo que entra na tabela de custo sem passar pela tabela de preços.
+  - **De outro provider, `costUsd` é descartado em silêncio** — não 400: o campo é aditivo, e um cliente antigo que o mande por engano não deve quebrar.
+  - A resposta 202 devolve `costUsd`, `costSource` e **sempre** `estimatedCostUsd`, este último para quem integra medir o erro da tabela sem acesso ao banco. `/settings/ai-usage` passa a mostrar a divisão medido/estimado no card de custo.
+  - **Nasce inerte**: nenhum cliente manda `costUsd` ainda. O emissor é PR próprio, no repositório do max-agent.
+
 ## [Unreleased] - 2026-08-22 - Alerta de queda da instância Z-API do Max
 
 ### Adicionado

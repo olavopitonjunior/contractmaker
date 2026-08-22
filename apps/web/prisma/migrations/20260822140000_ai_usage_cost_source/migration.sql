@@ -1,0 +1,34 @@
+-- Procedência do custo de cada linha de AIUsage.
+--
+-- ── Por que existe ────────────────────────────────────────────────────────
+--
+-- `estimatedCostUsd` sempre veio da tabela de preços do `calcCostUsd`. Medido
+-- em 21/08 contra o gpt-5.4-nano: quando NÃO há cache de prefixo, a tabela
+-- acerta com erro de 0,0% — o preço nunca foi o problema. Mas num turn com
+-- 1792 de 1956 tokens vindos do cache, o crédito real cobrado foi
+-- US$ 0,00010614 e a tabela dizia US$ 0,00042870: superestimativa de 304%.
+--
+-- Ou seja: a otimização que mais economiza é justamente a que não aparece, e
+-- o tenant vê uma conta que não existe. Com o copiloto (catálogo de tools e
+-- resultado de scope-query no prompt), todo turn passa dos ~1024 tokens que
+-- ligam o cache do provedor, e o caso raro vira o caso comum.
+--
+-- ── Aditiva e sem backfill, de propósito ─────────────────────────────────
+--
+-- Toda linha existente É estimativa, então o DEFAULT já as descreve com
+-- verdade. Carimbar linha velha de outro jeito seria inventar procedência.
+ALTER TABLE "AIUsage"
+  ADD COLUMN IF NOT EXISTS "costSource" TEXT NOT NULL DEFAULT 'estimated';
+
+-- ── Sem índice, e isso é decisão ─────────────────────────────────────────
+--
+-- Esta migration tinha um `(costSource, createdAt DESC)` que não serviria a
+-- ninguém: quem separa medido de estimado é o `/api/ai-usage`, EM MEMÓRIA,
+-- sobre linhas já buscadas por `(orgId, createdAt)` — nenhuma query filtra
+-- por `costSource` no banco. Somando a isso, a coluna tem cardinalidade 2, o
+-- que o planner não escolheria de qualquer jeito, e `AIUsage` é write-heavy
+-- por definição: todo turn do Max pagaria um sétimo índice na escrita.
+--
+-- Índice entra quando aparecer a query que o justifique — e aí declarado no
+-- `schema.prisma`, para não virar objeto que só existe no SQL (o repo já tem
+-- um caso desses, e o `check-migrations.ts` existe por causa dele).
