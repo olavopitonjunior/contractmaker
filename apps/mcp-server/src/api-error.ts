@@ -53,7 +53,11 @@ const BY_FIELD: Record<string, string> = {
 /** Mensagens por status, quando não há issues de validação pra traduzir. */
 const BY_STATUS: Record<number, string> = {
   401: "Não estou autorizado a fazer isso agora.",
-  402: "O orçamento de envios do mês foi atingido — este envio não foi feito. Fale com o administrador da imobiliária.",
+  // 402 deixou de significar "teto de gasto da plataforma" (que não existe
+  // mais) e passou a ser o limite do PLANO da conta ClickSign, reportado por
+  // ela própria. Dizer "orçamento do mês" mandava o corretor cobrar o
+  // administrador por um limite interno que ninguém tinha configurado.
+  402: "A conta ClickSign está sem envelopes disponíveis no plano atual — este envio não foi feito. Fale com o administrador da imobiliária para verificar o plano na ClickSign.",
   403: "Não tenho permissão para isso nesta conta.",
   404: "Não encontrei essa proposta.",
   // 409 cobre dois casos distintos nas propostas; o texto do servidor é mais
@@ -78,7 +82,7 @@ function humanServerMessage(body: unknown): string | null {
   if (!body || typeof body !== "object") return null;
   const b = body as { error?: unknown; message?: unknown };
   // `message` tem precedência: quando existe, `error` costuma ser o CÓDIGO
-  // ("preflight", "budget") e a explicação está aqui.
+  // ("preflight", "CLICKSIGN_PLAN_LIMIT") e a explicação está aqui.
   const raw = typeof b.message === "string" && b.message.trim() ? b.message : b.error;
   if (typeof raw !== "string") return null;
   const s = raw.trim();

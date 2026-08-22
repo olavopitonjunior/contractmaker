@@ -2038,7 +2038,7 @@ export const tools: Tool[] = [
   {
     name: "send_proposal",
     description:
-      "Envia uma proposta JÁ CRIADA pra assinatura (envelope ClickSign) ou Aceite WhatsApp. Se travar, o motivo mais comum é signatário SEM telefone e SEM e-mail — não dá pra avisar quem não tem contato; confira os signatários da proposta antes de culpar outro campo. Exige o `proposalId` devolvido por `create_proposal` — quando pedirem 'envie uma proposta' que ainda não existe, chame `create_proposal` primeiro e use o id DELA (não o id de outra coisa que a API tenha devolvido). Executa na hora: quem pediu já autorizou, não peça uma segunda confirmação. Gasta orçamento ClickSign e a mensagem chega de verdade ao destinatário, então confira os dados ANTES de chamar — não depois.",
+      "Envia uma proposta JÁ CRIADA pra assinatura (envelope ClickSign) ou Aceite WhatsApp. Se travar, o motivo mais comum é signatário SEM telefone e SEM e-mail — não dá pra avisar quem não tem contato; confira os signatários da proposta antes de culpar outro campo. Exige o `proposalId` devolvido por `create_proposal` — quando pedirem 'envie uma proposta' que ainda não existe, chame `create_proposal` primeiro e use o id DELA (não o id de outra coisa que a API tenha devolvido). Executa na hora: quem pediu já autorizou, não peça uma segunda confirmação. Consome um envelope do plano ClickSign e a mensagem chega de verdade ao destinatário, então confira os dados ANTES de chamar — não depois.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2060,7 +2060,7 @@ export const tools: Tool[] = [
   {
     name: "send_proposal_vendedor",
     description:
-      "Dispara a 2ª via (envelope do vendedor/proprietário) de proposta em `aguardando_vendedor`. Executa na hora, sem segunda confirmação. Gasta orçamento ClickSign.",
+      "Dispara a 2ª via (envelope do vendedor/proprietário) de proposta em `aguardando_vendedor`. Executa na hora, sem segunda confirmação. Consome um envelope do plano ClickSign.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2112,7 +2112,7 @@ export const tools: Tool[] = [
   {
     name: "cancel_proposal",
     description:
-      "Cancela a proposta inteira. Executa na hora quando o corretor pede. IRREVERSÍVEL: destrói os envelopes ClickSign em curso e reenviar gasta orçamento de novo — por isso não é o remédio pra contato errado (aí é `update_proposal_signer` + `resend_proposal_signer`) nem pra dado errado (aí é `update_proposal`). Use quando o negócio caiu ou a proposta não deve mais existir.",
+      "Cancela a proposta inteira. Executa na hora quando o corretor pede. IRREVERSÍVEL: destrói os envelopes ClickSign em curso e reenviar consome outro envelope do plano — por isso não é o remédio pra contato errado (aí é `update_proposal_signer` + `resend_proposal_signer`) nem pra dado errado (aí é `update_proposal`). Use quando o negócio caiu ou a proposta não deve mais existir.",
     inputSchema: {
       type: "object",
       properties: {
