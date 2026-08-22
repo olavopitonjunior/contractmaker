@@ -297,6 +297,48 @@ Todos com auth + cross-org guard via `deal.pipeline.orgId` + audit + bloqueio qu
 - `/login`, `/register`, `/forgot-password`, `/reset-password`, `/logout` (cleanup completo)
 - `/privacy`, `/terms` (LGPD) · `/api/webhooks/{asaas,clicksign,google-drive,max}` (HMAC validado; `max` = desfecho de entrega do agente Max, `MAX_WEBHOOK_SECRET`)
 
+## Max (agente de WhatsApp) — premissa de projeto, não consideração posterior
+
+O Max mora em **outro repositório** (`~/dev/imobpro/max-agent`, deploy próprio na
+Vercel). O acoplamento entre os dois é real e formal: se um lado muda o que entra
+numa assinatura, **toda** chamada passa a ser recusada, em silêncio, em produção.
+Já aconteceu.
+
+**`docs/max.md` é o contrato e é normativo.** Toda rota que o Max consome ou
+expõe está lá com forma de request, forma de resposta, autenticação e código de
+erro. Mudou a rota, mudou o documento — no mesmo PR, não depois.
+
+Antes de mexer em qualquer coisa que toque o Max:
+
+1. **Mudança de contrato exige PR nos dois repos, referenciados entre si**, e
+   **teste de vetor fixo dos dois lados** (hoje: `lib/max/__tests__/hmac-parity.test.ts`
+   aqui e `src/lib/__tests__/hmac-parity.test.ts` lá, com a MESMA assinatura hex).
+2. **Deploy em duas etapas: receptor primeiro, inerte.** Quem recebe entra antes,
+   respondendo "não configurado" enquanto o segredo não existe; o emissor liga
+   depois.
+3. **Capability nova nasce desligada** (`fail-closed`), com caso de teste
+   **negado** escrito antes do permitido.
+4. **Toda escrita é proposta + confirmação humana.** Não existe tool do Max que
+   executa direto.
+5. **Toda leitura tem projeção declarada por tipo de sujeito.** O que o corretor
+   comissionado (`SplitRecipient`, sem RBAC) recebe é decidido **no servidor** —
+   o que o modelo nunca recebe, ele não pode vazar. O teste afirma a **ausência**
+   dos campos proibidos, não a presença dos permitidos.
+6. **Toda chamada de modelo reporta custo** (`AIUsage`). Operação nova sem linha
+   de custo é bug, não detalhe.
+7. **Notificação não passa por modelo.** O `/notify` recebe fatos estruturados
+   campo a campo. É o que impede um LLM de reescrever um valor, errar o
+   destinatário ou decidir não mandar — falha medida em produção com o Newton.
+8. **Transcrição de conversa é só de `super_admin`.** `support`/`billing` entram
+   em `/admin/max` e veem o painel de status (metadado de operação); conversa,
+   não. O gate fica sobre o **fetch**, nunca só sobre o render.
+
+Onde as coisas moram aqui: `lib/max/` (hmac, admin-client, endpoint, gate,
+notify-trigger, provisioning, reach), `app/admin/max/` (Mission Control),
+`app/api/webhooks/max/` (desfecho de entrega). Quem decide se o canal é o Max ou
+o Newton é `resolveWhatsappAgent` (`lib/agents/whatsapp-router.ts`) — os
+call-sites nunca falam com trigger nenhum diretamente.
+
 ## Export PDF/DOCX
 
 **Chromium serverless:** `lib/render/exporter.ts::launchBrowser()` detecta env via `VERCEL`/`AWS_LAMBDA_FUNCTION_NAME` e usa `@sparticuz/chromium` + `puppeteer-core`. Local: Chrome do sistema. **Sem fallback `puppeteer` full** (tenta baixar Chrome em runtime → quebra em serverless). `next.config.js::serverComponentsExternalPackages` inclui ambos — Next deixa como `require` runtime.
