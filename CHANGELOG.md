@@ -4,6 +4,18 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-22 - Alerta de queda da instância Z-API do Max
+
+### Adicionado
+
+- **`POST /api/webhooks/max/alert`** — quando a instância Z-API do Max cai (ou volta), a plataforma manda um e-mail. Fecha a lacuna que sobrou de 04/08: naquele dia quatro mensagens reais ficaram represadas porque a instância tinha caído e ninguém soube. A Fase 4 já impediu a PERDA — o Max checa a conexão antes de despachar e represa a fila em vez de mentir "enviado" —, mas a fila continuava parada em silêncio até alguém abrir o painel. Contrato normativo em `docs/max.md` §9.
+  - **O corpo abre com quantas mensagens estão represadas.** É o número que decide a urgência de quem lê às 3 da manhã. `represadas: 0` é notícia legítima e não silencia nada: a queda derruba o inbound junto, e quem escrever para o Max fica sem resposta.
+  - **Alerta por TRANSIÇÃO, nunca por estado** — por estado seriam 1.440 e-mails por dia, porque o cron do Max roda a cada minuto. Quem guarda a transição é o `connection_state` do lado de lá; esta rota não decide repetição.
+  - **`MAX_ALERT_EMAIL`** (lista separada por vírgula) define o destinatário. **Ausente NÃO desliga o alerta**: cai nos `PlatformRole super_admin` do banco. Env esquecida virando alerta descartado em silêncio seria a falha original reencenada num lugar novo.
+  - **E-mail não enviado responde 500, não 200** — o max-agent só carimba "já avisei" em 2xx, então o 500 vira reenvio na passada seguinte do cron, sem fila nova nem código de retry. O 500 cobre uma causa transitória (provedor recusou) e uma permanente (nenhum destinatário); nesta última o incidente ainda fica registrado, porque o registro acontece antes de qualquer desistência.
+  - **Registro e notificação por caminhos separados**: o e-mail sai por `sendEmail` direto, e `reportPlatformAlert` entra em modo `"digest"` — o re-arm de 24 h do motor de alertas engoliria um segundo incidente no mesmo dia. A assinatura carrega o instante do incidente, então é uma linha por queda e o `count` conta tentativas de entrega.
+  - **Sem migration** (`PlatformAlertEvent.kind` é `String`) e **nasce inerte**: sem `MAX_WEBHOOK_SECRET` a rota responde 503. O emissor é PR próprio, no repositório do max-agent.
+
 ## [Unreleased] - 2026-08-21 - Estilos de documento saem da configuração (soft removal)
 
 ### Removido

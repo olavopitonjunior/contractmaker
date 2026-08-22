@@ -334,8 +334,10 @@ Antes de mexer em qualquer coisa que toque o Max:
    não. O gate fica sobre o **fetch**, nunca só sobre o render.
 
 Onde as coisas moram aqui: `lib/max/` (hmac, admin-client, endpoint, gate,
-notify-trigger, provisioning, reach), `app/admin/max/` (Mission Control),
-`app/api/webhooks/max/` (desfecho de entrega). Quem decide se o canal é o Max ou
+notify-trigger, provisioning, reach, alert-webhook), `app/admin/max/` (Mission
+Control), `app/api/webhooks/max/` (desfecho de entrega) e
+`app/api/webhooks/max/alert/` (queda/volta da instância Z-API → e-mail, §9 do
+`docs/max.md`). Quem decide se o canal é o Max ou
 o Newton é `resolveWhatsappAgent` (`lib/agents/whatsapp-router.ts`) — os
 call-sites nunca falam com trigger nenhum diretamente.
 

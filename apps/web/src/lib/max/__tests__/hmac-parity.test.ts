@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createHmac } from "node:crypto";
 import { signMaxAdminRequest } from "../hmac";
+import { parseMaxAlert } from "../alert-webhook";
 
 /**
  * Vetor fixo do HMAC do `/notify` — a metade daqui de um contrato de DOIS repos.
@@ -46,6 +47,23 @@ const ADMIN_ASSINATURA =
   "2878ff9c3bee22542de0e4a6a26e9f27f83e1e48a0afc5936be41d5afd578ac8";
 
 /**
+ * Terceiro vetor: o corpo do alerta de canal (`POST /api/webhooks/max/alert`).
+ *
+ * O ALGORITMO é o mesmo do primeiro vetor — o que este trava é o **corpo**, e
+ * ele importa porque a assinatura é sobre a string CRUA: mudar o nome de um
+ * campo ou a ORDEM em que o emissor monta o objeto muda o byte e, com ele, a
+ * assinatura. `JSON.stringify` preserva a ordem de inserção, então a ordem das
+ * chaves é parte do contrato quer se queira ou não — melhor que esteja escrita.
+ *
+ * A metade de lá é `max-agent/src/lib/__tests__/hmac-parity.test.ts`, com este
+ * mesmo literal, e lá o objeto é montado por `reportAlert()` de verdade.
+ */
+const ALERTA_RAW_BODY =
+  '{"evento":"zapi_desconectada","at":"2026-08-22T03:14:00.000Z","represadas":4}';
+const ALERTA_ASSINATURA =
+  "456c4fc09a08ab9f57ad5e33b6c792dea0bd1d71b4d39103153664b9c0492f34";
+
+/**
  * Réplica local do que `lib/max/notify-trigger.ts::sign` faz. Não importamos a
  * função de lá porque o módulo lê env na carga e o objetivo aqui é fixar o
  * FORMATO, não exercitar o transporte.
@@ -68,6 +86,13 @@ describe("paridade do HMAC com o serviço do Max", () => {
     expect(
       signMaxAdminRequest(TIMESTAMP, ADMIN_METHOD, ADMIN_PATH, SECRET)
     ).toBe(ADMIN_ASSINATURA);
+  });
+
+  it("o vetor do alerta de canal bate — corpo e ORDEM das chaves", () => {
+    expect(sign(TIMESTAMP, ALERTA_RAW_BODY, SECRET)).toBe(ALERTA_ASSINATURA);
+    // A guarda que dá sentido ao vetor: o parser aceita este corpo. Sem ela, um
+    // literal com campo renomeado passaria — assinaria certo uma coisa errada.
+    expect(parseMaxAlert(JSON.parse(ALERTA_RAW_BODY))).not.toBeNull();
   });
 
   it("o separador é um ponto entre timestamp e corpo", () => {
