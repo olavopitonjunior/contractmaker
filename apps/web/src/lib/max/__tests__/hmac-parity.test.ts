@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createHmac } from "node:crypto";
+import { signMaxAdminRequest } from "../hmac";
 
 /**
  * Vetor fixo do HMAC do `/notify` — a metade daqui de um contrato de DOIS repos.
@@ -22,6 +23,28 @@ const RAW_BODY = '{"orgId":"org-1","dedupeKey":"log-1"}';
 const ASSINATURA =
   "1d46081c8a0cb08b6ec1866fbb142ccd17ed6e47f442547d6362113268f75fb8";
 
+
+/**
+ * Segundo vetor: o formato das LEITURAS de painel (`/api/admin/*`).
+ *
+ * O `/notify` assina o corpo; o painel assina `método.caminho com query`,
+ * porque GET não tem corpo e assinar corpo vazio deixava a query de fora do
+ * HMAC — replay cross-tenant de cinco minutos.
+ *
+ * Este vetor não existia em repo nenhum. Os testes do cliente RECOMPUTAM a
+ * assinatura com um helper local, o que pega regressão aqui dentro e **não**
+ * pega divergência com o `max-agent` — que é exatamente o modo de falha que
+ * este arquivo existe para matar: 401 total, silencioso, sem nenhum dos dois
+ * repositórios quebrar sozinho.
+ *
+ * A query entra INTEIRA e na ordem em que a URL a monta. Reordenar parâmetros
+ * muda a assinatura, e é por isso que o cliente assina depois de montar a URL.
+ */
+const ADMIN_METHOD = "GET";
+const ADMIN_PATH = "/api/admin/conversations?orgId=org-1&limit=20";
+const ADMIN_ASSINATURA =
+  "2878ff9c3bee22542de0e4a6a26e9f27f83e1e48a0afc5936be41d5afd578ac8";
+
 /**
  * Réplica local do que `lib/max/notify-trigger.ts::sign` faz. Não importamos a
  * função de lá porque o módulo lê env na carga e o objetivo aqui é fixar o
@@ -36,6 +59,15 @@ function sign(timestamp: string, rawBody: string, secret: string): string {
 describe("paridade do HMAC com o serviço do Max", () => {
   it("o vetor fixo bate — não mudar sem mudar o outro repo junto", () => {
     expect(sign(TIMESTAMP, RAW_BODY, SECRET)).toBe(ASSINATURA);
+  });
+
+  it("o vetor do painel bate — mesmo contrato, outro formato", () => {
+    // Passa pelo helper REAL (`signMaxAdminRequest`), e não por uma réplica:
+    // aqui o objetivo é provar que a função que o cliente usa produz o valor
+    // que o serviço espera.
+    expect(
+      signMaxAdminRequest(TIMESTAMP, ADMIN_METHOD, ADMIN_PATH, SECRET)
+    ).toBe(ADMIN_ASSINATURA);
   });
 
   it("o separador é um ponto entre timestamp e corpo", () => {
