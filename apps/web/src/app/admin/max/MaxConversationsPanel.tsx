@@ -24,10 +24,31 @@ function Rotulo({ children }: { children: React.ReactNode }) {
 export function MaxConversationsPanel({
   result,
   orgName,
+  permitido,
 }: {
   result: MaxConversationsResult | null;
   orgName?: string;
+  permitido: boolean;
 }) {
+  /**
+   * Sem permissão, a seção diz o que é — não some e não finge estar vazia.
+   *
+   * O gate de verdade está na página, que nem chega a buscar a conversa; isto
+   * aqui é só a mensagem. E ela existe porque a alternativa (esconder) faria
+   * `support` ver uma tela onde a lista some sem explicação e abrir chamado
+   * dizendo que o painel quebrou.
+   */
+  if (!permitido) {
+    return (
+      <section className="mt-8">
+        <h2 className="mb-2 font-display text-lg font-semibold">Conversas</h2>
+        <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+          Transcrição de conversa é restrita ao super-admin da plataforma.
+        </p>
+      </section>
+    );
+  }
+
   // Sem tenant escolhido não há o que mostrar — e a rota do serviço exige
   // `orgId` de propósito: uma tela que lê conversa não deve mostrar todos os
   // tenants porque ninguém escolheu nenhum.
