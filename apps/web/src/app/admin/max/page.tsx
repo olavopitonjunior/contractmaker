@@ -102,6 +102,8 @@ export default async function MaxMissionControlPage({
    */
   const podeLerConversas = platformRole.role === "super_admin";
 
+  const selecionada = searchParams.orgId ?? null;
+
   const orgs = await prisma.organization.findMany({
     select: { id: true, name: true },
     orderBy: { name: "asc" },
@@ -169,7 +171,22 @@ export default async function MaxMissionControlPage({
       </header>
 
       <section className="mb-8">
-        <h2 className="mb-2 text-sm font-semibold">Tenants roteados pro Max</h2>
+        <h2 className="mb-2 flex flex-wrap items-baseline gap-2 text-sm font-semibold">
+          Tenants roteados pro Max
+          <span className="text-xs font-normal text-muted-foreground">
+            {selecionada
+              ? "recortando o painel por este tenant"
+              : "clique num nome para ver a fila e as conversas dele"}
+          </span>
+          {selecionada ? (
+            <Link
+              href="/admin/max"
+              className="text-xs font-normal underline underline-offset-4"
+            >
+              ver todos
+            </Link>
+          ) : null}
+        </h2>
         {routed.some((r) => r.on) ? (
           <ul className="space-y-1 text-sm">
             {routed
@@ -178,7 +195,31 @@ export default async function MaxMissionControlPage({
                 const p = porOrg.get(r.id);
                 return (
                   <li key={r.id} className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium">{r.name}</span>
+                    {/*
+                      O nome do tenant É o seletor.
+
+                      A aba de conversas dizia "escolha uma imobiliária acima" e
+                      não havia nada acima que fizesse isso: o `orgId` só entrava
+                      editando a URL à mão, então a feature nascia inalcançável
+                      por quem não conhece o parâmetro. Pego no smoke de
+                      produção, não em revisão de código — a tela estava certa
+                      em cada pedaço e errada como um todo.
+
+                      Vale para qualquer PlatformRole, e não só para quem lê
+                      conversa: o `orgId` também recorta o painel de status.
+                    */}
+                    {selecionada === r.id ? (
+                      <span className="font-medium underline decoration-2 underline-offset-4">
+                        {r.name}
+                      </span>
+                    ) : (
+                      <Link
+                        href={`/admin/max?orgId=${r.id}`}
+                        className="font-medium underline-offset-4 hover:underline"
+                      >
+                        {r.name}
+                      </Link>
+                    )}
                     <span className="text-xs text-muted-foreground">
                       {[r.vendas && "vendas", r.locacao && "locação"]
                         .filter(Boolean)
