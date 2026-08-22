@@ -65,6 +65,45 @@ da janela, fila e últimas entregas — e lê `GET /api/admin/status` do serviç
 assinado com o MESMO HMAC do `/notify`. O que se CONFIGURA continua em
 `/admin/agents` (persona, modelo, teto) e nas features por org (roteamento).
 
+**Aba de conversas** (21/08). O painel de status responde "a fila está
+saudável?"; a aba nova responde a outra pergunta, que antes não tinha onde ser
+feita: *o que o agente andou dizendo, e quanto isso custou?*. Lê
+`GET /api/admin/conversations` e mostra, por turn: recebido, respondido,
+ferramentas acionadas com desfecho, chamadas de modelo e tokens, latência e o
+motivo classificado quando o turn não chegou ao grafo.
+
+Nasceu de necessidade concreta: os dois primeiros turns reais em produção
+renderam quatro defeitos, e todos foram achados consultando o banco à mão.
+
+Quatro decisões que não são detalhe:
+ - **Conversa é só de super-admin.** A página é aberta a qualquer
+   `PlatformRole` — `support` precisa do painel de status para responder "o Max
+   está no ar?", e isso é metadado de operação. Transcrição não é: é o que o
+   corretor escreveu, de um tenant do qual o staff de plataforma não é membro.
+   O gate está sobre o **fetch**, não sobre o render, para a conversa nem
+   atravessar a rede; `support`/`billing` veem a seção dizendo que é restrita.
+   (Ressalva registrada: `PlatformRole.scope` não é consultado nesta página.
+   Apertar para `super_admin` torna isso inócuo aqui, mas quando `support`
+   ganhar qualquer leitura por tenant o escopo precisa passar a valer.)
+ - **Exige tenant escolhido.** A rota do serviço recusa sem `orgId` (a menos de
+   um `scope=all` explícito) e a tela respeita em vez de contornar — lista de
+   conversa de gente real não aparece porque ninguém filtrou.
+ - **Telefone mascarado na ORIGEM.** O número inteiro fica no banco do Max,
+   atrás de credencial; a resposta HTTP já vem com a máscara, então nem um bug
+   de render aqui expõe.
+ - **Texto expira, métrica não.** O conteúdo é apagado aos 90 dias
+   (`CONVERSATION_TTL_DAYS` no serviço); custo, tokens e trilha ficam. O
+   esquecimento (`POST /api/admin/forget`) apaga a linha inteira — o TTL quer o
+   custo sem o conteúdo, o esquecimento não pode deixar rastro do telefone.
+
+**A assinatura do painel mudou junto.** Os dois `fetch` do `admin-client`
+assinavam `${timestamp}.` — corpo vazio, porque GET não tem corpo. Isso deixava
+a QUERY fora do HMAC: uma assinatura capturada valia cinco minutos para
+**qualquer `?orgId=`**. Agora assinam `${timestamp}.${método}.${caminho com
+query}`, que é o formato que o serviço já esperava. Com isso, o
+`allowLegacyEmptyBody` do lado de lá pode cair assim que o log de sunset parar
+de aparecer.
+
 Desligar o primeiro cala o canal (as notificações viram `skipped` registrado);
 desligar o segundo cala a IA mas não o canal. São propósitos diferentes de
 propósito — um é transporte, o outro é agente.
@@ -153,6 +192,10 @@ produto: **notificação de sistema por e-mail passa a sair de madrugada**.
 | `POST /api/forms` | `documents:rw` | 3 — form de vendas (já existia) |
 | `POST /api/locacao/forms` | `locacao:rw` | 3 — form de locação (aberto pra Bearer nesta leva) |
 | `POST /api/proposals` e afins | `proposals:rw` | 3 |
+
+**No sentido inverso** (a plataforma lendo o serviço), via HMAC do `/notify` e
+não via Bearer: `GET /api/admin/status` e `GET /api/admin/conversations` — os
+dois assinando método e caminho COM query.
 
 **Um service-user + um token por org RE/MAX** — obrigatório: o Bearer deriva a
 org do dono do token (não existe header de org). Escopos: F1

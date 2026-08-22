@@ -1,10 +1,12 @@
 import type { MaxStatusResult } from "@/lib/max/admin-client";
+import { horaSP } from "./hora";
 
 /**
  * Painel de estado do serviço do Max. Server component — o dado é sensível
  * (fila de notificação de tenant) e não deve trafegar pro browser via API
  * pública.
  */
+
 
 function Card({
   label,
@@ -88,7 +90,7 @@ export function MaxStatusPanel({ result }: { result: MaxStatusResult }) {
             hint={
               win.open
                 ? "Entregando agora"
-                : `Próxima entrega ${new Date(win.nextDelivery).toLocaleString("pt-BR")}`
+                : `Próxima entrega ${horaSP(win.nextDelivery)}`
             }
           />
           <Card
@@ -141,7 +143,7 @@ export function MaxStatusPanel({ result }: { result: MaxStatusResult }) {
                 {outbox.recent.map((row) => (
                   <tr key={row.id} className="border-b last:border-0">
                     <td className="py-2 pr-3 whitespace-nowrap text-xs text-muted-foreground">
-                      {new Date(row.created_at).toLocaleString("pt-BR")}
+                      {horaSP(row.created_at)}
                     </td>
                     <td className="py-2 pr-3">{row.title || "—"}</td>
                     <td className="py-2 pr-3 text-xs text-muted-foreground">
