@@ -285,12 +285,52 @@ describe("POST /api/agents/usage", () => {
     });
 
     /**
-     * O teto de sanidade próprio deste campo: é o único que entra na tabela de
-     * custo sem passar pela tabela de preços, então precisa da própria cerca.
+     * O teto de sanidade descarta o NÚMERO, não a linha.
+     *
+     * Rejeitar a requisição inteira (que era o que o teto no zod fazia)
+     * inverte o propósito dele: o teto existe para o budget não engolir um
+     * valor absurdo, e sem a linha o budget passa a SUBcontar — o turn caro
+     * simplesmente some da conta. Tokens, latência e contractId têm que
+     * sobreviver.
      */
-    it("400 em custo absurdo", async () => {
+    it("custo absurdo é descartado, mas a LINHA é gravada como estimativa", async () => {
       tokenComEscopos(["agents:rw"]);
-      const res = await POST(req({ ...openrouter, costUsd: 99 }, "cmt_x"));
+      const res = await POST(
+        req({ ...openrouter, costUsd: 99, contractId: undefined }, "cmt_x")
+      );
+      expect(res.status).toBe(202);
+
+      const json = await res.json();
+      expect(json.costSource).toBe("estimated");
+      expect(json.costUsd).toBeLessThan(1);
+
+      expect(mockPrisma.aIUsage.create).toHaveBeenCalledTimes(1);
+      const data = mockPrisma.aIUsage.create.mock.calls[0][0].data;
+      expect(data.costSource).toBe("estimated");
+      expect(data.promptTokens).toBe(1200);
+      expect(Number(data.estimatedCostUsd)).toBeLessThan(1);
+      expect(Number(data.estimatedCostUsd)).toBeGreaterThan(0);
+    });
+
+    /**
+     * O contrato promete que `costUsd` de outro provider é ignorado em
+     * silêncio. Com o teto no zod isso era mentira acima de US$ 1: um turn
+     * `anthropic` tomava 400 por um campo que seria descartado adiante.
+     */
+    it("costUsd absurdo de OUTRO provider também não quebra a linha", async () => {
+      tokenComEscopos(["agents:rw"]);
+      const res = await POST(
+        req({ ...corpoValido, provider: "anthropic", costUsd: 2.3 }, "cmt_x")
+      );
+      expect(res.status).toBe(202);
+      expect((await res.json()).costSource).toBe("estimated");
+      expect(mockPrisma.aIUsage.create).toHaveBeenCalledTimes(1);
+    });
+
+    /** Número não-finito continua sendo 400: não é custo, é corpo malformado. */
+    it("400 em costUsd não-finito", async () => {
+      tokenComEscopos(["agents:rw"]);
+      const res = await POST(req({ ...openrouter, costUsd: "muito" }, "cmt_x"));
       expect(res.status).toBe(400);
       expect(mockPrisma.aIUsage.create).not.toHaveBeenCalled();
     });

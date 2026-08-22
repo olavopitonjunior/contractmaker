@@ -183,19 +183,27 @@ export interface RecordUsageParams {
 export type CostSource = "reported" | "estimated";
 
 /**
- * Divide um conjunto de linhas de custo entre medido e estimado.
+ * Resume a procedência do custo a partir de um `groupBy(["costSource"])`.
+ *
+ * **Recebe o groupBy, e não as linhas, de propósito.** A primeira versão desta
+ * função somava as linhas já carregadas pelo painel — que vêm com `take: 5000`.
+ * Numa org movimentada, a parte MEDIDA (os turns do Max, a fonte de maior
+ * volume) era truncada em silêncio, enquanto a tabela por provider na mesma
+ * tela vinha de um `groupBy` sem teto. As duas discordariam sem nenhum aviso,
+ * justamente numa linha que o usuário lê como sinal de confiança.
  *
  * Função pura e exportada porque é a única lógica do painel de custo que pode
- * errar em silêncio: um total sem procedência esconde que a parte estimada
- * pode estar muito acima do real quando há cache de prefixo (304% no caso
- * medido em 21/08). Testar isso pela rota exigiria mockar seis queries
- * paralelas; aqui custa três linhas.
+ * errar em silêncio; testar pela rota exigiria mockar sete queries paralelas.
  *
  * `Number(...)` porque o Prisma devolve `Decimal`, e somar Decimal com `+`
  * daria concatenação de string.
  */
 export function dividirPorProcedencia(
-  rows: Array<{ costSource?: string | null; estimatedCostUsd?: unknown }>
+  grupos: Array<{
+    costSource?: string | null;
+    _sum?: { estimatedCostUsd?: unknown };
+    _count?: { _all?: number } | number;
+  }>
 ): {
   reportedUsd: number;
   estimatedUsd: number;
@@ -207,18 +215,22 @@ export function dividirPorProcedencia(
   let reportedCalls = 0;
   let estimatedCalls = 0;
 
-  for (const r of rows) {
-    const v = Number(r.estimatedCostUsd ?? 0);
+  for (const g of grupos) {
+    const v = Number(g._sum?.estimatedCostUsd ?? 0);
     const custo = Number.isFinite(v) ? v : 0;
+    const n =
+      typeof g._count === "number" ? g._count : Number(g._count?._all ?? 0);
+    const calls = Number.isFinite(n) ? n : 0;
+
     // Só `"reported"` conta como medido. Linha antiga (anterior à coluna) tem
-    // o default `"estimated"`, e `null`/ausente cai no mesmo lado — na dúvida
-    // sobre a procedência, o honesto é chamar de estimativa.
-    if (r.costSource === "reported") {
+    // o default `"estimated"`, e `null`/valor desconhecido cai no mesmo lado —
+    // na dúvida sobre a procedência, o honesto é chamar de estimativa.
+    if (g.costSource === "reported") {
       reportedUsd += custo;
-      reportedCalls += 1;
+      reportedCalls += calls;
     } else {
       estimatedUsd += custo;
-      estimatedCalls += 1;
+      estimatedCalls += calls;
     }
   }
 

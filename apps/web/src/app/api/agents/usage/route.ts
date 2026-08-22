@@ -39,6 +39,9 @@ const MAX_LATENCIA_MS = 600_000;
  * US$ 1,00 é ordem de grandeza absurda para um turn — os turns reais do Max
  * custam frações de centavo (US$ 0,0004 sem cache) — e ainda assim contém o
  * estrago bem abaixo do budget de um contrato.
+ *
+ * **Não é aplicado no zod, de propósito** — ver o comentário no ponto de uso.
+ * Estourar o teto descarta o NÚMERO, não a linha.
  */
 const MAX_CUSTO_USD_POR_TURN = 1;
 
@@ -63,7 +66,7 @@ const bodySchema = z.object({
    * trata `0` como número medido — o emissor manda `null`, nunca `0`, quando
    * não sabe.
    */
-  costUsd: z.number().min(0).max(MAX_CUSTO_USD_POR_TURN).nullable().optional(),
+  costUsd: z.number().min(0).finite().nullable().optional(),
   toolsUsed: z.array(z.string().max(64)).max(50).optional(),
   iterations: z.number().int().min(1).max(50).optional(),
   success: z.boolean().optional(),
@@ -192,14 +195,41 @@ export const POST = withApi("POST /api/agents/usage", async (req: NextRequest) =
   }
 
   /**
-   * A exceção, num lugar só: fora do OpenRouter, `costUsd` é descartado aqui e
-   * a tabela de preços decide. Ignorar em silêncio (e não 400) é deliberado —
-   * o campo é aditivo, e um cliente que o mande por engano não deve quebrar.
+   * A exceção, num lugar só: fora do OpenRouter, `costUsd` é descartado e a
+   * tabela de preços decide. Ignorar em silêncio (e não 400) é deliberado — o
+   * campo é aditivo, e um cliente que o mande por engano não deve quebrar.
    */
-  const custoReportado = body.provider === "openrouter" ? body.costUsd ?? null : null;
-  if (body.costUsd != null && custoReportado === null) {
+  const doOpenRouter = body.provider === "openrouter" ? body.costUsd ?? null : null;
+  if (body.costUsd != null && doOpenRouter === null) {
     console.warn(
       `[agents/usage] costUsd ignorado: só vale para openrouter (veio de ${body.provider})`
+    );
+  }
+
+  /**
+   * O teto de sanidade fica AQUI, e não no zod, e a diferença importa.
+   *
+   * No zod ele rejeitava a requisição INTEIRA com 400 — e aí a linha não era
+   * gravada de jeito nenhum: nem tokens, nem latência, nem `contractId`. Duas
+   * consequências, as duas contrárias ao propósito do teto:
+   *
+   *  · o teto existe para proteger o budget de um número absurdo, e sem a
+   *    linha o budget passa a SUBcontar. Um turn caro de verdade sumia da
+   *    conta em vez de entrar limitado;
+   *  · contradizia o contrato prometido três parágrafos acima — um turn
+   *    `anthropic` carregando `costUsd: 2.30` tomava 400, mesmo sendo um valor
+   *    que seria descartado logo em seguida.
+   *
+   * Agora o número suspeito é DESCARTADO (não truncado — truncar gravaria um
+   * valor inventado como se fosse medido) e a linha cai na estimativa, alto no
+   * log. A medição se perde; a contabilidade, não.
+   */
+  const custoReportado =
+    doOpenRouter !== null && doOpenRouter <= MAX_CUSTO_USD_POR_TURN ? doOpenRouter : null;
+  if (doOpenRouter !== null && custoReportado === null) {
+    console.error(
+      `[agents/usage] costUsd ${doOpenRouter} acima do teto de US$ ${MAX_CUSTO_USD_POR_TURN} ` +
+        `— descartado, a linha vai como estimativa (agente ${body.agentKey}, modelo ${body.model})`
     );
   }
 
