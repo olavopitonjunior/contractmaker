@@ -6,9 +6,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { TrendingUp, DollarSign, BarChart3 } from "lucide-react";
 import { getIListConnection } from "@/lib/ilist/connection";
 import { getEffectivePermissions, dealScopeWhere } from "@/lib/security/rbac/check";
-import { prisma } from "@/lib/db/prisma";
 import { getBoardStages, getBoardKpis } from "@/lib/pipeline/board-query";
 import { parseBoardFilters } from "@/lib/pipeline/list-filters";
+import { getResponsavelOptions } from "@/lib/pipeline/responsaveis";
 import { PipelineFilters } from "@/components/pipeline/PipelineFilters";
 
 export default async function PipelinePage({
@@ -57,21 +57,13 @@ export default async function PipelinePage({
   // dos filtros da URL e do cap por coluna.
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
-  const [kpis, responsaveisRaw] = await Promise.all([
+  const [kpis, responsaveis] = await Promise.all([
     getBoardKpis(
       { pipelineId: board.pipelineId, archivedAt: null, ...dealScope },
       startOfToday
     ),
-    prisma.user.findMany({
-      where: { deals: { some: { pipelineId: board.pipelineId } } },
-      select: { id: true, name: true, email: true },
-      orderBy: { name: "asc" },
-    }),
+    getResponsavelOptions({ orgId, pipelineId: board.pipelineId }),
   ]);
-  const responsaveis = responsaveisRaw.map((u) => ({
-    id: u.id,
-    label: u.name?.trim() || u.email || u.id,
-  }));
 
   const stageIdByName = new Map(board.stages.map((s) => [s.name, s.id]));
   const countFor = (name: string) =>

@@ -31,7 +31,7 @@ export interface ResponsavelOption {
 interface PipelineFiltersProps {
   /** Filtros parseados da URL (server) — estado inicial/espelho. */
   filters: PipelineBoardFilters;
-  /** Usuários com deals no pipeline — opções do select "Responsável". */
+  /** Membros da org (+ ex-membros com negócios) — ver lib/pipeline/responsaveis.ts. */
   responsaveis: ResponsavelOption[];
   /** Totais pós-filtro do board (matching = _count; loaded = cards enviados). */
   totals: { matching: number; loaded: number };
