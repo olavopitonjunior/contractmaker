@@ -32,7 +32,12 @@ export type AlertKind =
   /** DEGRADAÇÃO: turn atendido no modelo de contingência. Kind próprio de
    *  propósito (review #234) — filtrar "bloqueou" junto com "degradou"
    *  conflataria severidades bem diferentes. */
-  | "model_fallback";
+  | "model_fallback"
+  /** Canal de um agente fora do ar (hoje: instância Z-API do Max). Chega por
+   *  `POST /api/webhooks/max/alert` sempre com `notify: "digest"` — o e-mail
+   *  desse caso sai por fora, porque quem decide a repetição é o
+   *  `connection_state` do max-agent, não o re-arm de 24h daqui. */
+  | "agent_channel_down";
 export type AlertSeverity = "info" | "warning" | "critical";
 
 export interface PlatformAlertInput {

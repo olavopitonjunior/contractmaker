@@ -263,8 +263,9 @@ some com o assunto.
 |---|---|
 | `MAX_NOTIFY_URL` | Base do serviço do Max. Ausente → WhatsApp `skipped` (`max_service_ausente`). É o estado de staging, por desenho. |
 | `MAX_NOTIFY_SECRET` | Segredo do HMAC das chamadas PARA o Max. Ausente → mesmo `skipped`. |
-| `MAX_WEBHOOK_SECRET` | Segredo do HMAC na direção OPOSTA: o Max reportando desfecho de entrega em `POST /api/webhooks/max`. Secret próprio de propósito — compartilhar o valor com `MAX_NOTIFY_SECRET` deixaria qualquer um dos lados forjar o outro. Ausente → rota responde 503 e o Max segue retentando. Mesmo valor no projeto Vercel do `max-agent`. |
+| `MAX_WEBHOOK_SECRET` | Segredo do HMAC na direção OPOSTA: o Max falando com a plataforma — desfecho de entrega em `POST /api/webhooks/max` e alerta de canal em `POST /api/webhooks/max/alert`. Secret próprio de propósito — compartilhar o valor com `MAX_NOTIFY_SECRET` deixaria qualquer um dos lados forjar o outro. Ausente → as duas rotas respondem 503 e o Max segue retentando. Mesmo valor no projeto Vercel do `max-agent`. |
 | `MAX_DISABLED=true` | Kill switch global, antes de qualquer leitura de módulo. |
+| `MAX_ALERT_EMAIL` | Destinatários do alerta de canal (§9), lista separada por vírgula. **Ausente NÃO desliga o alerta**: cai nos `PlatformRole super_admin` do banco. Alerta descartado em silêncio por env esquecida é exatamente a falha que ele existe para matar. |
 
 ## 7. Rollout e runbook
 
@@ -306,6 +307,11 @@ some com o assunto.
   cobrir um canal novo, crie a linha de log e mande o id como dedupeKey.
   O `maxDeliveryJson` ainda não tem CONSUMIDOR de UI — o fechamento aqui é
   no dado; expor no painel de notificações é etapa seguinte.
+- ~~**Queda da instância Z-API é invisível.**~~ **Fechada (F7, 2026-08-22).**
+  Em 04/08 quatro mensagens reais se perderam porque a instância caiu e ninguém
+  soube. A Fase 4 já impedira a PERDA (o Max checa a conexão antes de despachar
+  e represa a fila em vez de mentir "enviado"); faltava o AVISO — a fila ficava
+  parada em silêncio até alguém abrir o painel. Contrato em **§9**.
 - **`supports` do `max` segue `false`** no registry: o serviço ainda não lê o
   perfil, e a tela não deve prometer controle que o runtime não honra. Virar
   `true` campo a campo, conforme o serviço passar a honrar cada um.
@@ -318,7 +324,70 @@ some com o assunto.
   desconhecido/não-atribuído/inativo/duplicado. O Max consome na identidade e
   na semeadura de `corretorIds`.
 
-## 9. O que reaproveitar do `.openclaw` (auditado em 2026-08-01)
+## 9. Contrato do alerta de canal (F7, 2026-08-22)
+
+O max-agent guarda o estado da conexão (`connection_state`, linha única) e, **na
+transição**, chama:
+
+```http
+POST /api/webhooks/max/alert
+X-Max-Timestamp: <epoch ms>
+X-Max-Signature: hex(hmac_sha256(MAX_WEBHOOK_SECRET, `${timestamp}.${rawBody}`))
+Content-Type: application/json
+
+{ "evento": "zapi_desconectada", "at": "<ISO com offset>", "represadas": 4 }
+{ "evento": "zapi_reconectada",  "at": "<ISO com offset>", "foraPorMs": 8003000 }
+```
+
+**Mesmo secret e mesmo formato de assinatura do `/api/webhooks/max`** — é a
+mesma direção (Max → plataforma) e o mesmo tipo de segredo, de serviço e não de
+tenant. A spec previa a rota em `/api/agents/alert`; aquela família é Bearer por
+ORG, e este evento é da instância inteira (uma só, compartilhada pelos três
+tenants) — não existe org de onde tirar o token.
+
+Respostas: **200** entregue · **400** payload fora do contrato · **401**
+assinatura ou janela (±5 min) · **500** o e-mail não saiu · **503**
+`MAX_WEBHOOK_SECRET` ausente.
+
+**O 500 é parte do contrato, não um acidente.** O max-agent só carimba
+`notified_at` quando o POST devolve 2xx; um 200 com o e-mail não enviado
+perderia o alerta para sempre. O 500 vira reenvio na passada seguinte do cron,
+sem fila nova e sem código de retry.
+
+**E o 500 cobre duas causas de duração bem diferente**, deliberadamente:
+
+- **transitória** — o provedor recusou (SMTP fora, rate limit). O reenvio
+  resolve, e é para isso que ele existe;
+- **permanente** — não há destinatário: `MAX_ALERT_EMAIL` vazia **e** nenhum
+  `PlatformRole super_admin` no banco. Aí o max-agent retenta a cada minuto,
+  para sempre, e nunca entrega.
+
+Falhar alto nos dois casos é a escolha, e ela é assimétrica de propósito: a
+alternativa é responder 200 e engolir o alerta, que é a falha original de
+04/08 reencenada num lugar novo. O custo do caso permanente é uma linha de erro
+por minuto no log do max-agent (`alerta de queda NÃO entregue`) — ruidosa o
+bastante para ser achada, e o segundo destinatário (os `super_admin` do banco)
+existe justamente para tornar esse caso quase impossível em produção.
+
+**Repetição é decidida do lado de lá**, não aqui: transição (nunca estado —
+seriam 1.440 e-mails/dia, porque o cron roda a cada minuto), com debounce de 1 h
+contra flapping. Por isso o e-mail sai por `sendEmail` direto e o
+`reportPlatformAlert` é chamado em modo `"digest"`: registra o incidente em
+`PlatformAlertEvent` (visível em `/admin/metrics → Auditoria`) sem submeter o
+alerta ao re-arm de 24 h do motor, que engoliria um segundo incidente no mesmo
+dia.
+
+O corpo do e-mail abre com **quantas mensagens estão represadas** — é o número
+que decide a urgência de quem lê às 3 da manhã. `represadas: 0` é notícia
+legítima e não silencia nada: a queda também derruba o inbound, e quem escrever
+para o Max fica sem resposta.
+
+Detecção do lado do Max: **push** (callbacks `connected`/`disconnected` da Z-API
+apontados para `POST /api/zapi-connection/<secret>`, latência de segundos) com o
+**cron do outbox como rede de segurança** para o callback que se perde na rede —
+duas passadas discordando do estado gravado alertam assim mesmo.
+
+## 10. O que reaproveitar do `.openclaw` (auditado em 2026-08-01)
 
 **Correção de premissa:** o agente `max` que existe em `~/.openclaw/agents/max/`
 **não é** o agente das RE/MAX. É o *Max analista de crédito e seguro fiança da
