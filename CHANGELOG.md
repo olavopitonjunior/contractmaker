@@ -24,6 +24,28 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 - **Filtrar por uma pessoa escondia os negócios que a tela atribuía a ela.** O filtro casava `Deal.userId` (o criador, imutável) enquanto o card do kanban exibe o GERENTE (`Deal.managerUserId`, reatribuível): filtrar pelo nome que a própria coluna mostrava devolvia menos negócio do que ela anunciava. Passa a casar criador OU gerente. **A contagem de "N negócios" muda para quem já usava o filtro** — é a correção, não regressão.
 - **A busca sumia em silêncio quando combinada com outro filtro.** `q` e `responsavel` produzem `OR` e moravam na mesma chave `where.OR`: o segundo apagava o primeiro. Pela mesma razão, `getBoardStages` montava o `where` por spread, e o `OR` do escopo RBAC (gerente com visão restrita) sobrescrevia o dos filtros — a busca quebrava justamente para quem tem menos visão. Ambos passam a compor por `AND`. Nenhum dos dois vazou negócio: na colisão, quem sobrevivia era o escopo.
 
+## [Unreleased] - 2026-08-22 - Fim do orçamento de gasto da ClickSign
+
+### Removido
+
+- **O teto mensal de gasto em R$ da ClickSign, inteiro.** A plataforma barrava envio comparando um gasto acumulado contra um orçamento que ela mesma inventava: a conta saía de uma tabela de preços *hardcoded* e nunca conferida (`CLICKSIGN_COST_CENTS`: e-mail R$1,50, WhatsApp R$2,50, selfie R$9,00, ICP R$3,50) contra um default de R$100 (`getMonthlyBudgetCents`). O envio foi recusado com **"R$ 93 de R$ 100"** numa conta cujo plano ClickSign estava intacto — número inventado, bloqueio inventado. Saem: o gate no `executor`, o `EnvelopeBudgetError`, o sub-teto de propostas (`proposalBudgetCents`) e os dois gates das 2ªs vias encadeadas (envelope e Aceite).
+- **Todo valor em R$ do fluxo de assinatura**: os chips "Custo estimado" dos três diálogos de envio, o card "Orçamento e custo" em Configurações › Assinaturas, o `costCentsByMethod` de `/api/signatures/config`, o "(custo R$ X)" do resumo que vai a quem aprova envio por Bearer, e o valor por envelope na lista de recentes. O card "Gasto do mês / de R$ X de orçamento" do painel vira **"Envelopes no mês"** (contagem). Nenhuma coluna é apagada (limpeza é migration própria), mas o estado de cada uma difere: `monthlyBudgetCents` e `proposalBudgetCents` ficam **sem leitor**; **`costOverridesJson` continua sendo lida** (alimenta `Envelope.costCents`) e só perdeu o **escritor** — ajustar um override de custo virou operação de banco. Não confundir com coluna órfã.
+
+### Adicionado
+
+- **`lib/clicksign/quota.ts`** — a negativa por falta de envelope passa a nascer da resposta da própria ClickSign. `isPlanQuotaError` classifica HTTP 402 sozinho, e 403/422 só quando o texto do erro fala de limite/cota/plano/saldo; qualquer outra coisa segue como falha genérica. O critério é deliberadamente conservador: a ClickSign não documenta esse código publicamente, e errar para "limite do plano" reintroduziria o bug, mandando o corretor conferir um plano intacto. Todo 4xx de envio passa a logar o corpo cru (`[clicksign] falha 4xx`) para calibrar o regex com uma recusa real.
+- O erro vira `EnvelopePlanLimitError` (HTTP 402, `code: "CLICKSIGN_PLAN_LIMIT"`), com mensagem fixa e sem valores. O MCP do Newton/Max também para de dizer "orçamento do mês atingido" no 402.
+
+### Corrigido
+
+- **`CLAUDE.md` prometia um "ClickSign cap" sob `STAGING_MODE` que nunca existiu no código** — lá `STAGING_MODE` só prefixa `[STAGING]` no nome do envelope. O único freio real era o orçamento agora removido. Docs corrigidas: **staging não tem teto e cada envio consome um envelope real do plano, cobrado.**
+
+### Mantido de propósito
+
+- O **advisory lock por org** no `executor` continua: ele nasceu para o TOCTOU do orçamento, mas é o que serializa o re-check "1 envelope ativo por contrato" — sem ele, dois envios paralelos do mesmo contrato criam 2 envelopes (cobrança dobrada e 2 e-mails por signatário).
+- `Envelope.costCents` continua sendo gravado como telemetria interna, agora sem nenhum leitor em tela.
+- Os labels `chained_*_budget_exceeded` em `status-view.ts` ficam: eventos já gravados precisam continuar renderizando na timeline. Nada novo é emitido.
+
 ## [Unreleased] - 2026-08-21 - Estilos de documento saem da configuração (soft removal)
 
 ### Removido

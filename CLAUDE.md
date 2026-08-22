@@ -6,7 +6,7 @@ Plataforma de gestão de vendas e contratos imobiliários. Esteira: Lead/form p�
 
 **Produção:** [imobpro.ia.br](https://imobpro.ia.br) (custom domain registro.br, Vercel `prj_tkIfHl9chuVwZkNtHLAl5QXY2YOB`).
 
-**Staging:** [staging.imobpro.ia.br](https://staging.imobpro.ia.br) (Vercel `contractmaker-staging`, branch+Neon `staging`). Flag `STAGING_MODE=true` ativa gates (crons OFF, Asaas sandbox, ClickSign cap, Resend→owner). Workflow: feature → `staging` → smoke → PR pra `master` (label `staging-smoke-passed`). Detalhes em [docs/staging-workflow.md](docs/staging-workflow.md).
+**Staging:** [staging.imobpro.ia.br](https://staging.imobpro.ia.br) (Vercel `contractmaker-staging`, branch+Neon `staging`). Flag `STAGING_MODE=true` ativa gates (crons OFF, Asaas sandbox, Resend→owner) e prefixa `[STAGING]` no nome do envelope ClickSign. **Não há cap de ClickSign** — o "cap" citado aqui até 08/2026 era o orçamento mensal em R$, removido por barrar envio com valor inventado; staging envia assinatura real, sem teto. Workflow: feature → `staging` → smoke → PR pra `master` (label `staging-smoke-passed`). Detalhes em [docs/staging-workflow.md](docs/staging-workflow.md).
 
 **Single-tenant compartilhado:** `SHARED_ORG_ID=cmnt1ldo4000111bw4yo517k0`. Signup novo via `/api/auth/register` → `OrgMembership { role: "member" }`. Olavo (`olavo.piton@gmail.com`) e `admin@contractmaker.com` são owners. Schema continua multitenant.
 
@@ -216,11 +216,11 @@ Envelope vincula a UM de dois (CHECK XOR): Contract aprovado (`source="contract"
 
 **Caminho B — DealAttachment avulso:** `sendEnvelopeForAttachment` baixa PDF via `downloadBufferFromUrl`, signers 100% do dialog. Não exige aprovação. `POST /api/deals/[dealId]/envelopes`. UI: aba Assinaturas → "+ Enviar documento da pasta". Use cases: aditivos, distratos, procurações, recibos.
 
-**Helper `createEnvelopeFromBuffer`** (privado): budget check → upload snapshot → `prisma.envelope.create` → ClickSign API (createEnvelope → addDocument → addSigners → addRequirements → activate). Falha → `status: failed` + `deleteDraftEnvelope` best-effort.
+**Helper `createEnvelopeFromBuffer`** (privado): upload snapshot → `prisma.envelope.create` → ClickSign API (createEnvelope → addDocument → addSigners → addRequirements → activate). Falha → `status: failed` + `deleteDraftEnvelope` best-effort. O `withOrgBudgetLock` que envolve o create continua ali apesar do nome: ele serializa o re-check "1 envelope ativo por contrato" (sem ele, dois envios paralelos do mesmo contrato criam 2 envelopes — cobrança dobrada).
 
 **Listagem unificada:** `GET /api/deals/[dealId]/envelopes` retorna ambos com `subjectLabel` server-side. Hook `useDealEnvelopePolling(dealId)`. **Cancelamento:** `DELETE /api/deals/[dealId]/envelopes/[envelopeId]` (deal-level) ou `DELETE /api/contracts/[id]/envelopes/[envelopeId]` (legado).
 
-**Custo:** `Envelope.costCents`. Budget mensal `getMonthlyBudgetCents()` soma `running + closed` do mês. POST retorna 402 se estouraria.
+**Custo:** `Envelope.costCents` é ESTIMATIVA INTERNA (tabela em `lib/clicksign/costs.ts`, nunca conferida com plano real) — telemetria, não exibida em tela e não usada pra barrar nada. **Não existe orçamento mensal**: o `getMonthlyBudgetCents` foi removido em 08/2026 por recusar envio com valor inventado. **402 agora significa limite do PLANO da conta ClickSign**, classificado a partir da recusa dela em `lib/clicksign/quota.ts` (`isPlanQuotaError` → `EnvelopePlanLimitError`, `code: CLICKSIGN_PLAN_LIMIT`). Todo 4xx de envio loga o corpo cru como `[clicksign] falha 4xx`.
 
 **Diálogo de envio (`SendEnvelopeDialog.tsx`):** linhas editáveis Nome/Email/CPF agrupadas por origem. Vendedor + Comprador titulares sempre signers; **Corretora(s) e Testemunhas opt-in**. Linhas com `addedDuringDialog=true` em aprovado mostram banner amarelo: aparecem só no certificado ClickSign, não no PDF congelado.
 
