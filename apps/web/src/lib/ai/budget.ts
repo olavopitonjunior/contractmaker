@@ -4,8 +4,9 @@ import type { AgentKey } from "./agents/registry";
 /**
  * Budget de tokens IA por contrato.
  *
- * Estilo do `INFOSIMPLES_MONTHLY_BUDGET_CENTS` (certidões) e do
- * `getMonthlyBudgetCents` (Clicksign), mas escopado a um contrato específico.
+ * Estilo do `INFOSIMPLES_MONTHLY_BUDGET_CENTS` (certidões), mas escopado a um
+ * contrato específico. (O teto equivalente da ClickSign foi removido em
+ * 08/2026 — lá o limite real é o do plano da conta, não um número nosso.)
  * Soma todos os `AIUsage.totalTokens` registrados para o contrato e compara
  * com o teto configurado em `CONTRACT_AI_TOKEN_BUDGET` (default 200_000).
  *

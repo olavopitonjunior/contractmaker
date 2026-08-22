@@ -95,16 +95,14 @@ describe("prepareSend", () => {
     }
   });
 
-  it("orçamento estourado → budget", async () => {
-    signerFind.mockResolvedValue([okSigner()]);
-    const r = await prepareSend("p1", { ...deps, getSpent: async () => 99900 });
-    expect(r).toMatchObject({ blocked: "budget" });
-  });
-
-  it("sub-teto de propostas tem precedência sobre o mensal", async () => {
+  // O teto mensal e o sub-teto de propostas deixaram de existir: a plataforma
+  // barrava envio comparando gasto acumulado contra um número que ela mesma
+  // inventava. Quem diz se há envelope disponível é a ClickSign — o único
+  // bloqueio legítimo nasce da resposta dela (ver clicksign/quota.test.ts).
+  it("gasto alto e sub-teto configurado NÃO bloqueiam mais o envio", async () => {
     settingsMock.mockResolvedValue(settings({ proposalBudgetCents: 100 })); // R$1
     signerFind.mockResolvedValue([okSigner()]); // custo 150 > 100
     const r = await prepareSend("p1", deps);
-    expect(r).toMatchObject({ blocked: "budget", budgetCents: 100 });
+    expect(r).toMatchObject({ ok: true });
   });
 });

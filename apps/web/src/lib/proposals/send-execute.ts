@@ -13,9 +13,12 @@ import {
 import { createAcceptanceWhatsapp } from "@/lib/clicksign/acceptance";
 import { getSignatureSettings, resolveClickSignCreds } from "@/lib/clicksign/account";
 import type { ClickSignCreds } from "@/lib/clicksign/account";
-import { getMonthlySpendCents } from "@/lib/clicksign/executor";
-import { getMonthlyBudgetCents } from "@/lib/clicksign/costs";
 import { ClicksignError } from "@/lib/clicksign/client";
+import {
+  EnvelopePlanLimitError,
+  isPlanQuotaError,
+  logClicksignFailure,
+} from "@/lib/clicksign/quota";
 import { normalizeSigningGroups } from "@/lib/clicksign/signing-groups";
 import { STAGING_MODE } from "@/lib/env/staging";
 import { buildAcceptanceMessage } from "./acceptance-proof";
@@ -112,8 +115,6 @@ export function blockToResponse(block: PrepareResult): { status: number; body: u
         .join(" ");
       return { status: 422, body: { error: "preflight", message, issues: block.issues } };
     }
-    case "budget":
-      return { status: 402, body: { error: "budget", ...block } };
     case "not_configured":
       return { status: 409, body: { error: "ClickSign não conectada nesta organização." } };
     case "already_sending":
@@ -613,11 +614,16 @@ async function runClickSignEnvelope(p: {
     return { envelopeId: envelope.id };
   } catch (err) {
     console.error("[proposals] falha no envio do envelope:", err);
+    logClicksignFailure("proposals/sendEnvelope", err);
     if (clicksignId) await deleteDraftEnvelope(clicksignId, p.creds).catch(() => {});
     await prisma.envelope.update({
       where: { id: envelope.id },
       data: { status: "failed", lastError: err instanceof Error ? err.message : String(err) },
     });
+    // Mesma classificação do envio de contrato: sem isto, plano esgotado no
+    // meio de um envio de proposta virava 500 e o Newton dizia "erro interno,
+    // tente de novo" — mandando o corretor bater de novo num plano vazio.
+    if (isPlanQuotaError(err)) throw new EnvelopePlanLimitError(err.status);
     throw err;
   }
 }
@@ -703,7 +709,6 @@ export type SendVendedorResult =
         | "no_vendedor"
         | "no_creds"
         | "preflight"
-        | "budget"
         | "locked" // outro processo está enviando agora (lock)
         | "wrong_status" // guard anti-double-charge: status fora de SEND_VENDEDOR_STATUSES
         | "error";
@@ -748,14 +753,6 @@ export function vendedorResultToResponse(
           error:
             "Confira os dados do vendedor (nome completo, e-mail/telefone) e tente novamente.",
           detail: result.detail,
-        },
-      };
-    case "budget":
-      return {
-        status: 402,
-        body: {
-          error:
-            "Orçamento mensal de assinaturas atingido — libere saldo ou ajuste o limite em Configurações.",
         },
       };
     case "locked":
@@ -825,8 +822,8 @@ export async function sendVendedorVia(
 /**
  * 2ª rodada do ACEITE (WhatsApp): manda o termo pros vendedores/proprietários,
  * espelhando sendVendedorEnvelopeLocked — lock (no dispatcher), guard de
- * status anti-double-charge, preflight, budget (plannedAcceptanceCostCents),
- * avanço pra aguardando_vendedor SÓ no sucesso e eventos chained_aceite2_*.
+ * status anti-double-charge, preflight, avanço pra aguardando_vendedor SÓ no
+ * sucesso e eventos chained_aceite2_*.
  * Idempotência POR LINHA via `ProposalSigner.acceptanceClicksignId @unique`
  * (linha com termo não é reenviada — retry não duplica cobrança).
  */
@@ -910,7 +907,6 @@ async function sendVendedorAceiteLocked(
     await notifyFailure("no_creds");
     return { ok: false, reason: "no_creds" };
   }
-  const settings = await getSignatureSettings(proposal.orgId);
 
   // Preflight: Aceite é 100% WhatsApp — telefone nacional válido + nome completo.
   const issues = checkProposalReadiness(
@@ -928,21 +924,6 @@ async function sendVendedorAceiteLocked(
     return { ok: false, reason: "preflight", detail: issues.map((i) => i.reason).join("; ") };
   }
 
-  // Budget: custo do Aceite (~R$0,99/termo, cobrado na entrega) — mesmo gate
-  // do envelope, com o custo do instrumento certo.
-  const costCents = plannedAcceptanceCostCents(pending.length);
-  const budgetCents =
-    settings.proposalBudgetCents ?? getMonthlyBudgetCents(settings.monthlyBudgetCents);
-  const spentCents = await getMonthlySpendCents(proposal.orgId);
-  if (spentCents + costCents > budgetCents) {
-    await logProposalEvent(proposalId, "chained_aceite2_budget_exceeded", {
-      spentCents,
-      budgetCents,
-      costCents,
-    });
-    await notifyFailure("budget");
-    return { ok: false, reason: "budget" };
-  }
 
   const link = proposalPublicLink(proposal.token);
   const numero = proposalNumero(proposal);
@@ -1126,24 +1107,6 @@ async function sendVendedorEnvelopeLocked(
     costOverrides: settings.costOverridesJson as Record<string, unknown> | null,
   });
 
-  // Budget mensal (mesmo cap do envio inicial em send.ts): o split enviou só os
-  // proponentes primeiro, então o custo do vendedor NÃO foi contado adiantado. Sem
-  // este gate, o 2º envelope estouraria o teto que a plataforma promete (402). Sub-
-  // teto de propostas tem precedência sobre o mensal. Estourou → registra e para
-  // (o reconcile re-tenta quando houver saldo; a proposta fica em aguardando_vendedor).
-  const budgetCents =
-    settings.proposalBudgetCents ?? getMonthlyBudgetCents(settings.monthlyBudgetCents);
-  const spentCents = await getMonthlySpendCents(proposal.orgId);
-  if (spentCents + costCents > budgetCents) {
-    await logProposalEvent(proposalId, "chained_envelope2_budget_exceeded", {
-      spentCents,
-      budgetCents,
-      costCents,
-    });
-    await notifyFailure("budget");
-    return { ok: false, reason: "budget" };
-  }
-
   // Prazo PRÓPRIO da 2ª via (bug C): a via do proprietário nascia com
   // deadline = validUntil, que na parada de decisão (dias parada) já podia
   // estar VENCIDO — o envelope nascia expirado. Agora: o que for MAIOR entre a
@@ -1171,7 +1134,7 @@ async function sendVendedorEnvelopeLocked(
       costCents,
     });
     // Avanço DEPOIS do sucesso (antes o webhook avançava antes de gastar):
-    // falha por budget/preflight/erro deixa a proposta na parada de decisão,
+    // falha por preflight/erro deixa a proposta na parada de decisão,
     // com o botão de reenvio na tela. No retry a partir de aguardando_vendedor
     // o advance é replay (no-op) — o CAS protege.
     await advanceProposalStatus(proposalId, "aguardando_vendedor");

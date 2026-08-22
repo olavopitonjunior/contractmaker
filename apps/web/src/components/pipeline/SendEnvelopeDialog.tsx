@@ -21,7 +21,6 @@ import {
   Send,
   Trash2,
   UsersRound,
-  Wallet,
 } from "lucide-react";
 import {
   CLICKSIGN_ROLE_OPTIONS,
@@ -116,7 +115,6 @@ type RowKind = "vendedor" | "comprador" | "corretora" | "testemunha" | "avulso";
 type SubKind = "titular" | "conjuge" | "procurador" | "representante" | "avulso";
 
 const ROLE_OPTIONS = CLICKSIGN_ROLE_OPTIONS;
-const COST_PER_SIGNER_CENTS = 150;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Papel default — fonte única em lib/clicksign/roles.ts (server usa a mesma). */
@@ -349,7 +347,6 @@ interface SignatureConfig {
   configured: boolean;
   defaultAuthMethod: string;
   allowedAuthMethods: string[];
-  costCentsByMethod?: Record<string, number>;
 }
 
 export function SendEnvelopeDialog({
@@ -411,9 +408,6 @@ export function SendEnvelopeDialog({
     return null;
   }, [rows]);
 
-  const perSignerCents =
-    sigConfig?.costCentsByMethod?.[authMethod] ?? COST_PER_SIGNER_CENTS;
-  const costCents = rows.length * perSignerCents;
   const showApprovedWarning =
     contractStatus === "aprovado" && rows.some((r) => r.addedDuringDialog);
 
@@ -542,10 +536,10 @@ export function SendEnvelopeDialog({
           setStep("edit");
           return;
         }
+        // Limite do PLANO da conta ClickSign — a mensagem vem do servidor, que
+        // a monta a partir da recusa da própria ClickSign.
         if (res.status === 402) {
-          toast.error(
-            `Orçamento mensal excedido. Gasto: R$ ${(body.spentCents / 100).toFixed(2)} de R$ ${(body.budgetCents / 100).toFixed(2)}.`
-          );
+          toast.error(body.error || "A conta ClickSign está sem envelopes disponíveis.");
           return;
         }
         throw new Error(body.error || `HTTP ${res.status}`);
@@ -679,16 +673,13 @@ export function SendEnvelopeDialog({
 
             <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2">
               <span className="text-sm text-muted-foreground flex items-center gap-1.5">
-                <Wallet className="h-4 w-4" /> Custo estimado ({rows.length}{" "}
-                signatário{rows.length === 1 ? "" : "s"})
+                <UsersRound className="h-4 w-4" /> Signatários
               </span>
-              <span className="text-sm font-medium">
-                R$ {(costCents / 100).toFixed(2)}
-              </span>
+              <span className="text-sm font-medium tabular-nums">{rows.length}</span>
             </div>
           </div>
         ) : (
-          <ReviewStep rows={rows} orderEnabled={orderEnabled} costCents={costCents} />
+          <ReviewStep rows={rows} orderEnabled={orderEnabled} />
         )}
 
         <DialogFooter>
@@ -860,11 +851,9 @@ function SignerCard({
 function ReviewStep({
   rows,
   orderEnabled,
-  costCents,
 }: {
   rows: EditableRow[];
   orderEnabled: boolean;
-  costCents: number;
 }) {
   const roleLabel = (role: ClicksignRole) =>
     ROLE_OPTIONS.find((o) => o.value === role)?.label ?? role;
@@ -896,12 +885,9 @@ function ReviewStep({
       </div>
       <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2">
         <span className="text-sm text-muted-foreground flex items-center gap-1.5">
-          <Wallet className="h-4 w-4" /> Custo estimado ({rows.length} signatário
-          {rows.length === 1 ? "" : "s"})
+          <UsersRound className="h-4 w-4" /> Signatários
         </span>
-        <span className="text-sm font-medium">
-          R$ {(costCents / 100).toFixed(2)}
-        </span>
+        <span className="text-sm font-medium tabular-nums">{rows.length}</span>
       </div>
     </div>
   );

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { audit } from "@/lib/security/audit";
 import { requireClickSignAdmin } from "@/lib/clicksign/settings-guard";
@@ -12,11 +11,13 @@ const AUTH_METHODS = ["email", "whatsapp", "selfie", "icp_brasil"] as const;
 
 const patchSchema = z
   .object({
-    monthlyBudgetCents: z.number().int().positive().nullable().optional(),
-    costOverridesJson: z
-      .record(z.enum(AUTH_METHODS), z.number().int().nonnegative())
-      .nullable()
-      .optional(),
+    // `monthlyBudgetCents` e `costOverridesJson` saíram do contrato: não há
+    // mais teto de gasto nem estimativa de custo em tela.
+    //   - `monthlyBudgetCents` ficou sem leitor nenhum.
+    //   - `costOverridesJson` CONTINUA sendo lida (alimenta `Envelope.costCents`
+    //     via costs.ts), só perdeu o escritor — ajustar override agora é
+    //     operação de banco. NÃO apagar a coluna achando que é órfã.
+    // Limpeza de qualquer uma delas é migration própria.
     defaultAuthMethod: z.enum(AUTH_METHODS).optional(),
     allowedAuthMethods: z.array(z.enum(AUTH_METHODS)).min(1).optional(),
     defaultLocale: z.enum(["pt-BR", "en-US"]).optional(),
@@ -75,17 +76,6 @@ export async function PATCH(req: NextRequest) {
   const settings = await prisma.orgSignatureSettings.update({
     where: { orgId },
     data: {
-      ...(d.monthlyBudgetCents !== undefined
-        ? { monthlyBudgetCents: d.monthlyBudgetCents }
-        : {}),
-      ...(d.costOverridesJson !== undefined
-        ? {
-            costOverridesJson:
-              d.costOverridesJson === null
-                ? Prisma.DbNull
-                : d.costOverridesJson,
-          }
-        : {}),
       ...(d.defaultAuthMethod !== undefined
         ? { defaultAuthMethod: d.defaultAuthMethod }
         : {}),

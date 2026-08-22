@@ -162,7 +162,8 @@ PLATFORM_WALLET_ID=<sandbox wallet>
 CLICKSIGN_API_TOKEN=<prod>
 CLICKSIGN_API_BASE_URL=https://app.clicksign.com/api/v3
 CLICKSIGN_WEBHOOK_SECRET=<gerado no passo 6>
-CLICKSIGN_MONTHLY_BUDGET_CENTS=3000
+# CLICKSIGN_MONTHLY_BUDGET_CENTS foi REMOVIDO (08/2026) — não é mais lido.
+# Staging não tem teto de envio: ver docs/staging-workflow.md.
 
 # AI (modelos baratos)
 ANTHROPIC_API_KEY=<prod>

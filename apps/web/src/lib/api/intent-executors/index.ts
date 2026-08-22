@@ -142,6 +142,7 @@ export function ensureIntentExecutorsRegistered(): void {
     const { ClickSignNotConfiguredError } = await import(
       "@/lib/clicksign/account"
     );
+    const { EnvelopePlanLimitError } = await import("@/lib/clicksign/quota");
     try {
       const envelope = await sendEnvelopeForContract({
         contractId: p.contractId,
@@ -153,6 +154,12 @@ export function ensureIntentExecutorsRegistered(): void {
     } catch (err) {
       if (err instanceof ClickSignNotConfiguredError) {
         return { status: 409, body: { error: err.message } };
+      }
+      // Mesmo contrato das rotas REST: plano esgotado é 402 +
+      // CLICKSIGN_PLAN_LIMIT. Sem isto, o mesmo evento tinha resposta
+      // diferente conforme o ponto de entrada (agente/Bearer via 500).
+      if (err instanceof EnvelopePlanLimitError) {
+        return { status: 402, body: { error: err.message, code: err.code } };
       }
       const message = err instanceof Error ? err.message : String(err);
       return { status: 500, body: { error: message } };

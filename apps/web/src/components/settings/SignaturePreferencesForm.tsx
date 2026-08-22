@@ -21,8 +21,6 @@ const METHOD_LABELS: Record<AuthMethod, string> = {
 };
 
 interface Settings {
-  monthlyBudgetCents: number | null;
-  costOverridesJson: Record<string, number> | null;
   defaultAuthMethod: AuthMethod;
   allowedAuthMethods: AuthMethod[];
   defaultLocale: string;
@@ -36,31 +34,17 @@ interface Settings {
   proposalOwnerDeadlineDays: number | null;
 }
 
-const reais = (cents: number | null | undefined) =>
-  cents == null ? "" : (cents / 100).toFixed(2);
-const toCents = (v: string): number | null => {
-  const n = Number(v.replace(",", "."));
-  return v.trim() === "" || !Number.isFinite(n) ? null : Math.round(n * 100);
-};
-
 /**
  * Preferências de assinatura por org: tipos de assinatura habilitados + método
- * padrão, orçamento mensal, custo por método e padrões de envelope. Valem para
- * todos os envios (contrato, locação, avulso).
+ * padrão e padrões de envelope. Valem para todos os envios (contrato, locação,
+ * avulso). Sem orçamento nem custo — ver lib/clicksign/quota.ts.
  */
 export function SignaturePreferencesForm() {
   const [s, setS] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [budget, setBudget] = useState("");
   const [deadline, setDeadline] = useState("");
   const [ownerDeadline, setOwnerDeadline] = useState("");
-  const [overrides, setOverrides] = useState<Record<AuthMethod, string>>({
-    email: "",
-    whatsapp: "",
-    selfie: "",
-    icp_brasil: "",
-  });
 
   useEffect(() => {
     (async () => {
@@ -69,7 +53,6 @@ export function SignaturePreferencesForm() {
         if (res.ok) {
           const { settings } = await res.json();
           setS(settings);
-          setBudget(reais(settings.monthlyBudgetCents));
           setDeadline(
             settings.defaultDeadlineDays == null
               ? ""
@@ -80,12 +63,6 @@ export function SignaturePreferencesForm() {
               ? ""
               : String(settings.proposalOwnerDeadlineDays)
           );
-          setOverrides({
-            email: reais(settings.costOverridesJson?.email),
-            whatsapp: reais(settings.costOverridesJson?.whatsapp),
-            selfie: reais(settings.costOverridesJson?.selfie),
-            icp_brasil: reais(settings.costOverridesJson?.icp_brasil),
-          });
         }
       } finally {
         setLoading(false);
@@ -114,18 +91,10 @@ export function SignaturePreferencesForm() {
     if (!s) return;
     setBusy(true);
     try {
-      const costOverridesJson: Record<string, number> = {};
-      for (const m of AUTH_METHODS) {
-        const c = toCents(overrides[m]);
-        if (c != null) costOverridesJson[m] = c;
-      }
       const res = await fetch("/api/settings/signature-preferences", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          monthlyBudgetCents: toCents(budget),
-          costOverridesJson:
-            Object.keys(costOverridesJson).length > 0 ? costOverridesJson : null,
           defaultAuthMethod: s.defaultAuthMethod,
           allowedAuthMethods: s.allowedAuthMethods,
           defaultLocale: s.defaultLocale,
@@ -208,47 +177,9 @@ export function SignaturePreferencesForm() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Orçamento e custo</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div>
-            <Label htmlFor="budget" className="text-xs">
-              Orçamento mensal (R$) — vazio usa o padrão da plataforma
-            </Label>
-            <Input
-              id="budget"
-              inputMode="decimal"
-              value={budget}
-              onChange={(e) => setBudget(e.target.value)}
-              placeholder="Ex.: 100,00"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label className="text-xs">
-              Custo por assinatura (R$) — sobrescreve a estimativa por método
-            </Label>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {AUTH_METHODS.map((m) => (
-                <div key={m} className="flex items-center gap-2">
-                  <span className="w-40 text-xs text-muted-foreground">
-                    {METHOD_LABELS[m]}
-                  </span>
-                  <Input
-                    inputMode="decimal"
-                    value={overrides[m]}
-                    onChange={(e) =>
-                      setOverrides({ ...overrides, [m]: e.target.value })
-                    }
-                    placeholder="padrão"
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {/* O card "Orçamento e custo" saiu: não existe mais teto de gasto, e os
+          valores por método alimentavam uma estimativa que não correspondia ao
+          que a ClickSign cobra. O limite real é o do plano da conta. */}
 
       <Card>
         <CardHeader className="pb-3">
