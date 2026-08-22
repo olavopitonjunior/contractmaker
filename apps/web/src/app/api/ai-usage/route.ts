@@ -24,9 +24,17 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const to = limiteSuperior(searchParams.get("to"));
+  /**
+   * Default de 30 dias medido do INÍCIO do dia do `to`, não do fim dele.
+   *
+   * Com o `to` valendo 23:59:59.999, subtrair 30 dias dali começaria a janela
+   * às 23:59 de 30 dias atrás — cortando quase todo o primeiro dia. Não afeta
+   * o painel (ele sempre manda `from`), mas afeta qualquer outro consumidor
+   * do default documentado na rota.
+   */
   const from = searchParams.get("from")
     ? new Date(searchParams.get("from")!)
-    : new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
+    : new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate()) - 30 * 24 * 60 * 60 * 1000);
 
   // Guard against invalid dates
   if (isNaN(from.getTime()) || isNaN(to.getTime())) {

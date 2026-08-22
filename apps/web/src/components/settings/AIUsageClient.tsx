@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { formatUsd, formatUsdPreciso } from "@/lib/ai/format";
+import { presetRange, type RangePreset } from "@/lib/ui/date-range";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -319,46 +320,6 @@ function LineChart({ data }: { data: DayBucket[] }) {
 // Main client
 // ────────────────────────────────────────────────────────────────────────────
 
-type RangePreset = "7d" | "30d" | "mtd" | "last_month";
-
-/**
- * As janelas dos botões.
- *
- * ── Por que 6 e 29, e não 7 e 30 ─────────────────────────────────────────
- *
- * Os dois extremos são serializados como DATA PURA (`.slice(0,10)`), e desde
- * que o `to` passou a significar o dia inteiro (ver `limiteSuperior` em
- * `lib/ai/usage.ts`) a janela virou `[D_from 00:00Z, D_to 23:59:59.999Z]` —
- * ou seja, **ambos os dias entram por completo**.
- *
- * Com `now − 7×24h`, isso dá 15/08 a 22/08: OITO dias-calendário sob um botão
- * escrito "Últimos 7 dias". O erro é herdado — antes o `to` era meia-noite e a
- * conta fechava por acidente, às custas de o dia corrente sumir. Consertar o
- * dia corrente EXPÔS o rótulo.
- *
- * `now − 6×24h` fecha em sete dias de verdade. Mesma aritmética no de 30.
- */
-function presetRange(preset: RangePreset): { from: Date; to: Date } {
-  const now = new Date();
-  const to = new Date(now);
-  if (preset === "7d") {
-    const from = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
-    return { from, to };
-  }
-  if (preset === "30d") {
-    const from = new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000);
-    return { from, to };
-  }
-  if (preset === "mtd") {
-    const from = new Date(now.getFullYear(), now.getMonth(), 1);
-    return { from, to };
-  }
-  // last_month
-  const from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const endLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
-  return { from, to: endLastMonth };
-}
-
 export function AIUsageClient() {
   const [preset, setPreset] = useState<RangePreset>("30d");
   const [data, setData] = useState<UsageResponse | null>(null);
@@ -371,10 +332,9 @@ export function AIUsageClient() {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({
-        from: range.from.toISOString().slice(0, 10),
-        to: range.to.toISOString().slice(0, 10),
-      });
+      // `range` já vem como `YYYY-MM-DD` em UTC — sem `.slice()` aqui, que era
+      // onde a conta local virava data UTC deslocada.
+      const params = new URLSearchParams({ from: range.from, to: range.to });
       const res = await fetch(`/api/ai-usage?${params}`);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));

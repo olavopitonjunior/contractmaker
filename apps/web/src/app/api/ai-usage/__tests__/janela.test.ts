@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { limiteSuperior } from "@/lib/ai/usage";
 import { formatUsdPreciso } from "@/lib/ai/format";
+import { presetRange } from "@/lib/ui/date-range";
 
 /**
  * O fim da janela do painel de custo.
@@ -52,41 +53,75 @@ describe("limiteSuperior", () => {
  * estimado apareceriam como o mesmo `"$ <0,01"`.
  */
 /**
- * Os botões de período, depois que o `to` passou a valer o dia inteiro.
+ * Os botões de período — testados na FUNÇÃO REAL, não numa réplica.
  *
- * A janela virou `[D_from 00:00Z, D_to 23:59:59.999Z]` — os dois extremos
- * entram por completo. Com `now − 7×24h` isso dava OITO dias-calendário sob um
- * botão escrito "Últimos 7 dias": erro herdado que o conserto do dia corrente
- * expôs (antes o `to` era meia-noite e a conta fechava por acidente, às custas
- * de o dia de hoje sumir).
+ * A primeira versão deste teste recalculava a aritmética por conta própria, e
+ * com isso ficava verde mesmo revertendo o conserto no componente. Achado em
+ * code review, e é o motivo de `presetRange` ter saído do componente para o
+ * lib com o `agora` injetável.
+ *
+ * Dois defeitos convivem aqui, e os dois estão fixados abaixo:
+ *  · a janela cobria um dia a mais do que o rótulo (os dois extremos entram
+ *    por completo desde que o `to` vale o dia inteiro);
+ *  · a conta era feita em horário LOCAL e serializada em UTC, o que desloca
+ *    o limite num fuso negativo.
  */
-describe("presetRange — o rótulo tem que bater com a janela", () => {
-  const DIA = 24 * 60 * 60 * 1000;
+describe("presetRange", () => {
+  // 22/08 às 13:00Z = 10:00 em São Paulo. Meio do dia nos dois fusos, para o
+  // teste não passar por acidente de horário.
+  const AGORA = new Date("2026-08-22T13:00:00.000Z");
 
-  /** Réplica da conta do componente, para fixar a aritmética. */
-  const diasCobertos = (voltarMs: number) => {
-    const now = new Date("2026-08-22T10:00:00.000Z");
-    const from = new Date(now.getTime() - voltarMs);
-    const dFrom = new Date(from.toISOString().slice(0, 10) + "T00:00:00.000Z");
-    const dTo = limiteSuperior(now.toISOString().slice(0, 10));
-    return Math.round((dTo.getTime() - dFrom.getTime() + 1) / DIA);
-  };
-
-  it("6 dias para trás cobrem exatamente 7 dias-calendário", () => {
-    expect(diasCobertos(6 * DIA)).toBe(7);
+  it("7 dias cobre exatamente 7 dias-calendário", () => {
+    expect(presetRange("7d", AGORA)).toEqual({ from: "2026-08-16", to: "2026-08-22" });
   });
 
-  it("29 dias para trás cobrem exatamente 30", () => {
-    expect(diasCobertos(29 * DIA)).toBe(30);
+  it("30 dias cobre exatamente 30", () => {
+    expect(presetRange("30d", AGORA)).toEqual({ from: "2026-07-24", to: "2026-08-22" });
   });
 
-  /** O que estava errado: a conta antiga entregava um dia a mais. */
-  it("7 e 30 dariam 8 e 31 — é o erro que o conserto expôs", () => {
-    expect(diasCobertos(7 * DIA)).toBe(8);
-    expect(diasCobertos(30 * DIA)).toBe(31);
+  it("mês atual começa no dia 1 do mês, não às 21h do dia anterior", () => {
+    expect(presetRange("mtd", AGORA)).toEqual({ from: "2026-08-01", to: "2026-08-22" });
+  });
+
+  /**
+   * O defeito que o conserto do dia corrente agravou: em UTC-3 o `to` saía
+   * como `2026-08-01`, e com o dia inteiro valendo isso somava o 1º de agosto
+   * dentro do total de JULHO.
+   */
+  it("mês anterior termina no último dia dele, sem invadir o mês atual", () => {
+    expect(presetRange("last_month", AGORA)).toEqual({ from: "2026-07-01", to: "2026-07-31" });
+  });
+
+  /** Vira o ano sem quebrar: janeiro → dezembro do ano anterior. */
+  it("mês anterior atravessa a virada do ano", () => {
+    const jan = new Date("2026-01-10T13:00:00.000Z");
+    expect(presetRange("last_month", jan)).toEqual({ from: "2025-12-01", to: "2025-12-31" });
+  });
+
+  /**
+   * A prova de que a conta é em UTC: o resultado NÃO pode depender do fuso da
+   * máquina de quem roda. Um instante logo depois da meia-noite UTC é, em
+   * UTC-3, ainda o dia anterior — e era exatamente aí que a versão antiga
+   * escorregava.
+   */
+  it("não depende do fuso local", () => {
+    const logoAposMeiaNoiteUtc = new Date("2026-08-22T00:30:00.000Z");
+    expect(presetRange("mtd", logoAposMeiaNoiteUtc).to).toBe("2026-08-22");
+    expect(presetRange("7d", logoAposMeiaNoiteUtc)).toEqual({
+      from: "2026-08-16",
+      to: "2026-08-22",
+    });
   });
 });
 
+/**
+ * O formatador da linha de procedência.
+ *
+ * O `formatUsd` do KPI colapsa tudo abaixo de um centavo em `"$ <0,01"`,
+ * inclusive zero. Usá-lo aqui esconderia exatamente a diferença que a linha
+ * existe para mostrar: um turn do Max custa ~US$ 0,0004, então medido e
+ * estimado apareceriam como o mesmo `"$ <0,01"`.
+ */
 describe("formatUsdPreciso", () => {
   it("mostra centavos de milésimo em vez de colapsar", () => {
     expect(formatUsdPreciso(0.00010614)).toBe("$ 0,000106");
