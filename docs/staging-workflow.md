@@ -8,10 +8,12 @@ Ambiente de homologação `staging.imobpro.ia.br` (Vercel project `contractmaker
 # 1. Faz feature na sua branch
 git checkout -b feat/nova-coisa master
 
-# 2. Merge na staging primeiro
-git checkout staging
-git merge feat/nova-coisa
-git push
+# 2. Abre PR da feature PARA staging.
+#    NÃO faça `git checkout staging && git merge && git push`: o
+#    `staging-ci.yml` roda o gate de lint só em `pull_request`, então um merge
+#    direto entra sem ser lintado e o problema só aparece no PR de promoção,
+#    num diff staging→master enorme.
+gh pr create --base staging --head feat/nova-coisa
 
 # 3. Aguarda Vercel deploy + roda smoke test em https://staging.imobpro.ia.br
 #    Confirma:

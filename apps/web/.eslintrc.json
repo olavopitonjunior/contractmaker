@@ -1,0 +1,30 @@
+{
+  "root": true,
+  // `next/core-web-vitals` define o parser do TS mas NÃO registra o plugin.
+  // Sem este registro, os `// eslint-disable-next-line @typescript-eslint/...`
+  // que já existem no código viram "Definition for rule was not found" — 56
+  // erros duros. Registrar sem estender `next/typescript` é de propósito:
+  // aquele config é `plugin:@typescript-eslint/recommended` e levaria o repo de
+  // 44 para 381 achados, que é o mutirão que a issue #374 manda evitar.
+  "plugins": ["@typescript-eslint"],
+  "extends": "next/core-web-vitals",
+  "rules": {
+    // Aspas literais em texto JSX. É estilo — o React renderiza `"` e `&quot;`
+    // igual — a regra não tem auto-fix, e o legado tem 34 ocorrências em 10
+    // arquivos. Ligada, ela cobraria essa limpeza de quem encostasse nesses
+    // arquivos por qualquer outro motivo, que é exatamente o que a #374 evita.
+    "react/no-unescaped-entities": "off"
+  },
+  "overrides": [
+    {
+      // E-mail é HTML de 1999, não página Next: `<head>` e `<img>` são o
+      // certo aqui, e `next/head`/`next/image` não existem do outro lado.
+      // As duas regras são falso positivo neste diretório.
+      "files": ["src/lib/email/templates/**"],
+      "rules": {
+        "@next/next/no-head-element": "off",
+        "@next/next/no-img-element": "off"
+      }
+    }
+  ]
+}

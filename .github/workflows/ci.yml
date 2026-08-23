@@ -34,6 +34,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # O step de lint diffa contra a base do PR. O default (fetch-depth: 1)
+          # não traz base nenhuma e o diff sairia vazio — lint verde sem lintar.
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -57,3 +61,59 @@ jobs:
 
       - name: Unit tests
         run: npm run test -w apps/web
+
+      # Lint SÓ nos arquivos que o PR alterou. O repo nunca teve config de
+      # ESLint (issue #374), e ligar o gate no projeto inteiro abriria um
+      # mutirão: a medição na adoção deu 100 achados em 50 arquivos legados.
+      # O PR responde pelo que ele mexeu, que é onde ele pode regredir.
+      #
+      # É o ÚLTIMO step de propósito: uma falha de lint não deve esconder o
+      # resultado do typecheck nem dos testes.
+      #
+      # Só em PR — num `push` não existe `github.base_ref` contra o que diffar.
+      - name: Lint (arquivos alterados)
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+
+          # `next lint --file` espera caminho relativo ao dir do app, daí o
+          # corte do prefixo `apps/web/`.
+          # O `git diff` fica no seu próprio comando: se ele falhar (base ruim,
+          # clone raso, merge ref irresolvível), `set -e` derruba o step. Antes
+          # o `|| true` cobria a pipeline inteira e transformava essa falha em
+          # lista vazia → "nada a lintar" → verde. Era o mesmo modo de falha que
+          # o `fetch-depth: 0` acima existe para evitar, e invisível no log.
+          CHANGED=$(git diff --name-only --diff-filter=ACMR \
+            "origin/${{ github.base_ref }}...HEAD")
+
+          # Só o grep pode "falhar" legitimamente: exit 1 quando não casa nada.
+          FILES=()
+          while IFS= read -r f; do
+            [ -n "$f" ] && FILES+=("$f")
+          done < <(
+            printf '%s\n' "$CHANGED" \
+              | grep -E '^apps/web/.*\.(js|jsx|mjs|cjs|ts|tsx|mts|cts)$' \
+              | sed 's#^apps/web/##' || true
+          )
+
+          # Sem `--file`, `next lint` linta o projeto inteiro. Sair aqui é o que
+          # impede o mutirão de aparecer justo nos PRs que não tocam em código.
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "Nenhum arquivo de código alterado em apps/web — nada a lintar."
+            exit 0
+          fi
+
+          echo "Lintando ${#FILES[@]} arquivo(s):"
+          printf '  %s\n' "${FILES[@]}"
+
+          # `--max-warnings=0` e não "só erro": o `core-web-vitals` eleva apenas
+          # DUAS regras a error (`no-html-link-for-pages`, `no-sync-scripts`) —
+          # todo o resto, `jsx-a11y` inteiro incluído, é warning. Gatear só em
+          # erro deixaria passar acessibilidade, que é metade do valor disto.
+          #
+          # Isso só é justo porque a árvore está em ZERO achado: o legado foi
+          # neutralizado no `.eslintrc.json` e em 5 supressões pontuais, então
+          # nenhum PR herda dívida de arquivo que não escreveu.
+          ARGS=()
+          for f in "${FILES[@]}"; do ARGS+=(--file "$f"); done
+          npm run lint -w apps/web -- --max-warnings=0 "${ARGS[@]}"
