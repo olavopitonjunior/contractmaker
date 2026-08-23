@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { formatUsd, formatUsdPreciso } from "@/lib/ai/format";
-import { presetRange, type RangePreset } from "@/lib/ui/date-range";
+import { presetRange, rotuloDia, type RangePreset } from "@/lib/ui/date-range";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -426,8 +426,7 @@ export function AIUsageClient() {
         ))}
         {data && (
           <span className="text-xs text-muted-foreground ml-2">
-            {new Date(data.range.from).toLocaleDateString("pt-BR")} →{" "}
-            {new Date(data.range.to).toLocaleDateString("pt-BR")}
+            {rotuloDia(data.range.from)} → {rotuloDia(data.range.to)}
           </span>
         )}
       </div>
