@@ -255,6 +255,9 @@ export function DocumentosStep({
       cancelled = true;
     };
 
+    // Dependência pré-existente à adoção do ESLint (#374). Incluir `form` muda
+    // quando o efeito redispara; não foi avaliado neste PR de higiene.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, adapter, scopedSuggest]);
 
   // Phase F.I-α + F.II polling — enquanto houver cards em status não-final
@@ -429,6 +432,9 @@ export function DocumentosStep({
         return d;
       });
     });
+    // Dependência pré-existente à adoção do ESLint (#374). Incluir
+    // `scopedSuggest` muda quando o efeito redispara; não foi avaliado aqui.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docs, form, hydrated, adapter]);
 
   const updateDoc = useCallback((id: string, patch: Partial<DocumentCardData>) => {
@@ -853,6 +859,9 @@ export function DocumentosStep({
 
       await Promise.allSettled(tasks);
     },
+    // Dependência pré-existente à adoção do ESLint (#374). Incluir
+    // `applyExtractResult` muda a identidade do callback; não avaliado aqui.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [docs.length, token]
   );
 

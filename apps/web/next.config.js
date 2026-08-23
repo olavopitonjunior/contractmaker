@@ -1,5 +1,16 @@
 ﻿/** @type {import('next').NextConfig} */
 const nextConfig = {
+  // `next build` linta o projeto INTEIRO sempre que existe config de ESLint
+  // (`shouldLint = !ignoreDuringBuilds && runLint`, em next/dist/build/index.js).
+  // Sem esta linha, adotar o `.eslintrc.json` (issue #374) faria o build morrer
+  // nos ~44 achados legados — e como nenhum workflow roda `next build`, o CI
+  // ficaria verde enquanto TODO deploy do Vercel, produção inclusive, quebrava.
+  //
+  // Lint aqui é gate de PR, não de build: quem reprova é o step
+  // "Lint (arquivos alterados)", e só sobre o que o PR mexeu.
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   experimental: {
     externalDir: true,
     // These native binary packages must stay as runtime requires (not bundled

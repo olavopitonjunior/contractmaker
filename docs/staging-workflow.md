@@ -8,10 +8,12 @@ Ambiente de homologação `staging.imobpro.ia.br` (Vercel project `contractmaker
 # 1. Faz feature na sua branch
 git checkout -b feat/nova-coisa master
 
-# 2. Merge na staging primeiro
-git checkout staging
-git merge feat/nova-coisa
-git push
+# 2. Abre PR da feature PARA staging.
+#    NÃO faça `git checkout staging && git merge && git push`: o
+#    `staging-ci.yml` roda o gate de lint só em `pull_request`, então um merge
+#    direto entra sem ser lintado e o problema só aparece no PR de promoção,
+#    num diff staging→master enorme.
+gh pr create --base staging --head feat/nova-coisa
 
 # 3. Aguarda Vercel deploy + roda smoke test em https://staging.imobpro.ia.br
 #    Confirma:
@@ -141,7 +143,11 @@ O webhook auto-provisionado aponta pra `NEXTAUTH_URL/api/webhooks/clicksign/{slu
 
 ## Migrations em build (Vercel)
 
-O build roda `node scripts/vercel-migrate.mjs`, que só executa `prisma migrate deploy` quando `VERCEL_ENV=production` (deploy de prod do projeto), pulando em **preview**. O projeto `web` tem o `DATABASE_URL`/`DIRECT_URL` do escopo **Preview** apontando pro branch Neon de **staging** — então preview de PR nunca migra nem lê o banco de produção. (Contexto: incidente 2026-07-14 em que um preview migrou prod e travou os deploys.)
+Quem migra é o **`build:deploy`**, e é pra ele que o `buildCommand` do `vercel.json` aponta. Ele roda `node scripts/vercel-migrate.mjs`, que só executa `prisma migrate deploy` quando `VERCEL_ENV=production` (deploy de prod do projeto) — pulando em **preview**, em **development** e fora do Vercel. Escape hatch: `FORCE_MIGRATE=1`.
+
+`npm run build` (sem sufixo) **não migra**, de propósito: antes migrava, e um build na máquina de alguém aplicava migration contra o banco que o `.env` daquela pasta apontasse (issue #375).
+
+O projeto `web` tem o `DATABASE_URL`/`DIRECT_URL` do escopo **Preview** apontando pro branch Neon de **staging** — então preview de PR nunca migra nem lê o banco de produção. (Contexto: incidente 2026-07-14 em que um preview migrou prod e travou os deploys.)
 
 ## Asaas sandbox
 

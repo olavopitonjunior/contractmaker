@@ -24,6 +24,10 @@ jobs:
       NODE_OPTIONS: --max-old-space-size=4096
     steps:
       - uses: actions/checkout@v4
+        with:
+          # O step de lint diffa contra a base do PR. O default (fetch-depth: 1)
+          # não traz base nenhuma e o diff sairia vazio — lint verde sem lintar.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -41,3 +45,37 @@ jobs:
 
       - name: Tests
         run: npm run test -w apps/web
+
+      # Espelha o step do ci.yml — ver o comentário longo lá. Precisa existir
+      # nos DOIS workflows: feature branch entra por `staging`, então um lint
+      # só no ci.yml apareceria pela primeira vez no PR de promoção, num diff
+      # staging→master enorme e no lugar errado.
+      - name: Lint (arquivos alterados)
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+
+          CHANGED=$(git diff --name-only --diff-filter=ACMR \
+            "origin/${{ github.base_ref }}...HEAD")
+
+          FILES=()
+          while IFS= read -r f; do
+            [ -n "$f" ] && FILES+=("$f")
+          done < <(
+            printf '%s\n' "$CHANGED" \
+              | grep -E '^apps/web/.*\.(js|jsx|mjs|cjs|ts|tsx|mts|cts)$' \
+              | sed 's#^apps/web/##' || true
+          )
+
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "Nenhum arquivo de código alterado em apps/web — nada a lintar."
+            exit 0
+          fi
+
+          echo "Lintando ${#FILES[@]} arquivo(s):"
+          printf '  %s\n' "${FILES[@]}"
+
+          # `--max-warnings=0` — ver o comentário no ci.yml.
+          ARGS=()
+          for f in "${FILES[@]}"; do ARGS+=(--file "$f"); done
+          npm run lint -w apps/web -- --max-warnings=0 "${ARGS[@]}"

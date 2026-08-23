@@ -78,8 +78,8 @@ export async function convertProposalToDeal(input: {
   }
 
   const dataJson = (proposal.dataJson ?? {}) as Record<string, unknown>;
-  const module = moduleForSchemaType(proposal.schemaType);
-  const pipeline = await getPipelineByKind(input.orgId, module, {
+  const moduleKind = moduleForSchemaType(proposal.schemaType);
+  const pipeline = await getPipelineByKind(input.orgId, moduleKind, {
     include: { stages: { orderBy: { position: "asc" }, take: 1 } },
   });
   if (!pipeline || pipeline.stages.length === 0) {

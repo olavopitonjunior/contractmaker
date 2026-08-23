@@ -10,10 +10,19 @@
 ## Configuracao no Vercel
 
 1. **Importar projeto** em vercel.com/new
-2. **Root Directory:** `apps/web`
+2. **Root Directory:** a **raiz do repo** (não `apps/web`)
 3. **Framework:** Next.js (auto-detectado)
-4. **Build Command:** `npx prisma generate && next build`
-5. **Install Command:** `npm install` (default)
+4. **Build / Install / Output Command:** deixar **vazio**, herdando o
+   `vercel.json` da raiz
+
+> **Não** aponte o Root Directory para `apps/web` nem escreva um Build Command à
+> mão. O `vercel.json` da raiz é quem define `buildCommand: npm run build:deploy
+> -w apps/web`, e é o `build:deploy` — não o `build` — que roda
+> `scripts/vercel-migrate.mjs`. Um projeto configurado à mão com
+> `npx prisma generate && next build` nunca lê esse arquivo e portanto **nunca
+> aplica migration**: o build passa verde e o primeiro deploy depois de uma
+> mudança de schema quebra em runtime com coluna inexistente. Ver
+> `docs/staging-workflow.md`, seção "Migrations em build (Vercel)".
 
 ## Environment Variables
 
