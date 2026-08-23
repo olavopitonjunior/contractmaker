@@ -21,6 +21,17 @@ const grupo = (costSource: string | null, soma: unknown, calls: number) => ({
 });
 
 describe("dividirPorProcedencia", () => {
+  /**
+   * A precisão que a linha de procedência exige. Em 4 casas, o valor medido
+   * real do smoke (US$ 0,00010614) chegava na tela como `$ 0,000100` e as
+   * duas últimas casas do formatador de 6 eram decoração.
+   */
+  it("preserva 6 casas — o formatador da linha exibe 6", () => {
+    const r = dividirPorProcedencia([grupo("reported", 0.00010614, 1)]);
+    expect(r.reportedUsd).toBe(0.000106);
+    expect(r.reportedUsd).not.toBe(0.0001);
+  });
+
   it("separa medido de estimado, em valor e em contagem", () => {
     expect(
       dividirPorProcedencia([grupo("reported", 0.0003, 2), grupo("estimated", 0.001, 1)])

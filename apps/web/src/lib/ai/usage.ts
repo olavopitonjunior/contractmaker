@@ -234,9 +234,21 @@ export function dividirPorProcedencia(
     }
   }
 
+  /**
+   * SEIS casas, não quatro — e a diferença não é cosmética.
+   *
+   * O resto do painel arredonda em 4 porque exibe 2. Esta linha exibe **6**
+   * (`formatUsdPreciso`), justamente porque um turn do Max custa ~US$ 0,0004 e
+   * medido × estimado precisam ficar distinguíveis. Cortando em 4 aqui, as
+   * duas últimas casas do formatador viram decoração: US$ 0,00010614 chegava
+   * na tela como `$ 0,000100`, e `$ 0,000106` era inalcançável por construção.
+   *
+   * Achado no smoke de 22/08, olhando o número renderizado em vez de aceitar
+   * que "a linha apareceu".
+   */
   return {
-    reportedUsd: Number(reportedUsd.toFixed(4)),
-    estimatedUsd: Number(estimatedUsd.toFixed(4)),
+    reportedUsd: Number(reportedUsd.toFixed(6)),
+    estimatedUsd: Number(estimatedUsd.toFixed(6)),
     reportedCalls,
     estimatedCalls,
   };

@@ -4,6 +4,12 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-22 - Precisão da linha medido × estimado
+
+### Corrigido
+
+- **A linha de procedência arredondava em 4 casas e exibia em 6.** `dividirPorProcedencia` devolvia `toFixed(4)`, então as duas últimas casas do `formatUsdPreciso` eram decoração: o valor medido real do smoke (US$ 0,00010614) chegava na tela como `$ 0,000100`, e `$ 0,000106` era inalcançável por construção. O resto do painel arredonda em 4 porque exibe 2; esta linha exibe 6 de propósito, porque um turn do Max custa ~US$ 0,0004 e os dois lados precisam ficar distinguíveis. Achado no smoke de 22/08 — por olhar o número renderizado em vez de aceitar que "a linha apareceu".
+
 ## [Unreleased] - 2026-08-22 - O painel de custo volta a enxergar o dia de hoje
 
 ### Corrigido
