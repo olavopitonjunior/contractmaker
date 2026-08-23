@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { formatUsd, formatUsdPreciso } from "@/lib/ai/format";
+import { presetRange, type RangePreset } from "@/lib/ui/date-range";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -123,30 +125,6 @@ interface UsageResponse {
 // Formatters
 // ────────────────────────────────────────────────────────────────────────────
 
-/**
- * Valor pequeno com precisão de verdade.
- *
- * O `formatUsd` colapsa TUDO abaixo de um centavo em `"$ <0,01"` — inclusive
- * zero. Serve para o KPI, e não serve para a linha de procedência: um turn do
- * Max custa ~US$ 0,0004, então "medido vs estimado" apareceria como
- * `$ <0,01 · $ <0,01` — escondendo exatamente a diferença que a linha existe
- * para mostrar. E com zero estimado ela AFIRMARIA um custo que não existe.
- */
-function formatUsdPreciso(v: number): string {
-  if (v === 0) return "$ 0";
-  if (v < 0.01) return `$ ${v.toFixed(6).replace(".", ",")}`;
-  return formatUsd(v);
-}
-
-function formatUsd(v: number): string {
-  if (v < 0.01) return "$ <0,01";
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(v);
-}
 
 function formatInt(v: number): string {
   return new Intl.NumberFormat("pt-BR").format(v);
@@ -342,29 +320,6 @@ function LineChart({ data }: { data: DayBucket[] }) {
 // Main client
 // ────────────────────────────────────────────────────────────────────────────
 
-type RangePreset = "7d" | "30d" | "mtd" | "last_month";
-
-function presetRange(preset: RangePreset): { from: Date; to: Date } {
-  const now = new Date();
-  const to = new Date(now);
-  if (preset === "7d") {
-    const from = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    return { from, to };
-  }
-  if (preset === "30d") {
-    const from = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    return { from, to };
-  }
-  if (preset === "mtd") {
-    const from = new Date(now.getFullYear(), now.getMonth(), 1);
-    return { from, to };
-  }
-  // last_month
-  const from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const endLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
-  return { from, to: endLastMonth };
-}
-
 export function AIUsageClient() {
   const [preset, setPreset] = useState<RangePreset>("30d");
   const [data, setData] = useState<UsageResponse | null>(null);
@@ -377,10 +332,9 @@ export function AIUsageClient() {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({
-        from: range.from.toISOString().slice(0, 10),
-        to: range.to.toISOString().slice(0, 10),
-      });
+      // `range` já vem como `YYYY-MM-DD` em UTC — sem `.slice()` aqui, que era
+      // onde a conta local virava data UTC deslocada.
+      const params = new URLSearchParams({ from: range.from, to: range.to });
       const res = await fetch(`/api/ai-usage?${params}`);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));

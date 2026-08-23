@@ -4,6 +4,38 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-22 - Precisão da linha medido × estimado
+
+### Corrigido
+
+- **A linha de procedência arredondava em 4 casas e exibia em 6.** `dividirPorProcedencia` devolvia `toFixed(4)`, então as duas últimas casas do `formatUsdPreciso` eram decoração: o valor medido real do smoke (US$ 0,00010614) chegava na tela como `$ 0,000100`, e `$ 0,000106` era inalcançável por construção. O resto do painel arredonda em 4 porque exibe 2; esta linha exibe 6 de propósito, porque um turn do Max custa ~US$ 0,0004 e os dois lados precisam ficar distinguíveis. Achado no smoke de 22/08 — por olhar o número renderizado em vez de aceitar que "a linha apareceu".
+
+## [Unreleased] - 2026-08-22 - O painel de custo volta a enxergar o dia de hoje
+
+### Corrigido
+
+- **`/settings/ai-usage` NUNCA mostrava o gasto do dia corrente.** O cliente manda `?to=2026-08-22` (data pura), o servidor lia `new Date("2026-08-22")` — que é **meia-noite** — e o filtro `lte` cortava o dia inteiro. Os três presets (7 dias, 30 dias, mês atual) exibiam uma janela terminando ontem, e uma chamada de IA feita agora só aparecia no dia seguinte.
+  - Silencioso da pior forma: o número exibido estava sempre **certo para o intervalo pedido**; o intervalo é que não era o que o botão prometia. Achado em 22/08 durante o smoke do custo reportado, quando três linhas recém-gravadas simplesmente não apareciam na tela.
+  - Data pura em `?to=` passa a significar **o dia inteiro**, que é a leitura natural de um intervalo de datas e o que o contrato da rota já dizia. Timestamp completo continua respeitado como veio. O corte é em UTC — para um tenant em UTC-3, uma chamada depois das 21h cai no "dia seguinte" desta conta; é o mesmo critério que o `from` sempre usou, e resolver de verdade exige o fuso do tenant, que a rota não conhece.
+- **Os botões de período cobriam um dia a mais do que o rótulo dizia.** Achado de gate: com o `to` valendo o dia inteiro, a janela virou `[D_from 00:00Z, D_to 23:59:59.999Z]` — os dois extremos entram por completo —, então `now − 7×24h` dava OITO dias-calendário sob "Últimos 7 dias". É erro herdado que este conserto **expôs**: antes o `to` era meia-noite e a conta fechava por acidente, às custas de o dia corrente sumir. Agora `now − 6×24h` e `now − 29×24h`, com a aritmética fixada em teste. **"Mês anterior" e "Mês atual" também estavam errados, e por outra causa:** a conta era feita em horário LOCAL e serializada em UTC. Num fuso negativo isso desloca o limite um dia — em UTC-3, "Mês anterior" mandava `to = 01/08` e, com o dia inteiro valendo, somava 1º de agosto dentro do total de julho; "Mês atual" começava às 21h do último dia do mês anterior. `presetRange` passa a calcular em UTC e a devolver `YYYY-MM-DD` direto, sem `.slice()` no meio do caminho para desfazer a conta.
+- **O painel de Assinaturas tinha o MESMO bug, e agora também vê o dia corrente.** `/api/signatures/metrics` repetia o parsing de data e `SignaturesClient` tinha cópia própria da conta de período. Três telas usavam cópias da mesma aritmética; a conta agora mora em `lib/ui/date-range.ts` e a leitura de `to` em `limiteSuperior`. Consertar uma e deixar a outra é como não consertar — a segunda vira o relato de bug do mês seguinte.
+- **O `from` default das duas rotas deslocou junto com o `to`** e foi corrigido: 30 dias contados do FIM do dia cortavam quase todo o primeiro dia da janela. Não afeta os painéis (sempre mandam `from`), mas afeta qualquer consumidor do default documentado.
+- **A linha "medido · estimado" usava o formatador do KPI**, que colapsa tudo abaixo de um centavo em `$ <0,01` — inclusive zero. Como um turn do Max custa ~US$ 0,0004, o caso comum renderizava `$ <0,01 medido · $ <0,01 estimado`, escondendo exatamente a diferença que a linha existe para mostrar. Formatador próprio, com 6 casas, agora coberto por teste.
+
+### Nota de dado — linhas do Max com contagem de token sobreposta
+
+Entre o deploy do `efbd721` (22/08) e o deploy do emissor corrigido, as linhas do Max gravaram `promptTokens` **incluindo** os tokens de cache, porque o OpenAI/OpenRouter conta `cached_tokens` dentro de `prompt_tokens` enquanto esta base adota a convenção disjunta da Anthropic (`calcCostUsd` soma as parcelas).
+
+**O custo não é afetado** — `openai/gpt-5.4-nano` não tem `cacheRead` na `PRICING`, então a parcela zera. O que fica inflado é `totalCacheReadTokens` somado com `totalPromptTokens` no painel, só nessas linhas.
+
+Sem backfill, de propósito: reescrever linha marcada `costSource: "reported"` produziria o pior híbrido possível — pareceria medição e não seria. Para identificar as afetadas:
+
+```sql
+SELECT * FROM "AIUsage"
+ WHERE "agentKey" = 'max' AND "cacheReadTokens" > 0
+   AND "createdAt" < '<timestamp do deploy do emissor corrigido>';
+```
+
 ## [Unreleased] - 2026-08-22 - Custo de IA medido, não estimado (receptor)
 
 ### Adicionado
