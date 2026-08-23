@@ -100,3 +100,51 @@ export function presetRange(
     to: diaUtc(new Date(Date.UTC(ano, mes, 0))),
   };
 }
+
+/**
+ * O rótulo do período — o dia **UTC** de um instante, não o dia local dele.
+ *
+ * ── O bug que isto conserta ──────────────────────────────────────────────
+ *
+ * As rotas devolvem a janela como instante (`from.toISOString()`), e os dois
+ * painéis renderizavam com `new Date(iso).toLocaleDateString("pt-BR")` — ou
+ * seja, no fuso de quem olha. Num fuso NEGATIVO isso derruba a data em um dia
+ * quando o instante é meia-noite UTC, que é exatamente o que o `from` é:
+ *
+ *     from = "2026-07-25T00:00:00.000Z"  →  "24/07/2026"   ✗ um dia atrás
+ *     to   = "2026-08-23T23:59:59.999Z"  →  "23/08/2026"   ✓
+ *
+ * O `to` escapa porque vale o dia INTEIRO (ver `limiteSuperior`), e 23:59:59Z
+ * ainda é o mesmo dia em UTC-3. É essa assimetria que escondeu o defeito: a
+ * borda direita fica certa, então o rótulo parece plausível — e só a esquerda
+ * mente.
+ *
+ * Visto em produção em 22/08, no painel de custo: rótulo `24/07 → 23/08` para
+ * uma janela que o servidor calculou como `25/07 → 23/08`. Os NÚMEROS sempre
+ * estiveram certos; quem mentia era a legenda deles.
+ *
+ * Não é regressão do #369. Antes dele o `to` também era meia-noite, as duas
+ * bordas deslocavam juntas e o rótulo era uniformemente errado. O #369 deu ao
+ * `to` o significado de dia inteiro e, de quebra, consertou a exibição da
+ * direita — deixando a esquerda sozinha e a inconsistência à vista.
+ *
+ * ── Por que UTC, e não o fuso do leitor ──────────────────────────────────
+ *
+ * Porque é o que a janela É: `presetRange` decide em UTC e a rota filtra em
+ * UTC. Um rótulo em horário local descreveria um intervalo que a query não
+ * usou. A ressalva honesta continua a mesma do `limiteSuperior`: para um
+ * tenant em UTC-3, uma chamada feita depois das 21h já conta no "dia seguinte"
+ * desta conta. Resolver ISSO exige o fuso do tenant, que estas rotas não
+ * conhecem, e é outro trabalho (ver issue #371). O que este conserto garante é
+ * mais modesto e verificável: **o rótulo passa a dizer a janela que foi
+ * realmente consultada.**
+ *
+ * Só para as BORDAS da janela. Instante de evento — `sentAt`, `closedAt`,
+ * `createdAt` de um erro — continua em hora local, que é o certo para ele:
+ * ali o leitor quer saber que horas eram para ELE quando aquilo aconteceu.
+ */
+export function rotuloDia(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("pt-BR", { timeZone: "UTC" });
+}
