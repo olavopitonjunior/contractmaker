@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { limiteSuperior } from "@/lib/ui/date-range";
 import { formatUsdPreciso } from "@/lib/ai/format";
-import { presetRange } from "@/lib/ui/date-range";
+import { presetRange, rotuloDia } from "@/lib/ui/date-range";
 
 /**
  * ── POR QUE ESTE ARQUIVO FIXA O FUSO ──────────────────────────────────────
@@ -128,6 +128,54 @@ describe("presetRange", () => {
       from: "2026-08-16",
       to: "2026-08-22",
     });
+  });
+});
+
+/**
+ * O rótulo do período — a legenda da janela, não a janela.
+ *
+ * Achado olhando a TELA de produção em 22/08: o painel dizia
+ * `24/07/2026 → 23/08/2026` para uma janela que o servidor havia calculado
+ * como `25/07 00:00Z → 23/08 23:59:59Z`. Só a borda ESQUERDA mentia.
+ *
+ * A assimetria é o que escondeu o defeito por tanto tempo: o `to` é fim-do-dia
+ * UTC e sobrevive à conversão para UTC-3; o `from` é meia-noite UTC e cai para
+ * o dia anterior. Com a direita certa, o rótulo parece plausível.
+ *
+ * Estes testes SÓ têm sentido com o fuso fixado no topo do arquivo — em UTC as
+ * duas leituras coincidem e passariam com o bug de volta.
+ */
+describe("rotuloDia", () => {
+  /** O caso exato visto na tela, com os instantes que a rota devolveu. */
+  it("a borda esquerda mostra o dia que a query realmente usou", () => {
+    expect(rotuloDia("2026-07-25T00:00:00.000Z")).toBe("25/07/2026");
+  });
+
+  /** A borda direita não pode mudar — ela já estava certa. */
+  it("a borda direita continua no mesmo dia", () => {
+    expect(rotuloDia("2026-08-23T23:59:59.999Z")).toBe("23/08/2026");
+  });
+
+  /**
+   * A prova de que o rótulo descreve a janela: as duas pontas do que
+   * `presetRange` decidiu têm que reaparecer inteiras na legenda.
+   */
+  it("rotula exatamente a janela que presetRange escolheu", () => {
+    const { from, to } = presetRange("30d", new Date("2026-08-23T00:50:00.000Z"));
+    expect(from).toBe("2026-07-25");
+    expect(rotuloDia(`${from}T00:00:00.000Z`)).toBe("25/07/2026");
+    expect(rotuloDia(limiteSuperior(to).toISOString())).toBe("23/08/2026");
+  });
+
+  /** Virada de ano e de mês são onde o deslocamento de um dia mais dói. */
+  it("não escorrega na virada do ano", () => {
+    expect(rotuloDia("2026-01-01T00:00:00.000Z")).toBe("01/01/2026");
+    expect(rotuloDia("2026-03-01T00:00:00.000Z")).toBe("01/03/2026");
+  });
+
+  /** Lixo não vira data inventada. */
+  it("entrada inválida vira travessão, não uma data qualquer", () => {
+    expect(rotuloDia("ontem")).toBe("—");
   });
 });
 
