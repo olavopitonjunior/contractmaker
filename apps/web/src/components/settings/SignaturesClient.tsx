@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { presetRange, type RangePreset } from "@/lib/ui/date-range";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,7 +16,6 @@ import {
   Inbox,
 } from "lucide-react";
 
-type RangePreset = "7d" | "30d" | "mtd" | "last_month";
 
 interface RecentEnvelope {
   id: string;
@@ -85,31 +85,6 @@ function formatDuration(ms: number | null): string {
   return `${(hr / 24).toFixed(1)}d`;
 }
 
-function presetRange(preset: RangePreset): { from: Date; to: Date } {
-  const now = new Date();
-  if (preset === "7d") {
-    return {
-      from: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
-      to: now,
-    };
-  }
-  if (preset === "30d") {
-    return {
-      from: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
-      to: now,
-    };
-  }
-  if (preset === "mtd") {
-    return {
-      from: new Date(now.getFullYear(), now.getMonth(), 1),
-      to: now,
-    };
-  }
-  return {
-    from: new Date(now.getFullYear(), now.getMonth() - 1, 1),
-    to: new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59),
-  };
-}
 
 export function SignaturesClient({ embedded = false }: { embedded?: boolean } = {}) {
   const [preset, setPreset] = useState<RangePreset>("30d");
@@ -123,10 +98,9 @@ export function SignaturesClient({ embedded = false }: { embedded?: boolean } = 
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({
-        from: range.from.toISOString().slice(0, 10),
-        to: range.to.toISOString().slice(0, 10),
-      });
+      // Já vem `YYYY-MM-DD` em UTC do helper compartilhado — sem `.slice()`
+      // aqui, que era onde a conta local virava data UTC deslocada.
+      const params = new URLSearchParams({ from: range.from, to: range.to });
       const res = await fetch(`/api/signatures/metrics?${params}`);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
