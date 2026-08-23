@@ -141,7 +141,11 @@ O webhook auto-provisionado aponta pra `NEXTAUTH_URL/api/webhooks/clicksign/{slu
 
 ## Migrations em build (Vercel)
 
-O build roda `node scripts/vercel-migrate.mjs`, que só executa `prisma migrate deploy` quando `VERCEL_ENV=production` (deploy de prod do projeto), pulando em **preview**. O projeto `web` tem o `DATABASE_URL`/`DIRECT_URL` do escopo **Preview** apontando pro branch Neon de **staging** — então preview de PR nunca migra nem lê o banco de produção. (Contexto: incidente 2026-07-14 em que um preview migrou prod e travou os deploys.)
+Quem migra é o **`build:deploy`**, e é pra ele que o `buildCommand` do `vercel.json` aponta. Ele roda `node scripts/vercel-migrate.mjs`, que só executa `prisma migrate deploy` quando `VERCEL_ENV=production` (deploy de prod do projeto) — pulando em **preview**, em **development** e fora do Vercel. Escape hatch: `FORCE_MIGRATE=1`.
+
+`npm run build` (sem sufixo) **não migra**, de propósito: antes migrava, e um build na máquina de alguém aplicava migration contra o banco que o `.env` daquela pasta apontasse (issue #375).
+
+O projeto `web` tem o `DATABASE_URL`/`DIRECT_URL` do escopo **Preview** apontando pro branch Neon de **staging** — então preview de PR nunca migra nem lê o banco de produção. (Contexto: incidente 2026-07-14 em que um preview migrou prod e travou os deploys.)
 
 ## Asaas sandbox
 
