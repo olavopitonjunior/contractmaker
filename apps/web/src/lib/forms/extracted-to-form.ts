@@ -1,4 +1,5 @@
 import type { UseFormReturn } from "react-hook-form";
+import { isValidBirthdate, isValidCPF, maskCEP } from "./field-formats";
 
 /**
  * Granularidade de atribuição de cada documento na Etapa 0:
@@ -257,12 +258,221 @@ export function parseEndereco(value: unknown): { rua?: string; numero?: string }
   return { rua: value.trim() };
 }
 
+/**
+ * Textos que o modelo devolve quando NÃO conseguiu ler o campo, mas ainda
+ * assim precisa devolver uma string.
+ *
+ * Sem este filtro, um `"null"` do OCR era gravado no formulário como o TEXTO
+ * "null" — o corretor via a palavra no campo e tinha que apagar à mão. Medido
+ * no `gemma-4-31b-it` sem `nullable` no schema: todos os campos ilegíveis
+ * voltaram como a string `"null"`.
+ *
+ * `[ilegível]` e `[?]` vêm dos próprios prompts, que instruem o modelo a
+ * marcar trecho ruim (ver `PARTIAL_HINT` em lib/extraction/field-schemas).
+ */
+const SENTINELAS_DE_AUSENCIA = new Set([
+  "null",
+  "undefined",
+  "none",
+  "n/a",
+  "na",
+  "nao informado",
+  "não informado",
+  "nao consta",
+  "não consta",
+  "nao identificado",
+  "não identificado",
+  "desconhecido",
+  "ilegivel",
+  "ilegível",
+  "[ilegivel]",
+  "[ilegível]",
+  "[?]",
+  "-",
+  "--",
+  "—",
+  "?",
+]);
+
+/** `true` quando o valor é um "não li isto" disfarçado de conteúdo. */
+export function isSentinelaDeAusencia(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  return SENTINELAS_DE_AUSENCIA.has(value.trim().toLowerCase());
+}
+
+/**
+ * Converte `DD/MM/AAAA` para ISO, validando o calendário. Não opina sobre
+ * passado ou futuro — quem decide isso é o chamador, porque a resposta muda
+ * por campo: nascimento não pode ser futuro, validade de CNH **tem** que ser.
+ *
+ * Devolve `null` para data que não existe no calendário (31/02) ou com ano
+ * implausível para documento.
+ */
+function toIsoCalendarDate(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const s = value.trim();
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  let y: number, m: number, d: number;
+  if (iso) {
+    y = +iso[1]; m = +iso[2]; d = +iso[3];
+  } else if (br) {
+    d = +br[1]; m = +br[2]; y = +br[3];
+  } else {
+    return null;
+  }
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  // Ano implausível para documento. O teto é generoso de propósito: validade
+  // de CNH e prazo de procuração são futuros legítimos.
+  if (y < 1900 || y > 2200) return null;
+  const dt = new Date(y, m - 1, d, 12, 0, 0);
+  // Rejeita overflow (31/02 viraria 03/03).
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) {
+    return null;
+  }
+  return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+/**
+ * Normaliza data de NASCIMENTO para ISO `YYYY-MM-DD`, aceitando `DD/MM/AAAA`.
+ *
+ * **Por que existe:** o campo do formulário é `<input type="date">`, que só
+ * aceita ISO. Uma data em `DD/MM/AAAA` passava pelo `coerce` genérico
+ * (`value.trim()`), era gravada por `setValue`, e o browser simplesmente
+ * ignorava o valor — **o campo ficava vazio, sem erro nenhum**. O prompt pede
+ * ISO, mas prompt é pedido, não garantia: o modelo devolve `12/05/1980` com
+ * frequência, que é o formato impresso no próprio RG.
+ *
+ * Aplica as regras de `isValidBirthdate` (calendário válido, ano ≥ 1900, não
+ * futura) para não haver duas definições de "data de nascimento plausível".
+ */
+export function normalizeIsoDate(
+  value: unknown,
+  today: Date = new Date()
+): string | null {
+  if (typeof value !== "string") return null;
+  const s = value.trim();
+  if (!s || !isValidBirthdate(s, today)) return null;
+  return toIsoCalendarDate(s);
+}
+
+/** Campos do formulário que o browser exige em ISO (`<input type="date">`). */
+const DATE_FORM_FIELDS = new Set(["data_nascimento"]);
+
 export function coerce(field: string, value: unknown): unknown {
   if (value === null || value === undefined || value === "") return undefined;
+  // Antes de qualquer coisa: "null" e companhia não são conteúdo.
+  if (isSentinelaDeAusencia(value)) return undefined;
+  if (DATE_FORM_FIELDS.has(field)) return normalizeIsoDate(value) ?? undefined;
   if (field === "cpf") return sanitizeCpf(value);
   if (field === "uf") return sanitizeUf(value);
+  if (field === "cep") {
+    // Gate ANTES de mascarar. `maskCEP` faz `slice(0, 8)`, então um valor com
+    // dígitos a mais ("Rua X, 123 - CEP 01310100") seria TRUNCADO num CEP
+    // plausível e errado — 8 dígitos, passa na validação, e segue para DIMOB e
+    // Asaas como se fosse bom. Errado que parece certo é pior que ausente.
+    const digits = onlyDigits(String(value));
+    return digits.length === 8 ? maskCEP(digits) : undefined;
+  }
   if (field === "rg") return typeof value === "string" ? value.trim() : undefined;
   return typeof value === "string" ? value.trim() : value;
+}
+
+/**
+ * Por que um campo extraído não chegou (ou não deveria confiar) no formulário.
+ *
+ * - `ausente`      — o modelo devolveu sentinela ("null", "[ilegível]"): não leu.
+ * - `formato`      — veio conteúdo, mas inaproveitável (data impossível, CEP curto).
+ * - `cpf_invalido` — 11 dígitos, mas dígito verificador não fecha. É o mais
+ *                    perigoso dos três: parece um CPF, é gravado no formulário,
+ *                    e só quebra lá na frente (certidão, ClickSign, DIMOB).
+ */
+export type ExtractionIssueReason = "ausente" | "formato" | "cpf_invalido";
+
+export interface ExtractionIssue {
+  /** Chave como o OCR devolveu (ex.: `cpf_numero`). */
+  ocrKey: string;
+  /** Valor cru, para o revisor comparar com o documento. */
+  raw: unknown;
+  reason: ExtractionIssueReason;
+}
+
+/** Chaves de OCR que carregam CPF, em qualquer categoria de documento. */
+const CPF_OCR_KEYS = [
+  "cpf_numero",
+  "conjuge_cpf",
+  "outorgante_cpf",
+  "outorgado_cpf",
+  "conjuge1_cpf",
+  "conjuge2_cpf",
+];
+
+/**
+ * Datas que NÃO podem estar no futuro. Nascimento, emissão e lavratura são
+ * fatos já ocorridos.
+ */
+const PAST_DATE_OCR_KEYS = ["data_nascimento", "data_emissao", "data_lavratura", "data_casamento"];
+
+/**
+ * Datas que podem — e normalmente devem — estar no futuro.
+ *
+ * `data_validade` é `required` em `CNH_FIELDS` e, numa CNH válida, é futura
+ * por definição. Validá-la como data de nascimento marcaria **toda CNH boa**
+ * como problema, e uma lista de revisão que acusa o caso normal ensina o
+ * revisor a ignorá-la — que é o oposto do que ela existe para fazer.
+ */
+const FUTURE_OK_DATE_OCR_KEYS = ["data_validade", "prazo_validade"];
+
+/**
+ * Lista o que a extração produziu mas o formulário vai descartar ou aceitar
+ * sem merecer confiança.
+ *
+ * **Por que é função separada de `mapExtractedToForm`:** o mapper devolve
+ * `number` (campos preenchidos) e tem vários callers; mudar a assinatura
+ * quebraria todos. Além disso, o consumidor natural disto é a UI de revisão,
+ * que precisa da lista ANTES de aplicar — não como efeito colateral de aplicar.
+ *
+ * O problema que resolve: hoje `applyField` descarta valor inválido em
+ * silêncio, então "aplicou 0 campos" é indistinguível de "extração ruim". O
+ * corretor não tem como saber que o CPF veio ilegível — só descobre quando a
+ * certidão falha.
+ */
+export function collectExtractionIssues(
+  fields: Record<string, unknown> | null | undefined,
+  today: Date = new Date()
+): ExtractionIssue[] {
+  if (!fields) return [];
+  const issues: ExtractionIssue[] = [];
+  const push = (ocrKey: string, raw: unknown, reason: ExtractionIssueReason) =>
+    issues.push({ ocrKey, raw, reason });
+
+  for (const [ocrKey, raw] of Object.entries(fields)) {
+    if (raw === null || raw === undefined || raw === "") continue;
+    if (isSentinelaDeAusencia(raw)) {
+      push(ocrKey, raw, "ausente");
+      continue;
+    }
+    if (CPF_OCR_KEYS.includes(ocrKey)) {
+      // `String(raw)`: o schema pede string, mas prompt é pedido, não garantia
+      // — e um CPF que voltou como número não é um CPF ruim.
+      const digits = onlyDigits(String(raw));
+      if (digits.length !== 11) push(ocrKey, raw, "formato");
+      else if (!isValidCPF(digits)) push(ocrKey, raw, "cpf_invalido");
+      continue;
+    }
+    if (PAST_DATE_OCR_KEYS.includes(ocrKey) && !normalizeIsoDate(raw, today)) {
+      push(ocrKey, raw, "formato");
+      continue;
+    }
+    if (FUTURE_OK_DATE_OCR_KEYS.includes(ocrKey) && !toIsoCalendarDate(raw)) {
+      push(ocrKey, raw, "formato");
+      continue;
+    }
+    if (ocrKey === "cep" && onlyDigits(String(raw)).length !== 8) {
+      push(ocrKey, raw, "formato");
+    }
+  }
+  return issues;
 }
 
 /**
@@ -445,7 +655,14 @@ export function mapExtractedToForm(
       // the "conjuge" sub-object. We only fill if the slot's conjuge is empty.
       const conjuge2Nome = fields.conjuge2_nome;
       const conjuge2Cpf = sanitizeCpf(fields.conjuge2_cpf);
-      if (conjuge2Nome && typeof conjuge2Nome === "string") {
+      // Este caminho não passa por `applyField`, então o filtro de sentinela
+      // precisa ser explícito: sem ele, um `"null"` do modelo virava o NOME do
+      // cônjuge — e ainda contava como campo preenchido.
+      if (
+        conjuge2Nome &&
+        typeof conjuge2Nome === "string" &&
+        !isSentinelaDeAusencia(conjuge2Nome)
+      ) {
         const curr = form.getValues(`${basePath}.conjuge.nome`);
         if (!curr) {
           form.setValue(
@@ -474,7 +691,13 @@ export function mapExtractedToForm(
     ) {
       const conjugeNome = fields.conjuge_nome;
       const conjugeCpf = sanitizeCpf(fields.conjuge_cpf);
-      if (conjugeNome && typeof conjugeNome === "string") {
+      // Mesmo motivo do bloco de certidão acima: fora do `applyField`, o
+      // sentinela tem que ser barrado à mão.
+      if (
+        conjugeNome &&
+        typeof conjugeNome === "string" &&
+        !isSentinelaDeAusencia(conjugeNome)
+      ) {
         const curr = form.getValues(`${basePath}.conjuge.nome`);
         if (!curr) {
           form.setValue(
@@ -1015,11 +1238,22 @@ export function applyFichaResumo(
 
   const setIfEmpty = (path: string, value: unknown) => {
     if (value === undefined || value === null || value === "") return;
+    // A ficha-resumo escreve direto no path, sem passar por `applyField` — e
+    // por isso escapava inteira da normalização: `data_nascimento` em
+    // DD/MM/AAAA sumia no `<input type="date">`, e `"null"` do modelo virava
+    // texto. `setIfEmpty` é o ponto único por onde toda a ficha passa, então é
+    // aqui que a coerção tem que estar.
+    //
+    // O nome do campo é o último segmento do path (`vendedores.0.cep` → `cep`),
+    // que é exatamente a chave que `coerce` espera.
+    const formField = path.slice(path.lastIndexOf(".") + 1);
+    const coerced = coerce(formField, value);
+    if (coerced === undefined || coerced === null || coerced === "") return;
     if (skipIfDirty) {
       const current = form.getValues(path);
       if (current !== undefined && current !== null && current !== "") return;
     }
-    form.setValue(path, value as never, { shouldDirty: true, shouldTouch: true });
+    form.setValue(path, coerced as never, { shouldDirty: true, shouldTouch: true });
     filled += 1;
   };
 
