@@ -9,6 +9,7 @@ import { getAgentBudgetStatus } from "@/lib/ai/budget";
 import { resolveAgentProfile } from "@/lib/ai/agents/resolve";
 import { composeSystemPrompt } from "@/lib/ai/agents/prompt-blocks";
 import { maxAgentRouteGate } from "@/lib/max/gate";
+import { getMaxPolicy, POLITICA_VAZIA } from "@/lib/max/policy";
 import {
   AGENT_REGISTRY,
   EXTERNAL_AGENT_KEYS,
@@ -76,9 +77,21 @@ export const GET = withApi(
     });
     if (denied) return denied;
 
-    const [profile, budget] = await Promise.all([
+    /**
+     * A política de capabilities entra NESTA chamada, e não numa rota própria.
+     *
+     * O `gate` do Max já faz este GET uma vez por turn para ler `enabled` —
+     * uma rota separada custaria um segundo round-trip por mensagem, e o
+     * orçamento de tempo do turn vive dentro de uma function de 60 s que já
+     * gastou identidade, transcrição e RAG.
+     *
+     * Só para o `max`: os outros agentes externos não têm política, e devolver
+     * a forma vazia para eles sugeriria uma configuração que não existe.
+     */
+    const [profile, budget, maxPolicy] = await Promise.all([
       resolveAgentProfile(agentKey, orgId),
       getAgentBudgetStatus(orgId, agentKey),
+      agentKey === "max" ? getMaxPolicy(orgId) : Promise.resolve(null),
     ]);
 
     return NextResponse.json({
@@ -104,6 +117,17 @@ export const GET = withApi(
         composed: composeSystemPrompt("", profile),
       },
       ragScope: profile.ragScope,
+      /**
+       * Teto do que o agente pode OFERECER a cada sujeito. **Nunca alarga**: o
+       * que volta de fato continua sendo decidido pelo RBAC no `where` das
+       * queries, onde esta política não alcança.
+       *
+       * Org sem linha devolve a forma VAZIA, não `null` — ausência de política
+       * e política vazia significam a mesma coisa (nenhuma capability,
+       * fail-closed), e dar duas formas para um significado só obrigaria o
+       * outro lado a tratar dois casos idênticos.
+       */
+      maxPolicy: agentKey === "max" ? (maxPolicy ?? POLITICA_VAZIA) : undefined,
       /**
        * Pra o agente externo poder avisar antes de ser cortado. O corte em si é
        * responsabilidade de quem gasta: aqui não há turn a bloquear.

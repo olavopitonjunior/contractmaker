@@ -128,6 +128,10 @@ export function DocumentCard({
         className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted"
       >
         {isImage && doc.status !== "uploading" ? (
+          // Miniatura de upload do usuário, URL de blob arbitrária. Trocar por
+          // `next/image` exige dimensões e allowlist de domínio — mudança real,
+          // fora do escopo deste PR de higiene (#374).
+          // eslint-disable-next-line @next/next/no-img-element
           <img src={doc.fileUrl} alt={doc.filename} className="h-full w-full object-cover" />
         ) : (
           <FileText className="h-8 w-8 text-muted-foreground" />

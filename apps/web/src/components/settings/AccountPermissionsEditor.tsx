@@ -67,6 +67,9 @@ export function AccountPermissionsEditor({ accountId }: { accountId: string }) {
 
   useEffect(() => {
     void load();
+    // Dependência pré-existente à adoção do ESLint (#374). Incluir `load` muda
+    // quando o efeito redispara; não foi avaliado neste PR de higiene.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId]);
 
   function toggle(userId: string, cap: string, checked: boolean) {

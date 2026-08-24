@@ -78,6 +78,9 @@ export function CommentsPanel({
 
   useEffect(() => {
     load();
+    // Dependência pré-existente à adoção do ESLint (#374). Incluir `load` muda
+    // quando o efeito redispara; não foi avaliado neste PR de higiene.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contractId]);
 
   async function resolve(id: string, anchorId: string) {

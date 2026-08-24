@@ -376,7 +376,7 @@ Não-óbvios (enums e structure: ver `prisma/schema.prisma`):
 - **`VOYAGE_API_KEY` opcional:** sem ele, `query_knowledge_base` e `find_similar_contracts` caem em fallback ILIKE/fingerprint
 - **Upload de imagens** `/api/contracts/[id]/images`: 5MB max, JPEG/PNG/WebP. Requer `BLOB_READ_WRITE_TOKEN`
 - **Cron certidões** requer Vercel Pro. Sem ele, `awaiting_portal` fica eterno. Schedule `*/5min` em `vercel.json`
-- **Prisma migrations** rodam via `prisma migrate deploy` no build. Mudanças em dados (rename, backfills) → migration SQL plain idempotente
+- **Prisma migrations** rodam via `prisma migrate deploy` no `build:deploy` (o `buildCommand` do `vercel.json`), só com `VERCEL_ENV=production`. `npm run build` local **não** migra. Mudanças em dados (rename, backfills) → migration SQL plain idempotente
 - **Auto-promote stage não é retroativo:** webhook ClickSign close OU charge antes da migration = deal fica em stage anterior. Drag-drop manual
 - **Split Asaas:** rejeita wallet própria, duplicatas, max 10. Sandbox rejeita docs de identidade via API — usar `approveSandboxAccount`
 - **Form público é anônimo até o envio; depois fecha.** Gate em `lib/forms/form-gate.ts`: `completedAt != null && reopenedAt == null` → só membro da org (checa OrgMembership, não só sessão). Discrimina por `completedAt`, NÃO por `status` (deal de import nasce `vinculado` e nunca vira `completo`). Vale pras 2 esteiras (`/api/forms/[token]` e `/api/locacao/forms/[token]`) + subtoken/anexos/from-main. Reabrir: `POST .../lock {locked:false,reopen:true}`. Anexos já vistos seguem acessíveis (URL pública do Blob)

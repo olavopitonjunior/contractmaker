@@ -185,7 +185,7 @@ produto: **notificação de sistema por e-mail passa a sair de madrugada**.
 
 | Rota | Escopo | Fase |
 |---|---|---|
-| `GET /api/agents/profile?agentKey=max` | `agents:r` | 1 — persona, modelo, `ragScope`, budget, kill switch |
+| `GET /api/agents/profile?agentKey=max` | `agents:r` | 1 — modelo, `ragScope`, budget, kill switch · **F5: `maxPolicy`** (§11) |
 | `POST /api/agents/usage` | `agents:rw` (**só Bearer**) | 2 — custo por turn, uma linha **por modelo**. Aceita `costUsd` do provedor quando `provider: "openrouter"` (§9.1) |
 | `POST /api/agents/knowledge/search` | `agents:r` | 2 — RAG escopado pelo `ragScope` do perfil |
 | `GET /api/users/by-phone?phone=` | `metrics:r` | 1 — telefone → org/usuário |
@@ -475,3 +475,108 @@ A bridge Baileys (`~/.openclaw/bin/wa-bridge/`) morre com a mudança pra Z-API
 gateway OpenClaw também não: 48 execuções ociosas por dia com sessão sem poda
 queimaram US$ 150 de OpenRouter num agente fora de produção. Em LangGraph, cron
 externo e contexto podado.
+
+---
+
+## 11. Política de capabilities do Max (`maxPolicy`)
+
+**Entregue no PR 4 da Fase 5.** Trafega dentro de `GET /api/agents/profile`, e
+não numa rota própria: o `gate` do Max já faz aquele GET uma vez por turn para
+ler `enabled`, e uma rota separada custaria um segundo round-trip por mensagem
+dentro de uma function de 60 s que já gastou identidade, transcrição e RAG.
+
+### 11.1 Forma da resposta
+
+```jsonc
+// GET /api/agents/profile?agentKey=max  →  200
+{
+  "agentKey": "max",
+  "enabled": true,
+  // ... demais campos inalterados ...
+  "maxPolicy": {
+    "byRole": {
+      "admin": ["deal.list", "deal.pending"],
+      "sales": ["deal.list", "deal.detail", "proposal.list"]
+    },
+    "byRecipient": {
+      "sr_wesley": { "allow": ["deal.list"], "deny": ["deal.detail"] }
+    },
+    "brokerDefault": ["deal.pending"]
+  }
+}
+```
+
+Este exemplo é **o mesmo vetor** dos testes de paridade dos dois repos (§11.5) —
+byte a byte. Se divergir dele, é o documento que está errado.
+
+`maxPolicy` só aparece para `agentKey=max`. Para os demais agentes externos ela
+é **omitida** — devolver a forma vazia sugeriria uma configuração que não
+existe.
+
+### 11.2 As regras que o contrato garante
+
+| Regra | Consequência |
+|---|---|
+| **Fail-closed** | Papel ausente em `byRole` = **nenhuma** capability. Org sem linha na tabela devolve a forma VAZIA (`{byRole:{}, byRecipient:{}, brokerDefault:[]}`), nunca `null` — ausência e vazio significam a mesma coisa e não podem ter duas formas. |
+| **`deny` vence `allow`** | Sempre, sem exceção configurável. É o que faz "esta pessoa pode?" ser uma busca em vez de uma simulação de precedência. |
+| **Capability desconhecida é ignorada** | Na LEITURA, pelo Max. Um rollback de código para um catálogo menor concede menos; nunca fica indisponível. |
+| **O ImobPro não valida nome de capability** | O catálogo canônico é `max-agent/src/graph/policy.ts`. Uma segunda lista aqui existiria para divergir, e obrigaria deploy coordenado a cada capability nova. |
+
+### 11.3 As chaves de `byRole`, e o que elas ainda NÃO distinguem
+
+São valores de `OrgMembership.role`: `owner | admin | finance | sales | viewer |
+custom | member`.
+
+⚠️ **Papel customizado de tenant carrega o literal `custom`**, com as permissões
+reais em `customRoleId → CustomRole.permissions` — e o `by-phone` **não devolve
+`customRoleId`**. Consequência prática: um tenant com um "Estagiário" e um
+"Diretor" customizados não consegue dar tetos diferentes aos dois; configurar
+`byRole.custom` alcança os dois.
+
+Não bloqueia esta entrega (nada consome a política ainda), mas está congelado no
+contrato e precisa de decisão antes das leituras de negócio: ou o `by-phone`
+passa a devolver `customRoleId`, ou as chaves ganham a forma `custom:<id>`.
+
+### 11.4 A política NUNCA alarga — com duas ressalvas
+
+Ela decide **quais ferramentas o agente chega a ver** — o teto do que ele pode
+oferecer. **Não** decide quais linhas voltam: isso é `dealScopeWhere` /
+`proposalScopeWhere` (`lib/security/rbac/check.ts`), no `where` da query, onde
+esta política não alcança. Se o escopo daquele gerente não enxerga o negócio,
+nenhuma configuração aqui o faz aparecer.
+
+As duas travas são independentes de propósito: esta é configuração de tenant,
+aquela é autorização de plataforma.
+
+**Ressalva 1 — `byRecipient[id].allow` SOMA ao `brokerDefault`.** É a única
+porta de alargamento do sistema, e está no desenho: é assim que a imobiliária
+libera um corretor específico.
+
+**Ressalva 2 — corretor comissionado não tem a segunda trava.** Um
+`SplitRecipient` não tem `User`, logo não tem `EffectivePermissions` e não passa
+por `dealScopeWhere`/`proposalScopeWhere`. Para ele, `brokerDefault` +
+`byRecipient` é o **único** freio.
+
+Cruzando as duas: a porta de alargamento se aplica justamente a quem não tem
+RBAC atrás. É o ponto mais sensível deste desenho, e o que o cerca no servidor é
+a **projeção por tipo de sujeito** (regra 5), entregue no PR 5 — cujo teste
+afirma a **ausência** dos campos proibidos, não a presença dos permitidos.
+
+### 11.5 Paridade obrigatória (regra 1 do `CLAUDE.md`)
+
+O vetor fixo deste contrato existe nos dois repos, com o MESMO literal:
+
+- `apps/web/src/lib/max/__tests__/policy-parity.test.ts` (aqui)
+- `max-agent/src/graph/__tests__/policy-parity.test.ts` (lá)
+
+**Por que um contrato de FORMA precisa de vetor tanto quanto o do HMAC:** o modo
+de falha do HMAC é 401 em toda chamada — alguém percebe. O desta rota é
+**silencioso e assimétrico**. Renomear `brokerDefault` aqui não quebra nada lá:
+o Max lê um campo ausente, resolve fail-closed, e o corretor comissionado
+simplesmente para de receber o que a imobiliária configurou. Sem log, sem erro,
+sem teste vermelho — a postura segura é justamente o que esconde a divergência.
+
+Por isso o teste do lado do Max **remove cada chave e exige que o resultado
+mude**: se remover `brokerDefault` não alterasse nada, é porque ele não a estava
+lendo.
+
