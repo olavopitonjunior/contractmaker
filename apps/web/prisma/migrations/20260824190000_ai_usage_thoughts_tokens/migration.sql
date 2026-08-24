@@ -1,0 +1,37 @@
+-- Tokens de raciocínio em AIUsage.
+--
+-- ── Por que existe ────────────────────────────────────────────────────────
+--
+-- Todos os call-sites do Gemini gravavam `completionTokens: candidatesTokenCount`
+-- e ignoravam `thoughtsTokenCount`, que o SDK devolve como campo SEPARADO. Só
+-- que o Google fatura raciocínio como output — a tabela de preços diz
+-- literalmente "Output price (including thinking tokens)".
+--
+-- Medido numa matrícula, em 2026-08-24:
+--
+--   gemini-2.5-flash (produção):  65 candidates  +  312 thoughts
+--   gemini-3.5-flash-lite:       256 candidates  +    0 thoughts
+--   gemini-3.1-flash-lite:       257 candidates  +    0 thoughts
+--   gemma-4-31b-it:              243 candidates  +    0 thoughts
+--
+-- Ou seja: o painel reportava ~1/5 do custo de output real do OCR, e o modelo
+-- em produção era justamente o único que gastava raciocínio. A correção do
+-- cálculo (lib/ai/usage.ts::geminiUsageToTokens) faz o custo reportado do OCR
+-- SUBIR ~4x sem que nada tenha mudado em produção — é a subcontagem sendo
+-- corrigida, não regressão.
+--
+-- ── O que a coluna guarda ────────────────────────────────────────────────
+--
+-- A parte de `completionTokens` que foi raciocínio. Está DENTRO de
+-- completionTokens, não somada por fora: `totalTokens` não muda de semântica.
+-- Existe para o painel conseguir separar "quanto do custo é o modelo pensando"
+-- de "quanto é a resposta que o usuário recebeu" — que é a métrica que decide
+-- troca de modelo.
+--
+-- Linhas anteriores a esta migration ficam em 0. Zero em linha antiga significa
+-- NÃO MEDIDO, não "não houve raciocínio" — o custo histórico do OCR continua
+-- subestimado no banco e não há como recuperá-lo: o provedor não devolve
+-- usageMetadata retroativo. Comparações antes/depois desta data têm que ser
+-- feitas com essa ressalva.
+
+ALTER TABLE "AIUsage" ADD COLUMN "thoughtsTokens" INTEGER NOT NULL DEFAULT 0;

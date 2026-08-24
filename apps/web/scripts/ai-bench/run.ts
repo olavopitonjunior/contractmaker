@@ -27,7 +27,8 @@ import fs from "fs";
 import path from "path";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenAI } from "@google/genai";
-import { calcCostUsd } from "../../src/lib/ai/usage";
+import { calcCostUsd, geminiUsageToTokens } from "../../src/lib/ai/usage";
+import type { GeminiUsageMetadata } from "../../src/lib/ai/usage";
 import {
   HAIKU_MODEL,
   SONNET_MODEL,
@@ -117,12 +118,16 @@ async function callGemini(
     contents: prompt,
     config: { temperature: 0 },
   });
-  const usage = (res as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } })
-    .usageMetadata;
+  const usage = (res as { usageMetadata?: GeminiUsageMetadata }).usageMetadata;
+  // `geminiUsageToTokens` e não `candidatesTokenCount` cru: o raciocínio é
+  // faturado como output, e é justamente aqui que ignorá-lo enviesaria a
+  // decisão. Um modelo que pensa muito pareceria barato exatamente no relatório
+  // que existe para escolher o modelo.
+  const tok = geminiUsageToTokens(usage, model);
   return {
     text: res.text ?? "",
-    promptTok: usage?.promptTokenCount ?? 0,
-    completionTok: usage?.candidatesTokenCount ?? 0,
+    promptTok: tok.promptTokens,
+    completionTok: tok.completionTokens,
   };
 }
 

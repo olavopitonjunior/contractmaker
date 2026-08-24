@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
-import { recordAIUsage } from "@/lib/ai/usage";
+import { recordAIUsage, geminiUsageToTokens } from "@/lib/ai/usage";
+import type { GeminiUsageMetadata } from "@/lib/ai/usage";
 
 /**
  * Áudio e imagem de WhatsApp → texto, para o Max.
@@ -128,15 +129,13 @@ export async function transcribeMedia(
 
     const usage = (
       response as {
-        usageMetadata?: {
-          promptTokenCount?: number;
-          candidatesTokenCount?: number;
-        };
+        usageMetadata?: GeminiUsageMetadata;
       }
     ).usageMetadata;
 
     const text = (response.text ?? "").trim();
 
+    const tok = geminiUsageToTokens(usage, MODEL);
     recordAIUsage({
       orgId: p.orgId,
       userId: p.userId ?? null,
@@ -144,8 +143,9 @@ export async function transcribeMedia(
       provider: "gemini",
       model: MODEL,
       operation: "max_transcribe",
-      promptTokens: usage?.promptTokenCount ?? 0,
-      completionTokens: usage?.candidatesTokenCount ?? 0,
+      promptTokens: tok.promptTokens,
+      completionTokens: tok.completionTokens,
+      thoughtsTokens: tok.thoughtsTokens,
       latencyMs: Date.now() - t0,
       success: text.length > 0,
     });

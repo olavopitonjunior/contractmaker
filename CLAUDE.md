@@ -271,7 +271,7 @@ Registry = `SplitRecipient kind="commissioner"` + flags `notifyBy*` (tela `/corr
 
 `AIUsage`: tokens, custo USD, latência, provider (anthropic/gemini/voyage), model, operation, `toolsUsed[]`, `iterations`, sucesso/erro. Operations: `chat | passive_open | passive_edit | ocr_form | ocr_tool | extract_ccv_doc | embed_kb | embed_memory | embed_query | summarize_memory | clause_generate | doc_analysis`.
 
-**Helper `src/lib/ai/usage.ts`:** `PRICING` hardcoded (Claude Opus/Sonnet/Haiku, Gemini 2.5 Flash/Lite/2.0, Voyage law-2/v3) — **atualizar manual** (última revisão 2026-04-14). `calcCostUsd(model, prompt, completion, cacheRead, cacheWrite)` retorna 0 pra modelo desconhecido. `recordAIUsage` é fire-and-forget, nunca lança, error truncado em 500 chars. Agente agrega N iterações em 1 record com `iterations=N` e `toolsUsed` deduplicado.
+**Helper `src/lib/ai/usage.ts`:** `PRICING` hardcoded (Claude, Gemini 2.5/3.1/3.5, Gemma 4, Voyage) — **atualizar manual** (última revisão 2026-08-24). `calcCostUsd(model, prompt, completion, cacheRead, cacheWrite)` retorna 0 pra modelo desconhecido. Todo call-site do Gemini DEVE usar `geminiUsageToTokens()`: `thoughtsTokenCount` vem separado mas é faturado como output — ignorá-lo subestimava o custo do OCR em ~4x. `recordAIUsage` é fire-and-forget, nunca lança, error truncado em 500 chars. Agente agrega N iterações em 1 record com `iterations=N` e `toolsUsed` deduplicado.
 
 **Dashboard:** `/settings/ai-usage` (`AIUsageClient.tsx`) — 4 KPI cards, line chart SVG inline, bar rows CSS, top 10 users/contratos. Filtros: 7d/30d/mês atual/anterior. API: `GET /api/ai-usage?from=YYYY-MM-DD&to=YYYY-MM-DD`.
 
