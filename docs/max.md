@@ -495,16 +495,19 @@ dentro de uma function de 60 s que já gastou identidade, transcrição e RAG.
   // ... demais campos inalterados ...
   "maxPolicy": {
     "byRole": {
-      "manager": ["deal.list", "deal.pending"],
-      "sales":   ["deal.list", "deal.detail", "proposal.list"]
+      "admin": ["deal.list", "deal.pending"],
+      "sales": ["deal.list", "deal.detail", "proposal.list"]
     },
     "byRecipient": {
-      "sr_wesley": { "allow": ["deal.pending"], "deny": ["deal.detail"] }
+      "sr_wesley": { "allow": ["deal.list"], "deny": ["deal.detail"] }
     },
     "brokerDefault": ["deal.pending"]
   }
 }
 ```
+
+Este exemplo é **o mesmo vetor** dos testes de paridade dos dois repos (§11.5) —
+byte a byte. Se divergir dele, é o documento que está errado.
 
 `maxPolicy` só aparece para `agentKey=max`. Para os demais agentes externos ela
 é **omitida** — devolver a forma vazia sugeriria uma configuração que não
