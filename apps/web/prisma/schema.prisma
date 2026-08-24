@@ -388,7 +388,54 @@ model Organization {
   ilistConnection IListConnection?
   ilistListings   IListListing[]
 
+  // Max — o que o agente pode OFERECER a cada sujeito desta org. Nunca alarga:
+  // quais linhas voltam continua sendo do RBAC. Ver MaxCapabilityPolicy.
+  maxCapabilityPolicy MaxCapabilityPolicy?
+
   sequences OrgSequence[]
+}
+
+/// Política de capabilities do Max, por tenant.
+///
+/// **O que ela decide, e o que ela NÃO decide.** Ela decide quais ferramentas o
+/// agente chega a ver — o teto do que ele pode oferecer. Ela **não** decide
+/// quais linhas voltam: isso é `dealScopeWhere`/`proposalScopeWhere`, que roda
+/// no servidor e que esta tabela não alcança. Se o escopo do gerente não
+/// enxerga o negócio, nenhuma configuração aqui o faz aparecer. É por isso que
+/// a política **nunca alarga** — ela só estreita o que o RBAC já permitiu.
+///
+/// Uma linha por org (`@unique` em orgId), e não uma por sujeito: a
+/// granularidade fina mora nos JSONs, onde ela é editável sem migration a cada
+/// capability nova. Capability é string do catálogo em
+/// `max-agent/src/graph/policy.ts`; nome desconhecido na LEITURA é ignorado, e
+/// isso é deliberado — um rollback de código para um catálogo menor tem que
+/// conceder menos, nunca ficar indisponível.
+model MaxCapabilityPolicy {
+  id    String @id @default(cuid())
+  orgId String @unique
+
+  /// `{ [rolePreset]: Capability[] }`. Papel **ausente = nenhuma capability**
+  /// (fail-closed, regra 3 da governança do Max no CLAUDE.md). O default `{}`
+  /// não é conveniência: é o que faz toda org nascer sem conceder nada.
+  byRole Json @default("{}")
+
+  /// `{ [splitRecipientId]: { allow?: Capability[], deny?: Capability[] } }`.
+  /// `deny` vence `allow` — sempre, e sem exceção configurável, para que
+  /// "esta pessoa pode?" seja uma busca e não uma simulação de precedência.
+  byRecipient Json @default("{}")
+
+  /// Capabilities do corretor comissionado (`SplitRecipient`) sem override.
+  /// Fail-closed por padrão — ele não tem RBAC, então é o único freio.
+  brokerDefault Json @default("[]")
+
+  /// Quem mexeu por último. Política é decisão de gente, e mudança dela sem
+  /// autor é a que ninguém consegue explicar depois.
+  updatedBy String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 }
 
 /// Contador sequencial por (org, escopo) — hoje só o código da proposta

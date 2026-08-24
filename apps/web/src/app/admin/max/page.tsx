@@ -10,6 +10,8 @@ import { MAX_AGENT_KEY } from "@/lib/max/provisioning";
 import { MaxStatusPanel } from "./MaxStatusPanel";
 import { MaxConversationsPanel } from "./MaxConversationsPanel";
 import { ReprovisionButton } from "./ReprovisionButton";
+import { MaxPolicyPanel } from "./MaxPolicyPanel";
+import { getMaxPolicy } from "@/lib/max/policy";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Max — Mission Control" };
@@ -152,6 +154,16 @@ export default async function MaxMissionControlPage({
     ? orgs.find((o) => o.id === searchParams.orgId)?.name
     : undefined;
 
+  /**
+   * Política só com tenant escolhido, pelo mesmo motivo das conversas: ela é
+   * por org, e uma lista de todas de uma vez não responde pergunta nenhuma.
+   *
+   * `getMaxPolicy` nunca lança — falha de leitura cai na forma vazia, que é o
+   * fail-closed. O painel então mostra "nenhuma capability", que é a verdade
+   * operacional do que o agente pode oferecer naquele momento.
+   */
+  const policy = searchParams.orgId ? await getMaxPolicy(searchParams.orgId) : null;
+
   return (
     <div className="mx-auto max-w-5xl p-6">
       <header className="mb-6">
@@ -257,6 +269,10 @@ export default async function MaxMissionControlPage({
       </section>
 
       <MaxStatusPanel result={status} />
+
+      {policy && orgEscolhida ? (
+        <MaxPolicyPanel policy={policy} orgNome={orgEscolhida} />
+      ) : null}
 
       <MaxConversationsPanel
         result={conversas}
