@@ -555,6 +555,48 @@ describe("collectExtractionIssues", () => {
   it("CPF que veio como número não é falso positivo", () => {
     expect(collectExtractionIssues({ cpf_numero: 52998224725 }, HOJE)).toEqual([]);
   });
+
+  /**
+   * A ficha-resumo guarda CPF e data DENTRO de `partes[]`. Sem descer no array,
+   * justamente o documento que carrega mais CPFs — e que preenche o formulário
+   * inteiro — seria o único a nunca acusar problema nenhum.
+   */
+  it("desce em partes[] da ficha-resumo e identifica de quem é o CPF", () => {
+    const issues = collectExtractionIssues(
+      {
+        partes: [
+          { nome: "Joao", cpf: "52998224725" },
+          { nome: "Maria", cpf: "12345678900" },
+        ],
+      },
+      HOJE
+    );
+    expect(issues).toEqual([
+      { ocrKey: "partes[1].cpf", raw: "12345678900", reason: "cpf_invalido" },
+    ]);
+  });
+
+  it("desce em imoveis[] também", () => {
+    const issues = collectExtractionIssues(
+      { imoveis: [{ cep: "123" }] },
+      HOJE
+    );
+    expect(issues[0]).toMatchObject({ ocrKey: "imoveis[0].cep", reason: "formato" });
+  });
+
+  it("ficha sem problema nenhum devolve lista vazia", () => {
+    expect(
+      collectExtractionIssues(
+        { partes: [{ nome: "Joao", cpf: "52998224725", data_nascimento: "12/05/1980" }] },
+        HOJE
+      )
+    ).toEqual([]);
+  });
+
+  it("array ausente ou item não-objeto não quebra", () => {
+    expect(collectExtractionIssues({ partes: "nao e array" }, HOJE)).toEqual([]);
+    expect(collectExtractionIssues({ partes: [null, 42] }, HOJE)).toEqual([]);
+  });
 });
 
 describe("coerce — CEP com dígitos a mais", () => {
