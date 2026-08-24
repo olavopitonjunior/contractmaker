@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { UseFormReturn } from "react-hook-form";
 import {
+  coerce,
+  collectExtractionIssues,
   mapExtractedToForm,
   pickSpouseFromCertidao,
   resolveBasePath,
@@ -392,5 +394,230 @@ describe("autofill limpa o erro do campo que preencheu", () => {
     expect(clearErrors.mock.calls.map((c) => c[0])).not.toContain(
       "imoveis.0.matricula"
     );
+  });
+});
+
+/**
+ * Normalização do que o OCR devolve, antes de virar valor de formulário.
+ *
+ * Os casos abaixo tinham o mesmo sintoma para o corretor — "o campo ficou
+ * vazio" ou "veio lixo" — e causas diferentes, nenhuma visível na tela.
+ */
+describe("coerce — data em DD/MM/AAAA", () => {
+  const rg = (dataNascimento: string): ExtractedDoc => ({
+    category: "rg",
+    fields: { nome_completo: "Joao da Silva", data_nascimento: dataNascimento },
+  });
+  const alvo: Assignment = { kind: "vendedor", index: 0 };
+
+  /**
+   * O bug: `<input type="date">` só aceita ISO. Uma data em DD/MM/AAAA era
+   * gravada por setValue e o browser descartava sem erro — o campo ficava
+   * vazio e a extração parecia ter falhado. É o formato impresso no RG, então
+   * o modelo devolve assim com frequência.
+   */
+  it("converte para ISO em vez de deixar o browser descartar", () => {
+    const { form, store } = makeFormStub();
+    mapExtractedToForm(rg("12/05/1980"), alvo, form);
+    expect(store.get("vendedores.0.data_nascimento")).toBe("1980-05-12");
+  });
+
+  it("mantém ISO que já veio correto", () => {
+    const { form, store } = makeFormStub();
+    mapExtractedToForm(rg("1980-05-12"), alvo, form);
+    expect(store.get("vendedores.0.data_nascimento")).toBe("1980-05-12");
+  });
+
+  it("descarta data impossível em vez de gravar lixo", () => {
+    const { form, store } = makeFormStub();
+    mapExtractedToForm(rg("31/02/1980"), alvo, form);
+    expect(store.has("vendedores.0.data_nascimento")).toBe(false);
+    // O resto do documento continua sendo aproveitado.
+    expect(store.get("vendedores.0.nome")).toBe("Joao da Silva");
+  });
+});
+
+describe("coerce — sentinelas de ausência", () => {
+  const alvo: Assignment = { kind: "vendedor", index: 0 };
+
+  /**
+   * Sem `nullable` no responseSchema, o Gemma devolvia a string "null" para
+   * todo campo ilegível. Ela era gravada como TEXTO no formulário.
+   */
+  it.each(["null", "N/A", "não informado", "[ilegível]", "-"])(
+    "%s não vira texto no formulário",
+    (sentinela) => {
+      const { form, store } = makeFormStub();
+      mapExtractedToForm(
+        {
+          category: "rg",
+          fields: { nome_completo: "Joao da Silva", naturalidade: sentinela },
+        },
+        alvo,
+        form
+      );
+      expect(store.has("vendedores.0.naturalidade")).toBe(false);
+      expect(store.get("vendedores.0.nome")).toBe("Joao da Silva");
+    }
+  );
+
+  it("não confunde conteúdo legítimo que contém a palavra", () => {
+    const { form, store } = makeFormStub();
+    mapExtractedToForm(
+      { category: "rg", fields: { naturalidade: "Nulo de Minas" } },
+      alvo,
+      form
+    );
+    expect(store.get("vendedores.0.naturalidade")).toBe("Nulo de Minas");
+  });
+});
+
+describe("collectExtractionIssues", () => {
+  const HOJE = new Date(2026, 7, 24);
+
+  /**
+   * O mais perigoso dos três: 11 dígitos, formato plausível, é gravado no
+   * formulário — e só quebra na certidão, na ClickSign ou no DIMOB, longe
+   * de quem poderia ter conferido contra o documento.
+   */
+  it("acusa CPF com dígito verificador errado", () => {
+    const issues = collectExtractionIssues({ cpf_numero: "12345678900" }, HOJE);
+    expect(issues).toEqual([
+      { ocrKey: "cpf_numero", raw: "12345678900", reason: "cpf_invalido" },
+    ]);
+  });
+
+  it("CPF válido não vira ruído", () => {
+    // 529.982.247-25 — CPF de teste com dígitos verificadores corretos.
+    expect(collectExtractionIssues({ cpf_numero: "52998224725" }, HOJE)).toEqual([]);
+  });
+
+  it("distingue CPF truncado (formato) de CPF que não fecha (cpf_invalido)", () => {
+    const issues = collectExtractionIssues({ cpf_numero: "1234567" }, HOJE);
+    expect(issues[0].reason).toBe("formato");
+  });
+
+  it("acusa sentinela como ausente, não como erro de formato", () => {
+    const issues = collectExtractionIssues({ cpf_numero: "null" }, HOJE);
+    expect(issues[0].reason).toBe("ausente");
+  });
+
+  it("acusa data que o formulário vai descartar", () => {
+    const issues = collectExtractionIssues({ data_nascimento: "31/02/1980" }, HOJE);
+    expect(issues[0]).toMatchObject({ ocrKey: "data_nascimento", reason: "formato" });
+  });
+
+  it("data em DD/MM/AAAA não é problema — é normalizada", () => {
+    expect(collectExtractionIssues({ data_nascimento: "12/05/1980" }, HOJE)).toEqual([]);
+  });
+
+  it("campo vazio não gera ruído (não veio ≠ veio errado)", () => {
+    expect(
+      collectExtractionIssues({ cpf_numero: null, data_nascimento: "" }, HOJE)
+    ).toEqual([]);
+  });
+
+  it("fields ausente devolve lista vazia", () => {
+    expect(collectExtractionIssues(null)).toEqual([]);
+  });
+
+  /**
+   * `data_validade` é `required` em CNH_FIELDS e, numa CNH válida, é FUTURA
+   * por definição. Validá-la com a regra de nascimento (que rejeita futuro)
+   * marcaria toda CNH boa como problema — e uma lista de revisão que acusa o
+   * caso normal ensina o revisor a ignorá-la.
+   */
+  it("CNH válida não gera problema nenhum, apesar da validade futura", () => {
+    const cnh = {
+      nome_completo: "Joao da Silva",
+      cpf_numero: "52998224725",
+      data_nascimento: "12/05/1980",
+      data_emissao: "01/03/2021",
+      data_validade: "01/03/2031",
+    };
+    expect(collectExtractionIssues(cnh, HOJE)).toEqual([]);
+  });
+
+  it("mas data de nascimento no futuro continua sendo problema", () => {
+    const issues = collectExtractionIssues({ data_nascimento: "01/03/2031" }, HOJE);
+    expect(issues[0]).toMatchObject({ ocrKey: "data_nascimento", reason: "formato" });
+  });
+
+  it("validade com calendário impossível ainda é acusada", () => {
+    const issues = collectExtractionIssues({ data_validade: "31/02/2031" }, HOJE);
+    expect(issues[0]).toMatchObject({ ocrKey: "data_validade", reason: "formato" });
+  });
+
+  /**
+   * O schema pede string, mas prompt é pedido, não garantia — e um CPF que
+   * voltou como número não é um CPF ruim.
+   */
+  it("CPF que veio como número não é falso positivo", () => {
+    expect(collectExtractionIssues({ cpf_numero: 52998224725 }, HOJE)).toEqual([]);
+  });
+});
+
+describe("coerce — CEP com dígitos a mais", () => {
+  const alvo: Assignment = { kind: "vendedor", index: 0 };
+
+  /**
+   * `maskCEP` faz `slice(0, 8)`. Sem gate antes, "Rua X, 123 - CEP 01310100"
+   * virava "12301-310": oito dígitos, formato válido, CEP errado — e seguia
+   * para DIMOB e Asaas como se fosse bom. Errado que parece certo é pior que
+   * ausente, porque ninguém vai conferir.
+   */
+  it("descarta em vez de truncar num CEP plausível e errado", () => {
+    const { form, store } = makeFormStub();
+    mapExtractedToForm(
+      { category: "rg", fields: { cep: "Rua X, 123 - CEP 01310100" } },
+      alvo,
+      form
+    );
+    expect(store.has("vendedores.0.cep")).toBe(false);
+  });
+
+  it("CEP limpo é mascarado como o input faria", () => {
+    const { form, store } = makeFormStub();
+    mapExtractedToForm({ category: "rg", fields: { cep: "01310100" } }, alvo, form);
+    expect(store.get("vendedores.0.cep")).toBe("01310-100");
+  });
+
+  it("coerce e collectExtractionIssues concordam sobre o mesmo valor", () => {
+    const ruim = "Rua X, 123 - CEP 01310100";
+    expect(coerce("cep", ruim)).toBeUndefined();
+    expect(collectExtractionIssues({ cep: ruim })[0]?.reason).toBe("formato");
+  });
+});
+
+describe("caminhos que não passam por applyField", () => {
+  /**
+   * Nome de cônjuge (certidão e averbação de RG/CNH) escreve direto no path.
+   * Sem filtro explícito, um "null" do modelo virava o NOME do cônjuge — e
+   * ainda contava como campo preenchido.
+   */
+  it("sentinela não vira nome do cônjuge (averbação de RG)", () => {
+    const { form, store } = makeFormStub();
+    mapExtractedToForm(
+      {
+        category: "rg",
+        fields: { nome_completo: "Joao da Silva", conjuge_nome: "null" },
+      },
+      { kind: "vendedor", index: 0 },
+      form
+    );
+    expect(store.has("vendedores.0.conjuge.nome")).toBe(false);
+  });
+
+  it("cônjuge de verdade continua sendo aplicado", () => {
+    const { form, store } = makeFormStub();
+    mapExtractedToForm(
+      {
+        category: "rg",
+        fields: { nome_completo: "Joao da Silva", conjuge_nome: "Maria Souza" },
+      },
+      { kind: "vendedor", index: 0 },
+      form
+    );
+    expect(store.get("vendedores.0.conjuge.nome")).toBe("Maria Souza");
   });
 });
