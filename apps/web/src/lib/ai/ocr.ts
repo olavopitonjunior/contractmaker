@@ -2,7 +2,8 @@ import { Anthropic } from "@anthropic-ai/sdk";
 import { ocrModelFromEnv } from "./agents/model-provenance";
 import { GoogleGenAI } from "@google/genai";
 import type { ExtractionResult } from "./types";
-import { recordAIUsage } from "./usage";
+import { recordAIUsage, geminiUsageToTokens } from "./usage";
+import type { GeminiUsageMetadata } from "./usage";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -433,7 +434,8 @@ export async function extractPlainText(
       ],
     });
     if (ctx) {
-      const usage = (response as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }).usageMetadata;
+      const usage = (response as { usageMetadata?: GeminiUsageMetadata }).usageMetadata;
+      const tok = geminiUsageToTokens(usage, model);
       recordAIUsage({
         orgId: ctx.orgId,
         userId: ctx.userId,
@@ -441,8 +443,9 @@ export async function extractPlainText(
         provider: "gemini",
         model,
         operation: "ocr_form",
-        promptTokens: usage?.promptTokenCount ?? 0,
-        completionTokens: usage?.candidatesTokenCount ?? 0,
+        promptTokens: tok.promptTokens,
+        completionTokens: tok.completionTokens,
+        thoughtsTokens: tok.thoughtsTokens,
         latencyMs: Date.now() - t0,
         success: true,
       });
@@ -501,7 +504,7 @@ async function callGemini(
   model: string,
   base64Data: string,
   mimeType: string
-): Promise<{ text: string; usage: { promptTokenCount?: number; candidatesTokenCount?: number } | undefined }> {
+): Promise<{ text: string; usage: GeminiUsageMetadata | undefined }> {
   const ai = getGenAI();
   const response = await ai.models.generateContent({
     model,
@@ -512,7 +515,7 @@ async function callGemini(
   });
   return {
     text: response.text ?? "{}",
-    usage: (response as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }).usageMetadata,
+    usage: (response as { usageMetadata?: GeminiUsageMetadata }).usageMetadata,
   };
 }
 
@@ -528,7 +531,7 @@ async function callGemini(
 async function callClaudeHaikuOcr(
   base64Data: string,
   mimeType: string
-): Promise<{ text: string; usage: { promptTokenCount?: number; candidatesTokenCount?: number } | undefined }> {
+): Promise<{ text: string; usage: GeminiUsageMetadata | undefined }> {
   const model = process.env.OCR_FALLBACK_CLAUDE_MODEL || "claude-haiku-4-5-20251001";
   // PDFs não são suportados pelo fallback Claude (SDK estável só aceita images).
   // Deixa o erro Gemini propagar para PDF — user pode retentar mais tarde.
@@ -629,7 +632,7 @@ export async function classifyAndExtract(
   const t0 = Date.now();
 
   let text: string;
-  let usage: { promptTokenCount?: number; candidatesTokenCount?: number } | undefined;
+  let usage: GeminiUsageMetadata | undefined;
   let modelUsed = primaryModel;
 
   try {
@@ -730,6 +733,7 @@ export async function classifyAndExtract(
     // Phase F.I-β — provider correto conforme modelo usado (pode ter
     // caído na cascata Gemini → Claude Haiku).
     const providerUsed = modelUsed.startsWith("claude") ? "anthropic" : "gemini";
+    const tok = geminiUsageToTokens(usage, modelUsed);
     recordAIUsage({
       orgId: ctx.orgId,
       userId: ctx.userId,
@@ -737,8 +741,9 @@ export async function classifyAndExtract(
       provider: providerUsed,
       model: modelUsed,
       operation: "ocr_form",
-      promptTokens: usage?.promptTokenCount ?? 0,
-      completionTokens: usage?.candidatesTokenCount ?? 0,
+      promptTokens: tok.promptTokens,
+      completionTokens: tok.completionTokens,
+      thoughtsTokens: tok.thoughtsTokens,
       latencyMs: Date.now() - t0,
       success: true,
     });
@@ -896,7 +901,8 @@ export async function classifyAndExtractBatch(
   }
 
   if (ctx) {
-    const usage = (response as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }).usageMetadata;
+    const usage = (response as { usageMetadata?: GeminiUsageMetadata }).usageMetadata;
+    const tok = geminiUsageToTokens(usage, model);
     recordAIUsage({
       orgId: ctx.orgId,
       userId: ctx.userId,
@@ -904,8 +910,9 @@ export async function classifyAndExtractBatch(
       provider: "gemini",
       model,
       operation: "ocr_form",
-      promptTokens: usage?.promptTokenCount ?? 0,
-      completionTokens: usage?.candidatesTokenCount ?? 0,
+      promptTokens: tok.promptTokens,
+      completionTokens: tok.completionTokens,
+      thoughtsTokens: tok.thoughtsTokens,
       latencyMs: Date.now() - t0,
       success: true,
     });

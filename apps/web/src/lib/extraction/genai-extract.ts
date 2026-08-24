@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
-import { recordAIUsage, type AIOperation } from "@/lib/ai/usage";
+import { recordAIUsage, geminiUsageToTokens, type AIOperation } from "@/lib/ai/usage";
+import type { GeminiUsageMetadata } from "@/lib/ai/usage";
 import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
 
 /**
@@ -62,7 +63,7 @@ export async function runDocExtraction(
 
   let text: string;
   let usage:
-    | { promptTokenCount?: number; candidatesTokenCount?: number }
+    | GeminiUsageMetadata
     | undefined;
 
   try {
@@ -82,10 +83,7 @@ export async function runDocExtraction(
     text = response.text ?? "{}";
     usage = (
       response as {
-        usageMetadata?: {
-          promptTokenCount?: number;
-          candidatesTokenCount?: number;
-        };
+        usageMetadata?: GeminiUsageMetadata;
       }
     ).usageMetadata;
   } catch (err) {
@@ -105,6 +103,7 @@ export async function runDocExtraction(
     return {};
   }
 
+  const tok = geminiUsageToTokens(usage, model);
   recordAIUsage({
     orgId: ctx.orgId,
     userId: ctx.userId,
@@ -112,8 +111,9 @@ export async function runDocExtraction(
     provider: "gemini",
     model,
     operation,
-    promptTokens: usage?.promptTokenCount ?? 0,
-    completionTokens: usage?.candidatesTokenCount ?? 0,
+    promptTokens: tok.promptTokens,
+    completionTokens: tok.completionTokens,
+    thoughtsTokens: tok.thoughtsTokens,
     latencyMs: Date.now() - t0,
     success: true,
   });
