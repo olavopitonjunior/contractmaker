@@ -2,7 +2,20 @@ import { Anthropic } from "@anthropic-ai/sdk";
 import { ocrModelFromEnv } from "./agents/model-provenance";
 import { GoogleGenAI } from "@google/genai";
 import type { ExtractionResult } from "./types";
-import { recordAIUsage } from "./usage";
+import { recordAIUsage, geminiUsageToTokens, calcCostUsd } from "./usage";
+import { waitUntil } from "@vercel/functions";
+import { prisma } from "@/lib/db/prisma";
+import {
+  compararSombra,
+  shadowModelFromEnv,
+  type ComparacaoSombra,
+} from "./ocr-shadow";
+import type { GeminiUsageMetadata } from "./usage";
+import {
+  chamarOpenAIOcr,
+  isModeloOpenAI,
+  schemaJsonDeCampos,
+} from "./ocr-openai";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -362,6 +375,281 @@ const VALID_CATEGORIES = [
   "outro",
 ];
 
+// ────────────────────────────────────────────────────────────────────────────
+// Structured output — `responseSchema` do Gemini
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Todos os campos planos citados no `COMBINED_PROMPT`, em união.
+ *
+ * O schema do Gemini não tem `oneOf` utilizável, então `campos` é um SUPERSET:
+ * o modelo preenche o que pertence à categoria detectada e devolve `null` no
+ * resto. O prompt continua sendo quem explica QUAIS campos pertencem a cada
+ * categoria; o schema só garante o formato da saída.
+ *
+ * **Declarar `properties` não é detalhe.** Medido em 24/08 contra a API: um
+ * `campos: { type: "OBJECT" }` sem properties não dá erro — devolve
+ * `campos: {}` VAZIO, em silêncio. Ou seja, o OCR pararia de extrair qualquer
+ * coisa sem nenhum sintoma no log.
+ */
+const COMBINED_FIELD_KEYS = [
+  // pessoa (rg, cpf, cnh)
+  "nome_completo", "rg_numero", "orgao_expedidor", "data_nascimento", "sexo",
+  "naturalidade", "filiacao_mae", "filiacao_pai", "conjuge_nome", "conjuge_cpf",
+  "cpf_numero", "situacao_cadastral", "categoria", "data_emissao",
+  "data_validade", "registro_cnh",
+  // matrícula / imóvel
+  "matricula_numero", "cartorio", "endereco_completo", "bairro", "cidade", "uf",
+  "cep", "proprietario_nome", "area_total", "onus_existentes", "descricao_imovel",
+  // iptu
+  "inscricao_iptu", "inscricao_municipal", "sql", "endereco", "valor_venal",
+  "ano_referencia", "debitos_pendentes",
+  // escritura
+  "vendedor_nome", "comprador_nome", "valor_transacao", "data_lavratura",
+  "endereco_imovel", "matricula_referenciada",
+  // procuração
+  "outorgante_nome", "outorgante_cpf", "outorgado_nome", "outorgado_cpf",
+  "poderes_resumo", "prazo_validade",
+  // comprovante de residência
+  "titular_nome", "emissor",
+  // certidão de casamento
+  "conjuge1_nome", "conjuge1_cpf", "conjuge2_nome", "conjuge2_cpf",
+  "data_casamento", "regime_bens",
+  // `outro` — rótulo livre que o DocumentCard usa como legenda do badge
+  "tipo_documento",
+  // PJ no nível PLANO. O COMBINED_PROMPT manda, em `outro`, "incluir todos os
+  // dados relevantes (nomes, cpf, CNPJ, enderecos...)", mas com schema ligado só
+  // volta o que está declarado — e `cnpj`/`razao_social` só existiam aninhados
+  // em `partes[]`. Sem isto, cartão CNPJ e contrato social passariam a devolver
+  // nada nesses campos justamente quando o schema é ligado.
+  "cnpj", "razao_social",
+] as const;
+
+/** Campos que o formulário consome como data ISO. Ver `coerce` em lib/forms. */
+const DATE_FIELD_KEYS = new Set<string>([
+  "data_nascimento", "data_emissao", "data_validade", "data_lavratura",
+  "data_casamento",
+]);
+
+type SchemaNode = Record<string, unknown>;
+
+/**
+ * `nullable: true` em todo campo: sem isso o modelo não tem como dizer "não li"
+ * dentro do tipo STRING e devolve a string literal `"null"`, que vazava para o
+ * formulário como texto. Medido no `gemma-4-31b-it`.
+ */
+function stringField(key: string): SchemaNode {
+  const node: SchemaNode = { type: "STRING", nullable: true };
+  if (DATE_FIELD_KEYS.has(key)) {
+    node.description = "Data no formato ISO YYYY-MM-DD. null se ilegivel.";
+  }
+  const aviso = DESCRICAO_ANTI_VAZAMENTO[key];
+  if (aviso) node.description = aviso;
+  return node;
+}
+
+/**
+ * O preço do superset: declarar `cidade`/`uf`/`bairro`/`cep` para TODA
+ * categoria convida o modelo a preenchê-los em documento que não tem endereço.
+ *
+ * O caso concreto: num RG ou CNH, a única cidade impressa é a NATURALIDADE
+ * ("Naturalidade: São Paulo-SP"). Mas `cidade` e `uf` mapeiam, em
+ * `FIELD_MAP_PERSON`, para a cidade e a UF do ENDEREÇO da pessoa — então o
+ * local de nascimento aterrissaria silenciosamente no endereço. O guard de
+ * `null` em `applyField` não ajuda: o valor é uma string legítima.
+ *
+ * Restringir o schema por categoria exigiria um schema por categoria (o que o
+ * braço de duas etapas do bench vai avaliar). Enquanto isso, a descrição é o
+ * que o modelo lê — e é grátis.
+ */
+const DESCRICAO_ANTI_VAZAMENTO: Record<string, string> = {
+  cidade:
+    "Cidade do ENDERECO de residencia ou do imovel. NAO use a naturalidade/local de nascimento.",
+  uf: "UF do ENDERECO de residencia ou do imovel. NAO use a naturalidade.",
+  bairro: "Bairro do ENDERECO. null se o documento nao traz endereco.",
+  cep: "CEP do ENDERECO. null se o documento nao traz endereco.",
+  naturalidade: "Local de NASCIMENTO, como impresso no documento.",
+};
+
+const FICHA_PARTE_KEYS = [
+  "nome", "cpf", "rg", "data_nascimento", "nome_mae", "naturalidade",
+  "estado_civil", "profissao", "nacionalidade", "email", "endereco", "numero",
+  "complemento", "bairro", "cidade", "uf", "cep", "cnpj", "razao_social",
+];
+
+/**
+ * Papéis que `applyFichaResumo` reconhece. Fora desta lista, ele faz
+ * `continue` e a parte inteira some — sem erro, sem campo, sem sinal na tela.
+ *
+ * `papel` merece `enum` pela MESMA razão que `tipo`: um modelo que responda
+ * "Vendedor 1" ou "Vendedor" em vez de "vendedor" derruba a pessoa toda, e a
+ * ficha-resumo é justamente o documento que preenche o formulário inteiro.
+ */
+const FICHA_PAPEIS = [
+  "vendedor", "comprador",
+  "conjuge_vendedor", "conjuge_comprador",
+  "representante_vendedor", "representante_comprador",
+  "procurador_vendedor", "procurador_comprador",
+];
+
+const FICHA_IMOVEL_KEYS = [
+  "rua", "numero", "bairro", "cidade", "uf", "cep", "matricula", "cartorio",
+  "inscricao_iptu", "inscricao_municipal", "sql", "descricao",
+];
+
+/** Objeto de campos STRING nullable, mais quaisquer propriedades extras. */
+function objectOf(keys: readonly string[], extraProps: SchemaNode = {}): SchemaNode {
+  const properties: SchemaNode = {};
+  for (const k of keys) properties[k] = stringField(k);
+  return { type: "OBJECT", properties: { ...properties, ...extraProps } };
+}
+
+/**
+ * Campos do `COMBINED_PROMPT` POR CATEGORIA.
+ *
+ * ── Por que não é um superset ────────────────────────────────────────────
+ *
+ * A primeira versão deste PR declarava um objeto único com os ~55 campos de
+ * todas as categorias. Medido contra 10 documentos reais em 24/08, isso
+ * **suprime a extração** — o modelo, diante de dezenas de propriedades
+ * majoritariamente irrelevantes para o documento na frente dele, preenche
+ * muito menos. Mesmo documento, `finishReason=STOP` nos dois casos:
+ *
+ *   CNH (PDF digital limpo):  11 campos SEM schema  →  3 com o superset
+ *   certidão de nascimento:   23 campos SEM schema  →  2 com o superset
+ *
+ * No agregado, a omissão subia de 14,3% para 48,7% e a acurácia caía de 78,6%
+ * para 53,3%. Ou seja: era PIOR que não ter schema nenhum.
+ *
+ * Com o schema enxuto da categoria, a omissão cai para **7,1%** e a acurácia
+ * sobe para **86,2%** — melhor que os dois anteriores. É por isso que a
+ * extração é feita em DUAS etapas: classificar primeiro, e só então extrair
+ * com o schema do que o documento realmente é.
+ */
+const CAMPOS_POR_CATEGORIA: Record<string, readonly string[]> = {
+  rg: ["nome_completo", "rg_numero", "orgao_expedidor", "data_nascimento", "sexo",
+       "naturalidade", "filiacao_mae", "filiacao_pai", "conjuge_nome", "conjuge_cpf",
+       "cpf_numero", "data_emissao"],
+  cpf: ["nome_completo", "cpf_numero", "data_nascimento", "situacao_cadastral"],
+  cnh: ["nome_completo", "cpf_numero", "rg_numero", "data_nascimento", "sexo",
+        "naturalidade", "filiacao_mae", "filiacao_pai", "categoria", "data_emissao",
+        "data_validade", "registro_cnh", "conjuge_nome", "conjuge_cpf"],
+  matricula: ["matricula_numero", "cartorio", "endereco_completo", "bairro", "cidade",
+              "uf", "cep", "proprietario_nome", "area_total", "onus_existentes",
+              "descricao_imovel"],
+  iptu: ["inscricao_iptu", "inscricao_municipal", "sql", "endereco", "bairro", "cidade",
+         "uf", "valor_venal", "ano_referencia", "debitos_pendentes"],
+  escritura: ["vendedor_nome", "comprador_nome", "valor_transacao", "data_lavratura",
+              "cartorio", "endereco_imovel", "matricula_referenciada"],
+  procuracao: ["outorgante_nome", "outorgante_cpf", "outorgado_nome", "outorgado_cpf",
+               "poderes_resumo", "data_lavratura", "prazo_validade"],
+  comprovante_residencia: ["titular_nome", "endereco_completo", "bairro", "cidade",
+                           "uf", "cep", "emissor"],
+  certidao_casamento: ["conjuge1_nome", "conjuge1_cpf", "conjuge2_nome", "conjuge2_cpf",
+                       "data_casamento", "regime_bens", "cartorio", "data_lavratura"],
+};
+
+/**
+ * Etapa 1 — só classificar. Saída minúscula (dois campos), então a chamada
+ * extra custa pouco e responde rápido.
+ */
+const CLASSIFY_SCHEMA: SchemaNode = {
+  type: "OBJECT",
+  properties: {
+    tipo: { type: "STRING", format: "enum", enum: VALID_CATEGORIES },
+    confidence: { type: "NUMBER" },
+  },
+  required: ["tipo", "confidence"],
+};
+
+/**
+ * Etapa 2 — extrair com o schema DA CATEGORIA detectada.
+ *
+ * Devolve `null` para `outro` e `ficha_resumo`, que seguem SEM schema de
+ * propósito:
+ *
+ * - `outro` tem contrato free-form no prompt ("inclua todos os dados
+ *   relevantes"), e qualquer schema o limita — medido, 22 campos sem schema
+ *   contra 7 com o enxuto. Documento fora do catálogo (cartão CNPJ, certidão
+ *   de nascimento, comprovante de Pix) é exatamente onde não se sabe de
+ *   antemão o que vem.
+ * - `ficha_resumo` é estrutura aninhada (`partes[]`/`imoveis[]`) de tamanho
+ *   variável, e é ela que preenche o formulário inteiro.
+ */
+function schemaDaCategoria(categoria: string): SchemaNode | null {
+  const campos = CAMPOS_POR_CATEGORIA[categoria];
+  if (!campos) return null;
+  return {
+    type: "OBJECT",
+    properties: {
+      tipo: { type: "STRING", format: "enum", enum: VALID_CATEGORIES },
+      campos: objectOf(campos),
+      confidence: { type: "NUMBER" },
+    },
+    required: ["tipo", "campos", "confidence"],
+  };
+}
+
+/**
+ * O batch segue SEM schema.
+ *
+ * Ele manda até 4 documentos numa chamada, de categorias potencialmente
+ * diferentes — não há "a categoria" para escolher o schema, e o superset é
+ * justamente o que se mostrou pior que nada. Além disso o batch está
+ * deprecado (Phase F.II) e o `DocumentosStep` não o chama mais.
+ */
+
+/**
+ * Structured output nasce DESLIGADO — opt-in por `OCR_STRUCTURED_OUTPUT=true`.
+ *
+ * Ligar isto muda o comportamento de extração de TODO documento em produção, e
+ * a régua que diria se muda para melhor (o bench de visão) ainda não rodou
+ * sobre documentos reais. O README do ai-bench é explícito: "nada troca de
+ * modelo em produção sem passar por aqui primeiro" — e trocar a forma da
+ * chamada é a mesma classe de mudança.
+ *
+ * Sequência prevista: liga em staging → bench e shadow medem → só então o
+ * default inverte, em PR próprio, com o número na mão.
+ */
+function structuredOutputEnabled(): boolean {
+  return process.env.OCR_STRUCTURED_OUTPUT === "true";
+}
+
+/**
+ * Config do `generateContent` para as chamadas de extração.
+ *
+ * **Não** passar `thinkingConfig` aqui: `gemma-4-31b-it` responde HTTP 400
+ * ("Thinking budget is not supported for this model") e derrubaria a chamada
+ * inteira. Com `responseSchema` o Gemma já para de emitir raciocínio na saída,
+ * que era o motivo de querer o thinkingConfig.
+ */
+function extractionConfig(schema: SchemaNode | null) {
+  if (!structuredOutputEnabled() || !schema) return undefined;
+  return { responseMimeType: "application/json", responseSchema: schema };
+}
+
+/**
+ * O modelo recusou o `responseSchema`/`responseMimeType` — 400 INVALID_ARGUMENT.
+ *
+ * Separado de `shouldTryFallbackModel` de propósito: aqui a resposta certa não
+ * é trocar de modelo (o fallback receberia o mesmo schema), e sim repetir SEM
+ * structured output.
+ */
+export function isSchemaRejectionError(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  const é400 = msg.includes("400") || msg.includes("invalid_argument");
+  if (!é400) return false;
+  return (
+    msg.includes("schema") ||
+    msg.includes("response_mime_type") ||
+    msg.includes("responsemimetype") ||
+    msg.includes("response_schema") ||
+    msg.includes("responseschema") ||
+    msg.includes("json mode") ||
+    msg.includes("not supported")
+  );
+}
+
 const SUPPORTED_OCR_MIMES = new Set([
   "image/jpeg",
   "image/png",
@@ -433,7 +721,8 @@ export async function extractPlainText(
       ],
     });
     if (ctx) {
-      const usage = (response as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }).usageMetadata;
+      const usage = (response as { usageMetadata?: GeminiUsageMetadata }).usageMetadata;
+      const tok = geminiUsageToTokens(usage, model);
       recordAIUsage({
         orgId: ctx.orgId,
         userId: ctx.userId,
@@ -441,8 +730,9 @@ export async function extractPlainText(
         provider: "gemini",
         model,
         operation: "ocr_form",
-        promptTokens: usage?.promptTokenCount ?? 0,
-        completionTokens: usage?.candidatesTokenCount ?? 0,
+        promptTokens: tok.promptTokens,
+        completionTokens: tok.completionTokens,
+        thoughtsTokens: tok.thoughtsTokens,
         latencyMs: Date.now() - t0,
         success: true,
       });
@@ -497,22 +787,141 @@ function shouldTryFallbackModel(err: unknown): boolean {
   );
 }
 
+/**
+ * Uma chamada de extração, no provedor do modelo pedido.
+ *
+ * O nome `callGemini` ficou por trás deste despacho porque a cascata de
+ * fallback, o registro de uso e o parse já falam com ele — trocar a assinatura
+ * espalharia a mudança por cinco call-sites sem ganho. O que muda é que agora
+ * um modelo `gpt-*` sai por outro caminho.
+ */
 async function callGemini(
   model: string,
   base64Data: string,
   mimeType: string
-): Promise<{ text: string; usage: { promptTokenCount?: number; candidatesTokenCount?: number } | undefined }> {
+): Promise<{ text: string; usage: GeminiUsageMetadata | undefined }> {
+  if (isModeloOpenAI(model)) {
+    // Duas etapas também aqui: sem a categoria não há schema, e o schema com
+    // todos os campos de todas as categorias foi medido como pior que nenhum.
+    let schema: Record<string, unknown> | null = null;
+    if (structuredOutputEnabled()) {
+      try {
+        const cls = await chamarOpenAIOcr({
+          modelo: model, prompt: COMBINED_PROMPT, base64: base64Data, mimeType,
+          schema: { type: "object",
+            properties: { tipo: { type: "string" }, confidence: { type: "number" } },
+            required: ["tipo", "confidence"] },
+        });
+        const campos = CAMPOS_POR_CATEGORIA[parseGeminiJson(cls.text).tipo];
+        schema = campos ? schemaJsonDeCampos(campos) : null;
+      } catch {
+        // Classificação é auxiliar: falhou, extrai sem schema.
+        schema = null;
+      }
+    }
+    const r = await chamarOpenAIOcr({
+      modelo: model, prompt: COMBINED_PROMPT, base64: base64Data, mimeType, schema,
+    });
+    // Traduz para o shape do `usageMetadata` do Gemini, que é o que
+    // `geminiUsageToTokens` e o registro de uso já consomem. `thoughts` fica
+    // ZERO de propósito: na OpenAI o raciocínio JÁ está em `completion_tokens`,
+    // e somá-lo de novo dobraria o custo reportado.
+    return {
+      text: r.text,
+      usage: {
+        promptTokenCount: r.promptTokens,
+        candidatesTokenCount: r.completionTokens,
+        thoughtsTokenCount: 0,
+        totalTokenCount: r.promptTokens + r.completionTokens,
+      },
+    };
+  }
+
   const ai = getGenAI();
-  const response = await ai.models.generateContent({
-    model,
-    contents: [
-      { text: COMBINED_PROMPT },
-      { inlineData: { mimeType, data: base64Data } },
-    ],
-  });
+  const contents = [
+    { text: COMBINED_PROMPT },
+    { inlineData: { mimeType, data: base64Data } },
+  ];
+
+  // ── Etapa 1: classificar ────────────────────────────────────────────────
+  //
+  // Só acontece com structured output ligado. Existe para a etapa 2 poder usar
+  // o schema DA CATEGORIA: um schema com os ~55 campos de todas elas suprime a
+  // extração (ver CAMPOS_POR_CATEGORIA), e sem classificar antes não há como
+  // saber qual schema usar.
+  let config: ReturnType<typeof extractionConfig>;
+  let usoClassificacao: GeminiUsageMetadata | undefined;
+  if (structuredOutputEnabled()) {
+    try {
+      const cls = await ai.models.generateContent({
+        model,
+        contents,
+        config: { responseMimeType: "application/json", responseSchema: CLASSIFY_SCHEMA as never },
+      });
+      usoClassificacao = (cls as { usageMetadata?: GeminiUsageMetadata }).usageMetadata;
+      const tipo = parseGeminiJson(cls.text ?? "").tipo;
+      config = extractionConfig(schemaDaCategoria(tipo));
+    } catch (err) {
+      // Classificação falhou: segue SEM schema. A etapa 2 é a que importa, e
+      // o comportamento sem schema é o de produção hoje — degradar é melhor
+      // que derrubar por causa de uma chamada auxiliar.
+      if (!isSchemaRejectionError(err)) {
+        console.warn(
+          `[ocr] classificação (etapa 1) falhou em ${model}: ${err instanceof Error ? err.message.slice(0, 80) : "?"}`
+        );
+      }
+      config = undefined;
+    }
+  }
+
+  // ── Etapa 2: extrair ────────────────────────────────────────────────────
+  let response;
+  try {
+    response = await ai.models.generateContent({
+      model,
+      contents,
+      ...(config ? { config } : {}),
+    });
+  } catch (err) {
+    // Schema rejeitado (400 INVALID_ARGUMENT) NÃO pode virar apagão do OCR.
+    //
+    // `shouldTryFallbackModel` só casa 5xx/safety/decode, então um 400 pularia
+    // o fallback do Gemini E o último recurso no Claude, e a extração falharia
+    // 100% das vezes. E não adiantaria trocar de modelo: o fallback receberia o
+    // MESMO schema. A saída certa é degradar para a chamada sem `config`, que é
+    // exatamente o comportamento de hoje — pior que com schema, melhor que nada.
+    if (config && isSchemaRejectionError(err)) {
+      console.warn(
+        `[ocr] ${model} rejeitou o responseSchema — repetindo sem structured output`
+      );
+      response = await ai.models.generateContent({ model, contents });
+    } else {
+      throw err;
+    }
+  }
+  // O uso soma as DUAS chamadas. Cobrar só a extração esconderia o preço da
+  // classificação, que é justamente o custo deste formato.
+  const usoExtracao = (response as { usageMetadata?: GeminiUsageMetadata }).usageMetadata;
   return {
     text: response.text ?? "{}",
-    usage: (response as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }).usageMetadata,
+    usage: somarUso(usoClassificacao, usoExtracao),
+  };
+}
+
+/** Soma dois `usageMetadata`. `undefined` de um lado devolve o outro. */
+function somarUso(
+  a: GeminiUsageMetadata | undefined,
+  b: GeminiUsageMetadata | undefined
+): GeminiUsageMetadata | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  const soma = (x?: number, y?: number) => (x ?? 0) + (y ?? 0);
+  return {
+    promptTokenCount: soma(a.promptTokenCount, b.promptTokenCount),
+    candidatesTokenCount: soma(a.candidatesTokenCount, b.candidatesTokenCount),
+    thoughtsTokenCount: soma(a.thoughtsTokenCount, b.thoughtsTokenCount),
+    totalTokenCount: soma(a.totalTokenCount, b.totalTokenCount),
+    cachedContentTokenCount: soma(a.cachedContentTokenCount, b.cachedContentTokenCount),
   };
 }
 
@@ -528,7 +937,7 @@ async function callGemini(
 async function callClaudeHaikuOcr(
   base64Data: string,
   mimeType: string
-): Promise<{ text: string; usage: { promptTokenCount?: number; candidatesTokenCount?: number } | undefined }> {
+): Promise<{ text: string; usage: GeminiUsageMetadata | undefined }> {
   const model = process.env.OCR_FALLBACK_CLAUDE_MODEL || "claude-haiku-4-5-20251001";
   // PDFs não são suportados pelo fallback Claude (SDK estável só aceita images).
   // Deixa o erro Gemini propagar para PDF — user pode retentar mais tarde.
@@ -629,7 +1038,7 @@ export async function classifyAndExtract(
   const t0 = Date.now();
 
   let text: string;
-  let usage: { promptTokenCount?: number; candidatesTokenCount?: number } | undefined;
+  let usage: GeminiUsageMetadata | undefined;
   let modelUsed = primaryModel;
 
   try {
@@ -729,7 +1138,12 @@ export async function classifyAndExtract(
   if (ctx) {
     // Phase F.I-β — provider correto conforme modelo usado (pode ter
     // caído na cascata Gemini → Claude Haiku).
-    const providerUsed = modelUsed.startsWith("claude") ? "anthropic" : "gemini";
+    const providerUsed = modelUsed.startsWith("claude")
+      ? "anthropic"
+      : isModeloOpenAI(modelUsed)
+        ? "openai"
+        : "gemini";
+    const tok = geminiUsageToTokens(usage, modelUsed);
     recordAIUsage({
       orgId: ctx.orgId,
       userId: ctx.userId,
@@ -737,8 +1151,9 @@ export async function classifyAndExtract(
       provider: providerUsed,
       model: modelUsed,
       operation: "ocr_form",
-      promptTokens: usage?.promptTokenCount ?? 0,
-      completionTokens: usage?.candidatesTokenCount ?? 0,
+      promptTokens: tok.promptTokens,
+      completionTokens: tok.completionTokens,
+      thoughtsTokens: tok.thoughtsTokens,
       latencyMs: Date.now() - t0,
       success: true,
     });
@@ -746,12 +1161,117 @@ export async function classifyAndExtract(
 
   const parsed = parseGeminiJson(text);
 
+  // Shadow: roda um segundo modelo SÓ para medir divergência. Nunca altera o
+  // que o usuário vê, e não pode atrasar a resposta — por isso vem depois do
+  // `parsed` e é fire-and-forget.
+  dispararSombra({
+    primario: { documentType: parsed.tipo, fields: parsed.fields },
+    primaryModel: modelUsed,
+    primaryLatencyMs: Date.now() - t0,
+    base64Data,
+    mimeType,
+    ctx,
+  });
+
   return {
     documentType: parsed.tipo,
     fields: parsed.fields as Record<string, string>,
     confidence: parsed.confidence,
     rawText: text,
   };
+}
+
+/**
+ * Dispara a chamada sombra e grava a comparação. Nunca lança, nunca espera.
+ *
+ * **Duas camadas de proteção, e as duas são necessárias:**
+ *
+ * 1. Desligado por padrão (`OCR_SHADOW_MODEL` vazio). Sem isso, um deploy de
+ *    preview do projeto `web` — que fala com o banco de PRODUÇÃO — tentaria
+ *    escrever numa tabela que produção ainda não tem.
+ * 2. `try/catch` em tudo. Mesmo ligado, falha de sombra é irrelevante para o
+ *    usuário: ele já tem o resultado do modelo primário na mão.
+ */
+function dispararSombra(p: {
+  primario: { documentType: string; fields: Record<string, unknown> };
+  primaryModel: string;
+  primaryLatencyMs: number;
+  base64Data: string;
+  mimeType: string;
+  ctx?: OcrUsageContext;
+}): void {
+  const shadowModel = shadowModelFromEnv();
+  if (!shadowModel || shadowModel === p.primaryModel) return;
+
+  const tarefa = (async () => {
+    const t0 = Date.now();
+    let comparacao: ComparacaoSombra | null = null;
+    let erro: string | null = null;
+    let custo = 0;
+    let latencia = 0;
+
+    try {
+      const r = await callGemini(shadowModel, p.base64Data, p.mimeType);
+      latencia = Date.now() - t0;
+      const tok = geminiUsageToTokens(r.usage, shadowModel);
+      custo = calcCostUsd(shadowModel, tok.promptTokens, tok.completionTokens);
+      const sombra = parseGeminiJson(r.text);
+      comparacao = compararSombra(p.primario, {
+        documentType: sombra.tipo,
+        fields: sombra.fields,
+      });
+      if (p.ctx) {
+        recordAIUsage({
+          orgId: p.ctx.orgId,
+          userId: p.ctx.userId,
+          contractId: p.ctx.contractId,
+          provider: "gemini",
+          model: shadowModel,
+          // Operação PRÓPRIA: sem isso o custo da sombra entraria no total do
+          // OCR e o painel diria que a extração ficou 2x mais cara.
+          operation: "ocr_shadow",
+          promptTokens: tok.promptTokens,
+          completionTokens: tok.completionTokens,
+          thoughtsTokens: tok.thoughtsTokens,
+          latencyMs: latencia,
+          success: true,
+        });
+      }
+    } catch (err) {
+      latencia = Date.now() - t0;
+      erro = (err instanceof Error ? err.message : String(err)).slice(0, 300);
+    }
+
+    try {
+      await prisma.ocrShadowComparison.create({
+        data: {
+          orgId: p.ctx?.orgId ?? null,
+          attachmentId: p.ctx?.contractId ?? null,
+          primaryModel: p.primaryModel,
+          shadowModel,
+          primaryCategory: p.primario.documentType,
+          shadowCategory: comparacao?.categoriaSombra ?? null,
+          categoryDiverged: comparacao?.categoriaDivergiu ?? false,
+          fieldsEqual: comparacao?.camposIguais ?? 0,
+          fieldsDiverged: comparacao?.camposDivergentes ?? [],
+          fieldsOnlyPrimary: comparacao?.camposSoNoPrimario ?? [],
+          fieldsOnlyShadow: comparacao?.camposSoNaSombra ?? [],
+          primaryLatencyMs: p.primaryLatencyMs,
+          shadowLatencyMs: latencia,
+          shadowCostUsd: custo,
+          shadowError: erro,
+        },
+      });
+    } catch (err) {
+      console.error("[ocr-shadow] falha ao gravar comparação:", err);
+    }
+  })();
+
+  try {
+    waitUntil(tarefa);
+  } catch {
+    void tarefa;
+  }
 }
 
 /**
@@ -896,7 +1416,8 @@ export async function classifyAndExtractBatch(
   }
 
   if (ctx) {
-    const usage = (response as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }).usageMetadata;
+    const usage = (response as { usageMetadata?: GeminiUsageMetadata }).usageMetadata;
+    const tok = geminiUsageToTokens(usage, model);
     recordAIUsage({
       orgId: ctx.orgId,
       userId: ctx.userId,
@@ -904,8 +1425,9 @@ export async function classifyAndExtractBatch(
       provider: "gemini",
       model,
       operation: "ocr_form",
-      promptTokens: usage?.promptTokenCount ?? 0,
-      completionTokens: usage?.candidatesTokenCount ?? 0,
+      promptTokens: tok.promptTokens,
+      completionTokens: tok.completionTokens,
+      thoughtsTokens: tok.thoughtsTokens,
       latencyMs: Date.now() - t0,
       success: true,
     });
@@ -934,7 +1456,33 @@ export async function classifyAndExtractBatch(
     );
   }
 
-  return parsed.map((obj, i) => {
+  // O prompt (e agora o schema) exige `indice`, mas o mapeamento é POSICIONAL.
+  // Se o modelo devolver os objetos fora de ordem, o CPF do documento A cai no
+  // card do documento B — sem erro, porque o único guard é o tamanho do array.
+  // Ordenar por `indice` quando ele vem íntegro fecha esse buraco; quando não
+  // vem, a posição continua sendo o melhor palpite disponível.
+  const itens = parsed as Array<Record<string, unknown>>;
+  const indices = itens.map((o) =>
+    typeof (o as { indice?: unknown })?.indice === "number"
+      ? ((o as { indice: number }).indice)
+      : null
+  );
+  const indicesIntegros =
+    indices.every((n) => n !== null) &&
+    new Set(indices).size === indices.length &&
+    indices.every((n) => n !== null && n >= 0 && n < items.length);
+  const ordenados = indicesIntegros
+    ? [...itens].sort(
+        (a, b) => (a as { indice: number }).indice - (b as { indice: number }).indice
+      )
+    : itens;
+  if (!indicesIntegros) {
+    console.warn(
+      "[batch OCR] `indice` ausente ou inconsistente — mapeando por posição"
+    );
+  }
+
+  return ordenados.map((obj, i) => {
     const o = obj as Record<string, unknown>;
     const rawTipo = typeof o.tipo === "string" ? o.tipo.trim().toLowerCase() : "outro";
     const tipo = VALID_CATEGORIES.includes(rawTipo) ? rawTipo : "outro";

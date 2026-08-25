@@ -10,7 +10,12 @@ vi.mock("@google/genai", () => {
   return { GoogleGenAI };
 });
 
-vi.mock("@/lib/ai/usage", () => ({
+// `recordAIUsage` é mockado (não queremos escrita no banco), mas
+// `geminiUsageToTokens` fica REAL de propósito: é ele que soma
+// `thoughtsTokenCount` ao completion, e é justamente essa conta que as
+// asserções de token abaixo precisam exercitar.
+vi.mock("@/lib/ai/usage", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/ai/usage")>()),
   recordAIUsage: vi.fn(),
 }));
 
@@ -113,6 +118,39 @@ describe("extractCcvDataJson", () => {
         success: true,
         promptTokens: 10,
         completionTokens: 5,
+      })
+    );
+  });
+
+  /**
+   * O bug que este caminho tinha: `thoughtsTokenCount` vem como campo separado
+   * do `candidatesTokenCount`, mas o Google fatura os dois como output. Gravar
+   * só candidates subestimava o custo — no `gemini-2.5-flash` o raciocínio
+   * chegou a ser 5x a resposta.
+   */
+  it("soma os tokens de raciocínio ao completion registrado", async () => {
+    const { recordAIUsage } = await import("@/lib/ai/usage");
+    mockGenerateContent.mockResolvedValueOnce({
+      text: "{}",
+      usageMetadata: {
+        promptTokenCount: 283,
+        candidatesTokenCount: 65,
+        thoughtsTokenCount: 312,
+        totalTokenCount: 660,
+      },
+    });
+
+    const { extractCcvDataJson } = await import("../ccv-extractor");
+    await extractCcvDataJson(Buffer.from("%PDF-1.4"), "application/pdf", {
+      orgId: "org-1",
+      userId: "user-1",
+    });
+
+    expect(recordAIUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptTokens: 283,
+        completionTokens: 377,
+        thoughtsTokens: 312,
       })
     );
   });

@@ -40,14 +40,108 @@ export const PRICING: Record<string, ModelPricing> = {
   // painel passa a mentir em silêncio, que é o modo de falha desta tabela.
   "openai/gpt-5.4-nano": { input: 0.2, output: 1.25 },
   "openai/gpt-5.4-mini": { input: 0.75, output: 4.5 },
+  // Candidato a OCR avaliado em 25/08. Aceita `file` (PDF nativo) e imagem, e
+  // — diferente do Gemini — NÃO perde recall com responseSchema.
+  "openai/gpt-5.6-luna": { input: 0.2, output: 1.2 },
+  // Mesmo modelo pela API DIRETA da OpenAI — id sem o prefixo do OpenRouter.
+  // `completion_tokens` da OpenAI já inclui o raciocínio, então não há campo
+  // separado a somar (ao contrário do Gemini).
+  "gpt-5.6-luna": { input: 0.2, output: 1.2 },
+  "openai/gpt-5.6-luna-pro": { input: 0.2, output: 1.2 },
 
   "gemini-2.5-flash": { input: 0.3, output: 2.5 },
   "gemini-2.5-flash-lite": { input: 0.1, output: 0.4 },
   "gemini-2.0-flash": { input: 0.1, output: 0.4 },
+  // Candidatos avaliados para o OCR (tabela oficial em 2026-08-24). O preço de
+  // output do Google é "including thinking tokens" — ver `geminiUsageToTokens`,
+  // que soma `thoughtsTokenCount` ao completion antes de chegar aqui.
+  "gemini-3.5-flash-lite": { input: 0.3, output: 2.5 },
+  "gemini-3.1-flash-lite": { input: 0.25, output: 1.5 },
+  // Gemma é free-of-charge na API do Gemini e NÃO tem tier pago. Zero aqui é o
+  // preço real, declarado de propósito: sem a entrada, `calcCostUsd` também
+  // devolveria 0, mas por buraco na tabela, e o warn dele sumiria junto — os
+  // dois zeros são indistinguíveis na coluna de custo.
+  //
+  // ⚠️ "Sem tier pago" NÃO significa "sem política de dados": os termos do
+  // Gemini definem Paid Service pelo PROJETO Cloud da chave, não pelo modelo
+  // ("a Paid Service only when accessing the API through a Cloud Project
+  // associated with an active billing account"). Numa chave de projeto sem
+  // billing, prompt e resposta viram material de treino com revisão humana —
+  // o que, num pipeline que lê CPF e RG, é problema de LGPD, não de custo.
+  // Confirmar o billing do projeto da chave ANTES de apontar OCR para Gemma.
+  "gemma-4-31b-it": { input: 0, output: 0 },
+  "gemma-4-26b-a4b-it": { input: 0, output: 0 },
   // Voyage AI — embeddings (input-only)
   "voyage-law-2": { input: 0.12, output: 0 },
   "voyage-3": { input: 0.06, output: 0 },
 };
+
+/**
+ * `usageMetadata` do SDK `@google/genai`. `thoughtsTokenCount` só aparece em
+ * modelos que raciocinam; os demais omitem o campo.
+ */
+export interface GeminiUsageMetadata {
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+  thoughtsTokenCount?: number;
+  totalTokenCount?: number;
+  cachedContentTokenCount?: number;
+}
+
+export interface GeminiTokenCounts {
+  promptTokens: number;
+  completionTokens: number;
+  /** Parte do completion que foi raciocínio. Faturada, mas invisível na resposta. */
+  thoughtsTokens: number;
+}
+
+/**
+ * Traduz o `usageMetadata` do Gemini para os campos de `AIUsage`.
+ *
+ * **Por que isto existe:** todos os call-sites do Gemini gravavam
+ * `completionTokens: candidatesTokenCount`, ignorando `thoughtsTokenCount`.
+ * Mas o Google fatura raciocínio como output — a tabela de preços diz
+ * literalmente "Output price (including thinking tokens)" — e os dois campos
+ * são separados. Medido numa matrícula no `gemini-2.5-flash`: 65 candidates
+ * contra 312 thoughts, ou seja, o painel reportava ~1/5 do custo de output real.
+ *
+ * **O cache é deixado DENTRO de `promptTokens` de propósito.** `promptTokenCount`
+ * já inclui `cachedContentTokenCount`, e seria tentador separá-lo para cobrar
+ * na faixa de cacheRead — mas nenhuma entrada Gemini do `PRICING` define
+ * `cacheRead`, e `calcCostUsd` faz `cacheReadTokens * (p.cacheRead ?? 0)`.
+ * Separar sem a taxa faria o token cacheado custar ZERO, trocando a
+ * subcontagem do output por uma subcontagem da entrada — o mesmo erro, do
+ * outro lado. Mantê-lo no prompt cobra a taxa cheia: superestima um pouco
+ * (o cache do Gemini custa ~10% do input), e superestimar é o lado seguro.
+ * Separar de verdade exige as taxas na tabela e é trabalho para outro PR;
+ * até lá `totalTokens` também mantém a semântica de hoje, o que importa
+ * porque `lib/ai/budget.ts` soma essa coluna contra o teto por contrato.
+ */
+export function geminiUsageToTokens(
+  usage: GeminiUsageMetadata | undefined,
+  model?: string
+): GeminiTokenCounts {
+  const prompt = usage?.promptTokenCount ?? 0;
+  const candidates = usage?.candidatesTokenCount ?? 0;
+  const thoughts = usage?.thoughtsTokenCount ?? 0;
+
+  // Identidade observada em todas as sondas: total = prompt + candidates +
+  // thoughts. Se o Google mudar isso, é melhor descobrir por log do que por
+  // fatura — este é exatamente o modo de falha que o bug original teve.
+  const total = usage?.totalTokenCount;
+  if (total != null && total !== prompt + candidates + thoughts) {
+    console.warn(
+      `[usage] soma de tokens do Gemini nao bate${model ? ` (${model})` : ""}: ` +
+        `total=${total} prompt=${prompt} candidates=${candidates} thoughts=${thoughts}`
+    );
+  }
+
+  return {
+    promptTokens: prompt,
+    completionTokens: candidates + thoughts,
+    thoughtsTokens: thoughts,
+  };
+}
 
 export function calcCostUsd(
   model: string,
@@ -83,7 +177,16 @@ export function calcCostUsd(
  * externo teria que se declarar `anthropic` — e o painel mostraria um modelo
  * OpenAI atribuído à Anthropic.
  */
-export type AIProvider = "anthropic" | "gemini" | "voyage" | "openrouter";
+export type AIProvider =
+  | "anthropic"
+  | "gemini"
+  | "voyage"
+  | "openrouter"
+  // OpenAI DIRETA (não via OpenRouter). Entrou quando o OCR passou a poder
+  // rodar em `gpt-5.6-luna`, que leu melhor que qualquer candidato Gemini no
+  // bench de visão. Distinto de `openrouter` de propósito: são chaves, faturas
+  // e limites de rate diferentes, e o painel precisa separá-los.
+  | "openai";
 
 export type AIOperation =
   | "chat"
@@ -91,6 +194,10 @@ export type AIOperation =
   | "passive_edit"
   | "ocr_form"
   | "ocr_tool"
+  // Chamada SOMBRA do OCR: um segundo modelo rodando em paralelo só para
+  // medir divergência. Operação própria porque, somada em `ocr_form`, o painel
+  // diria que a extração ficou 2x mais cara do que ficou.
+  | "ocr_shadow"
   | "embed_kb"
   | "embed_memory"
   | "embed_query"
@@ -156,6 +263,13 @@ export interface RecordUsageParams {
   operation: AIOperation;
   promptTokens: number;
   completionTokens?: number;
+  /**
+   * Parte de `completionTokens` que foi raciocínio (Gemini `thoughtsTokenCount`,
+   * Anthropic thinking). Já está DENTRO de `completionTokens` — vem separado só
+   * para o painel conseguir responder "quanto do custo é o modelo pensando?".
+   * Não somar de novo no total.
+   */
+  thoughtsTokens?: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
   latencyMs: number;
@@ -311,6 +425,7 @@ export function recordAIUsage(params: RecordUsageParams): void {
         operation: params.operation,
         promptTokens: params.promptTokens,
         completionTokens: completion,
+        thoughtsTokens: params.thoughtsTokens ?? 0,
         cacheReadTokens: cacheRead,
         cacheWriteTokens: cacheWrite,
         totalTokens: total,

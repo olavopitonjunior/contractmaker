@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
+import type { WritePreviewEntry } from "@/components/forms/ExtractedDataDialog";
 import {
   isUncatalogedPersonDoc,
   type Assignment,
@@ -440,6 +441,48 @@ export function DocumentosStep({
   const updateDoc = useCallback((id: string, patch: Partial<DocumentCardData>) => {
     setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
   }, []);
+
+  /**
+   * O que o "Aplicar aos campos" escreveria para um doc, sem escrever nada.
+   *
+   * Vive aqui porque `computeDocWrites` precisa do adapter e do form, que o
+   * DocumentCard não tem — e não deveria ter. É chamado só quando o dialog de
+   * revisão abre: rodar o mapper para todo card de toda lista seria trabalho
+   * jogado fora.
+   */
+  const getWritePreview = useCallback(
+    (id: string): WritePreviewEntry[] | null => {
+      const doc = docs.find((d) => d.id === id);
+      if (!doc || !doc.fields || doc.status !== "ready") return null;
+      try {
+        const writes = computeDocWrites(
+          adapter,
+          { category: doc.category, fields: doc.fields, confidence: doc.confidence ?? undefined },
+          doc.assignment,
+          form
+        );
+        // `computeDocWrites` roda com `skipIfDirty: false` — é o contrato dele.
+        // Os dois caminhos reais de aplicação usam `true`, então o que já tem
+        // valor NÃO será sobrescrito. Marcar aqui evita o preview prometer
+        // escrita justamente onde a diferença importa: o operador digitou o CPF
+        // e o dialog anunciaria o CPF do OCR.
+        return Array.from(writes.entries()).map(([path, value]) => {
+          const atual = form.getValues(path as never);
+          return {
+            path,
+            value,
+            jaPreenchido: atual !== undefined && atual !== null && atual !== "",
+          };
+        });
+      } catch {
+        // Preview é conveniência: se o mapper reclamar de um shape inesperado,
+        // o dialog mostra os dados extraídos e omite a seção — nunca derruba a
+        // etapa inteira do formulário por causa de uma prévia.
+        return null;
+      }
+    },
+    [docs, adapter, form]
+  );
 
   // Ensure the slot's backing array has at least `index + 1` entries. Used by
   // both auto-grow (adapter.suggest putting a doc on a slot that doesn't exist
@@ -1132,6 +1175,7 @@ export function DocumentosStep({
                 }
                 onRetry={handleRetry}
                 onExtract={handleRetry}
+                getWritePreview={getWritePreview}
               />
             ))}
           </div>

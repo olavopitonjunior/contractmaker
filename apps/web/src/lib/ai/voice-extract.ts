@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
-import { recordAIUsage } from "@/lib/ai/usage";
+import { recordAIUsage, geminiUsageToTokens } from "@/lib/ai/usage";
+import type { GeminiUsageMetadata } from "@/lib/ai/usage";
 
 /**
  * Input de voz no formulário público → autopreenchimento de campos.
@@ -197,7 +198,7 @@ export async function extractFromVoice(
 
   let text = "";
   let usage:
-    | { promptTokenCount?: number; candidatesTokenCount?: number }
+    | GeminiUsageMetadata
     | undefined;
 
   try {
@@ -220,10 +221,7 @@ export async function extractFromVoice(
     text = response.text ?? "{}";
     usage = (
       response as {
-        usageMetadata?: {
-          promptTokenCount?: number;
-          candidatesTokenCount?: number;
-        };
+        usageMetadata?: GeminiUsageMetadata;
       }
     ).usageMetadata;
   } catch (err) {
@@ -242,14 +240,16 @@ export async function extractFromVoice(
     return { fields: {}, rawText: "" };
   }
 
+  const tok = geminiUsageToTokens(usage, VOICE_MODEL);
   recordAIUsage({
     orgId: ctx.orgId,
     userId: ctx.userId,
     provider: "gemini",
     model: VOICE_MODEL,
     operation: "voice_extract",
-    promptTokens: usage?.promptTokenCount ?? 0,
-    completionTokens: usage?.candidatesTokenCount ?? 0,
+    promptTokens: tok.promptTokens,
+    completionTokens: tok.completionTokens,
+    thoughtsTokens: tok.thoughtsTokens,
     latencyMs: Date.now() - t0,
     success: true,
   });
