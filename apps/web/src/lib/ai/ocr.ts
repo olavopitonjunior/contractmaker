@@ -48,6 +48,15 @@ function getGenAI(): GoogleGenAI {
  */
 export function humanizeOcrError(raw: string): string {
   const lower = raw.toLowerCase();
+  // Credencial primeiro: se a cascata inteira caiu por config, o corretor não
+  // tem NADA a fazer com o arquivo dele. Mandá-lo "tentar outro documento" o
+  // faz repetir um trabalho que nunca vai funcionar até alguém corrigir uma env
+  // var — e ainda esconde o incidente, porque ele culpa o próprio PDF em vez de
+  // abrir chamado. Vem antes de "invalid image" porque o detector exige duas
+  // metades e não confunde os dois.
+  if (isConfigCredentialError(lower)) {
+    return "O serviço de extração está temporariamente indisponível por uma configuração do sistema — não é problema do seu arquivo. A equipe técnica já pode ver isso nos logs.";
+  }
   if (lower.includes("safety") || lower.includes("blocked")) {
     return "O documento foi bloqueado pelo filtro de segurança do OCR. Tente um arquivo diferente.";
   }
@@ -766,6 +775,16 @@ export async function extractPlainText(
 function shouldTryFallbackModel(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const msg = err.message.toLowerCase();
+
+  // Credencial ANTES do guard de rate-limit, de propósito.
+  //
+  // `insufficient_quota` da OpenAI vem como **429** — mas é crédito acabado,
+  // condição PERMANENTE, não pico de tráfego. Backoff não resolve; trocar de
+  // provedor resolve. Sem esta ordem, `msg.includes("429")` devolveria false
+  // primeiro e reproduziria o mesmo apagão que esta função existe para evitar,
+  // só que com a chave válida e sem saldo.
+  if (isConfigCredentialError(msg, err)) return true;
+
   // Don't fallback on rate limits (those need backoff, not a different model)
   if (
     msg.includes("quota") ||
@@ -776,12 +795,6 @@ function shouldTryFallbackModel(err: unknown): boolean {
   ) {
     return false;
   }
-  // Credencial do provedor ausente: trocar de modelo RESOLVE, porque o fallback
-  // sai por outro provedor. Sem este caso, era a única classe de falha do OCR
-  // que apagava em vez de degradar — `GEMINI_OCR_MODEL=gpt-5.6-luna` sem
-  // `OPENAI_API_KEY` fazia 100% das extrações falharem, e o `.env.example`
-  // recomenda justamente esse modelo. Ver `isConfigCredentialError`.
-  if (isConfigCredentialError(msg)) return true;
   // Fallback on 500s, safety blocks, "content blocked", parse failures
   return (
     msg.includes("500") ||
@@ -802,20 +815,37 @@ function shouldTryFallbackModel(err: unknown): boolean {
  * provedores, que significam a mesma coisa na prática: este provedor não vai
  * atender, tente outro.
  */
-export function isConfigCredentialError(msgLower: string): boolean {
-  // Caminho 1: a forma que ESTE código lança, sem depender do texto do
-  // provedor. `ocr-openai.ts` monta "OpenAI OCR got status: 403. <corpo>".
-  //
-  // Isto existe por um buraco concreto: 403 com chave VÁLIDA mas projeto sem
-  // acesso ao modelo (ex.: `gpt-5.6-luna` não liberado) tipicamente NÃO traz a
-  // expressão "api key" no corpo. Sem esta cláusula, aquele caso continuaria
-  // apagando 100% das extrações — o vizinho exato do bug que este código
-  // conserta, só que com a chave presente.
+export function isConfigCredentialError(msgLower: string, err?: unknown): boolean {
+  // Caminho 1 — CAMPO ESTRUTURADO, o mais confiável: o SDK do Gemini lança
+  // `ApiError` com `.status` (verificado no bundle instalado, 1.50.1). Não
+  // depende de texto nenhum, então sobrevive a mudança de wording do provedor.
+  const status = (err as { status?: unknown } | undefined)?.status;
+  if (status === 401 || status === 403) return true;
+
+  // Caminho 2 — a forma que ESTE código monta. `ocr-openai.ts` produz
+  // "OpenAI OCR got status: 403. <corpo>".
   if (/got status:\s*(401|403)/.test(msgLower)) return true;
 
-  // Caminho 2: texto do provedor. Exige as DUAS metades — falar de credencial
+  // Caminho 3 — o corpo JSON que o SDK do Gemini stringifica:
+  // {"error":{"message":"…","code":403,"status":"PERMISSION_DENIED"}}.
+  //
+  // Este é o buraco que quase passou: 403 do Gemini (billing desligado, API
+  // não habilitada, chave sem acesso ao modelo) não traz "api key" nem
+  // "got status", então nenhum dos outros caminhos pegaria — e como o FALLBACK
+  // também é Gemini, uma `GEMINI_API_KEY` recusada apagaria os dois hops.
+  if (/"code"\s*:\s*(401|403)\b/.test(msgLower)) return true;
+  if (msgLower.includes("permission_denied") || msgLower.includes("unauthenticated")) {
+    return true;
+  }
+
+  // Caminho 4 — crédito esgotado. Vem como 429, mas é PERMANENTE: backoff não
+  // resolve, trocar de provedor resolve. Por isso é tratado aqui e não no
+  // guard de rate-limit.
+  if (msgLower.includes("insufficient_quota")) return true;
+
+  // Caminho 5 — texto do provedor. Exige as DUAS metades: falar de credencial
   // E dizer que está ausente/recusada. Só "invalid" faria "invalid image"
-  // virar erro de config.
+  // virar erro de config e gastaria um fallback que não resolve nada.
   const falaDeCredencial =
     msgLower.includes("api_key") ||
     msgLower.includes("api key") ||
@@ -829,8 +859,8 @@ export function isConfigCredentialError(msgLower: string): boolean {
     msgLower.includes("missing") ||
     msgLower.includes("invalid") ||
     msgLower.includes("unauthorized") ||
-    msgLower.includes("401") ||
-    msgLower.includes("403");
+    /\b401\b/.test(msgLower) ||
+    /\b403\b/.test(msgLower);
   return falaDeCredencial && ausenteOuRecusada;
 }
 
@@ -1139,9 +1169,23 @@ export async function classifyAndExtract(
           !fallbackMsg.toLowerCase().includes("safety") &&
           !fallbackMsg.toLowerCase().includes("blocked");
         if (shouldTryClaude) {
-          console.warn(
-            `[ocr] fallback Gemini ${fallbackModel} also failed — trying Claude Haiku as last resort`
-          );
+          // O segundo hop também precisa gritar quando a causa é config.
+          // Cenário real: `GEMINI_OCR_MODEL` num provedor sem chave E
+          // `GEMINI_API_KEY` recusada. O primeiro hop loga CONFIG, o segundo
+          // caía num warn genérico, e o Claude (que sempre tem chave, porque
+          // move o resto do app) salvava a extração — a ~10× o custo, sem
+          // ninguém saber que DOIS provedores estão quebrados.
+          if (isConfigCredentialError(fallbackMsg.toLowerCase(), fallbackErr)) {
+            console.error(
+              `[ocr] CONFIG: o fallback ${fallbackModel} TAMBÉM falhou por credencial. ` +
+                `Dois provedores fora — caindo no Claude, que custa bem mais. ` +
+                `Confira GEMINI_API_KEY com scripts/verify-ocr.sh.`
+            );
+          } else {
+            console.warn(
+              `[ocr] fallback Gemini ${fallbackModel} also failed — trying Claude Haiku as last resort`
+            );
+          }
           try {
             const result = await callClaudeHaikuOcr(base64Data, mimeType);
             text = result.text;

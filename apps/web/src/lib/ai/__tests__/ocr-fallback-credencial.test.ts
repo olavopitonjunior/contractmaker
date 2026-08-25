@@ -68,6 +68,59 @@ describe("isConfigCredentialError", () => {
     expect(isConfigCredentialError("openai ocr got status: 429. {}")).toBe(false);
   });
 
+  /**
+   * A forma REAL do erro do Gemini — conferida no bundle instalado (1.50.1).
+   * O SDK lança `ApiError` com `.status`, e a `message` é
+   * `JSON.stringify({error:{message, code, status}})`. Não há "got status:" nem
+   * "api key".
+   *
+   * Este era o buraco mais perigoso: como o FALLBACK também é Gemini, uma
+   * `GEMINI_API_KEY` recusada apagaria os DOIS hops da cascata.
+   */
+  it("403 nativo do Gemini casa pelo campo estruturado .status", () => {
+    const err = Object.assign(
+      new Error(
+        '{"error":{"message":"Generative Language API has not been used in project 123 or it is disabled.","code":403,"status":"PERMISSION_DENIED"}}'
+      ),
+      { status: 403 }
+    );
+    expect(isConfigCredentialError(err.message.toLowerCase(), err)).toBe(true);
+  });
+
+  it("403 nativo do Gemini casa pelo corpo JSON mesmo sem o campo estruturado", () => {
+    // Sem `err`, sobra o texto: o corpo traz "code":403 e PERMISSION_DENIED.
+    expect(
+      isConfigCredentialError(
+        '{"error":{"message":"api has not been used in project","code":403,"status":"permission_denied"}}'
+      )
+    ).toBe(true);
+  });
+
+  it("401 nativo do Gemini (UNAUTHENTICATED) casa", () => {
+    expect(
+      isConfigCredentialError(
+        '{"error":{"message":"request had invalid authentication credentials","code":401,"status":"unauthenticated"}}'
+      )
+    ).toBe(true);
+  });
+
+  /**
+   * Crédito esgotado vem como 429, mas é PERMANENTE — backoff não resolve,
+   * trocar de provedor resolve. Se o guard de rate-limit rodasse antes, isto
+   * reproduziria o mesmo apagão com a chave válida e sem saldo.
+   */
+  it("insufficient_quota (429 permanente da OpenAI) conta como config", () => {
+    expect(
+      isConfigCredentialError(
+        'openai ocr got status: 429. {"error":{"type":"insufficient_quota","message":"you exceeded your current quota"}}'
+      )
+    ).toBe(true);
+  });
+
+  it("500 com code no corpo NÃO vira erro de credencial", () => {
+    expect(isConfigCredentialError('{"error":{"code":500,"status":"internal"}}')).toBe(false);
+  });
+
   it("exige as DUAS metades: falar de credencial e dizer que está ausente/recusada", () => {
     // Só "invalid" não basta — senão "invalid image" viraria erro de config.
     expect(isConfigCredentialError("invalid request payload")).toBe(false);
