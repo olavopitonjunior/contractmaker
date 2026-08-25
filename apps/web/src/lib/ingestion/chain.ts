@@ -34,6 +34,11 @@ export function advanceUrl(origin: string, runId: string): string {
   return `${origin.replace(/\/+$/, "")}/api/templates/ingest/runs/${runId}/advance`;
 }
 
+/** URL absoluta do `/execute` deste run (a corrente da fase de execução). */
+export function executeUrl(origin: string, runId: string): string {
+  return `${origin.replace(/\/+$/, "")}/api/templates/ingest/runs/${runId}/execute`;
+}
+
 /**
  * Dispara a próxima fatia. Devolve a promessa para o caller passar ao
  * `waitUntil` — nunca rejeita: falhar em re-encadear é degradação (o cron
@@ -43,13 +48,30 @@ export async function chainAdvance(
   origin: string,
   runId: string
 ): Promise<ChainAdvanceResult> {
+  return chainTo(advanceUrl(origin, runId), runId);
+}
+
+/**
+ * Dispara a próxima fatia da EXECUÇÃO do plano (um template por invocação).
+ *
+ * Corrente própria porque o `/execute` não é retomável pelo `/advance`:
+ * `executing` está fora de `AUTO_ADVANCE_STATUSES` justamente para o sweeper
+ * não empurrar um run cujo plano ninguém revisou. O corpo vai VAZIO — a revisão
+ * já está gravada em `planReviewed`, e mandá-la de novo abriria caminho para
+ * uma corrente sobrescrever a decisão do operador.
+ */
+export async function chainExecute(
+  origin: string,
+  runId: string
+): Promise<ChainAdvanceResult> {
+  return chainTo(executeUrl(origin, runId), runId);
+}
+
+async function chainTo(url: string, runId: string): Promise<ChainAdvanceResult> {
   const secret = process.env.CRON_SECRET;
   if (!secret) return { scheduled: false, reason: "no-cron-secret" };
   try {
-    await fetch(advanceUrl(origin, runId), {
-      method: "POST",
-      headers: { "x-cron-secret": secret },
-    });
+    await fetch(url, { method: "POST", headers: { "x-cron-secret": secret } });
     return { scheduled: true };
   } catch (err) {
     console.warn(`[ingestion] re-encadeamento do run ${runId} falhou:`, err);

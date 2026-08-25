@@ -3,6 +3,7 @@ import { requireCronAuth } from "@/lib/security/cron-auth";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
 import { prisma } from "@/lib/db/prisma";
 import { advanceRun } from "@/lib/ingestion/run-executor";
+import { executePlanSlice } from "@/lib/ingestion/plan-executor";
 import {
   AUTO_ADVANCE_STATUSES,
   RUN_STALE_MS,
@@ -35,6 +36,12 @@ const MAX_RUNS_PER_SWEEP = Number(process.env.INGESTION_SWEEP_MAX ?? "3");
  * `planning` e `awaiting_review` ficam FORA da varredura de propósito: um run
  * parado neles não está travado, está esperando (o planner da Fase A2 e a
  * revisão humana, respectivamente).
+ *
+ * `executing` ENTRA, numa segunda passada: ali o operador já decidiu e o run
+ * está no meio da escrita (um template por invocação). Se a corrente do
+ * `/execute` se romper, o lote fica com cláusulas no acervo e metade dos
+ * modelos — o pior estado possível, porque o slot de quem já subiu aponta pra
+ * uma cláusula que existe e o resto do acervo espera um modelo que não veio.
  */
 export async function GET(req: NextRequest) {
   const cronDenied = requireCronAuth(req);
@@ -65,10 +72,30 @@ export async function GET(req: NextRequest) {
       results.push(await advanceRun({ runId: candidate.id }));
     }
 
+    const executing = await prisma.ingestionRun.findMany({
+      where: {
+        status: "executing",
+        // `updatedAt` velho é o sinal de PARADO: cada fatia grava o relatório e
+        // renova o carimbo, então um run que está andando pela corrente nunca
+        // entra aqui — o sweeper destrava, não disputa.
+        updatedAt: { lt: staleBefore },
+        OR: [{ startedAt: null }, { startedAt: { lt: staleBefore } }],
+      },
+      orderBy: { updatedAt: "asc" },
+      take: MAX_RUNS_PER_SWEEP,
+      select: { id: true },
+    });
+    const executed = [];
+    for (const candidate of executing) {
+      executed.push(await executePlanSlice({ runId: candidate.id }));
+    }
+
     return NextResponse.json({
       ok: true,
       picked: candidates.length,
       runs: results,
+      pickedExecuting: executing.length,
+      executed,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

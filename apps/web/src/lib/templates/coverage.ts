@@ -22,7 +22,14 @@ import {
   CANONICAL_MODALIDADES_BY_MODULE,
   type CanonicalModalidade,
 } from "./canonical-templates";
-import { modalidadeLabel } from "@/lib/contracts/template-category";
+import {
+  GARANTIA_LABELS,
+  GARANTIA_TIPOS,
+  modalidadeLabel,
+  parseMatchCriteria,
+  templateFamilyForModalidade,
+  type GarantiaTipo,
+} from "@/lib/contracts/template-category";
 
 /** Modalidades do kit mínimo obrigatório, na ordem em que o painel as mostra. */
 export const REQUIRED_KIT_MODALIDADES: CanonicalModalidade[] = [
@@ -43,6 +50,12 @@ export interface CoverageTemplateLite {
   engine: string;
   /** SHA-256 do DOCX de origem — só existe em modelo ingerido pela imobiliária. */
   sourceHash?: string | null;
+  /**
+   * Critérios de pareamento (`ContractTemplate.matchCriteria`). Opcional: só a
+   * matriz modalidade × garantia lê este campo — o painel "Modelos do sistema"
+   * segue passando os mesmos campos de antes.
+   */
+  matchCriteria?: unknown;
 }
 
 export interface CoverageRow {
@@ -144,4 +157,137 @@ export function computeTemplateCoverage(input: {
     requiredDone,
     kitComplete: requiredDone === required.length,
   };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Matriz modalidade × garantia
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A segunda dimensão da cobertura: GARANTIA.
+ *
+ * `computeTemplateCoverage` responde "a imobiliária tem um modelo de locação?".
+ * Depois da ingestão em lote a pergunta que importa é outra — "tem o modelo de
+ * locação COM FIADOR?" —, porque garantia diferente é template físico diferente
+ * (`matchCriteria.garantia` é o que `pickTemplateByFacts` elege). Um tenant com
+ * um único modelo de locação genérico e cinco garantias no formulário tem
+ * cobertura "completa" pelo painel antigo e quatro buracos na prática.
+ *
+ * A matriz enxerga também o RASCUNHO, e é de propósito: o run de ingestão nasce
+ * suggest-only (template `draft`), então o relatório precisa distinguir "você
+ * ganhou este modelo, falta ativar" de "este continua faltando".
+ */
+export type GarantiaCoverageState = "active" | "draft" | "missing";
+
+export interface GarantiaCoverageCell {
+  garantia: GarantiaTipo;
+  label: string;
+  state: GarantiaCoverageState;
+  templateId?: string;
+  templateName?: string;
+}
+
+export interface GarantiaCoverageRow {
+  modalidade: string;
+  label: string;
+  cells: GarantiaCoverageCell[];
+  /**
+   * Estado do modelo SEM critério de garantia — o genérico da modalidade. Ele
+   * não é eleito por fato do formulário (pontua 0 no pareamento); só serve como
+   * `isDefault`. Fica separado das células para não fingir que cobre todas.
+   */
+  genericState: GarantiaCoverageState;
+}
+
+export interface GarantiaCoverageReport {
+  garantias: GarantiaTipo[];
+  rows: GarantiaCoverageRow[];
+  /** Células vazias de uma modalidade que a org JÁ começou a cobrir. */
+  gaps: Array<{ modalidade: string; garantia: GarantiaTipo; label: string }>;
+}
+
+/**
+ * Modalidades em que a garantia decide o modelo: as de locação e as propostas
+ * de locação (o form de proposta também coleta `garantia.tipo`).
+ */
+function garantiaAwareModalidades(enabled: ReadonlySet<string>): string[] {
+  return CANONICAL_TEMPLATES.map((t) => t.modalidade)
+    .filter((m) => {
+      const mod = MODULE_BY_MODALIDADE.get(m);
+      return mod ? enabled.has(mod) : false;
+    })
+    .filter(
+      (m) =>
+        templateFamilyForModalidade(m) === "locacao" ||
+        m.startsWith("proposta_locacao")
+    );
+}
+
+function stateOf(status: string): GarantiaCoverageState | null {
+  if (status === "active") return "active";
+  if (status === "draft") return "draft";
+  return null;
+}
+
+/**
+ * Matriz modalidade × garantia da org.
+ *
+ * Recebe os templates NÃO arquivados (ativos e rascunhos) — diferente de
+ * `computeTemplateCoverage`, que só olha ativos porque espelha o que a geração
+ * enxerga.
+ */
+export function computeGarantiaCoverage(input: {
+  modules: readonly string[];
+  templates: CoverageTemplateLite[];
+}): GarantiaCoverageReport {
+  const enabled = new Set(input.modules);
+  const garantias = [...GARANTIA_TIPOS];
+  const usable = input.templates.filter((t) => stateOf(t.status) !== null);
+
+  const rows: GarantiaCoverageRow[] = garantiaAwareModalidades(enabled).map(
+    (modalidade) => {
+      const mine = usable.filter((t) => t.modalidade === modalidade);
+
+      const cells = garantias.map<GarantiaCoverageCell>((garantia) => {
+        const matches = mine.filter(
+          (t) => parseMatchCriteria(t.matchCriteria)?.garantia === garantia
+        );
+        // Ativo vence rascunho: o que a geração usa hoje é a informação mais
+        // útil na célula.
+        const chosen =
+          matches.find((t) => t.status === "active") ?? matches[0] ?? null;
+        return {
+          garantia,
+          label: GARANTIA_LABELS[garantia],
+          state: chosen ? stateOf(chosen.status)! : "missing",
+          templateId: chosen?.id,
+          templateName: chosen?.name,
+        };
+      });
+
+      const generic = mine.filter((t) => !parseMatchCriteria(t.matchCriteria)?.garantia);
+      const genericChosen =
+        generic.find((t) => t.status === "active") ?? generic[0] ?? null;
+
+      return {
+        modalidade,
+        label: modalidadeLabel(modalidade),
+        cells,
+        genericState: genericChosen ? stateOf(genericChosen.status)! : "missing",
+      };
+    }
+  );
+
+  // Buraco só é buraco onde a imobiliária JÁ opera: listar as 7 garantias de uma
+  // modalidade que o tenant nunca usou transformaria o relatório num muro de
+  // pendências falsas, e a primeira reação a um muro desses é ignorá-lo inteiro.
+  const gaps = rows
+    .filter((r) => r.cells.some((c) => c.state !== "missing"))
+    .flatMap((r) =>
+      r.cells
+        .filter((c) => c.state === "missing")
+        .map((c) => ({ modalidade: r.modalidade, garantia: c.garantia, label: c.label }))
+    );
+
+  return { garantias, rows, gaps };
 }
