@@ -341,6 +341,21 @@ describe("planner — o plano do corpus real", () => {
     expect(call.system.map((b) => b.text).join()).not.toContain("Playbook — CONTRATO DE COMPRA");
     expect(call.userContent).toContain("## DOCUMENTOS DO LOTE");
   });
+
+  it("pede a resposta em STREAMING — 16k tokens de saída não cabem numa chamada muda", async () => {
+    // Foi assim que a chamada morreu em staging: 504 na Vercel, sem plano e sem
+    // erro registrado. Saída longa sem streaming é o caso clássico de timeout.
+    const r = runner(goodPlan());
+    await planLibrary(input, { structured: r.fn });
+    expect(r.calls[0].stream).toBe(true);
+    expect(r.calls[0].maxTokens).toBe(16_000);
+  });
+
+  it("registra a duração de cada tentativa — é o que faltava para ver o aperto", async () => {
+    const r = runner(goodPlan());
+    const result = await planLibrary(input, { structured: r.fn });
+    expect(result.attempts[0].durationMs).toBe(900);
+  });
 });
 
 describe("planner — plano recusado", () => {

@@ -157,6 +157,8 @@ export interface PlanAttemptRecord {
   ok: boolean;
   confidence: number;
   violations: PlanViolation[];
+  /** Quanto a chamada demorou. Ver o `latencyMs` de `runStructured`. */
+  durationMs: number;
 }
 
 export interface PlanLibraryResult {
@@ -1036,6 +1038,10 @@ export async function planLibrary(
       schema: PLAN_SCHEMA,
       maxTokens: 16_000,
       effort: step.effort,
+      // 16.000 tokens de saída com `effort` alto é minutos de geração. Sem
+      // streaming a requisição fica muda até a resposta inteira ficar pronta, e
+      // foi assim que esta chamada morreu no `maxDuration` da função em staging.
+      stream: true,
     });
 
     if (options.meter) {
@@ -1062,6 +1068,7 @@ export async function planLibrary(
       ok: verdict.ok,
       confidence: plan.confidence,
       violations: verdict.violations,
+      durationMs: result.latencyMs,
     });
     last = { plan, violations: verdict.violations };
 

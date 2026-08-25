@@ -45,11 +45,24 @@
  * — o documento, o digest do lote — entram depois do breakpoint, senão cada
  * item do lote invalidaria o prefixo e o cache não pouparia nada.
  *
- * Sem streaming de propósito: as saídas aqui são curtas (uma classificação, um
- * plano) e cabem folgadas dentro do timeout padrão do SDK.
+ * ## Streaming
+ *
+ * Opcional, por chamada (`stream: true`). A classificação é curta e vai sem;
+ * o planner pede `max_tokens: 16.000` e vai COM — saída longa sem streaming é o
+ * caso clássico de a requisição estourar o timeout antes da primeira resposta,
+ * e foi o que matou a chamada do planner em staging (504 na Vercel).
+ *
+ * O acúmulo dos eventos é do SDK ({@link MessageStream}), não nosso: `usage`
+ * chega partido entre `message_start` e `message_delta`, e remontar isso à mão
+ * seria reescrever código que já existe e já é testado. O caminho passa por
+ * `toReadableStream()` porque `client.messages.stream()` exigiria tipar o corpo
+ * como `MessageCreateParams` — que, no 0.30, não conhece `thinking` nem
+ * `output_config`, exatamente o motivo de usarmos `client.post`.
  */
 
 import type { Anthropic } from "@anthropic-ai/sdk";
+import type { Stream } from "@anthropic-ai/sdk/streaming";
+import { MessageStream } from "@anthropic-ai/sdk/lib/MessageStream";
 import { getAnthropicClient } from "./anthropic-client";
 import {
   capabilitiesFor,
@@ -75,6 +88,12 @@ export interface StructuredCallInput {
   schema: Record<string, unknown>;
   maxTokens: number;
   effort: EffortLevel;
+  /**
+   * Receber a resposta em streaming. Ligue para todo `maxTokens` grande: o
+   * corpo é o mesmo e a saída também, mas a conexão não fica muda enquanto o
+   * modelo pensa — que é o que faz uma chamada longa morrer no timeout.
+   */
+  stream?: boolean;
 }
 
 export interface StructuredUsage {
@@ -106,6 +125,8 @@ export interface StructuredRequestBody {
     cache_control?: { type: "ephemeral" };
   }>;
   messages: Array<{ role: "user"; content: string }>;
+  /** Presente só quando a chamada é em streaming — a API o exige no CORPO. */
+  stream?: true;
   thinking?: { type: "adaptive" };
   output_config: {
     effort?: EffortLevel;
@@ -211,6 +232,7 @@ export function buildStructuredRequest(
     max_tokens: input.maxTokens,
     system: toSystemBlocks(input.system),
     messages: [{ role: "user", content: input.userContent }],
+    ...(input.stream ? { stream: true as const } : {}),
     ...(caps.adaptiveThinking ? { thinking: { type: "adaptive" as const } } : {}),
     output_config: {
       ...(supportsEffort(caps) ? { effort: input.effort } : {}),
@@ -220,9 +242,36 @@ export function buildStructuredRequest(
 }
 
 /**
+ * A chamada em streaming, reduzida à mesma forma de resposta da não-streaming.
+ *
+ * `client.post(..., { stream: true })` devolve o `Stream` de eventos SSE do
+ * SDK; `MessageStream` é o acumulador que remonta a mensagem final a partir
+ * deles. Structured output em streaming não traz `parsed_output` — o JSON chega
+ * como `text_delta` —, e é por isso que {@link extractJson} tem o caminho pelo
+ * bloco de texto: aqui ele não é fallback, é a rota normal.
+ */
+async function postStreaming(
+  client: Pick<Anthropic, "post">,
+  body: StructuredRequestBody
+): Promise<StructuredResponseBody> {
+  const stream = (await client.post("/v1/messages", {
+    body,
+    stream: true,
+  })) as Stream<unknown>;
+  const message = await MessageStream.fromReadableStream(
+    stream.toReadableStream()
+  ).finalMessage();
+  return message as unknown as StructuredResponseBody;
+}
+
+/**
  * Uma chamada estruturada. Devolve o JSON cru (a VALIDAÇÃO de forma é do
  * chamador — `lib/ingestion/*` tem os enums fechados do domínio) e a contagem
  * de tokens, que o chamador grava em `AIUsage` e acumula no cap do run.
+ *
+ * `latencyMs` mede a chamada INTEIRA, streaming incluído (do POST à mensagem
+ * final) — é ele que o run grava no relatório para o orçamento da fatia deixar
+ * de ser descoberto pelo log da Vercel.
  */
 export async function runStructured<T = unknown>(
   input: StructuredCallInput,
@@ -232,9 +281,9 @@ export async function runStructured<T = unknown>(
   const body = buildStructuredRequest(input);
 
   const t0 = Date.now();
-  const response = (await anthropic.post("/v1/messages", {
-    body,
-  })) as StructuredResponseBody;
+  const response = input.stream
+    ? await postStreaming(anthropic, body)
+    : ((await anthropic.post("/v1/messages", { body })) as StructuredResponseBody);
   const latencyMs = Date.now() - t0;
 
   return {

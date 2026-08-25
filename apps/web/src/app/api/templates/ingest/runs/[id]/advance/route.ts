@@ -7,9 +7,13 @@ import { advanceRun } from "@/lib/ingestion/run-executor";
 import { authorizeIngestion } from "@/lib/ingestion/route-auth";
 
 export const runtime = "nodejs";
-// O executor para em 90s (INGESTION_SLICE_BUDGET_MS) justamente pra sobrar
+// O executor para em 240s (INGESTION_SLICE_BUDGET_MS) justamente pra sobrar
 // tempo de gravar o estado e disparar a próxima fatia dentro deste teto.
-export const maxDuration = 120;
+//
+// Eram 120s até o run de staging: a chamada do planner (Opus 4.8, effort high,
+// 16k tokens de saída) começa com a fatia inteira pela frente e não coube.
+// `run-executor.test.ts` amarra este número ao orçamento do executor.
+export const maxDuration = 300;
 
 /**
  * POST /api/templates/ingest/runs/:id/advance

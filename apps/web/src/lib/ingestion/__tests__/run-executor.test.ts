@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { prisma } from "@/lib/db/prisma";
 import type { ItemStatus, RunStatus } from "@/lib/ingestion/run-state";
 import { INGEST_CLASSIFY_MODEL, INGEST_PLAN_MODEL } from "@/lib/ai/shared/models";
@@ -34,11 +36,17 @@ vi.mock("@/lib/knowledge/upload-classifier", () => ({
 
 import {
   advanceRun,
+  MAX_PLAN_ATTEMPTS,
+  PLAN_MIN_BUDGET_MS,
+  SLICE_BUDGET_MS,
   type AdvanceRunOptions,
   type AdvanceRunResult,
   type LibraryPlanner,
+  type PlanAttemptsReport,
   type PlanningReport,
+  type StageTiming,
 } from "@/lib/ingestion/run-executor";
+import { RUN_STALE_MS } from "@/lib/ingestion/run-state";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Harness: um banco em memória que HONRA o `where` dos updateMany.
@@ -253,22 +261,30 @@ function plannerReturning(result: {
   plan: LibraryPlan;
   accepted: boolean;
   escalated?: boolean;
+  /** Atraso da chamada, para os testes de instrumentação medirem algo. */
+  delayMs?: number;
 }): LibraryPlanner {
-  return vi.fn(async () => ({
-    plan: result.plan,
-    accepted: result.accepted,
-    escalated: result.escalated ?? false,
-    attempts: [
-      {
-        attempt: 1,
-        model: INGEST_PLAN_MODEL,
-        effort: "high" as const,
-        ok: result.accepted,
-        confidence: result.plan.confidence,
-        violations: [],
-      },
-    ],
-  }));
+  return vi.fn(async () => {
+    if (result.delayMs) {
+      await new Promise((resolve) => setTimeout(resolve, result.delayMs));
+    }
+    return {
+      plan: result.plan,
+      accepted: result.accepted,
+      escalated: result.escalated ?? false,
+      attempts: [
+        {
+          attempt: 1,
+          model: INGEST_PLAN_MODEL,
+          effort: "high" as const,
+          ok: result.accepted,
+          confidence: result.plan.confidence,
+          violations: [],
+          durationMs: result.delayMs ?? 0,
+        },
+      ],
+    };
+  });
 }
 
 function emptyPlan(confidence = 0.9): LibraryPlan {
@@ -421,7 +437,7 @@ describe("advanceRun — claim entre invocações concorrentes", () => {
 
   it("claim vencido é retomável — worker morto não trava o lote", async () => {
     seed(3, "extracting");
-    runs[0].startedAt = new Date(Date.now() - 10 * 60 * 1000);
+    runs[0].startedAt = new Date(Date.now() - RUN_STALE_MS - 60_000);
 
     const result = await advanceRun({ runId: "run-1", orgId: "org-1", maxSteps: 1 });
     expect(result.claimed).toBe(true);
@@ -453,7 +469,7 @@ describe("advanceRun — claim entre invocações concorrentes", () => {
       item.text = CONTRATO;
       item.classification = { familyKey: "contrato_locacao:locacao:fiador" };
     }
-    runs[0].startedAt = new Date(Date.now() - 10 * 60 * 1000);
+    runs[0].startedAt = new Date(Date.now() - RUN_STALE_MS - 60_000);
 
     const result = await advanceRun({ runId: "run-1", orgId: "org-1" });
     expect(result.claimed).toBe(true);
@@ -892,5 +908,179 @@ describe("advanceRun — custo de IA", () => {
     expect(result.status).toBe("failed");
     expect(runs[0].error).toContain("teto de custo de IA deste lote");
     expect(runs[0].libraryPlan).toBeNull();
+  });
+});
+
+describe("advanceRun — teto de tentativas de planejamento", () => {
+  /** Um run parado em `planning`, com tudo pronto para a chamada. */
+  function seedPlanning(): void {
+    seed(2, "planning");
+    for (const item of items) {
+      item.status = "classified";
+      item.text = CONTRATO;
+      item.classification = { familyKey: "contrato_locacao:locacao:fiador" };
+    }
+  }
+
+  /**
+   * O que o sweeper faz com um run cuja função morreu no meio da chamada: o
+   * claim vence, o run volta a ser reivindicável e a chamada REPETE. É este laço
+   * — pago a cada volta — que o teto fecha.
+   */
+  function resumeAfterDeath(): void {
+    runs[0].status = "planning";
+    runs[0].startedAt = null;
+    runs[0].error = null;
+  }
+
+  function planAttempts(): PlanAttemptsReport | undefined {
+    return (runs[0].report as { planAttempts?: PlanAttemptsReport }).planAttempts;
+  }
+
+  it("a tentativa é gravada ANTES da chamada — a que morre no timeout também conta", async () => {
+    seedPlanning();
+    const planner: LibraryPlanner = vi.fn(async () => {
+      // No instante em que o planner é chamado o contador JÁ está no banco.
+      // Contado depois, o caso que interessa (a chamada que não volta) nunca
+      // seria contado.
+      expect(planAttempts()?.count).toBe(1);
+      return {
+        plan: emptyPlan(),
+        accepted: true,
+        escalated: false,
+        attempts: [],
+      };
+    });
+
+    await advanceRun({ runId: "run-1", orgId: "org-1", planner });
+    expect(planner).toHaveBeenCalledTimes(1);
+    expect(planAttempts()?.maxAttempts).toBe(MAX_PLAN_ATTEMPTS);
+  });
+
+  it("esgotadas as tentativas o run vai a failed em vez de repetir a chamada paga", async () => {
+    seedPlanning();
+    const planner: LibraryPlanner = vi.fn(async () => {
+      throw new Error("a função morreu antes da resposta");
+    });
+
+    for (let i = 0; i < MAX_PLAN_ATTEMPTS; i++) {
+      resumeAfterDeath();
+      await advanceRun({ runId: "run-1", orgId: "org-1", planner });
+    }
+    expect(planner).toHaveBeenCalledTimes(MAX_PLAN_ATTEMPTS);
+    expect(planAttempts()?.count).toBe(MAX_PLAN_ATTEMPTS);
+
+    resumeAfterDeath();
+    const result = await advanceRun({ runId: "run-1", orgId: "org-1", planner });
+
+    expect(result.status).toBe("failed");
+    expect(runs[0].status).toBe("failed");
+    // A quarta volta não gasta chamada nenhuma.
+    expect(planner).toHaveBeenCalledTimes(MAX_PLAN_ATTEMPTS);
+    expect(runs[0].error).toContain("não coube no tempo");
+    expect(runs[0].error).toContain("lotes menores");
+    // Parada controlada: o claim é liberado e nada do lote se perde.
+    expect(runs[0].startedAt).toBeNull();
+    expect(items.every((i) => i.status === "classified")).toBe(true);
+  });
+
+  it("o contador é do RUN e sobrevive à invocação — vive no report", async () => {
+    seedPlanning();
+    runs[0].report = {
+      planAttempts: {
+        count: MAX_PLAN_ATTEMPTS,
+        startedAt: new Date().toISOString(),
+        maxAttempts: MAX_PLAN_ATTEMPTS,
+      },
+    };
+    const planner = plannerReturning({ plan: emptyPlan(), accepted: true });
+
+    const result = await advanceRun({ runId: "run-1", orgId: "org-1", planner });
+
+    expect(result.status).toBe("failed");
+    expect(planner).not.toHaveBeenCalled();
+    expect(runs[0].libraryPlan).toBeNull();
+  });
+});
+
+describe("advanceRun — instrumentação de duração", () => {
+  function timings(): Record<string, StageTiming> {
+    return (runs[0].report as { timings?: Record<string, StageTiming> }).timings ?? {};
+  }
+
+  it("grava a duração da chamada do planner no report", async () => {
+    seed(2);
+    const planner = plannerReturning({
+      plan: emptyPlan(),
+      accepted: true,
+      delayMs: 15,
+    });
+
+    await drain({ planner });
+
+    const report = runs[0].report as { planning?: PlanningReport };
+    expect(report.planning?.durationMs).toBeGreaterThan(0);
+    expect(timings().plan.calls).toBe(1);
+    expect(timings().plan.totalMs).toBe(report.planning?.durationMs);
+    expect(timings().plan.maxMs).toBe(report.planning?.durationMs);
+  });
+
+  it("conta uma chamada de classificação por item", async () => {
+    seed(3);
+    await drain();
+    expect(timings().classify.calls).toBe(3);
+    expect(timings().classify.totalMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("o cronômetro da classificação ACUMULA — uma fatia não apaga a anterior", async () => {
+    seed(2, "classifying");
+    for (const item of items) {
+      item.status = "extracted";
+      item.text = CONTRATO;
+    }
+    runs[0].report = {
+      timings: { classify: { calls: 5, totalMs: 500, maxMs: 200, lastMs: 100 } },
+    };
+
+    await advanceRun({ runId: "run-1", orgId: "org-1", maxSteps: 1 });
+
+    expect(timings().classify.calls).toBe(7);
+    expect(timings().classify.totalMs).toBeGreaterThanOrEqual(500);
+    expect(timings().classify.maxMs).toBeGreaterThanOrEqual(200);
+  });
+});
+
+describe("orçamento da fatia × maxDuration da rota", () => {
+  const ROUTES = join(__dirname, "..", "..", "..", "app", "api", "templates", "ingest", "runs", "[id]");
+
+  /** O `maxDuration` declarado na rota, lido do arquivo. */
+  function maxDurationOf(route: string): number {
+    const source = readFileSync(join(ROUTES, route, "route.ts"), "utf8");
+    const match = source.match(/export const maxDuration = (\d+)/);
+    expect(match, `${route} declara maxDuration`).toBeTruthy();
+    return Number(match![1]);
+  }
+
+  it("as duas rotas do pipeline têm o mesmo teto", () => {
+    expect(maxDurationOf("advance")).toBe(300);
+    expect(maxDurationOf("execute")).toBe(maxDurationOf("advance"));
+  });
+
+  it("a fatia acaba com folga para gravar o estado e re-encadear", () => {
+    // A folga é o que salva o claim: uma fatia cortada pelo timeout da Vercel
+    // deixaria `startedAt` carimbado até a janela de stale vencer.
+    const ceiling = maxDurationOf("advance") * 1_000;
+    expect(SLICE_BUDGET_MS).toBeLessThanOrEqual(ceiling - 30_000);
+  });
+
+  it("o piso do planner cabe na fatia — senão `planning` nunca começaria", () => {
+    expect(PLAN_MIN_BUDGET_MS).toBeLessThan(SLICE_BUDGET_MS);
+    expect(PLAN_MIN_BUDGET_MS).toBeGreaterThan(0);
+  });
+
+  it("a janela de stale é maior que o maxDuration — o sweeper não rouba worker vivo", () => {
+    // Com stale ≤ maxDuration, o sweeper reivindicaria um run cuja chamada do
+    // planner ainda está em andamento e pagaria a mesma chamada duas vezes.
+    expect(RUN_STALE_MS).toBeGreaterThan(maxDurationOf("advance") * 1_000);
   });
 });
