@@ -1186,9 +1186,13 @@ export async function classifyAndExtract(
  *
  * **Duas camadas de proteção, e as duas são necessárias:**
  *
- * 1. Desligado por padrão (`OCR_SHADOW_MODEL` vazio). Sem isso, um deploy de
- *    preview do projeto `web` — que fala com o banco de PRODUÇÃO — tentaria
- *    escrever numa tabela que produção ainda não tem.
+ * 1. Desligado por padrão (`OCR_SHADOW_MODEL` vazio). A razão original era que
+ *    o preview do projeto `web` falava com o banco de PRODUÇÃO — isso foi
+ *    corrigido no incidente de 2026-07-14, e hoje o escopo Preview tem
+ *    DATABASE_URL próprio, apontando pro Neon de staging (conferido em
+ *    2026-08-25 comparando os hosts). O default desligado fica assim mesmo:
+ *    ligar uma segunda chamada de modelo por documento é decisão de custo, e
+ *    custo não deve ser efeito colateral de deploy.
  * 2. `try/catch` em tudo. Mesmo ligado, falha de sombra é irrelevante para o
  *    usuário: ele já tem o resultado do modelo primário na mão.
  */
