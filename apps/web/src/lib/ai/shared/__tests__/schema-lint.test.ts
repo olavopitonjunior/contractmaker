@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   formatSchemaLintIssues,
   lintStructuredSchema,
+  UNSUPPORTED_KEYWORDS,
 } from "@/lib/ai/shared/schema-lint";
 
 describe("lintStructuredSchema — o padrão que derrubou o run", () => {
@@ -61,6 +62,96 @@ describe("lintStructuredSchema — enum × type do mesmo nível", () => {
 
   it("type sem enum é legal, inclusive em união", () => {
     expect(lintStructuredSchema({ type: ["string", "null"] })).toEqual([]);
+  });
+});
+
+describe("lintStructuredSchema — palavras-chave fora do subconjunto", () => {
+  it("reprova minimum/maximum em number — o segundo 400 real", () => {
+    const issues = lintStructuredSchema({
+      type: "object",
+      properties: { confidence: { type: "number", minimum: 0, maximum: 1 } },
+    });
+
+    expect(issues.map((i) => i.rule)).toEqual([
+      "unsupported_keyword",
+      "unsupported_keyword",
+    ]);
+    expect(issues.every((i) => i.path === "#/properties/confidence")).toBe(true);
+    // A mensagem das confirmadas diz que a API responde 400, sem "provavelmente".
+    expect(issues[0].detail).toContain("a API responde");
+    expect(issues[0].detail).not.toContain("provavelmente");
+  });
+
+  it("aprova o número sem faixa, com a faixa dita na description", () => {
+    expect(
+      lintStructuredSchema({
+        type: "number",
+        description: "De 0 a 1. Fora dessa faixa o valor é truncado.",
+      })
+    ).toEqual([]);
+  });
+
+  it.each(Object.keys(UNSUPPORTED_KEYWORDS))("reprova `%s`", (keyword) => {
+    const issues = lintStructuredSchema({ type: "string", [keyword]: 1 });
+    expect(issues.map((i) => i.rule)).toEqual(["unsupported_keyword"]);
+  });
+
+  it("as deduzidas se anunciam como dedução, não como fato observado", () => {
+    const [issue] = lintStructuredSchema({ type: "string", minLength: 3 });
+    expect(issue.detail).toContain("recusa essa família");
+    expect(issue.detail).toContain("`minimum`/`maximum`");
+  });
+
+  it("description, title e $defs seguem livres — não são restrição de valor", () => {
+    expect(
+      lintStructuredSchema({
+        type: "object",
+        title: "Plano",
+        description: "O plano do lote.",
+        $defs: { x: { type: "string" } },
+        properties: { a: { type: "string", description: "Um campo." } },
+      })
+    ).toEqual([]);
+  });
+
+  it("anyOf/oneOf/allOf não são reprovados — anyOf está confirmado funcionando", () => {
+    expect(
+      lintStructuredSchema({
+        anyOf: [{ type: "string" }, { type: "null" }],
+      })
+    ).toEqual([]);
+    expect(lintStructuredSchema({ oneOf: [{ type: "string" }] })).toEqual([]);
+    expect(lintStructuredSchema({ allOf: [{ type: "string" }] })).toEqual([]);
+  });
+
+  it("um CAMPO chamado `title`, `default` ou `pattern` não é falso positivo", () => {
+    // O planner tem uma propriedade `title`. Nome de campo em `properties` é
+    // dado do domínio, não palavra-chave — confundi-los reprovaria schema bom.
+    expect(
+      lintStructuredSchema({
+        type: "object",
+        required: ["title", "default", "pattern"],
+        properties: {
+          title: { type: "string" },
+          default: { type: "string" },
+          pattern: { type: "string" },
+        },
+      })
+    ).toEqual([]);
+  });
+
+  it("a palavra-chave é achada em qualquer profundidade", () => {
+    const issues = lintStructuredSchema({
+      type: "object",
+      properties: {
+        lista: { type: "array", items: { type: "string", maxLength: 40 } },
+        ramo: { anyOf: [{ type: "number", multipleOf: 0.5 }, { type: "null" }] },
+      },
+    });
+    expect(issues.map((i) => i.path).sort()).toEqual([
+      "#/properties/lista/items",
+      "#/properties/ramo/anyOf/0",
+    ]);
   });
 });
 

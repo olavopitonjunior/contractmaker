@@ -3,28 +3,62 @@
  *
  * ## Por que isto existe
  *
- * O primeiro run real em staging morreu com HTTP 400:
+ * `output_config.format` aceita um SUBCONJUNTO de JSON Schema, e o subconjunto
+ * não está documentado a contento: cada restrição apareceu como um HTTP 400 num
+ * run real de staging, uma por deploy. Nenhum teste desta base chega na API —
+ * logo, nada aqui pegaria a próxima sozinho. Este módulo é o substituto:
+ * percorre o schema inteiro (inclusive `items`, `$defs`, `anyOf` e objetos
+ * aninhados) e reprova ANTES do deploy.
+ *
+ * ## As restrições CONFIRMADAS, cada uma por um 400 de verdade
+ *
+ * **1. `enum` junto de `type` em união.**
  *
  * ```
- * output_config.format.schema: Invalid schema:
- * Enum value 'fiador' does not match declared type '['string', 'null']'
+ * Invalid schema: Enum value 'fiador' does not match declared type
+ * '['string', 'null']'
  * ```
  *
- * O padrão `{ type: ["string", "null"], enum: [...VALORES, null] }` é JSON
- * Schema legal, mas o validador de structured outputs checa cada valor do `enum`
- * contra o `type` DECLARADO e não sabe destrinchar uma união: para ele
- * `'fiador'` não é do tipo `['string','null']`. A forma aceita mantém cada ramo
- * consistente consigo mesmo:
+ * `{ type: ["string","null"], enum: [...VALORES, null] }` é JSON Schema legal,
+ * mas o validador checa cada valor do `enum` contra o `type` DECLARADO e não
+ * destrincha a união: para ele `'fiador'` não é do tipo `['string','null']`. A
+ * forma aceita mantém cada ramo consistente consigo mesmo:
  *
  * ```json
  * { "anyOf": [{ "type": "string", "enum": ["fiador"] }, { "type": "null" }] }
  * ```
  *
- * Nenhum teste chama a API — logo, nada nesta base pegaria a regressão sozinho.
- * Este módulo é o substituto: percorre o schema inteiro (inclusive `items`,
- * `$defs`, `anyOf` e objetos aninhados) e reprova o descasamento ANTES do
- * deploy. Ver `__tests__/schema-lint.test.ts` e o teste que roda estas regras
- * sobre os schemas reais da ingestão.
+ * **2. Restrição de faixa em número.**
+ *
+ * ```
+ * For 'number' type, properties maximum, minimum are not supported
+ * request_id=req_011CeQ8FQZXmnA6G4i8QRffc
+ * ```
+ *
+ * ## A leitura das duas, e o que ela prevê
+ *
+ * O subconjunto aceita o que descreve a FORMA da saída (`type`, `properties`,
+ * `required`, `items`, `enum`, `anyOf`, `additionalProperties`, `description`)
+ * e recusa o que restringe o VALOR além da forma. `minimum`/`maximum` são só o
+ * primeiro membro dessa família a aparecer; `minLength`, `pattern`, `format`,
+ * `minItems` e companhia são a mesma ideia em outro tipo, e não há motivo para
+ * esperar que passem.
+ *
+ * Por isso {@link UNSUPPORTED_KEYWORDS} vai além do que a API já recusou
+ * explicitamente. As entradas deduzidas estão marcadas como tal, e a mensagem
+ * de cada issue diz de qual grupo ela vem — quem mexer aqui precisa distinguir
+ * "a API recusou isto" de "a API provavelmente recusa isto". Reprovar
+ * localmente algo que talvez passasse custa uma linha a menos no schema;
+ * descobrir em produção custa um run.
+ *
+ * O que NÃO entra na lista: `description` (usadíssima, e o schema com ela
+ * passou), `title`, `$defs`/`$ref` e os combinadores `anyOf`/`oneOf`/`allOf` —
+ * `anyOf` está confirmado funcionando e chutar contra os irmãos dele quebraria
+ * schema válido sem evidência nenhuma.
+ *
+ * Onde a restrição importa de verdade (a faixa de `confidence`, por exemplo),
+ * ela sai do schema e vira validação no PARSE. Ver `toConfidence` em
+ * `lib/ingestion/llm-classifier.ts` e em `lib/ingestion/planner.ts`.
  */
 
 /** Um descasamento encontrado. `path` usa notação de JSON Pointer simplificada. */
@@ -40,7 +74,72 @@ export type SchemaLintRule =
   /** `enum` contém `null` mas o `type` declarado não alcança `null`. */
   | "null_enum_unreachable"
   /** Valor do `enum` incompatível com o `type` do mesmo nível. */
-  | "enum_type_mismatch";
+  | "enum_type_mismatch"
+  /** Palavra-chave de validação fora do subconjunto de `output_config.format`. */
+  | "unsupported_keyword";
+
+/**
+ * Palavras-chave que o subconjunto não aceita → como a issue se explica.
+ *
+ * `confirmed` = a API já respondeu 400 por causa dela. `deduced` = mesma família
+ * ("restringe o valor além da forma"), sem erro observado ainda. Ver o cabeçalho
+ * do módulo para o raciocínio inteiro.
+ */
+export const UNSUPPORTED_KEYWORDS: Record<string, "confirmed" | "deduced"> = {
+  // Confirmadas pelo 400 "For 'number' type, properties maximum, minimum are
+  // not supported" (request_id=req_011CeQ8FQZXmnA6G4i8QRffc).
+  minimum: "confirmed",
+  maximum: "confirmed",
+
+  // Faixa numérica — a MESMA família das duas acima.
+  exclusiveMinimum: "deduced",
+  exclusiveMaximum: "deduced",
+  multipleOf: "deduced",
+
+  // Restrição de valor em string.
+  minLength: "deduced",
+  maxLength: "deduced",
+  pattern: "deduced",
+  format: "deduced",
+  contentEncoding: "deduced",
+  contentMediaType: "deduced",
+
+  // Restrição de valor em array.
+  minItems: "deduced",
+  maxItems: "deduced",
+  uniqueItems: "deduced",
+  contains: "deduced",
+  minContains: "deduced",
+  maxContains: "deduced",
+
+  // Restrição de valor/estrutura condicional em objeto. `patternProperties` e
+  // `propertyNames` dependem de `pattern`, que já cai na linha de cima.
+  minProperties: "deduced",
+  maxProperties: "deduced",
+  patternProperties: "deduced",
+  propertyNames: "deduced",
+  dependentRequired: "deduced",
+  dependentSchemas: "deduced",
+  dependencies: "deduced",
+
+  // Validação condicional e negação — não descrevem a forma da saída.
+  if: "deduced",
+  then: "deduced",
+  else: "deduced",
+  not: "deduced",
+  unevaluatedProperties: "deduced",
+  unevaluatedItems: "deduced",
+
+  // Anotações que carregam um VALOR de exemplo/padrão. `default` está na lista
+  // que a API recusa em outros produtos de structured output, e nenhuma delas
+  // muda a forma da resposta — não vale o risco.
+  default: "deduced",
+  const: "deduced",
+  examples: "deduced",
+  readOnly: "deduced",
+  writeOnly: "deduced",
+  deprecated: "deduced",
+};
 
 type JsonSchemaType =
   | "string"
@@ -111,6 +210,26 @@ function checkNode(
   path: string,
   out: SchemaLintIssue[]
 ): void {
+  // Só as chaves DESTE nó de schema são palavras-chave. Os nomes dentro de
+  // `properties` são dados do domínio — o planner tem um campo chamado `title`,
+  // e confundi-lo com a anotação homônima seria um falso positivo garantido.
+  for (const key of Object.keys(node)) {
+    const origin = UNSUPPORTED_KEYWORDS[key];
+    if (!origin) continue;
+    out.push({
+      path,
+      rule: "unsupported_keyword",
+      detail:
+        origin === "confirmed"
+          ? `\`${key}\` não é aceito por \`output_config.format\` — a API responde ` +
+            "400. Se a restrição importa, mova-a para a validação no parse e " +
+            "diga a faixa esperada na `description`."
+          : `\`${key}\` restringe o valor além da forma; o subconjunto de ` +
+            "`output_config.format` recusa essa família (o caso confirmado é " +
+            "`minimum`/`maximum`). Tire do schema e valide no parse.",
+    });
+  }
+
   const rawEnum = node.enum;
   const rawType = node.type;
 

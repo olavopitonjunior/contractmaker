@@ -187,7 +187,16 @@ export const CLASSIFICATION_SCHEMA: Record<string, unknown> = {
         },
       },
     },
-    confidence: { type: "number", minimum: 0, maximum: 1 },
+    // Sem `minimum`/`maximum`: `output_config.format` recusa restrição de faixa
+    // em número ("For 'number' type, properties maximum, minimum are not
+    // supported"). A faixa vira instrução no prompt — que o modelo lê — e
+    // garantia em `toConfidence`, que é o único ponto que a impõe de fato.
+    confidence: {
+      type: "number",
+      description:
+        "Sua confiança na classificação, de 0 (chute) a 1 (certeza). " +
+        "Fora dessa faixa o valor é truncado.",
+    },
     reason: {
       type: "string",
       description: "Uma frase curta em PT-BR explicando a decisão.",
@@ -303,6 +312,20 @@ function asString(v: unknown): string | null {
 
 function toDocType(v: unknown): IngestDocType | null {
   return isIngestDocType(v) ? v : null;
+}
+
+/**
+ * Confiança em [0,1] — a ÚNICA guarda da faixa desde que `minimum`/`maximum`
+ * saíram do schema (`output_config.format` os recusa).
+ *
+ * Trunca em vez de rejeitar: `confidence` é uma autoavaliação acessória, e
+ * descartar uma classificação inteira porque o modelo escreveu `1.2` trocaria
+ * um número cosmético por um item perdido. Ausente ou não numérica vira 0.5 —
+ * "não sei", que é a leitura honesta de um campo que não veio.
+ */
+function toConfidence(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 0.5;
+  return Math.min(1, Math.max(0, raw));
 }
 
 function toGarantia(v: unknown): GarantiaTipo | null {
@@ -430,10 +453,7 @@ export function createLlmItemClassifier(
         : false;
       const garantiaTipo = admitsGarantia ? toGarantia(raw.garantiaTipo) : null;
 
-      const confidence =
-        typeof raw.confidence === "number" && Number.isFinite(raw.confidence)
-          ? Math.min(1, Math.max(0, raw.confidence))
-          : 0.5;
+      const confidence = toConfidence(raw.confidence);
 
       const externalEntities = toExternalEntities(raw.piiEntities);
       const findings = detectPii(input.text, { externalEntities });
