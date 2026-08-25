@@ -70,16 +70,27 @@ describe("validators — garantia locatícia e wizard de seguro", () => {
       }
     });
 
-    it("aceita garantia_digital com substituir=true", () => {
+    it("aceita garantia_onerosa com substituir=true", () => {
       const r = guaranteeCreateSchema.safeParse({
-        tipo: "garantia_digital",
+        tipo: "garantia_onerosa",
         leaseContractId: "lc_x",
-        provider: "credpago",
+        provider: "Almada",
         taxaMensal: 180,
         substituir: true,
       });
       expect(r.success).toBe(true);
       if (r.success) expect(r.data.substituir).toBe(true);
+    });
+
+    it("COMPAT: aceita o legado garantia_digital e grava garantia_onerosa", () => {
+      const r = guaranteeCreateSchema.safeParse({
+        tipo: "garantia_digital",
+        leaseContractId: "lc_x",
+        provider: "Loft",
+        taxaMensal: 180,
+      });
+      expect(r.success).toBe(true);
+      if (r.success) expect(r.data.tipo).toBe("garantia_onerosa");
     });
 
     it("rejeita tipo desconhecido", () => {

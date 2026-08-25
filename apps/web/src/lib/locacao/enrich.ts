@@ -7,6 +7,7 @@ import {
   DEFAULT_LOCACAO_SETTINGS,
   type LocacaoSettings,
 } from "@/lib/contracts/default-config";
+import { normalizeGarantiaTipo } from "@/lib/contracts/template-category";
 
 const MEIO_PAGAMENTO_ALUGUEL_TEXTO: Record<string, string> = {
   pix: "PIX",
@@ -27,7 +28,7 @@ const TIPO_IMOVEL_TEXTO: Record<string, string> = {
   temporada: "imóvel de temporada",
 };
 
-// Seguro-fiança / garantia digital: tomador da apólice e vigência escolhidos no
+// Seguro-fiança / garantia onerosa: tomador da apólice e vigência escolhidos no
 // formulário viram texto pronto pra cláusula de garantia. Sem escolha, nenhuma
 // chave é materializada — o template mantém a redação genérica.
 const SEGURO_TOMADOR_TEXTO: Record<string, string> = {
@@ -201,7 +202,22 @@ export function enrichLocacaoData(
     if (foro) config.foro_texto = foro;
   }
 
-  // Seguro-fiança/garantia digital: tomador e vigência da apólice em texto.
+  // `garantia.tipo` canônico ANTES de qualquer condicional do template. O
+  // contrato decide a cláusula por `(eq garantia.tipo "…")`, então um dataJson
+  // gravado antes do rename `garantia_digital` → `garantia_onerosa` (inclusive
+  // o snapshot congelado em Contract.dataJson, que a migration não toca) cairia
+  // no ramo genérico do `{{else}}`. Só reescreve quando há o que reescrever.
+  {
+    const atual = enriched.garantia as Record<string, unknown> | undefined;
+    if (atual && typeof atual === "object") {
+      const canonico = normalizeGarantiaTipo(atual.tipo);
+      if (canonico && canonico !== atual.tipo) {
+        enriched.garantia = { ...atual, tipo: canonico };
+      }
+    }
+  }
+
+  // Seguro-fiança/garantia onerosa: tomador e vigência da apólice em texto.
   // Idempotente e sem default — quem não escolheu não ganha frase.
   const garantia = (enriched.garantia as Record<string, unknown> | undefined) || {};
   if (config.seguro_tomador_texto == null || config.seguro_tomador_texto === "") {

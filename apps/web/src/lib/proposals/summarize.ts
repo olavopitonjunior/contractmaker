@@ -1,6 +1,6 @@
 import { formatMoneyBR } from "@/lib/format/money";
 import { maskCPF, maskCNPJ } from "@/lib/forms/field-formats";
-import { GARANTIA_LABELS, type GarantiaTipo } from "@/lib/contracts/template-category";
+import { GARANTIA_LABELS, normalizeGarantiaTipo } from "@/lib/contracts/template-category";
 
 /**
  * Resumo leve do dataJson da proposta (proponente + imóvel + valor) sem expor o
@@ -119,9 +119,10 @@ function garantiaLabel(d: Record<string, unknown>): string | null {
   const loc = (d.locacao ?? {}) as Record<string, unknown>;
   const garantiaObj = (d.garantia ?? {}) as Record<string, unknown>;
   const tipo = str(garantiaObj.tipo);
+  const canonico = normalizeGarantiaTipo(tipo);
   return (
     str(loc.garantia) ||
-    (tipo ? GARANTIA_LABELS[tipo as GarantiaTipo] ?? tipo : null) ||
+    (canonico ? GARANTIA_LABELS[canonico] : tipo || null) ||
     null
   );
 }

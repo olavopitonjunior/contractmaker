@@ -90,6 +90,31 @@ describe("dadosLocacaoSchema", () => {
     expect(comFiador.success).toBe(true);
   });
 
+  it("garantia onerosa: aceita o legado `garantia_digital` na ENTRADA e grava o novo", () => {
+    // Rascunho salvo antes do rename de 2026-08-25. Sem o preprocess ele seria
+    // rejeitado pelo enum e o formulário inteiro ficaria inválido.
+    const legado = dadosLocacaoSchema.parse({
+      ...baseValid,
+      garantia: { tipo: "garantia_digital", provider: "CredAluga" },
+    });
+    expect(legado.garantia?.tipo).toBe("garantia_onerosa");
+    expect(legado.garantia?.provider).toBe("CredAluga");
+
+    const novo = dadosLocacaoSchema.parse({
+      ...baseValid,
+      garantia: { tipo: "garantia_onerosa", provider: "Loft" },
+    });
+    expect(novo.garantia?.tipo).toBe("garantia_onerosa");
+
+    // O legado é a ÚNICA exceção; slug de fornecedor não vira modalidade.
+    expect(
+      dadosLocacaoSchema.safeParse({
+        ...baseValid,
+        garantia: { tipo: "almada" },
+      }).success
+    ).toBe(false);
+  });
+
   it("seguro-fiança: tomador e vigência são opcionais e restritos ao enum", () => {
     // Ausentes — o operador/imobiliária escolhe, nada é forçado.
     const semEscolha = dadosLocacaoSchema.parse({
@@ -119,7 +144,7 @@ describe("dadosLocacaoSchema", () => {
     expect(
       dadosLocacaoSchema.safeParse({
         ...baseValid,
-        garantia: { tipo: "garantia_digital", seguro_vigencia: "mensal" },
+        garantia: { tipo: "garantia_onerosa", seguro_vigencia: "mensal" },
       }).success
     ).toBe(false);
   });

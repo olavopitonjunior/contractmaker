@@ -530,8 +530,18 @@ const GARANTIA_HINTS: Array<{ tipo: GarantiaTipo; patterns: RegExp[] }> = [
     patterns: [/seguro (de )?fianca/, /apolice/, /seguradora/],
   },
   {
-    tipo: "garantia_digital",
-    patterns: [/garantia (locaticia )?digital/, /termo de adesao/],
+    // Garantia ONEROSA — a modalidade paga, prestada por um fornecedor (Almada,
+    // Loft, CredAluga, …). As palavras-chave são as da MODALIDADE, nunca nomes
+    // de fornecedor: a lista varia por imobiliária e amarrar o palpite a ela
+    // faria o modelo de quem trocou de fornecedor deixar de ser reconhecido.
+    tipo: "garantia_onerosa",
+    patterns: [
+      /garantia onerosa/,
+      /garantia (locaticia )?digital/,
+      /fianca digital/,
+      /carta (de )?fianca/,
+      /termo de adesao/,
+    ],
   },
   { tipo: "fiador", patterns: [/fiador/, /beneficio de ordem/, /fianca/] },
   { tipo: "caucao", patterns: [/caucao/, /art(igo)? 38/] },

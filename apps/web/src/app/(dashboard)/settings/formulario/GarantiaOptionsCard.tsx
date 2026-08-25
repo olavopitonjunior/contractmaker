@@ -49,7 +49,7 @@ interface Props {
 /** Tipos que fazem sentido cadastrar com garantidor. */
 const TIPOS_COM_GARANTIDOR: GarantiaTipo[] = [
   "seguro_fianca",
-  "garantia_digital",
+  "garantia_onerosa",
   "titulo_capitalizacao",
 ];
 

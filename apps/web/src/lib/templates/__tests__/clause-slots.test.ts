@@ -174,6 +174,52 @@ describe("resolveClauseSlots", () => {
     expect(out.values.slot_garantia).toContain("art. 38 da Lei nº 8.245/91");
   });
 
+  // ────────────────────────────────────────────────────────────────────────
+  // Rename `garantia_digital` → `garantia_onerosa` (2026-08-25).
+  // ────────────────────────────────────────────────────────────────────────
+
+  it("fallback canônico cobre `garantia_onerosa`", async () => {
+    const out = await resolveClauseSlots({
+      orgId: "org1",
+      templateSource: slotMarkerHandlebars("garantia"),
+      data: { garantia: { tipo: "garantia_onerosa", provider: "Almada" } },
+      format: "html",
+      db: dbWith([]),
+    });
+    expect(out.resolved[0]).toMatchObject({ value: "garantia_onerosa", source: "fallback" });
+    expect(out.values.slot_garantia).toContain("garantia locatícia onerosa");
+    expect(out.values.slot_garantia).toContain("Almada");
+    // Nunca o ramo genérico do `{{else}}`.
+    expect(out.values.slot_garantia).not.toContain("modalidade ajustada entre as partes");
+  });
+
+  it("REGRESSÃO: dataJson LEGADO (`garantia_digital`) elege a MESMA cláusula do acervo", async () => {
+    // Deal gravado antes do rename: o normalizador tem que levá-lo à tag nova,
+    // senão o `hasEvery` não acha a cláusula e o contrato sai com o genérico.
+    const db = dbWith([
+      { id: "ki-onerosa", content: "<p>Cláusula de garantia onerosa da imobiliária.</p>" },
+    ]);
+    const out = await resolveClauseSlots({
+      orgId: "org1",
+      templateSource: slotMarkerHandlebars("garantia"),
+      data: { garantia: { tipo: "garantia_digital", provider: "Loft" } },
+      format: "html",
+      db,
+    });
+    expect(db.knowledgeItem.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tags: { hasEvery: slotTagsFor("garantia", "garantia_onerosa") },
+        }),
+      })
+    );
+    expect(out.resolved[0]).toMatchObject({
+      value: "garantia_onerosa",
+      source: "knowledge",
+      knowledgeItemId: "ki-onerosa",
+    });
+  });
+
   it("form sem garantia informada nem consulta o acervo — vai direto ao fallback", async () => {
     const db = dbWith([{ id: "ki3", content: "<p>não deve ser usada</p>" }]);
     const out = await resolveClauseSlots({

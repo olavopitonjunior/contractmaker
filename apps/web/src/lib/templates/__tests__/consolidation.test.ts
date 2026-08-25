@@ -237,6 +237,21 @@ describe("suggestGarantiaTipo (palpite determinístico do rótulo)", () => {
       "As partes ajustam a presente locação sem modalidade de garantia, nos termos do art. 37.",
       "sem_garantia",
     ],
+    // Garantia ONEROSA — reconhecida pelas palavras da MODALIDADE. Nenhum nome
+    // de fornecedor entra na heurística: a lista (Almada, Loft, CredAluga…)
+    // varia por imobiliária e amarrá-la ao palpite quebraria em toda troca.
+    [
+      "A locação é garantida por garantia onerosa prestada pela garantidora, na forma do respectivo termo de adesão.",
+      "garantia_onerosa",
+    ],
+    [
+      "A PARTE LOCATÁRIA contratou fiança digital junto à empresa garantidora indicada pela administradora.",
+      "garantia_onerosa",
+    ],
+    [
+      "A garantia da presente locação se dará por carta de fiança emitida em favor da PARTE LOCADORA.",
+      "garantia_onerosa",
+    ],
   ])("reconhece %s#", (text, expected) => {
     expect(suggestGarantiaTipo(text)).toBe(expected);
   });

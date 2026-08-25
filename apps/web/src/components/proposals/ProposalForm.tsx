@@ -723,7 +723,7 @@ export function ProposalForm({
                         />
                       </div>
                     )}
-                    {["seguro_fianca", "garantia_digital", "titulo_capitalizacao"].includes(
+                    {["seguro_fianca", "garantia_onerosa", "titulo_capitalizacao"].includes(
                       v.garantia.tipo
                     ) && (
                       <div className="space-y-1">
