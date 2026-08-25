@@ -48,6 +48,15 @@ function getGenAI(): GoogleGenAI {
  */
 export function humanizeOcrError(raw: string): string {
   const lower = raw.toLowerCase();
+  // Credencial primeiro: se a cascata inteira caiu por config, o corretor não
+  // tem NADA a fazer com o arquivo dele. Mandá-lo "tentar outro documento" o
+  // faz repetir um trabalho que nunca vai funcionar até alguém corrigir uma env
+  // var — e ainda esconde o incidente, porque ele culpa o próprio PDF em vez de
+  // abrir chamado. Vem antes de "invalid image" porque o detector exige duas
+  // metades e não confunde os dois.
+  if (isConfigCredentialError(lower)) {
+    return "O serviço de extração está temporariamente indisponível por uma configuração do sistema — não é problema do seu arquivo. A equipe técnica já pode ver isso nos logs.";
+  }
   if (lower.includes("safety") || lower.includes("blocked")) {
     return "O documento foi bloqueado pelo filtro de segurança do OCR. Tente um arquivo diferente.";
   }
@@ -766,6 +775,16 @@ export async function extractPlainText(
 function shouldTryFallbackModel(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const msg = err.message.toLowerCase();
+
+  // Credencial ANTES do guard de rate-limit, de propósito.
+  //
+  // `insufficient_quota` da OpenAI vem como **429** — mas é crédito acabado,
+  // condição PERMANENTE, não pico de tráfego. Backoff não resolve; trocar de
+  // provedor resolve. Sem esta ordem, `msg.includes("429")` devolveria false
+  // primeiro e reproduziria o mesmo apagão que esta função existe para evitar,
+  // só que com a chave válida e sem saldo.
+  if (isConfigCredentialError(msg, err)) return true;
+
   // Don't fallback on rate limits (those need backoff, not a different model)
   if (
     msg.includes("quota") ||
@@ -785,6 +804,116 @@ function shouldTryFallbackModel(err: unknown): boolean {
     msg.includes("invalid image") ||
     msg.includes("decode")
   );
+}
+
+/**
+ * Credencial do provedor ausente ou recusada — erro de CONFIGURAÇÃO, não de
+ * documento nem de capacidade do modelo.
+ *
+ * Recebe a mensagem já em minúsculas. Cobre o texto que os call-sites lançam
+ * (`OPENAI_API_KEY nao configurada`, com e sem acento) e as recusas 401/403 dos
+ * provedores, que significam a mesma coisa na prática: este provedor não vai
+ * atender, tente outro.
+ */
+export function isConfigCredentialError(msgLower: string, err?: unknown): boolean {
+  // Caminho 1 — CAMPO ESTRUTURADO, o mais confiável: o SDK do Gemini lança
+  // `ApiError` com `.status` (verificado no bundle instalado, 1.50.1). Não
+  // depende de texto nenhum, então sobrevive a mudança de wording do provedor.
+  const status = (err as { status?: unknown } | undefined)?.status;
+  if (status === 401 || status === 403) return true;
+
+  // Caminho 2 — a forma que ESTE código monta. `ocr-openai.ts` produz
+  // "OpenAI OCR got status: 403. <corpo>".
+  if (/got status:\s*(401|403)/.test(msgLower)) return true;
+
+  // Caminho 3 — o corpo JSON que o SDK do Gemini stringifica:
+  // {"error":{"message":"…","code":403,"status":"PERMISSION_DENIED"}}.
+  //
+  // Este é o buraco que quase passou: 403 do Gemini (billing desligado, API
+  // não habilitada, chave sem acesso ao modelo) não traz "api key" nem
+  // "got status", então nenhum dos outros caminhos pegaria — e como o FALLBACK
+  // também é Gemini, uma `GEMINI_API_KEY` recusada apagaria os dois hops.
+  if (/"code"\s*:\s*(401|403)\b/.test(msgLower)) return true;
+  if (msgLower.includes("permission_denied") || msgLower.includes("unauthenticated")) {
+    return true;
+  }
+
+  // Caminho 4 — crédito esgotado. Vem como 429, mas é PERMANENTE: backoff não
+  // resolve, trocar de provedor resolve. Por isso é tratado aqui e não no
+  // guard de rate-limit.
+  if (msgLower.includes("insufficient_quota")) return true;
+
+  // Caminho 5 — texto do provedor. Exige as DUAS metades: falar de credencial
+  // E dizer que está ausente/recusada. Só "invalid" faria "invalid image"
+  // virar erro de config e gastaria um fallback que não resolve nada.
+  const falaDeCredencial =
+    msgLower.includes("api_key") ||
+    msgLower.includes("api key") ||
+    msgLower.includes("apikey") ||
+    msgLower.includes("credential");
+  const ausenteOuRecusada =
+    msgLower.includes("nao configurada") ||
+    msgLower.includes("não configurada") ||
+    msgLower.includes("not configured") ||
+    msgLower.includes("not valid") ||
+    msgLower.includes("missing") ||
+    msgLower.includes("invalid") ||
+    msgLower.includes("unauthorized") ||
+    /\b401\b/.test(msgLower) ||
+    /\b403\b/.test(msgLower);
+  return falaDeCredencial && ausenteOuRecusada;
+}
+
+/**
+ * Loga a degradação quando — e só quando — a causa é credencial. Devolve `true`
+ * se logou, para o call-site decidir se ainda precisa do `warn` genérico.
+ *
+ * Existe como função única porque os dois hops da cascata tinham blocos quase
+ * iguais, e a divergência entre eles produziu um bug: um passava o objeto de
+ * erro para `isConfigCredentialError`, o outro só a string. Quando o erro casa
+ * apenas pelo campo estruturado `.status` (sem `"code":` no texto), a versão
+ * sem o objeto reclassifica como falha comum e **perde a etiqueta CONFIG** —
+ * reintroduzindo a invisibilidade um degrau abaixo, na hora de logar.
+ *
+ * Por isso a assinatura recebe `err: unknown`, nunca uma string: não dá para
+ * esquecer o argumento que importa.
+ *
+ * **Nunca ecoa o corpo do erro.** Esta é justamente a classe cujo payload
+ * carrega material de chave — o 401 da OpenAI devolve o `sk-…` enviado. Um
+ * `slice()` esconderia só por aritmética: bastaria o prefixo encurtar.
+ */
+function logarSeForCredencial(p: {
+  err: unknown;
+  modeloQueFalhou: string;
+  proximo: string;
+  hop: "primario" | "fallback";
+}): boolean {
+  const msg = p.err instanceof Error ? p.err.message : String(p.err);
+  if (!isConfigCredentialError(msg.toLowerCase(), p.err)) return false;
+
+  const status =
+    msg.match(/got status:\s*(\d{3})/)?.[1] ??
+    msg.match(/"code"\s*:\s*(\d{3})/)?.[1] ??
+    (typeof (p.err as { status?: unknown })?.status === "number"
+      ? String((p.err as { status: number }).status)
+      : undefined);
+  const httpTxt = status ? ` (HTTP ${status})` : "";
+
+  if (p.hop === "primario") {
+    console.error(
+      `[ocr] CONFIG: o modelo ${p.modeloQueFalhou} não rodou por credencial ausente ` +
+        `ou recusada${httpTxt}. Degradando para ${p.proximo} para não perder o ` +
+        `documento, mas GEMINI_OCR_MODEL aponta para um provedor cuja chave falta ` +
+        `ou não dá acesso a esse modelo. Confira com scripts/verify-ocr.sh.`
+    );
+  } else {
+    console.error(
+      `[ocr] CONFIG: o fallback ${p.modeloQueFalhou} TAMBÉM falhou por credencial` +
+        `${httpTxt}. Dois provedores fora — caindo em ${p.proximo}, que custa bem ` +
+        `mais. Confira GEMINI_API_KEY com scripts/verify-ocr.sh.`
+    );
+  }
+  return true;
 }
 
 /**
@@ -1048,9 +1177,20 @@ export async function classifyAndExtract(
   } catch (primaryErr) {
     // Fallback: try a different model on 5xx / safety / decode errors
     if (fallbackModel && fallbackModel !== primaryModel && shouldTryFallbackModel(primaryErr)) {
-      console.warn(
-        `[ocr] primary model ${primaryModel} failed (${primaryErr instanceof Error ? primaryErr.message.slice(0, 80) : "?"}), trying fallback ${fallbackModel}`
-      );
+      const msgPrimario =
+        primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
+      if (
+        !logarSeForCredencial({
+          err: primaryErr,
+          modeloQueFalhou: primaryModel,
+          proximo: fallbackModel,
+          hop: "primario",
+        })
+      ) {
+        console.warn(
+          `[ocr] primary model ${primaryModel} failed (${msgPrimario.slice(0, 80)}), trying fallback ${fallbackModel}`
+        );
+      }
       try {
         const result = await callGemini(fallbackModel, base64Data, mimeType);
         text = result.text;
@@ -1070,9 +1210,18 @@ export async function classifyAndExtract(
           !fallbackMsg.toLowerCase().includes("safety") &&
           !fallbackMsg.toLowerCase().includes("blocked");
         if (shouldTryClaude) {
-          console.warn(
-            `[ocr] fallback Gemini ${fallbackModel} also failed — trying Claude Haiku as last resort`
-          );
+          if (
+            !logarSeForCredencial({
+              err: fallbackErr,
+              modeloQueFalhou: fallbackModel,
+              proximo: "Claude Haiku",
+              hop: "fallback",
+            })
+          ) {
+            console.warn(
+              `[ocr] fallback Gemini ${fallbackModel} also failed — trying Claude Haiku as last resort`
+            );
+          }
           try {
             const result = await callClaudeHaikuOcr(base64Data, mimeType);
             text = result.text;

@@ -109,9 +109,16 @@ export async function GET(req: Request) {
         process.env.OCR_FALLBACK_CLAUDE_MODEL || "claude-haiku-4-5-20251001",
       provider: usaOpenAI ? "openai" : "gemini",
       /**
-       * O apagão silencioso: modelo `gpt-*` sem `OPENAI_API_KEY` faz 100% das
-       * extrações falharem SEM cair em fallback — o erro "OPENAI_API_KEY nao
-       * configurada" não casa nenhum padrão de `shouldTryFallbackModel`.
+       * Modelo apontando para um provedor sem chave.
+       *
+       * Isto JÁ FOI um apagão silencioso: o erro de credencial não casava
+       * nenhum padrão de `shouldTryFallbackModel`, então 100% das extrações
+       * falhavam sem cair em fallback. Corrigido — hoje a cascata degrada para
+       * o Gemini e loga `[ocr] CONFIG:`.
+       *
+       * O campo continua valendo, e por um motivo melhor: degradação é queda
+       * de qualidade silenciosa. O documento sai extraído por um modelo que
+       * ninguém escolheu, e sem este booleano ninguém descobre.
        */
       providerKeyPresent: usaOpenAI
         ? Boolean(process.env.OPENAI_API_KEY)
