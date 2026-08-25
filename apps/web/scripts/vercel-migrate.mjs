@@ -1,10 +1,17 @@
 // Aplica `prisma migrate deploy` APENAS em deploy de produção do Vercel.
 //
 // Motivo: no Vercel, o projeto `web` builda tanto produção (master) quanto os
-// PREVIEWS de PR, e o ambiente Preview injeta o DATABASE_URL de PRODUÇÃO. Sem
-// este guard, todo preview de PR rodava `migrate deploy` contra o banco de
+// PREVIEWS de PR. Até 2026-07-14 o escopo Preview injetava o DATABASE_URL de
+// PRODUÇÃO, então todo preview de PR rodava `migrate deploy` contra o banco de
 // prod — e uma migration quebrada num PR travava os deploys de produção ANTES
 // do merge (incidente 2026-07-14; ver memória project_clicksign_multitenant).
+//
+// Isso FOI CORRIGIDO: hoje o escopo Preview tem DATABASE_URL/DIRECT_URL
+// próprios, apontando pro branch Neon de staging (conferido em 2026-08-25
+// comparando os hosts: Preview `ep-morning-leaf-…`, Production
+// `ep-bitter-wildflower-…`). O guard fica assim mesmo — defesa em profundidade:
+// ele não depende de a env estar configurada certo, e é a env que já errou uma
+// vez. Ver docs/staging-workflow.md.
 //
 // Regra: roda a migration quando VERCEL_ENV=production, OU quando
 // FORCE_MIGRATE=1 (escape hatch explícito). Em qualquer outro caso — preview,
