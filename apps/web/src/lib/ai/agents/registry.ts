@@ -179,6 +179,10 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
     tenantEditable: false,
     operations: [
       "ocr_form",
+      // Chamada sombra do OCR (OCR_SHADOW_MODEL). Atribuída ao mesmo agente,
+      // mas com operação própria: somada em `ocr_form`, o painel diria que a
+      // extração ficou 2x mais cara do que ficou.
+      "ocr_shadow",
       "ocr_tool",
       "extract_ccv_doc",
       "extract_locacao_doc",

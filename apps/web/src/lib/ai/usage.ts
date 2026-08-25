@@ -177,6 +177,10 @@ export type AIOperation =
   | "passive_edit"
   | "ocr_form"
   | "ocr_tool"
+  // Chamada SOMBRA do OCR: um segundo modelo rodando em paralelo só para
+  // medir divergência. Operação própria porque, somada em `ocr_form`, o painel
+  // diria que a extração ficou 2x mais cara do que ficou.
+  | "ocr_shadow"
   | "embed_kb"
   | "embed_memory"
   | "embed_query"
