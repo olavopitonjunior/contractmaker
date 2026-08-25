@@ -7,9 +7,11 @@ import { PageHeader } from "@/components/layout/page-header";
 import { TemplatesListClient } from "@/components/templates/TemplatesListClient";
 import { DocumentIngestionDialog } from "@/components/templates/DocumentIngestionDialog";
 import { SystemTemplatesPanel } from "@/components/templates/SystemTemplatesPanel";
+import { StartIngestionRunButton } from "@/components/templates/StartIngestionRunButton";
 import { getOrgModules } from "@/lib/modules/read";
 import { MODULE_CATALOG, type ModuleKey } from "@/lib/modules/catalog";
 import { computeTemplateCoverage } from "@/lib/templates/coverage";
+import { isIngestionEnabled } from "@/lib/ingestion/guard";
 
 export default async function TemplatesPage({
   searchParams,
@@ -67,6 +69,7 @@ export default async function TemplatesPage({
   const enabledModules = MODULE_CATALOG.map((m) => m.key).filter(
     (m: ModuleKey) => modules.enabled[m]
   );
+  const ingestionEnabled = await isIngestionEnabled(org.id);
   const coverage = computeTemplateCoverage({
     modules: enabledModules,
     templates: activeForCoverage,
@@ -78,6 +81,12 @@ export default async function TemplatesPage({
         title="Templates de Contrato"
         description="Mande os documentos da sua imobiliária — contratos, propostas e cláusulas, de uma vez. Nós lemos, dizemos o que cada um é e você confirma; modelos parecidos viram um só."
       >
+        {/* O lote é o caminho para quem já tem acervo: quem só onboardou via
+            wizard tinha o botão lá, e a imobiliária que chega depois com a pasta
+            inteira ficava sem por onde começar. */}
+        {ingestionEnabled && (
+          <StartIngestionRunButton orgId={org.id} label="Enviar acervo de uma vez" />
+        )}
         <DocumentIngestionDialog
           autoOpen={searchParams?.ingest === "1"}
           enabledModules={enabledModules}
