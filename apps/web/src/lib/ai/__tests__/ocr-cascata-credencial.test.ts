@@ -117,6 +117,45 @@ describe("cascata quando o provedor primário está sem credencial", () => {
   });
 
   /**
+   * Os DOIS hops Gemini fora por credencial — o cenário que o código descreve
+   * e que nenhum caso exercitava: `GEMINI_OCR_MODEL` num provedor sem chave E
+   * `GEMINI_API_KEY` recusada.
+   *
+   * O Claude salva a extração (ele sempre tem chave, porque move o resto do
+   * app) a ~10× o custo. Sem o log do segundo hop, ninguém descobre que DOIS
+   * provedores estão quebrados — a conta só aparece na fatura.
+   */
+  it("F4c: segundo hop também grita quando o fallback cai por credencial", async () => {
+    process.env.GEMINI_OCR_MODEL = "gemini-3.5-flash-lite";
+    // Primário e fallback falham por credencial; o Claude (mock global) atende.
+    const credencial = () =>
+      Object.assign(new Error('{"error":{"code":403,"status":"PERMISSION_DENIED"}}'), {
+        status: 403,
+      });
+    mockGenerateContent
+      .mockRejectedValueOnce(credencial())
+      .mockRejectedValueOnce(credencial());
+
+    const erros: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => {
+      erros.push(a.map(String).join(" "));
+    });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await extrair().catch(() => {
+      // Se o Claude não atender neste ambiente, tudo bem: o que se afirma é o
+      // LOG dos dois hops, não o sucesso da extração.
+    });
+
+    const log = erros.join("\n");
+    expect(log).toContain("TAMBÉM falhou por credencial");
+    expect(log).toContain("Dois provedores fora");
+    expect(log).toContain("GEMINI_API_KEY");
+    // O corpo do erro continua fora do log, nos dois hops.
+    expect(log).not.toContain("PERMISSION_DENIED");
+  });
+
+  /**
    * O log de CONFIG é reservado a credencial. Falha comum do provedor — 500,
    * imagem ilegível — continua no `warn` de sempre, senão o sinal novo vira
    * ruído e some junto com o resto.

@@ -865,6 +865,58 @@ export function isConfigCredentialError(msgLower: string, err?: unknown): boolea
 }
 
 /**
+ * Loga a degradação quando — e só quando — a causa é credencial. Devolve `true`
+ * se logou, para o call-site decidir se ainda precisa do `warn` genérico.
+ *
+ * Existe como função única porque os dois hops da cascata tinham blocos quase
+ * iguais, e a divergência entre eles produziu um bug: um passava o objeto de
+ * erro para `isConfigCredentialError`, o outro só a string. Quando o erro casa
+ * apenas pelo campo estruturado `.status` (sem `"code":` no texto), a versão
+ * sem o objeto reclassifica como falha comum e **perde a etiqueta CONFIG** —
+ * reintroduzindo a invisibilidade um degrau abaixo, na hora de logar.
+ *
+ * Por isso a assinatura recebe `err: unknown`, nunca uma string: não dá para
+ * esquecer o argumento que importa.
+ *
+ * **Nunca ecoa o corpo do erro.** Esta é justamente a classe cujo payload
+ * carrega material de chave — o 401 da OpenAI devolve o `sk-…` enviado. Um
+ * `slice()` esconderia só por aritmética: bastaria o prefixo encurtar.
+ */
+function logarSeForCredencial(p: {
+  err: unknown;
+  modeloQueFalhou: string;
+  proximo: string;
+  hop: "primario" | "fallback";
+}): boolean {
+  const msg = p.err instanceof Error ? p.err.message : String(p.err);
+  if (!isConfigCredentialError(msg.toLowerCase(), p.err)) return false;
+
+  const status =
+    msg.match(/got status:\s*(\d{3})/)?.[1] ??
+    msg.match(/"code"\s*:\s*(\d{3})/)?.[1] ??
+    (typeof (p.err as { status?: unknown })?.status === "number"
+      ? String((p.err as { status: number }).status)
+      : undefined);
+  const httpTxt = status ? ` (HTTP ${status})` : "";
+
+  if (p.hop === "primario") {
+    console.error(
+      `[ocr] CONFIG: o modelo ${p.modeloQueFalhou} não rodou por credencial ausente ` +
+        `ou recusada${httpTxt}. Degradando para ${p.proximo} para não perder o ` +
+        `documento, mas GEMINI_OCR_MODEL aponta para um provedor cuja chave falta ` +
+        `ou não dá acesso a esse modelo. Confira com scripts/verify-ocr.sh.`
+    );
+  } else {
+    console.error(
+      `[ocr] CONFIG: o fallback ${p.modeloQueFalhou} TAMBÉM falhou por credencial` +
+        `${httpTxt}. Dois provedores fora — caindo em ${p.proximo}, que custa bem ` +
+        `mais. Confira GEMINI_API_KEY com scripts/verify-ocr.sh.`
+    );
+  }
+  return true;
+}
+
+/**
  * Uma chamada de extração, no provedor do modelo pedido.
  *
  * O nome `callGemini` ficou por trás deste despacho porque a cascata de
@@ -1127,25 +1179,14 @@ export async function classifyAndExtract(
     if (fallbackModel && fallbackModel !== primaryModel && shouldTryFallbackModel(primaryErr)) {
       const msgPrimario =
         primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
-      // Erro de credencial degrada em silêncio se a gente deixar: o documento
-      // sai extraído e ninguém descobre que o modelo configurado nunca rodou.
-      // Trocar um apagão barulhento por config errada invisível é pior a longo
-      // prazo — daí o log em nível próprio, com o que corrigir.
-      if (isConfigCredentialError(msgPrimario.toLowerCase())) {
-        // NÃO ecoar o corpo do erro: esta é justamente a classe cujo payload
-        // carrega material de chave (o 401 da OpenAI devolve o `sk-…` enviado).
-        // Um `slice(0, 80)` só esconde por aritmética — muda o prefixo da
-        // mensagem e o segredo entra no log. O operador precisa do modelo, da
-        // env e do status; nada disso exige o corpo.
-        const status = msgPrimario.match(/got status:\s*(\d{3})/)?.[1];
-        console.error(
-          `[ocr] CONFIG: o modelo ${primaryModel} não rodou por credencial ` +
-            `ausente ou recusada${status ? ` (HTTP ${status})` : ""}. Degradando para ` +
-            `${fallbackModel} para não perder o documento, mas GEMINI_OCR_MODEL aponta ` +
-            `para um provedor cuja chave falta ou não dá acesso a esse modelo. ` +
-            `Confira com scripts/verify-ocr.sh.`
-        );
-      } else {
+      if (
+        !logarSeForCredencial({
+          err: primaryErr,
+          modeloQueFalhou: primaryModel,
+          proximo: fallbackModel,
+          hop: "primario",
+        })
+      ) {
         console.warn(
           `[ocr] primary model ${primaryModel} failed (${msgPrimario.slice(0, 80)}), trying fallback ${fallbackModel}`
         );
@@ -1169,19 +1210,14 @@ export async function classifyAndExtract(
           !fallbackMsg.toLowerCase().includes("safety") &&
           !fallbackMsg.toLowerCase().includes("blocked");
         if (shouldTryClaude) {
-          // O segundo hop também precisa gritar quando a causa é config.
-          // Cenário real: `GEMINI_OCR_MODEL` num provedor sem chave E
-          // `GEMINI_API_KEY` recusada. O primeiro hop loga CONFIG, o segundo
-          // caía num warn genérico, e o Claude (que sempre tem chave, porque
-          // move o resto do app) salvava a extração — a ~10× o custo, sem
-          // ninguém saber que DOIS provedores estão quebrados.
-          if (isConfigCredentialError(fallbackMsg.toLowerCase(), fallbackErr)) {
-            console.error(
-              `[ocr] CONFIG: o fallback ${fallbackModel} TAMBÉM falhou por credencial. ` +
-                `Dois provedores fora — caindo no Claude, que custa bem mais. ` +
-                `Confira GEMINI_API_KEY com scripts/verify-ocr.sh.`
-            );
-          } else {
+          if (
+            !logarSeForCredencial({
+              err: fallbackErr,
+              modeloQueFalhou: fallbackModel,
+              proximo: "Claude Haiku",
+              hop: "fallback",
+            })
+          ) {
             console.warn(
               `[ocr] fallback Gemini ${fallbackModel} also failed — trying Claude Haiku as last resort`
             );

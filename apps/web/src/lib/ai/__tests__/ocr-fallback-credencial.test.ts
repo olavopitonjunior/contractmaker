@@ -77,7 +77,24 @@ describe("isConfigCredentialError", () => {
    * Este era o buraco mais perigoso: como o FALLBACK também é Gemini, uma
    * `GEMINI_API_KEY` recusada apagaria os DOIS hops da cascata.
    */
-  it("403 nativo do Gemini casa pelo campo estruturado .status", () => {
+  /**
+   * ISOLA o campo estruturado: a mensagem é genérica de propósito, sem
+   * `"code":`, sem `permission_denied`, sem `got status:`, sem "api key".
+   *
+   * A primeira versão deste caso usava o JSON completo do Gemini — e passava
+   * mesmo sem o `err`, porque o texto casava por outro caminho. O comentário
+   * dizia "casa pelo campo estruturado" e o teste não provava isso. Quebrar a
+   * leitura de `.status` deixaria o teste verde, que é exatamente o ponto cego
+   * que deixou passar o bug de esquecer o 2º argumento no log.
+   */
+  it("casa SÓ pelo campo estruturado .status, com mensagem genérica", () => {
+    const err = Object.assign(new Error("Forbidden"), { status: 403 });
+    expect(isConfigCredentialError("forbidden", err)).toBe(true);
+    // E a prova de que é o campo que decide: sem ele, este texto não casa.
+    expect(isConfigCredentialError("forbidden")).toBe(false);
+  });
+
+  it("403 nativo do Gemini casa pelo corpo mesmo sem o campo estruturado", () => {
     const err = Object.assign(
       new Error(
         '{"error":{"message":"Generative Language API has not been used in project 123 or it is disabled.","code":403,"status":"PERMISSION_DENIED"}}'
