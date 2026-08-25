@@ -36,6 +36,18 @@ desktop.ini
 /Modelo teste.pdf
 /Modelo*.pdf
 
+# Corpus do bench de VISÃO — documentos REAIS (RG, CPF, CNH, matrícula) de
+# pessoas reais, baixados do Blob por `scripts/ai-bench/pull-fixtures.ts`.
+#
+# Esta regra existe ANTES de qualquer documento tocar o disco, e é a única
+# defesa: o gitleaks do pre-commit procura padrão de credencial, não CPF dentro
+# de um PDF escaneado. Se um documento vazar para um commit, ele fica no
+# histórico do repositório PÚBLICO para sempre.
+#
+# O gabarito (`ground-truth.json`) também entra aqui: ele contém os valores
+# corretos dos campos, ou seja, exatamente o PII do documento em texto puro.
+apps/web/scripts/ai-bench/fixtures/vision/
+
 # storage
 .storage/
 public/exports/
