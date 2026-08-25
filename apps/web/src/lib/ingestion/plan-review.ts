@@ -311,22 +311,34 @@ export const ISSUE_KIND_LABELS: Record<PlanIssueKind, string> = {
   plan_invalid: "Recusado pela verificação automática",
   low_confidence: "Sugestão pouco confiável",
   grouping_ambiguous: "Agrupamento ambíguo",
+  // Lacunas de lados opostos, e por isso rótulos que não se confundem: aqui
+  // faltou ao PLANNER (o material veio e não coube no índice); ali faltou ao
+  // ACERVO (o cliente não mandou o modelo).
+  index_truncated: "Decidido sobre parte do material",
   acervo_incompleto: "Acervo incompleto",
 };
 
 /**
- * Issues que a tela destaca em vermelho. As três travam regra de PRODUTO, não
- * de forma: `pii_leftover` é dado de cliente prestes a ganhar embedding,
- * `provider_in_template` é a seguradora grudada no corpo do modelo — o modelo
- * que deveria servir a todas passa a servir a uma — e `plan_invalid` é o plano
- * que os guardrails RECUSARAM. Este último precisa ser vermelho justamente
- * porque o operador tem o poder de aprovar assim mesmo: a tela não pode deixar
- * a recusa parecer um aviso.
+ * Issues que a tela destaca em vermelho. O critério não é gravidade, é ORDEM: o
+ * operador precisa saber disto ANTES de aprovar, e ele continua podendo aprovar
+ * mesmo assim.
+ *
+ * As quatro travam regra de PRODUTO, não de forma: `pii_leftover` é dado de
+ * cliente prestes a ganhar embedding, `provider_in_template` é a seguradora
+ * grudada no corpo do modelo — o modelo que deveria servir a todas passa a
+ * servir a uma —, `plan_invalid` é o plano que os guardrails RECUSARAM e
+ * `index_truncated` diz que o plano foi decidido sobre uma AMOSTRA do acervo.
+ * Este último entra porque muda o que a aprovação significa: aprovar sabendo
+ * que famílias inteiras foram planejadas sem o material completo é uma decisão;
+ * aprovar sem saber é um acidente. Os dois últimos precisam ser vermelhos
+ * justamente porque o operador tem o poder de aprovar assim mesmo — a tela não
+ * pode deixar a ressalva parecer um detalhe.
  */
 export const BLOCKING_ISSUE_KINDS: readonly PlanIssueKind[] = [
   "pii_leftover",
   "provider_in_template",
   "plan_invalid",
+  "index_truncated",
 ];
 
 export function isBlockingIssue(kind: PlanIssueKind): boolean {

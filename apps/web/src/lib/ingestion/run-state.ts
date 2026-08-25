@@ -24,11 +24,12 @@
  * `awaiting_review`, que é onde a decisão passa a ser humana.
  *
  * `planning` é o único estágio automático que não é item-a-item: são zero itens
- * na fatia e UMA chamada cara. O executor trata isso reservando orçamento de
- * tempo para ela (ver `PLAN_MIN_BUDGET_MS` em run-executor.ts); e é justamente
- * por `planning` estar aqui dentro que uma chamada interrompida pelo timeout da
- * Vercel volta a ser reivindicável quando a janela de stale vence, em vez de
- * deixar o run parado para sempre.
+ * na fatia e uma chamada cara por invocação — a escalação do planner é fatiada
+ * em DEGRAUS, um por invocação, porque dois não cabem nos 300s da rota. O
+ * executor reserva orçamento de tempo para o degrau (ver `PLAN_MIN_BUDGET_MS` em
+ * run-executor.ts); e é justamente por `planning` estar aqui dentro que uma
+ * chamada interrompida pelo timeout da Vercel volta a ser reivindicável quando a
+ * janela de stale vence, em vez de deixar o run parado para sempre.
  */
 
 /** Estágios de um run, na ordem em que o pipeline os percorre. */

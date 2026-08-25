@@ -118,6 +118,13 @@ export interface PlanDiscard {
  * separado de `low_confidence` porque quem lê a tela de revisão precisa saber a
  * diferença: "o modelo hesitou" e "o modelo propôs algo proibido" pedem reações
  * diferentes do operador. O motivo concreto vai no `detail`.
+ *
+ * `index_truncated` e `acervo_incompleto` nomeiam lacunas de lados opostos e
+ * por isso não se fundem: `acervo_incompleto` é falta no material do CLIENTE
+ * (não veio o modelo de um caso que a imobiliária claramente opera);
+ * `index_truncated` é falta no que o PLANNER viu (o material veio, mas não
+ * coube no índice de blocos). O operador reage diferente: no primeiro caso
+ * pede mais documentos, no segundo revisa uma decisão tomada sobre amostra.
  */
 export type PlanIssueKind =
   | "classification_conflict"
@@ -127,6 +134,7 @@ export type PlanIssueKind =
   | "plan_invalid"
   | "low_confidence"
   | "grouping_ambiguous"
+  | "index_truncated"
   | "acervo_incompleto";
 
 export interface PlanIssue {

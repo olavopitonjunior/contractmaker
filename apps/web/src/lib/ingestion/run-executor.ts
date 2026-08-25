@@ -42,12 +42,27 @@
  * timeout, rede). Erro PERMANENTE — 4xx de requisição inválida, que é sempre
  * bug nosso — derruba o run: ver `classifyItem` e `runPlanner`.
  *
- * ## O plano tem um teto de TENTATIVAS, além do teto de custo
+ * ## O plano gasta UM degrau por invocação
+ *
+ * O planner escala em degraus (repetir com as violações → mais profundidade →
+ * outro modelo) e cada degrau é uma chamada de ~147s medidos em staging, contra
+ * os 300s de `maxDuration` da rota: dois degraus não cabem numa invocação. Então
+ * o degrau é a unidade da FATIA, como o item é nos outros estágios. Uma
+ * invocação executa um degrau; recusado, o estado da escada fica no `report`
+ * (ver {@link PlanningReport}) e o run continua em `planning` com `hasMore`, para
+ * a corrente reentrar. Aceito — ou esgotada a escada —, o plano é gravado e o
+ * run vai a `awaiting_review`.
+ *
+ * O ganho não é só caber no tempo: com o estado persistido, as violações de cada
+ * degrau ficam GRAVADAS. Antes, a função que morria no meio da escada levava
+ * junto o motivo pelo qual o primeiro plano foi recusado.
+ *
+ * ## O plano tem um teto de DEGRAUS, além do teto de custo
  *
  * A chamada do planner é a única do pipeline que pode morrer sem deixar rastro:
  * quando a função estoura o `maxDuration` no meio dela, a Anthropic cobra e o
  * medidor — que só grava no retorno — não vê nada. O run volta para o sweeper e
- * a chamada repete, paga e invisível. {@link MAX_PLAN_ATTEMPTS} fecha esse laço.
+ * a chamada repete, paga e invisível. {@link MAX_PLAN_STEPS} fecha esse laço.
  */
 
 import { prisma } from "@/lib/db/prisma";
@@ -80,7 +95,10 @@ import {
 } from "@/lib/ingestion/grouping";
 import {
   planLibrary,
+  PLAN_LADDER_STEPS,
+  type IndexBudgetReport,
   type PlanAttemptRecord,
+  type PlanLadderState,
   type PlanLibraryInput,
   type PlanLibraryOptions,
   type PlanLibraryResult,
@@ -125,37 +143,47 @@ export const SLICE_BUDGET_MS = Number(
 const MAX_STEPS_PER_INVOCATION = 40;
 
 /**
- * Tempo que o estágio `planning` exige ter pela frente antes de começar.
+ * Tempo que o estágio `planning` exige ter pela frente antes de começar UM
+ * degrau.
  *
- * A chamada do planner é UMA, indivisível e lenta (Opus 4.8 com `effort: high`,
- * mais os degraus da escalação). Começá-la com 10s de orçamento significaria
- * pagar o token e perder a resposta no timeout da Vercel. Então, quando não
- * cabe, a fatia termina com o run em `planning` e a corrente reentra com os
+ * O piso protege um degrau, não a escada inteira — é por isso que ele cabe. Uma
+ * chamada medida em staging levou 147s; o piso é 210s para absorver a variação
+ * com o tamanho do lote (o digest de um acervo de 50 arquivos é bem maior que o
+ * de 11) sem passar dos 240s da fatia. Começar um degrau com 10s de orçamento
+ * significaria pagar o token e perder a resposta no timeout da Vercel. Quando
+ * não cabe, a fatia termina com o run em `planning` e a corrente reentra com os
  * 240s inteiros — `planning` está em `AUTO_ADVANCE_STATUSES` justamente para
  * isso.
  *
- * E se a chamada estourar mesmo assim, o sweeper reivindica o run e ela REPETE.
- * É por isso que {@link MAX_PLAN_ATTEMPTS} existe: repetir não é de graça.
+ * E se o degrau estourar mesmo assim, o sweeper reivindica o run e ele REPETE.
+ * É por isso que {@link MAX_PLAN_STEPS} existe: repetir não é de graça.
  */
 export const PLAN_MIN_BUDGET_MS = Number(
-  process.env.INGESTION_PLAN_BUDGET_MS ?? "180000"
+  process.env.INGESTION_PLAN_BUDGET_MS ?? "210000"
 );
 
 /**
- * Quantas vezes um run tenta PLANEJAR antes de desistir.
+ * Quantos DEGRAUS de plano um run pode pagar antes de desistir.
  *
- * A repetição parecia inofensiva ("no pior caso, repete") e não é: a Anthropic
- * cobra a chamada mesmo quando a nossa função morre antes da resposta, e o
- * medidor só grava DEPOIS do retorno. Uma chamada que sempre estoura é, então,
+ * Conta degraus INICIADOS, que é o que custa dinheiro — inclusive o degrau que
+ * não volta. A repetição parecia inofensiva ("no pior caso, repete") e não é: a
+ * Anthropic cobra a chamada mesmo quando a nossa função morre antes da resposta,
+ * e o medidor só grava DEPOIS do retorno. Um degrau que sempre estoura é, então,
  * um laço infinito de chamadas pagas que não aparecem em `aiCostUsd` nem no
  * cap — o único gasto do sistema que ninguém vê nascer.
  *
- * Três tentativas: as duas primeiras cobrem instabilidade real (deploy no meio,
- * lentidão pontual do provedor); a terceira sem sucesso não é azar, é um lote
- * que não cabe no tempo, e isso não melhora repetindo.
+ * O teto é o tamanho da escada ({@link PLAN_LADDER_STEPS}): um run paga a escada
+ * inteira e nada além dela. Degrau que morre no timeout come um degrau da
+ * escada, que então termina mais cedo — em `awaiting_review`, com as issues do
+ * último plano que voltou. Só quando NENHUM degrau volta o run cai em
+ * {@link PlanStepLimitError}, porque aí não há plano nenhum para revisar.
+ *
+ * Não existe um segundo contador: "tentativa de planejamento" e "degrau da
+ * escada" passaram a ser o mesmo evento (uma invocação, uma chamada paga), e
+ * dois nomes para o mesmo número é a confusão que este comentário evita.
  */
-export const MAX_PLAN_ATTEMPTS = Number(
-  process.env.INGESTION_PLAN_MAX_ATTEMPTS ?? "3"
+export const MAX_PLAN_STEPS = Number(
+  process.env.INGESTION_PLAN_MAX_STEPS ?? String(PLAN_LADDER_STEPS)
 );
 
 /** Fração do orçamento a partir da qual uma chamada vira aviso no log. */
@@ -170,40 +198,54 @@ export type LibraryPlanner = (
   options: PlanLibraryOptions
 ) => Promise<PlanLibraryResult>;
 
-/** O que fica em `IngestionRun.report.planning` — a trilha da decisão. */
+/**
+ * `IngestionRun.report.planning` — a trilha da decisão E o estado da escada
+ * entre invocações.
+ *
+ * Um lugar só, de propósito. A escada acontece ao longo de várias invocações e
+ * precisa de estado durável; esse estado é exatamente o que o operador quer ler
+ * depois ("em que degrau o plano parou, e o que o planner propôs de errado no
+ * primeiro?"). Separar "o diário" do "estado" criaria dois blocos com o mesmo
+ * assunto e números parecidos — e o segundo é sempre o que envelhece.
+ *
+ * Vive no `report` (JSON) e não em colunas porque é diagnóstico de um estágio
+ * que já tem o resto do seu diário ali: `grouping`, `planning` e `timings` são
+ * todos do mesmo tipo de informação, e colunas custariam uma migração para dar
+ * acesso indexado a números que nenhuma consulta filtra.
+ */
 export interface PlanningReport {
-  plannedAt: string;
-  /** Passou nos guardrails E no piso de confiança. */
-  accepted: boolean;
-  /** Alguma tentativa saiu do degrau base (mais profundidade ou outro modelo). */
-  escalated: boolean;
-  confidence: number;
+  /** ISO do início do ÚLTIMO degrau. Gravado ANTES da chamada. */
+  startedAt: string;
+  /** Degraus INICIADOS, inclusive o que não voltou. Teto: {@link MAX_PLAN_STEPS}. */
+  stepsStarted: number;
+  /** Teto de degraus vigente quando o degrau foi registrado. */
+  maxSteps: number;
+  /** Índice do PRÓXIMO degrau, ou `null` quando a escada acabou. */
+  nextStepIndex: number | null;
+  /**
+   * Os degraus que VOLTARAM, com as violações de cada um. É aqui que fica a
+   * resposta para "o que o planner propôs de errado na primeira tentativa" — e
+   * é daqui que sai o feedback do prompt do degrau seguinte.
+   */
   attempts: PlanAttemptRecord[];
   /** Implementação que classificou os itens (`llm` ou `deterministic`). */
   classifier: string;
-  /** Tempo de parede do estágio inteiro, escalação incluída. */
+  /** Tempo de parede somado dos degraus deste run. */
   durationMs: number;
-}
-
-/**
- * `IngestionRun.report.planAttempts` — o contador DURÁVEL de tentativas de
- * planejamento do RUN.
- *
- * Não confundir com `PlanningReport.attempts`, que são os degraus da escada
- * DENTRO de uma chamada bem-sucedida. Este conta quantas vezes o estágio
- * `planning` foi iniciado — inclusive as vezes em que ele não voltou.
- *
- * Vive no `report` (JSON) e não numa coluna porque é diagnóstico de um estágio
- * que já tem o resto do seu diário ali: `grouping`, `planning` e `timings` são
- * todos do mesmo tipo de informação, e uma coluna a mais custaria uma migração
- * para dar acesso indexado a um número que nenhuma consulta filtra.
- */
-export interface PlanAttemptsReport {
-  count: number;
-  /** ISO do início da ÚLTIMA tentativa. */
-  startedAt: string;
-  /** Teto vigente quando a tentativa foi registrada. */
-  maxAttempts: number;
+  /** ISO do último degrau que VOLTOU; `null` enquanto nenhum voltou. */
+  plannedAt: string | null;
+  /** Passou nos guardrails E no piso de confiança. */
+  accepted: boolean;
+  /** Algum degrau saiu do base (mais profundidade ou outro modelo). */
+  escalated: boolean;
+  confidence: number;
+  /**
+   * Quanto do lote coube no índice de parágrafos. Fica no relatório porque um
+   * corte silencioso produz um plano que parece certo: o operador precisa ver
+   * quantos blocos entraram, quantos ficaram de fora e de quais famílias.
+   * `null` enquanto nenhum degrau voltou.
+   */
+  indexBudget: IndexBudgetReport | null;
 }
 
 /**
@@ -218,26 +260,26 @@ export interface StageTiming {
 }
 
 /**
- * O run gastou as tentativas de planejamento.
+ * O run gastou os degraus de planejamento sem nenhum deles voltar.
  *
  * Tipado pelo mesmo motivo de {@link IngestionCostCapError}: é parada
  * CONTROLADA, não crash, e o executor precisa distinguir as duas para não
  * gritar `console.error` num desfecho previsto.
  */
-export class PlanAttemptLimitError extends Error {
-  readonly code = "INGESTION_PLAN_ATTEMPTS" as const;
-  readonly attempts: number;
-  constructor(attempts: number) {
+export class PlanStepLimitError extends Error {
+  readonly code = "INGESTION_PLAN_STEPS" as const;
+  readonly steps: number;
+  constructor(steps: number) {
     super(
-      `O planejamento deste lote foi tentado ${attempts} vezes e não coube no ` +
+      `O planejamento deste lote foi tentado ${steps} vezes e não coube no ` +
         `tempo da função. Cada tentativa é cobrada mesmo quando a resposta não ` +
         `chega, então o lote parou aqui em vez de repetir sem fim. O que ` +
         `costuma resolver: dividir o acervo em lotes menores (ou por tipo de ` +
         `contrato) e disparar de novo. Tudo que já foi lido, classificado e ` +
         `agrupado continua gravado.`
     );
-    this.name = "PlanAttemptLimitError";
-    this.attempts = attempts;
+    this.name = "PlanStepLimitError";
+    this.steps = steps;
   }
 }
 
@@ -438,7 +480,7 @@ export async function advanceRun(
           // ABRE em `planning` tem a fatia inteira pela frente: adiar ali seria
           // adiar para sempre, com orçamento pequeno demais configurado.
           if (steps > 1 && Date.now() + PLAN_MIN_BUDGET_MS > deadline) break;
-          report = await persistPlan({
+          const outcome = await persistPlan({
             run,
             items,
             now,
@@ -447,6 +489,10 @@ export async function advanceRun(
             meter,
             classifierName: classifier.name,
           });
+          report = outcome.report;
+          // A escada tem outro degrau, e um degrau é o que cabe numa invocação:
+          // o run fica em `planning`, `hasMore` sai true e a corrente reentra.
+          if (outcome.pending) break;
         }
         const next = nextRunStatus(status);
         if (!next) break;
@@ -516,11 +562,11 @@ export async function advanceRun(
       // `failed` porque não há como seguir sem alguém subir o teto — mas o run
       // segue íntegro e retomável, com tudo que já foi extraído no lugar.
       console.warn(`[ingestion] run ${options.runId} parou no teto de custo:`, message);
-    } else if (err instanceof PlanAttemptLimitError) {
-      // Também parada controlada: o run gastou as tentativas de planejamento e
+    } else if (err instanceof PlanStepLimitError) {
+      // Também parada controlada: o run gastou os degraus de planejamento e
       // parar é o desfecho DESEJADO, não uma falha do código.
       console.warn(
-        `[ingestion] run ${options.runId} parou no teto de tentativas de plano:`,
+        `[ingestion] run ${options.runId} parou no teto de degraus de plano:`,
         message
       );
     } else {
@@ -919,10 +965,10 @@ function toPlannerItems(items: readonly ItemRow[]): PlannerItem[] {
 async function runPlanner(
   planner: LibraryPlanner,
   input: PlanLibraryInput,
-  meter: IngestionAiMeter
+  options: PlanLibraryOptions
 ): Promise<PlanLibraryResult> {
   try {
-    return await planner(input, { meter });
+    return await planner(input, options);
   } catch (err) {
     if (err instanceof IngestionCostCapError) throw err;
     const failure = describeApiFailure(err);
@@ -939,11 +985,47 @@ async function runPlanner(
   }
 }
 
+/** O que o estágio `planning` já registrou no report, ou null. */
+function readPlanning(report: Record<string, unknown>): PlanningReport | null {
+  const raw = report.planning;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const value = raw as Partial<PlanningReport>;
+  if (typeof value.stepsStarted !== "number") return null;
+  return {
+    startedAt: value.startedAt ?? "",
+    stepsStarted: Math.max(0, Math.floor(value.stepsStarted)),
+    maxSteps: value.maxSteps ?? MAX_PLAN_STEPS,
+    nextStepIndex:
+      typeof value.nextStepIndex === "number" ? value.nextStepIndex : null,
+    attempts: Array.isArray(value.attempts) ? value.attempts : [],
+    classifier: value.classifier ?? "",
+    durationMs: value.durationMs ?? 0,
+    plannedAt: value.plannedAt ?? null,
+    accepted: value.accepted === true,
+    escalated: value.escalated === true,
+    confidence: value.confidence ?? 0,
+    indexBudget: value.indexBudget ?? null,
+  };
+}
+
+/** Resultado de uma invocação do estágio: `pending` = a escada tem outro degrau. */
+interface PersistPlanOutcome {
+  report: Record<string, unknown>;
+  pending: boolean;
+}
+
 /**
- * Roda o planner e grava o resultado.
+ * Roda UM degrau do planner e grava o resultado.
  *
- * Grava o plano em `libraryPlan` mesmo quando os guardrails o RECUSARAM depois
- * da escalação. O plano recusado já vem com as issues que explicam o quê
+ * Degrau recusado com escada pela frente NÃO grava `libraryPlan`: um degrau
+ * intermediário é uma proposta descartada, e deixá-la na coluna faria a tela de
+ * revisão mostrar um plano que o próprio pipeline já não considera o do lote. O
+ * que fica gravado dele são as VIOLAÇÕES, em `planning.attempts` — que é ao
+ * mesmo tempo o insumo do prompt seguinte e a resposta para "por que o primeiro
+ * plano foi recusado".
+ *
+ * Acabada a escada, grava o plano em `libraryPlan` mesmo quando os guardrails o
+ * RECUSARAM. O plano recusado já vem com as issues que explicam o quê
  * (`plan_invalid`, `low_confidence`, …) e o run segue para `awaiting_review`:
  * quem decide entre corrigir, aprovar em partes ou jogar fora é o operador.
  * Deixar o run parado num estágio sem saída — ou apagar o plano — tiraria dele
@@ -957,7 +1039,7 @@ async function persistPlan(args: {
   planner: LibraryPlanner;
   meter: IngestionAiMeter;
   classifierName: string;
-}): Promise<Record<string, unknown>> {
+}): Promise<PersistPlanOutcome> {
   let report = args.report;
   let grouping = readGrouping(report);
   if (!grouping) {
@@ -968,55 +1050,70 @@ async function persistPlan(args: {
     report = await persistReport(args.run.id, { ...report, grouping });
   }
 
-  const spent = readPlanAttempts(report);
-  if (spent >= MAX_PLAN_ATTEMPTS) throw new PlanAttemptLimitError(spent);
+  const previous = readPlanning(report);
+  const spent = previous?.stepsStarted ?? 0;
+  // Sem degrau nenhum de volta e sem orçamento: não há plano para revisar, e
+  // repetir é comprar de novo a chamada que não chega. Ver {@link MAX_PLAN_STEPS}.
+  if (spent >= MAX_PLAN_STEPS) throw new PlanStepLimitError(spent);
 
-  // A tentativa é contada ANTES da chamada, e gravada antes de ela voltar.
-  //
-  // Contar depois pareceria mais natural — só que a tentativa que interessa é
-  // justamente a que NÃO volta: a que estoura o `maxDuration` e mata a função
-  // no meio da chamada. Essa nunca chegaria ao incremento, o contador ficaria
-  // parado em zero e o sweeper repetiria a chamada (paga, e invisível ao
-  // `aiCostUsd`) para sempre. O preço de contar antes é uma tentativa "gasta"
-  // quando o banco cai logo depois — barato perto de um laço infinito.
-  const attempt: PlanAttemptsReport = {
-    count: spent + 1,
-    startedAt: new Date().toISOString(),
-    maxAttempts: MAX_PLAN_ATTEMPTS,
+  const ladder: PlanLadderState = {
+    stepIndex: previous?.nextStepIndex ?? 0,
+    attempts: previous?.attempts ?? [],
   };
-  report = await persistReport(args.run.id, { ...report, planAttempts: attempt });
+
+  // O degrau é contado ANTES da chamada, e gravado antes de ela voltar.
+  //
+  // Contar depois pareceria mais natural — só que o degrau que interessa é
+  // justamente o que NÃO volta: o que estoura o `maxDuration` e mata a função
+  // no meio da chamada. Esse nunca chegaria ao incremento, o contador ficaria
+  // parado em zero e o sweeper repetiria a chamada (paga, e invisível ao
+  // `aiCostUsd`) para sempre. O preço de contar antes é um degrau "gasto"
+  // quando o banco cai logo depois — barato perto de um laço infinito.
+  const started: PlanningReport = {
+    startedAt: new Date().toISOString(),
+    stepsStarted: spent + 1,
+    maxSteps: MAX_PLAN_STEPS,
+    nextStepIndex: ladder.stepIndex,
+    attempts: ladder.attempts,
+    classifier: args.classifierName,
+    durationMs: previous?.durationMs ?? 0,
+    plannedAt: previous?.plannedAt ?? null,
+    accepted: false,
+    escalated: previous?.escalated ?? false,
+    confidence: previous?.confidence ?? 0,
+    indexBudget: previous?.indexBudget ?? null,
+  };
+  report = await persistReport(args.run.id, { ...report, planning: started });
 
   const startedAt = Date.now();
   const result = await runPlanner(
     args.planner,
     { items: toPlannerItems(args.items), grouping },
-    args.meter
+    { meter: args.meter, ladder, stepBudget: MAX_PLAN_STEPS - spent }
   );
   const durationMs = Date.now() - startedAt;
-  warnIfSlow("a chamada do planner", durationMs, PLAN_MIN_BUDGET_MS);
+  warnIfSlow("o degrau do planner", durationMs, PLAN_MIN_BUDGET_MS);
 
+  const pending = result.nextLadder !== null;
   const planning: PlanningReport = {
+    ...started,
+    nextStepIndex: result.nextLadder?.stepIndex ?? null,
+    attempts: result.attempts,
+    durationMs: started.durationMs + durationMs,
     plannedAt: args.now.toISOString(),
     accepted: result.accepted,
     escalated: result.escalated,
     confidence: result.plan.confidence,
-    attempts: result.attempts,
-    classifier: args.classifierName,
-    durationMs,
+    indexBudget: result.indexBudget,
   };
-  return persistReport(
+  report = await persistReport(
     args.run.id,
     {
       ...report,
       planning,
       timings: withTiming(report, "plan", addCall(readTiming(report, "plan"), durationMs)),
     },
-    { libraryPlan: result.plan as object }
+    pending ? {} : { libraryPlan: result.plan as object }
   );
-}
-
-/** Tentativas de planejamento já gastas por este run. Ver {@link PlanAttemptsReport}. */
-function readPlanAttempts(report: Record<string, unknown>): number {
-  const count = asRecord(report.planAttempts).count;
-  return typeof count === "number" && count > 0 ? Math.floor(count) : 0;
+  return { report, pending };
 }
