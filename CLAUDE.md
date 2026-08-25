@@ -1,5 +1,11 @@
 # Contractmaker — Claude Code Context
 
+## Project Defaults
+
+Codebase TypeScript. Todo código novo em TypeScript com tipos explícitos; evitar
+`any`. Rodar typecheck e build **antes** de declarar uma tarefa concluída — não
+depois, e não "provavelmente passa".
+
 ## Visão geral
 
 Plataforma de gestão de vendas e contratos imobiliários. Esteira: Lead/form público → Kanban → contrato (template **ou** upload) → editor Google Docs embedado → assinatura ClickSign → PDF assinado de volta na pasta. Pagadoria integrada com Asaas. Due diligence via Infosimples.
@@ -361,3 +367,25 @@ Não-óbvios (enums e structure: ver `prisma/schema.prisma`):
 - **Split Asaas:** rejeita wallet própria, duplicatas, max 10. Sandbox rejeita docs de identidade via API — usar `approveSandboxAccount`
 - **Form público é anônimo até o envio; depois fecha.** Gate em `lib/forms/form-gate.ts`: `completedAt != null && reopenedAt == null` → só membro da org (checa OrgMembership, não só sessão). Discrimina por `completedAt`, NÃO por `status` (deal de import nasce `vinculado` e nunca vira `completo`). Vale pras 2 esteiras (`/api/forms/[token]` e `/api/locacao/forms/[token]`) + subtoken/anexos/from-main. Reabrir: `POST .../lock {locked:false,reopen:true}`. Anexos já vistos seguem acessíveis (URL pública do Blob)
 - **Operacionais em memória**: ver `MEMORY.md` (OAuth 7d, printf, env pull, Resend sandbox, Handlebars shadowing, timezone, PowerShell)
+
+## Working Style
+
+Antes de rodar sequência **destrutiva** no Bash (delete, revoke, force, reset,
+overwrite, drop), enunciar o plano em 2-3 bullets e esperar confirmação. Comando
+demorado mas seguro — aguardar CI, aguardar deploy, consultar banco — roda direto,
+sem pedir permissão. Preferir um comando composto a várias chamadas exploratórias.
+
+## Deployment Verification
+
+Depois de mudar qualquer env var (nome de modelo do OCR, flag, segredo), **não
+presuma que pegou**. Verificar em três passos: (1) confirmar que a var está no
+config do deploy, (2) disparar rebuild/redeploy, (3) bater no serviço rodando e
+afirmar que a resposta reflete o valor novo. **Reportar o valor observado, não o
+pretendido.**
+
+Três armadilhas já medidas neste projeto (detalhe na memória
+[[reference-vercel-env-armadilhas]]):
+
+- **`vercel redeploy` reaproveita o snapshot de env do deploy anterior** — fica READY rodando o valor velho. Para a troca pegar, criar deploy novo a partir do git.
+- **Env `sensitive` não pode ser lida de volta nem convertida.** Sem conseguir ler, não há como verificar o que produção roda. Para valor que não é credencial (nome de modelo, booleano), usar `encrypted`.
+- **O oráculo que vale é o runtime, não a env.** Aqui: a coluna `AIUsage.model` no banco diz qual modelo realmente rodou. Env declara intenção; a linha no banco é prova.
