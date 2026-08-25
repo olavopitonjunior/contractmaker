@@ -776,6 +776,12 @@ function shouldTryFallbackModel(err: unknown): boolean {
   ) {
     return false;
   }
+  // Credencial do provedor ausente: trocar de modelo RESOLVE, porque o fallback
+  // sai por outro provedor. Sem este caso, era a única classe de falha do OCR
+  // que apagava em vez de degradar — `GEMINI_OCR_MODEL=gpt-5.6-luna` sem
+  // `OPENAI_API_KEY` fazia 100% das extrações falharem, e o `.env.example`
+  // recomenda justamente esse modelo. Ver `isConfigCredentialError`.
+  if (isConfigCredentialError(msg)) return true;
   // Fallback on 500s, safety blocks, "content blocked", parse failures
   return (
     msg.includes("500") ||
@@ -785,6 +791,47 @@ function shouldTryFallbackModel(err: unknown): boolean {
     msg.includes("invalid image") ||
     msg.includes("decode")
   );
+}
+
+/**
+ * Credencial do provedor ausente ou recusada — erro de CONFIGURAÇÃO, não de
+ * documento nem de capacidade do modelo.
+ *
+ * Recebe a mensagem já em minúsculas. Cobre o texto que os call-sites lançam
+ * (`OPENAI_API_KEY nao configurada`, com e sem acento) e as recusas 401/403 dos
+ * provedores, que significam a mesma coisa na prática: este provedor não vai
+ * atender, tente outro.
+ */
+export function isConfigCredentialError(msgLower: string): boolean {
+  // Caminho 1: a forma que ESTE código lança, sem depender do texto do
+  // provedor. `ocr-openai.ts` monta "OpenAI OCR got status: 403. <corpo>".
+  //
+  // Isto existe por um buraco concreto: 403 com chave VÁLIDA mas projeto sem
+  // acesso ao modelo (ex.: `gpt-5.6-luna` não liberado) tipicamente NÃO traz a
+  // expressão "api key" no corpo. Sem esta cláusula, aquele caso continuaria
+  // apagando 100% das extrações — o vizinho exato do bug que este código
+  // conserta, só que com a chave presente.
+  if (/got status:\s*(401|403)/.test(msgLower)) return true;
+
+  // Caminho 2: texto do provedor. Exige as DUAS metades — falar de credencial
+  // E dizer que está ausente/recusada. Só "invalid" faria "invalid image"
+  // virar erro de config.
+  const falaDeCredencial =
+    msgLower.includes("api_key") ||
+    msgLower.includes("api key") ||
+    msgLower.includes("apikey") ||
+    msgLower.includes("credential");
+  const ausenteOuRecusada =
+    msgLower.includes("nao configurada") ||
+    msgLower.includes("não configurada") ||
+    msgLower.includes("not configured") ||
+    msgLower.includes("not valid") ||
+    msgLower.includes("missing") ||
+    msgLower.includes("invalid") ||
+    msgLower.includes("unauthorized") ||
+    msgLower.includes("401") ||
+    msgLower.includes("403");
+  return falaDeCredencial && ausenteOuRecusada;
 }
 
 /**
@@ -1048,9 +1095,31 @@ export async function classifyAndExtract(
   } catch (primaryErr) {
     // Fallback: try a different model on 5xx / safety / decode errors
     if (fallbackModel && fallbackModel !== primaryModel && shouldTryFallbackModel(primaryErr)) {
-      console.warn(
-        `[ocr] primary model ${primaryModel} failed (${primaryErr instanceof Error ? primaryErr.message.slice(0, 80) : "?"}), trying fallback ${fallbackModel}`
-      );
+      const msgPrimario =
+        primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
+      // Erro de credencial degrada em silêncio se a gente deixar: o documento
+      // sai extraído e ninguém descobre que o modelo configurado nunca rodou.
+      // Trocar um apagão barulhento por config errada invisível é pior a longo
+      // prazo — daí o log em nível próprio, com o que corrigir.
+      if (isConfigCredentialError(msgPrimario.toLowerCase())) {
+        // NÃO ecoar o corpo do erro: esta é justamente a classe cujo payload
+        // carrega material de chave (o 401 da OpenAI devolve o `sk-…` enviado).
+        // Um `slice(0, 80)` só esconde por aritmética — muda o prefixo da
+        // mensagem e o segredo entra no log. O operador precisa do modelo, da
+        // env e do status; nada disso exige o corpo.
+        const status = msgPrimario.match(/got status:\s*(\d{3})/)?.[1];
+        console.error(
+          `[ocr] CONFIG: o modelo ${primaryModel} não rodou por credencial ` +
+            `ausente ou recusada${status ? ` (HTTP ${status})` : ""}. Degradando para ` +
+            `${fallbackModel} para não perder o documento, mas GEMINI_OCR_MODEL aponta ` +
+            `para um provedor cuja chave falta ou não dá acesso a esse modelo. ` +
+            `Confira com scripts/verify-ocr.sh.`
+        );
+      } else {
+        console.warn(
+          `[ocr] primary model ${primaryModel} failed (${msgPrimario.slice(0, 80)}), trying fallback ${fallbackModel}`
+        );
+      }
       try {
         const result = await callGemini(fallbackModel, base64Data, mimeType);
         text = result.text;
