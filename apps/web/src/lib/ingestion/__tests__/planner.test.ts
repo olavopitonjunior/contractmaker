@@ -6,6 +6,7 @@ import {
   MIN_PLAN_CONFIDENCE,
   analyzeBatch,
   buildBatchDigest,
+  materializePlan,
   planLibrary,
   type BatchAnalysis,
   type PlanLibraryInput,
@@ -508,6 +509,138 @@ describe("planner — escalação por confiança baixa", () => {
     expect(result.plan.issues.some((i) => i.kind === "low_confidence")).toBe(true);
     // O plano é VÁLIDO — só pouco confiável. Nada de `plan_invalid` aqui.
     expect(result.plan.issues.some((i) => i.kind === "plan_invalid")).toBe(false);
+  });
+});
+
+/**
+ * O modo estrito exige TODO campo em `required`, então os campos que o modelo
+ * antes omitia (`slotBlocks`, `isDefaultSuggested`, `groupId` e os quatro de
+ * `matchCriteria`) passam a vir com um valor de AUSÊNCIA explícito.
+ *
+ * O que estes testes fixam é a condição que torna a mudança segura: o parse
+ * trata o valor de ausência EXATAMENTE como tratava a omissão. Sem isso, a
+ * guarda contra o 400 teria trocado um erro barulhento por um plano errado — e
+ * os planos já gravados no banco (que vieram do formato antigo, com o campo
+ * ausente) deixariam de bater com os novos.
+ */
+describe("planner — ausência omitida × ausência explícita produzem o MESMO plano", () => {
+  // `input` só existe depois do `beforeAll` que lê o corpus — resolver o índice
+  // no corpo do describe rodaria cedo demais.
+  const index = () => analysis.index;
+
+  /** Um template no formato ANTIGO: campos opcionais simplesmente omitidos. */
+  const omitido = {
+    sourceItemId: "fiador",
+    name: "Locação residencial — fiador",
+    modalidade: "locacao",
+    matchCriteria: { garantia: "fiador" },
+    rationale: "Contrato com fiador.",
+  };
+
+  /** O mesmo template no formato NOVO: cada ausência dita explicitamente. */
+  const explicito = {
+    ...omitido,
+    matchCriteria: {
+      garantia: "fiador",
+      fiadorPessoa: null,
+      pessoa: null,
+      admImobiliaria: null,
+    },
+    slotBlocks: [],
+    isDefaultSuggested: false,
+    groupId: null,
+  };
+
+  it("o template sai idêntico nos dois formatos", () => {
+    const antigo = materializePlan({ templates: [omitido], confidence: 0.9 }, index());
+    const novo = materializePlan({ templates: [explicito], confidence: 0.9 }, index());
+
+    expect(novo.templates[0]).toEqual(antigo.templates[0]);
+    // E a ausência continua sendo ausência no objeto GRAVADO: nada de
+    // `slotBlocks: {}` ou `isDefaultSuggested: false` vazando para o banco.
+    expect(novo.templates[0]).not.toHaveProperty("slotBlocks");
+    expect(novo.templates[0]).not.toHaveProperty("isDefaultSuggested");
+    expect(novo.templates[0]).not.toHaveProperty("groupId");
+    expect(novo.templates[0].matchCriteria).toEqual({ garantia: "fiador" });
+  });
+
+  it("slotBlocks aceita lista vazia, null e ausência como a mesma coisa", () => {
+    const shapes = [undefined, null, []];
+    const saidas = shapes.map(
+      (slotBlocks) =>
+        materializePlan(
+          { templates: [{ ...omitido, slotBlocks }], confidence: 0.9 },
+          index()
+        ).templates[0]
+    );
+    for (const saida of saidas) expect(saida).toEqual(saidas[0]);
+    expect(saidas[0]).not.toHaveProperty("slotBlocks");
+  });
+
+  it("isDefaultSuggested: false é o mesmo que omitido, e true continua valendo", () => {
+    const comFalse = materializePlan(
+      { templates: [{ ...omitido, isDefaultSuggested: false }], confidence: 0.9 },
+      index()
+    );
+    expect(comFalse.templates[0]).not.toHaveProperty("isDefaultSuggested");
+
+    const comTrue = materializePlan(
+      { templates: [{ ...omitido, isDefaultSuggested: true }], confidence: 0.9 },
+      index()
+    );
+    expect(comTrue.templates[0].isDefaultSuggested).toBe(true);
+  });
+
+  it("groupId null é o mesmo que omitido, e a string continua valendo", () => {
+    const nulo = materializePlan(
+      { templates: [{ ...omitido, groupId: null }], confidence: 0.9 },
+      index()
+    );
+    expect(nulo.templates[0]).not.toHaveProperty("groupId");
+
+    const comId = materializePlan(
+      { templates: [{ ...omitido, groupId: "porto" }], confidence: 0.9 },
+      index()
+    );
+    expect(comId.templates[0].groupId).toBe("porto");
+  });
+
+  it("os quatro campos de matchCriteria em null não entram no critério", () => {
+    const todosNulos = materializePlan(
+      {
+        templates: [
+          {
+            ...omitido,
+            matchCriteria: {
+              garantia: null,
+              fiadorPessoa: null,
+              pessoa: null,
+              admImobiliaria: null,
+            },
+          },
+        ],
+        confidence: 0.9,
+      },
+      index()
+    );
+    expect(todosNulos.templates[0].matchCriteria).toEqual({});
+  });
+
+  it("o slotBlocks preenchido segue funcionando — a mudança não é só permissiva", () => {
+    const comBloco = materializePlan(
+      {
+        templates: [
+          {
+            ...explicito,
+            sourceItemId: "porto",
+            slotBlocks: [{ slot: "garantia", blockRefs: [fiancaRef("porto")] }],
+          },
+        ],
+        confidence: 0.9,
+      },
+      index()
+    );
+    expect(comBloco.templates[0].slotBlocks?.garantia?.length).toBeGreaterThan(0);
   });
 });
 

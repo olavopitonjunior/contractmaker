@@ -5,14 +5,32 @@ import {
   UNSUPPORTED_KEYWORDS,
 } from "@/lib/ai/shared/schema-lint";
 
+/**
+ * Um objeto ESTRITO — todo campo em `required`, `additionalProperties: false`.
+ *
+ * Existe para os testes que não são sobre as regras de estrutura: sem ele, cada
+ * fixture arrastaria duas issues de ruído e esconderia o que o teste quer ver.
+ */
+function strictObj(
+  properties: Record<string, unknown>,
+  extra: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: Object.keys(properties),
+    properties,
+    ...extra,
+  };
+}
+
 describe("lintStructuredSchema — o padrão que derrubou o run", () => {
   it("reprova enum junto de type em união", () => {
-    const issues = lintStructuredSchema({
-      type: "object",
-      properties: {
+    const issues = lintStructuredSchema(
+      strictObj({
         garantia: { type: ["string", "null"], enum: ["fiador", "caucao", null] },
-      },
-    });
+      })
+    );
 
     expect(issues).toHaveLength(1);
     expect(issues[0].rule).toBe("enum_with_union_type");
@@ -20,14 +38,13 @@ describe("lintStructuredSchema — o padrão que derrubou o run", () => {
   });
 
   it("aprova a forma correta: anyOf com um ramo por tipo", () => {
-    const issues = lintStructuredSchema({
-      type: "object",
-      properties: {
+    const issues = lintStructuredSchema(
+      strictObj({
         garantia: {
           anyOf: [{ type: "string", enum: ["fiador", "caucao"] }, { type: "null" }],
         },
-      },
-    });
+      })
+    );
     expect(issues).toEqual([]);
   });
 });
@@ -67,10 +84,9 @@ describe("lintStructuredSchema — enum × type do mesmo nível", () => {
 
 describe("lintStructuredSchema — palavras-chave fora do subconjunto", () => {
   it("reprova minimum/maximum em number — o segundo 400 real", () => {
-    const issues = lintStructuredSchema({
-      type: "object",
-      properties: { confidence: { type: "number", minimum: 0, maximum: 1 } },
-    });
+    const issues = lintStructuredSchema(
+      strictObj({ confidence: { type: "number", minimum: 0, maximum: 1 } })
+    );
 
     expect(issues.map((i) => i.rule)).toEqual([
       "unsupported_keyword",
@@ -104,21 +120,22 @@ describe("lintStructuredSchema — palavras-chave fora do subconjunto", () => {
 
   it("description, title e $defs seguem livres — não são restrição de valor", () => {
     expect(
-      lintStructuredSchema({
-        type: "object",
-        title: "Plano",
-        description: "O plano do lote.",
-        $defs: { x: { type: "string" } },
-        properties: { a: { type: "string", description: "Um campo." } },
-      })
+      lintStructuredSchema(
+        strictObj(
+          { a: { type: "string", description: "Um campo." } },
+          {
+            title: "Plano",
+            description: "O plano do lote.",
+            $defs: { x: { type: "string" } },
+          }
+        )
+      )
     ).toEqual([]);
   });
 
   it("anyOf/oneOf/allOf não são reprovados — anyOf está confirmado funcionando", () => {
     expect(
-      lintStructuredSchema({
-        anyOf: [{ type: "string" }, { type: "null" }],
-      })
+      lintStructuredSchema({ anyOf: [{ type: "string" }, { type: "null" }] })
     ).toEqual([]);
     expect(lintStructuredSchema({ oneOf: [{ type: "string" }] })).toEqual([]);
     expect(lintStructuredSchema({ allOf: [{ type: "string" }] })).toEqual([]);
@@ -128,26 +145,23 @@ describe("lintStructuredSchema — palavras-chave fora do subconjunto", () => {
     // O planner tem uma propriedade `title`. Nome de campo em `properties` é
     // dado do domínio, não palavra-chave — confundi-los reprovaria schema bom.
     expect(
-      lintStructuredSchema({
-        type: "object",
-        required: ["title", "default", "pattern"],
-        properties: {
+      lintStructuredSchema(
+        strictObj({
           title: { type: "string" },
           default: { type: "string" },
           pattern: { type: "string" },
-        },
-      })
+        })
+      )
     ).toEqual([]);
   });
 
   it("a palavra-chave é achada em qualquer profundidade", () => {
-    const issues = lintStructuredSchema({
-      type: "object",
-      properties: {
+    const issues = lintStructuredSchema(
+      strictObj({
         lista: { type: "array", items: { type: "string", maxLength: 40 } },
         ramo: { anyOf: [{ type: "number", multipleOf: 0.5 }, { type: "null" }] },
-      },
-    });
+      })
+    );
     expect(issues.map((i) => i.path).sort()).toEqual([
       "#/properties/lista/items",
       "#/properties/ramo/anyOf/0",
@@ -155,28 +169,117 @@ describe("lintStructuredSchema — palavras-chave fora do subconjunto", () => {
   });
 });
 
-describe("lintStructuredSchema — a varredura alcança o schema inteiro", () => {
-  it("desce por items, $defs, anyOf e objetos aninhados", () => {
+// ────────────────────────────────────────────────────────────────────────────
+// Modo estrito — DEDUZIDO, nenhum 400 o citou ainda.
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("lintStructuredSchema — todo campo em required", () => {
+  it("reprova o campo de properties que ficou de fora", () => {
     const issues = lintStructuredSchema({
       type: "object",
-      properties: {
+      additionalProperties: false,
+      required: ["a"],
+      properties: { a: { type: "string" }, b: { type: "string" } },
+    });
+
+    expect(issues.map((i) => i.rule)).toEqual(["incomplete_required"]);
+    expect(issues[0].detail).toContain("b");
+    expect(issues[0].detail).not.toContain(", a");
+  });
+
+  it("reprova o objeto sem `required` nenhum", () => {
+    const issues = lintStructuredSchema({
+      type: "object",
+      additionalProperties: false,
+      properties: { a: { type: "string" } },
+    });
+    expect(issues.map((i) => i.rule)).toEqual(["incomplete_required"]);
+  });
+
+  it("a mensagem ensina a saída: manter em required e deixar a ausência ser valor", () => {
+    const [issue] = lintStructuredSchema({
+      type: "object",
+      additionalProperties: false,
+      properties: { opcional: { type: ["string", "null"] } },
+    });
+    expect(issue.detail).toContain("`null`");
+    expect(issue.detail).toContain("como trata a omissão");
+  });
+
+  it("objeto de forma livre, sem properties, não gera issue", () => {
+    // Não há campo a exigir; inventar issue aqui seria ruído.
+    expect(lintStructuredSchema({ type: "object" })).toEqual([]);
+    expect(
+      lintStructuredSchema({ type: "object", additionalProperties: false })
+    ).toEqual([]);
+  });
+
+  it("`required` completo passa, em qualquer ordem", () => {
+    expect(
+      lintStructuredSchema({
+        type: "object",
+        additionalProperties: false,
+        required: ["b", "a"],
+        properties: { a: { type: "string" }, b: { type: "string" } },
+      })
+    ).toEqual([]);
+  });
+});
+
+describe("lintStructuredSchema — additionalProperties: false em todo objeto", () => {
+  it("reprova o objeto sem additionalProperties", () => {
+    const issues = lintStructuredSchema({
+      type: "object",
+      required: ["a"],
+      properties: { a: { type: "string" } },
+    });
+    expect(issues.map((i) => i.rule)).toEqual(["open_object"]);
+    expect(issues[0].detail).toContain("ausente");
+  });
+
+  it("reprova `additionalProperties: true` — aberto é aberto", () => {
+    const issues = lintStructuredSchema({
+      type: "object",
+      additionalProperties: true,
+      required: ["a"],
+      properties: { a: { type: "string" } },
+    });
+    expect(issues.map((i) => i.rule)).toEqual(["open_object"]);
+    expect(issues[0].detail).toContain("true");
+  });
+
+  it("alcança objeto aninhado dentro de items", () => {
+    const issues = lintStructuredSchema(
+      strictObj({
         lista: {
           type: "array",
-          items: {
-            type: "object",
-            properties: {
+          items: { type: "object", properties: { x: { type: "string" } } },
+        },
+      })
+    );
+    expect(issues.map((i) => `${i.path} ${i.rule}`).sort()).toEqual([
+      "#/properties/lista/items incomplete_required",
+      "#/properties/lista/items open_object",
+    ]);
+  });
+});
+
+describe("lintStructuredSchema — a varredura alcança o schema inteiro", () => {
+  it("desce por items, $defs, anyOf e objetos aninhados", () => {
+    const issues = lintStructuredSchema(
+      strictObj(
+        {
+          lista: {
+            type: "array",
+            items: strictObj({
               alvo: { type: ["string", "null"], enum: ["a", null] },
-            },
+            }),
           },
+          ramo: { anyOf: [{ type: "string", enum: ["ok", 1] }, { type: "null" }] },
         },
-        ramo: {
-          anyOf: [{ type: "string", enum: ["ok", 1] }, { type: "null" }],
-        },
-      },
-      $defs: {
-        reuso: { type: "string", enum: [null] },
-      },
-    });
+        { $defs: { reuso: { type: "string", enum: [null] } } }
+      )
+    );
 
     expect(issues.map((i) => i.path).sort()).toEqual([
       "#/$defs/reuso",
@@ -186,13 +289,7 @@ describe("lintStructuredSchema — a varredura alcança o schema inteiro", () =>
   });
 
   it("additionalProperties: false não é subschema e não quebra a varredura", () => {
-    expect(
-      lintStructuredSchema({
-        type: "object",
-        additionalProperties: false,
-        properties: { a: { type: "string" } },
-      })
-    ).toEqual([]);
+    expect(lintStructuredSchema(strictObj({ a: { type: "string" } }))).toEqual([]);
   });
 
   it("entrada que não é objeto sai sem issue, em vez de lançar", () => {

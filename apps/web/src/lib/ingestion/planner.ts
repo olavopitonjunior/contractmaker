@@ -452,7 +452,20 @@ export const PLAN_SCHEMA: Record<string, unknown> = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["sourceItemId", "name", "modalidade", "matchCriteria", "rationale"],
+        // Cada campo de `properties` entra em `required` — ver o cabeçalho de
+        // `lib/ai/shared/schema-lint.ts`. Os que antes eram omitidos passam a
+        // exigir um valor de AUSÊNCIA explícito (`[]`, `false`, `null`), e o
+        // parse trata esse valor exatamente como tratava a omissão.
+        required: [
+          "sourceItemId",
+          "name",
+          "modalidade",
+          "matchCriteria",
+          "slotBlocks",
+          "isDefaultSuggested",
+          "groupId",
+          "rationale",
+        ],
         properties: {
           sourceItemId: { type: "string" },
           name: { type: "string" },
@@ -460,6 +473,7 @@ export const PLAN_SCHEMA: Record<string, unknown> = {
           matchCriteria: {
             type: "object",
             additionalProperties: false,
+            required: ["garantia", "fiadorPessoa", "pessoa", "admImobiliaria"],
             properties: {
               garantia: nullableEnum(GARANTIA_TIPOS),
               fiadorPessoa: nullableEnum(["pf", "pj"]),
@@ -469,8 +483,13 @@ export const PLAN_SCHEMA: Record<string, unknown> = {
           },
           slotBlocks: {
             type: "array",
+            // Lista VAZIA, e não null, para dizer "nenhum espaço": o campo é uma
+            // coleção e o vazio já é a forma natural de uma coleção sem itens —
+            // duas maneiras de dizer a mesma coisa só dariam ao modelo uma
+            // escolha sem consequência. O parse aceita as duas de qualquer jeito.
             description:
-              "Trechos que saem do corpo e viram espaço. Use REFERÊNCIAS (B1, B2…).",
+              "Trechos que saem do corpo e viram espaço. Use REFERÊNCIAS (B1, B2…). " +
+              "Lista VAZIA quando o template não tem espaço a extrair.",
             items: {
               type: "object",
               additionalProperties: false,
@@ -481,8 +500,17 @@ export const PLAN_SCHEMA: Record<string, unknown> = {
               },
             },
           },
-          isDefaultSuggested: { type: "boolean" },
-          groupId: { type: ["string", "null"] },
+          isDefaultSuggested: {
+            type: "boolean",
+            description:
+              "true só no template que a família deve sugerir por padrão. " +
+              "false nos demais — não omita.",
+          },
+          groupId: {
+            type: ["string", "null"],
+            description:
+              "Grupo de quase idênticos que originou este template, ou null.",
+          },
           rationale: { type: "string" },
         },
       },

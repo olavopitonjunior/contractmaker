@@ -51,6 +51,15 @@
  * localmente algo que talvez passasse custa uma linha a menos no schema;
  * descobrir em produção custa um run.
  *
+ * Pela mesma lógica preventiva entram `incomplete_required` e `open_object`
+ * (ver {@link checkObjectStrictness}), também DEDUZIDAS: o modo estrito
+ * equivalente em outras APIs de structured output exige todo campo em
+ * `required` e `additionalProperties: false` em todo objeto. A contrapartida é
+ * que a ausência precisa virar um VALOR (`null`, `[]`, `false`) — e o parse
+ * tem de tratar esse valor exatamente como trata a omissão, senão a "guarda"
+ * troca um 400 por um plano errado. Ver `toTemplate` em
+ * `lib/ingestion/planner.ts`, que já fazia isso.
+ *
  * O que NÃO entra na lista: `description` (usadíssima, e o schema com ela
  * passou), `title`, `$defs`/`$ref` e os combinadores `anyOf`/`oneOf`/`allOf` —
  * `anyOf` está confirmado funcionando e chutar contra os irmãos dele quebraria
@@ -76,7 +85,11 @@ export type SchemaLintRule =
   /** Valor do `enum` incompatível com o `type` do mesmo nível. */
   | "enum_type_mismatch"
   /** Palavra-chave de validação fora do subconjunto de `output_config.format`. */
-  | "unsupported_keyword";
+  | "unsupported_keyword"
+  /** Objeto com campo de `properties` que ficou fora de `required`. */
+  | "incomplete_required"
+  /** Objeto sem `additionalProperties: false`. */
+  | "open_object";
 
 /**
  * Palavras-chave que o subconjunto não aceita → como a issue se explica.
@@ -205,6 +218,59 @@ const SUBSCHEMA_MAPS = [
 /** Palavras-chave cujo valor é uma LISTA de schemas. */
 const SUBSCHEMA_LISTS = ["anyOf", "oneOf", "allOf", "prefixItems"] as const;
 
+/**
+ * As duas exigências do modo estrito, DEDUZIDAS — nenhum 400 as citou ainda.
+ *
+ * Structured outputs quer descrever a saída sem margem: se um campo pode faltar,
+ * o parser do outro lado não sabe se o modelo decidiu omiti-lo ou esqueceu. As
+ * APIs equivalentes resolvem isso do mesmo jeito — todo campo em `required` e
+ * `additionalProperties: false` em todo objeto —, e a ausência vira um VALOR
+ * explícito (`null`, `[]`, `false`).
+ *
+ * Só roda em nó com `properties` não vazio: objeto de forma livre (sem
+ * `properties`) não tem campo a exigir, e inventar issue ali seria ruído.
+ */
+function checkObjectStrictness(
+  node: Record<string, unknown>,
+  path: string,
+  out: SchemaLintIssue[]
+): void {
+  const properties = node.properties;
+  if (!isRecord(properties)) return;
+  const names = Object.keys(properties);
+  if (names.length === 0) return;
+
+  const required = Array.isArray(node.required)
+    ? node.required.filter((n): n is string => typeof n === "string")
+    : [];
+  const missing = names.filter((name) => !required.includes(name));
+  if (missing.length > 0) {
+    out.push({
+      path,
+      rule: "incomplete_required",
+      detail:
+        `campo(s) de \`properties\` fora de \`required\`: ${missing.join(", ")}. ` +
+        "O modo estrito exige TODOS. Se o campo pode não vir, mantenha-o em " +
+        "`required` e deixe a ausência ser um valor explícito (`null`, `[]`, " +
+        "`false`) que o parse trate como trata a omissão hoje.",
+    });
+  }
+
+  if (node.additionalProperties !== false) {
+    out.push({
+      path,
+      rule: "open_object",
+      detail:
+        "objeto com `properties` precisa de `additionalProperties: false`; " +
+        `aqui está ${
+          "additionalProperties" in node
+            ? JSON.stringify(node.additionalProperties)
+            : "ausente"
+        }.`,
+    });
+  }
+}
+
 function checkNode(
   node: Record<string, unknown>,
   path: string,
@@ -229,6 +295,8 @@ function checkNode(
             "`minimum`/`maximum`). Tire do schema e valide no parse.",
     });
   }
+
+  checkObjectStrictness(node, path, out);
 
   const rawEnum = node.enum;
   const rawType = node.type;
