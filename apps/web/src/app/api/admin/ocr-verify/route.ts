@@ -26,7 +26,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { timingSafeEqual } from "node:crypto";
+import { requireBearerAuth } from "@/lib/security/cron-auth";
 import { prisma } from "@/lib/db/prisma";
 import { ocrModelFromEnv } from "@/lib/ai/agents/model-provenance";
 import { shadowModelFromEnv } from "@/lib/ai/ocr-shadow";
@@ -35,34 +35,19 @@ import { isModeloOpenAI } from "@/lib/ai/ocr-openai";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-function iguaisSemTiming(a: string, b: string): boolean {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ab.length !== bb.length) return false;
-  try {
-    return timingSafeEqual(ab, bb);
-  } catch {
-    return false;
-  }
-}
-
-/** `null` = autorizado. Fail-closed: sem secret no ambiente, ninguém entra. */
-function negarAcesso(req: Request): NextResponse | null {
-  const secret = process.env.OPS_VERIFY_SECRET || process.env.CRON_SECRET;
-  if (!secret) {
-    return NextResponse.json(
-      { error: "OPS_VERIFY_SECRET/CRON_SECRET não configurado — rota desabilitada" },
-      { status: 503 }
-    );
-  }
-  const header = req.headers.get("authorization") ?? "";
-  const bearer = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
-  const enviado = bearer || req.headers.get("x-cron-secret") || "";
-  if (!enviado || !iguaisSemTiming(enviado, secret)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  return null;
-}
+/**
+ * `null` = autorizado. Fail-closed: sem secret no ambiente, ninguém entra.
+ *
+ * Delega para o helper compartilhado de propósito. A versão anterior daqui
+ * reimplementava `cron-auth.ts` inteiro por causa de UMA linha (o fallback de
+ * env) — e um fix de parsing de header lá nunca chegaria aqui, em silêncio.
+ */
+const negarAcesso = (req: Request) =>
+  requireBearerAuth(
+    req,
+    ["OPS_VERIFY_SECRET", "CRON_SECRET"],
+    "OPS_VERIFY_SECRET/CRON_SECRET não configurado — rota desabilitada"
+  );
 
 /** Modelos vistos de verdade, por operação, na janela pedida. */
 async function modelosVistos(desde: Date) {
@@ -87,7 +72,12 @@ export async function GET(req: Request) {
   if (negado) return negado;
 
   const url = new URL(req.url);
-  const dias = Math.min(Math.max(Number(url.searchParams.get("days") ?? 7), 1), 90);
+  // `Number("abc")` é NaN, e o clamp propaga NaN: `new Date(Date.now() - NaN)`
+  // vira Invalid Date, o Prisma estoura, o catch engole, e `windowDays` sai
+  // como null no JSON — a rota mentiria por omissão justamente onde promete
+  // ser prova. Daí o `isFinite` ANTES do clamp.
+  const diasBruto = Number(url.searchParams.get("days") ?? 7);
+  const dias = Number.isFinite(diasBruto) ? Math.min(Math.max(diasBruto, 1), 90) : 7;
   const desde = new Date(Date.now() - dias * 24 * 60 * 60_000);
 
   const effectiveModel = ocrModelFromEnv();

@@ -135,6 +135,62 @@ describe("GET /api/admin/ocr-verify", () => {
     expect(JSON.stringify(body)).not.toContain("interno-123.local");
   });
 
+  /**
+   * `modelsSeen` é o campo que o passo V7 do `verify-ocr.sh` usa para afirmar
+   * que a extração mais recente rodou no modelo esperado. Sem dado real aqui,
+   * trocar `_count._all` por outra coisa, ou inverter o sort, passaria batido —
+   * e o script continuaria "verde" olhando para a linha errada.
+   */
+  it("modelsSeen mapeia os campos do groupBy e ordena do mais recente pro mais antigo", async () => {
+    groupBy.mockResolvedValue([
+      {
+        operation: "ocr_shadow",
+        model: "gemini-2.5-flash",
+        _count: { _all: 3 },
+        _max: { createdAt: new Date("2026-08-25T10:00:00Z") },
+      },
+      {
+        operation: "ocr_form",
+        model: "gemini-3.5-flash-lite",
+        _count: { _all: 7 },
+        _max: { createdAt: new Date("2026-08-25T16:13:42Z") },
+      },
+    ]);
+
+    const res = await chamar({ authorization: "Bearer segredo-de-teste" });
+    const body = await res.json();
+    const vistos = body.runtime.modelsSeen;
+
+    // Mais recente primeiro — o script lê a PRIMEIRA linha `ocr_form`.
+    expect(vistos[0].operation).toBe("ocr_form");
+    expect(vistos[0].model).toBe("gemini-3.5-flash-lite");
+    expect(vistos[0].calls).toBe(7);
+    expect(vistos[0].lastAt).toBe("2026-08-25T16:13:42.000Z");
+    expect(vistos[1].operation).toBe("ocr_shadow");
+    expect(vistos[1].calls).toBe(3);
+  });
+
+  it("days inválido cai no default em vez de virar NaN", async () => {
+    const { GET } = await import("../ocr-verify/route");
+    const res = await GET(
+      new Request("https://exemplo.test/api/admin/ocr-verify?days=abc", {
+        headers: { authorization: "Bearer segredo-de-teste" },
+      })
+    );
+    const body = await res.json();
+    expect(body.runtime.windowDays).toBe(7);
+  });
+
+  it("days fora da faixa é limitado, não rejeitado", async () => {
+    const { GET } = await import("../ocr-verify/route");
+    const alto = await GET(
+      new Request("https://exemplo.test/api/admin/ocr-verify?days=9999", {
+        headers: { authorization: "Bearer segredo-de-teste" },
+      })
+    );
+    expect((await alto.json()).runtime.windowDays).toBe(90);
+  });
+
   it("OPS_VERIFY_SECRET vence CRON_SECRET quando os dois existem", async () => {
     process.env.OPS_VERIFY_SECRET = "secret-de-ops";
     const comOps = await chamar({ authorization: "Bearer secret-de-ops" });

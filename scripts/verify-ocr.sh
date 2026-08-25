@@ -46,6 +46,11 @@ if [[ -z "$SECRET" ]]; then
   exit 2
 fi
 
+case "$BASE_URL" in
+  http://*|https://*) ;;
+  *) echo "BASE_URL inválida: precisa começar com http:// ou https://" >&2; exit 2 ;;
+esac
+
 echo "verificando $BASE_URL (esperando modelo '$EXPECT_MODEL')"
 echo
 
@@ -89,8 +94,11 @@ fi
 
 # ---------------------------------------------------------------- V5-V8
 echo "V5-V8  config efetiva do OCR"
-# `-H @-` lê o header do stdin: o segredo NÃO entra no argv, então não
-# aparece em `ps aux` para outros processos da máquina.
+# `-H @-` lê o header do stdin: tira o segredo do ARGV, então ele não aparece
+# em `ps aux`. Não elimina a exposição por env — passado como
+# `OPS_VERIFY_SECRET=... ./verify-ocr.sh`, o valor é herdado pelos subprocessos
+# e fica legível em /proc/<pid>/environ enquanto rodam. Isso é inerente a
+# secret via env (mesmo caso dos crons); `-H @-` fecha só o argv.
 BODY=$(curl -s -H @- "$BASE_URL/api/admin/ocr-verify?days=$DAYS" \
   <<<"Authorization: Bearer $SECRET")
 
@@ -132,6 +140,7 @@ else
   vermelho "structuredOutput = $ST, esperava $EXPECT_STRUCTURED"
 fi
 
+# V6b — shadow é WARN: desligado é config válida, não falha.
 if [[ "$SHADOW" == "$EXPECT_SHADOW" ]]; then
   verde "shadowModel = $SHADOW"
 else
@@ -153,9 +162,10 @@ else
   fi
 fi
 
-# V7 — evidência de runtime. WARN, não FAIL: OCR é sob demanda, então ausência
-# de chamada recente não prova falha nenhuma.
-echo "V7  evidência de runtime (últimos $DAYS dia(s))"
+# V9 — evidência de runtime. WARN, não FAIL: OCR é sob demanda, então ausência
+# de chamada recente não prova falha nenhuma. É o único passo que olha o que
+# REALMENTE rodou; todos os outros olham config.
+echo "V9  evidência de runtime (últimos $DAYS dia(s))"
 VISTOS=$(printf '%s' "$BODY" | python3 -c "
 import json,sys
 d = json.load(sys.stdin)
