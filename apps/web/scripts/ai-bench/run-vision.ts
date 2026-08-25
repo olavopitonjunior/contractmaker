@@ -43,6 +43,7 @@
 import fs from "fs";
 import path from "path";
 import { GoogleGenAI } from "@google/genai";
+import { chamarOpenRouter, schemaJsonDaCategoria } from "./openrouter-vision";
 import { calcCostUsd, geminiUsageToTokens } from "../../src/lib/ai/usage";
 import type { GeminiUsageMetadata } from "../../src/lib/ai/usage";
 import { COMBINED_PROMPT } from "../../src/lib/ai/ocr";
@@ -61,6 +62,10 @@ interface Braco {
   chave: string;
   modelo: string;
   comSchema: boolean;
+  /** OpenRouter em vez do SDK do Gemini. Exige OPENROUTER_API_KEY. */
+  openrouter?: boolean;
+  /** `reasoning_effort`. O "-xhigh" do nome do modelo é ISTO, não um ID. */
+  esforco?: string;
   rotulo: string;
   /**
    * Duas chamadas: classificar (schema mínimo) e depois extrair com o schema
@@ -122,6 +127,12 @@ const BRACOS: Braco[] = [
     rotulo: "3.5-flash-lite 2 etapas" },
   { chave: "duas25", modelo: "gemini-2.5-flash", comSchema: true, duasEtapas: true,
     rotulo: "2.5-flash 2 etapas" },
+  // OpenAI via OpenRouter. Aceita PDF nativo e, medido em 25/08, NÃO perde
+  // recall com schema — ao contrário do Gemini, que caiu de 11 campos para 3.
+  { chave: "luna", modelo: "openai/gpt-5.6-luna", comSchema: true, openrouter: true,
+    esforco: "xhigh", rotulo: "gpt-5.6-luna xhigh" },
+  { chave: "luna2", modelo: "openai/gpt-5.6-luna", comSchema: true, openrouter: true,
+    esforco: "xhigh", duasEtapas: true, rotulo: "gpt-5.6-luna 2 etapas" },
 ];
 
 /** Schema só de classificação — saída minúscula, para a 1a etapa ser barata. */
@@ -320,7 +331,40 @@ async function main() {
         // Nas duas etapas, o custo é a SOMA das duas chamadas — cobrar só a
         // segunda esconderia metade do preço do formato.
         let custoExtra = 0;
+        // Tokens do OpenRouter não vêm no formato do Gemini; guardados à parte.
+        let tokensOR: { prompt: number; completion: number } | null = null;
         try {
+          // ── Braço OpenRouter ─────────────────────────────────────────────
+          if (braco.openrouter) {
+            const chave = process.env.OPENROUTER_API_KEY;
+            if (!chave) throw new Error("OPENROUTER_API_KEY ausente");
+
+            let schemaOR: Record<string, unknown> | null = null;
+            if (braco.comSchema) {
+              if (braco.duasEtapas) {
+                // Etapa 1: classificar sem schema (a saída é curta e o modelo
+                // já devolve o `tipo` no JSON), depois extrair com o schema
+                // DA CATEGORIA — a forma que o bench mostrou ser a correta.
+                const cls = await chamarOpenRouter(chave, {
+                  modelo: braco.modelo, prompt: COMBINED_PROMPT,
+                  base64, mimeType: caso.mime, esforco: braco.esforco,
+                });
+                custoExtra = calcCostUsd(braco.modelo, cls.promptTokens, cls.completionTokens);
+                const cat = normalizarCategoria(parseTolerante(cls.texto)?.tipo);
+                const campos = CAMPOS_POR_CATEGORIA[cat];
+                schemaOR = campos ? schemaJsonDaCategoria(campos) : null;
+              } else {
+                schemaOR = schemaJsonDaCategoria(CAMPOS_DO_PROMPT);
+              }
+            }
+
+            const r = await chamarOpenRouter(chave, {
+              modelo: braco.modelo, prompt: COMBINED_PROMPT,
+              base64, mimeType: caso.mime, esforco: braco.esforco, schema: schemaOR,
+            });
+            texto = r.texto;
+            tokensOR = { prompt: r.promptTokens, completion: r.completionTokens };
+          } else {
           const partes = [
             { text: COMBINED_PROMPT },
             { inlineData: { mimeType: caso.mime, data: base64 } },
@@ -361,6 +405,7 @@ async function main() {
           });
           texto = res.text ?? "";
           usage = (res as { usageMetadata?: GeminiUsageMetadata }).usageMetadata;
+          }
         } catch (err) {
           // Falha é RESULTADO MEDIDO, não caso a ignorar. Descartá-la fazia um
           // modelo que estoura rate limit em metade do corpus reportar a mesma
@@ -383,7 +428,9 @@ async function main() {
 
         const latenciaMs = Date.now() - t0;
         const parsed = parseTolerante(texto);
-        const tok = geminiUsageToTokens(usage, braco.modelo);
+        const tok = tokensOR
+          ? { promptTokens: tokensOR.prompt, completionTokens: tokensOR.completion, thoughtsTokens: 0 }
+          : geminiUsageToTokens(usage, braco.modelo);
         const custoUsd =
           calcCostUsd(braco.modelo, tok.promptTokens, tok.completionTokens) + custoExtra;
         const campos = (parsed?.campos ?? null) as Record<string, unknown> | null;

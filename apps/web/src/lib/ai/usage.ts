@@ -40,6 +40,14 @@ export const PRICING: Record<string, ModelPricing> = {
   // painel passa a mentir em silêncio, que é o modo de falha desta tabela.
   "openai/gpt-5.4-nano": { input: 0.2, output: 1.25 },
   "openai/gpt-5.4-mini": { input: 0.75, output: 4.5 },
+  // Candidato a OCR avaliado em 25/08. Aceita `file` (PDF nativo) e imagem, e
+  // — diferente do Gemini — NÃO perde recall com responseSchema.
+  "openai/gpt-5.6-luna": { input: 0.2, output: 1.2 },
+  // Mesmo modelo pela API DIRETA da OpenAI — id sem o prefixo do OpenRouter.
+  // `completion_tokens` da OpenAI já inclui o raciocínio, então não há campo
+  // separado a somar (ao contrário do Gemini).
+  "gpt-5.6-luna": { input: 0.2, output: 1.2 },
+  "openai/gpt-5.6-luna-pro": { input: 0.2, output: 1.2 },
 
   "gemini-2.5-flash": { input: 0.3, output: 2.5 },
   "gemini-2.5-flash-lite": { input: 0.1, output: 0.4 },
@@ -169,7 +177,16 @@ export function calcCostUsd(
  * externo teria que se declarar `anthropic` — e o painel mostraria um modelo
  * OpenAI atribuído à Anthropic.
  */
-export type AIProvider = "anthropic" | "gemini" | "voyage" | "openrouter";
+export type AIProvider =
+  | "anthropic"
+  | "gemini"
+  | "voyage"
+  | "openrouter"
+  // OpenAI DIRETA (não via OpenRouter). Entrou quando o OCR passou a poder
+  // rodar em `gpt-5.6-luna`, que leu melhor que qualquer candidato Gemini no
+  // bench de visão. Distinto de `openrouter` de propósito: são chaves, faturas
+  // e limites de rate diferentes, e o painel precisa separá-los.
+  | "openai";
 
 export type AIOperation =
   | "chat"

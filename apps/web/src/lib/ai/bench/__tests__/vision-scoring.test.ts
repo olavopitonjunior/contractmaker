@@ -192,16 +192,55 @@ describe("agregar", () => {
   });
 });
 
+/** Placar com N comparações, para os testes atingirem o volume mínimo. */
+const placarComN = (n: number, over: Partial<PlacarDocumento> = {}) =>
+  placar({
+    campos: Array.from({ length: n }, () =>
+      compararCampos({ bairro: "x" }, { bairro: "x" })
+    ).flat(),
+    ...over,
+  });
+
+describe("avaliar — volume mínimo", () => {
+  /**
+   * O critério original comparava taxas com `>` estrito. Parecia rigoroso e era
+   * inútil: com ~150 comparações, 1 ponto percentual é UMA ocorrência, e a taxa
+   * do próprio baseline oscilou 2,2% → 1,9% → 0,6% entre execuções idênticas.
+   *
+   * O teste que desmascara não é um candidato reprovado — é o BASELINE
+   * reprovando a si mesmo.
+   */
+  it("recusa veredito quando a amostra é pequena demais", () => {
+    const pequeno = agregar([placarComN(50)]);
+    const v = avaliar(pequeno, pequeno);
+    expect(v.aprovado).toBe(false);
+    expect(v.motivos.join(" ")).toMatch(/amostra pequena/i);
+  });
+
+  it("com volume suficiente, volta a emitir veredito", () => {
+    const grande = agregar([placarComN(400)]);
+    expect(avaliar(grande, grande).aprovado).toBe(true);
+  });
+});
+
 describe("avaliar — critério de aceitação", () => {
-  const base = agregar([
-    placar({ campos: compararCampos({ cpf_numero: "1" }, { cpf_numero: "1" }) }),
-  ]);
+  const base = agregar([placarComN(400)]);
 
   /**
    * O ponto do veto: um modelo mais preciso NA MÉDIA mas que inventa mais
    * reprova. O campo errado viaja para o contrato, a certidão e a assinatura
    * sem ninguém conferir.
    */
+  /**
+   * O caso real que expôs o problema: baseline 0,6% contra candidato 2,6% são
+   * 1 contra 4 ocorrências em 154 comparações (z = 1,35, indistinguível de
+   * ruído). Vetar aí é deixar o sorteio decidir qual modelo vai para produção.
+   */
+  it("diferença pequena de alucinação NÃO veta — é ruído, não sinal", () => {
+    const v = avaliar(base, { ...base, taxaAlucinacao: base.taxaAlucinacao + 0.015 });
+    expect(v.aprovado).toBe(true);
+  });
+
   it("alucinar mais reprova mesmo com acurácia melhor", () => {
     const candidato = { ...base, acuraciaPonderada: 0.99, taxaAlucinacao: base.taxaAlucinacao + 0.05 };
     const v = avaliar(base, candidato);
