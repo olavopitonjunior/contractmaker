@@ -33,9 +33,13 @@ const MAX_RUNS_PER_SWEEP = Number(process.env.INGESTION_SWEEP_MAX ?? "3");
  * rodar junto com a corrente é seguro: quem perder a corrida recebe
  * `claimed: false` e sai.
  *
- * `planning` e `awaiting_review` ficam FORA da varredura de propósito: um run
- * parado neles não está travado, está esperando (o planner da Fase A2 e a
- * revisão humana, respectivamente).
+ * `planning` ENTRA na varredura, e é o estágio que mais precisa dela: a chamada
+ * do planner é única e longa, então é a que tem mais chance de ser cortada pelo
+ * timeout da função. Um run parado ali com o claim vencido é um run cuja
+ * chamada morreu no meio — refazê-la é a única saída, e ninguém está olhando.
+ *
+ * `awaiting_review` fica FORA de propósito: um run parado nele não está
+ * travado, está esperando a revisão humana.
  *
  * `executing` ENTRA, numa segunda passada: ali o operador já decidiu e o run
  * está no meio da escrita (um template por invocação). Se a corrente do

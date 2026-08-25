@@ -16,14 +16,19 @@
  * pendente naquele estágio. Isso torna `/advance` idempotente por item: chamar
  * duas vezes não reprocessa o que já saiu de `pending`.
  *
- * ## O corte da Fase A1
+ * ## Onde os dois pontos de julgamento entram
  *
- * Os dois pontos de JULGAMENTO (classificação por documento e decisão de
- * conjunto → LibraryPlan) são da Fase A2. Aqui o pipeline vai até `grouping` e
- * entra em `planning` — onde para, porque não há planner registrado. Parar em
- * `planning` sem `libraryPlan` é um estado CONSISTENTE e legível ("o
- * determinístico acabou, falta a decisão"); inventar um plano seria pior que
- * não ter nenhum.
+ * `classifying` chama o classificador por documento e `planning` chama o
+ * planner — os dois pontos de JULGAMENTO da Fase A2. Ambos são estágios
+ * AUTOMÁTICOS: o run atravessa o pipeline inteiro sozinho e só para em
+ * `awaiting_review`, que é onde a decisão passa a ser humana.
+ *
+ * `planning` é o único estágio automático que não é item-a-item: são zero itens
+ * na fatia e UMA chamada cara. O executor trata isso reservando orçamento de
+ * tempo para ela (ver `PLAN_MIN_BUDGET_MS` em run-executor.ts); e é justamente
+ * por `planning` estar aqui dentro que uma chamada interrompida pelo timeout da
+ * Vercel volta a ser reivindicável quando a janela de stale vence, em vez de
+ * deixar o run parado para sempre.
  */
 
 /** Estágios de um run, na ordem em que o pipeline os percorre. */
@@ -97,15 +102,22 @@ export function nextRunStatus(status: RunStatus): RunStatus | null {
 /**
  * Estágios que o `/advance` e o sweeper conduzem SOZINHOS.
  *
- * `planning` fica de fora porque depende do LLM (Fase A2) e `awaiting_review`
- * porque depende de gente. Um run parado neles não está travado — está
- * esperando, e o sweeper não deve tocá-lo.
+ * `planning` ENTRA: a chamada do planner é trabalho de máquina como qualquer
+ * outra, e um run que a alcança tem de chegar sozinho até `awaiting_review` —
+ * sem isso a corrente e o cron parariam a um passo da tela de revisão e o lote
+ * dependeria de alguém apertar um botão. Estar aqui também é o que torna a
+ * chamada RETOMÁVEL: se a invocação morre no meio dela, o claim vence e o
+ * sweeper reivindica o run de novo.
+ *
+ * `awaiting_review` e `executing` ficam de fora porque dependem de gente — um
+ * run parado neles não está travado, está esperando.
  */
 export const AUTO_ADVANCE_STATUSES: readonly RunStatus[] = [
   "queued",
   "extracting",
   "classifying",
   "grouping",
+  "planning",
 ];
 
 export function isAutoAdvanceable(status: RunStatus): boolean {

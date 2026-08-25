@@ -48,8 +48,8 @@ export async function POST(
 
   if (!result.claimed) {
     // Ou o run não existe / é de outra imobiliária (404 idêntico nos dois
-    // casos), ou está com outra invocação, ou está num estágio que não avança
-    // sozinho (`planning` espera o planner; `awaiting_review` espera gente).
+    // casos), ou está com outra invocação, ou já chegou num estágio que não
+    // avança sozinho (`awaiting_review` e `executing` esperam gente).
     const run = await prisma.ingestionRun.findFirst({
       where: { id: params.id, ...(orgId ? { orgId } : {}) },
       select: { status: true, itemsTotal: true, itemsDone: true },

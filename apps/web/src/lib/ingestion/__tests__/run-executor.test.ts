@@ -1,6 +1,21 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { prisma } from "@/lib/db/prisma";
 import type { ItemStatus, RunStatus } from "@/lib/ingestion/run-state";
+import { INGEST_CLASSIFY_MODEL, INGEST_PLAN_MODEL } from "@/lib/ai/shared/models";
+import { IngestionCostCapError } from "@/lib/ingestion/ai-budget";
+import { LIBRARY_PLAN_VERSION, type LibraryPlan } from "@/lib/ingestion/library-plan";
+import type { ItemClassification } from "@/lib/ingestion/classifier";
+import type { StructuredCallInput } from "@/lib/ai/shared/anthropic-structured";
+
+/**
+ * O cliente da Anthropic INTEIRO fica mockado neste arquivo. É a única garantia
+ * de que nenhum caminho — nem o classificador LLM, nem o planner, nem um degrau
+ * de escalação — chega na API de verdade a partir da suíte.
+ */
+const runStructuredMock = vi.fn();
+vi.mock("@/lib/ai/shared/anthropic-structured", () => ({
+  runStructured: (...args: unknown[]) => runStructuredMock(...args),
+}));
 
 const extractDocxMock = vi.fn();
 vi.mock("@/lib/extraction/docx", () => ({
@@ -17,7 +32,13 @@ vi.mock("@/lib/knowledge/upload-classifier", () => ({
   classifyKnowledgeUpload: (...args: unknown[]) => classifyMock(...args),
 }));
 
-import { advanceRun } from "@/lib/ingestion/run-executor";
+import {
+  advanceRun,
+  type AdvanceRunOptions,
+  type AdvanceRunResult,
+  type LibraryPlanner,
+  type PlanningReport,
+} from "@/lib/ingestion/run-executor";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Harness: um banco em memória que HONRA o `where` dos updateMany.
@@ -36,6 +57,8 @@ interface FakeRun {
   itemsTotal: number;
   itemsDone: number;
   report: unknown;
+  libraryPlan: unknown;
+  aiCostUsd: unknown;
   error: string | null;
 }
 
@@ -134,6 +157,8 @@ function seed(itemCount: number, status: RunStatus = "queued"): void {
       itemsTotal: itemCount,
       itemsDone: 0,
       report: null,
+      libraryPlan: null,
+      aiCostUsd: null,
       error: null,
     },
   ];
@@ -162,9 +187,118 @@ const CONTRATO = [
   "E por estarem assim justos e contratados, firmam o presente em duas vias de igual teor.",
 ].join("\n");
 
+// ────────────────────────────────────────────────────────────────────────────
+// Respostas do modelo — cruas, como a API as devolveria.
+// ────────────────────────────────────────────────────────────────────────────
+
+const RAW_CLASSIFICATION = {
+  docType: "contrato_locacao",
+  subOption: "residencial",
+  modalidade: "locacao",
+  garantiaTipo: "fiador",
+  provider: null,
+  isFilledInstance: false,
+  piiEntities: [],
+  confidence: 0.92,
+  reason: "Contrato de locação residencial garantido por fiador.",
+};
+
+function rawPlan(sourceItemId = "item-0") {
+  return {
+    templates: [
+      {
+        sourceItemId,
+        name: "Locação residencial — fiador",
+        modalidade: "locacao",
+        matchCriteria: { garantia: "fiador" },
+        rationale: "Minuta completa, sem dados de cliente.",
+      },
+    ],
+    clauses: [],
+    discards: [],
+    issues: [],
+    confidence: 0.88,
+  };
+}
+
+function structuredResult(model: string, data: unknown) {
+  return {
+    data,
+    model,
+    usage: {
+      promptTokens: 4_000,
+      completionTokens: 800,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
+    latencyMs: 1_200,
+  };
+}
+
+/** Um plano injetável — o caminho que não passa por modelo nenhum. */
+function plannerReturning(result: {
+  plan: LibraryPlan;
+  accepted: boolean;
+  escalated?: boolean;
+}): LibraryPlanner {
+  return vi.fn(async () => ({
+    plan: result.plan,
+    accepted: result.accepted,
+    escalated: result.escalated ?? false,
+    attempts: [
+      {
+        attempt: 1,
+        model: INGEST_PLAN_MODEL,
+        effort: "high" as const,
+        ok: result.accepted,
+        confidence: result.plan.confidence,
+        violations: [],
+      },
+    ],
+  }));
+}
+
+function emptyPlan(confidence = 0.9): LibraryPlan {
+  return {
+    version: LIBRARY_PLAN_VERSION,
+    templates: [],
+    clauses: [],
+    discards: [],
+    issues: [],
+    confidence,
+  };
+}
+
+/** Roda o run até ele parar de pedir re-encadeamento. */
+async function drain(
+  options: Partial<AdvanceRunOptions> = {}
+): Promise<AdvanceRunResult> {
+  let result = await advanceRun({ runId: "run-1", orgId: "org-1", ...options });
+  for (let i = 0; i < 12 && result.hasMore; i++) {
+    result = await advanceRun({ runId: "run-1", orgId: "org-1", ...options });
+  }
+  return result;
+}
+
+/** As operações de IA que chegaram ao `recordAIUsage` nesta execução. */
+function recordedOperations(): string[] {
+  const create = prisma.aIUsage.create as unknown as ReturnType<typeof vi.fn>;
+  return create.mock.calls.map(
+    (call) => (call[0] as { data: { operation: string } }).data.operation
+  );
+}
+
+const ORIGINAL_KEY = process.env.ANTHROPIC_API_KEY;
+
 beforeEach(() => {
   vi.clearAllMocks();
   installHarness();
+  process.env.ANTHROPIC_API_KEY = "test-key";
+  runStructuredMock.mockImplementation(async (input: StructuredCallInput) =>
+    input.model === INGEST_CLASSIFY_MODEL
+      ? structuredResult(INGEST_CLASSIFY_MODEL, RAW_CLASSIFICATION)
+      : structuredResult(input.model, rawPlan())
+  );
   extractDocxMock.mockResolvedValue({ text: CONTRATO, html: "" });
   extractPlainTextMock.mockResolvedValue(CONTRATO);
   classifyMock.mockResolvedValue({
@@ -180,6 +314,11 @@ beforeEach(() => {
       arrayBuffer: async () => DOCX_BYTES.buffer.slice(0),
     }))
   );
+});
+
+afterEach(() => {
+  if (ORIGINAL_KEY === undefined) delete process.env.ANTHROPIC_API_KEY;
+  else process.env.ANTHROPIC_API_KEY = ORIGINAL_KEY;
 });
 
 describe("advanceRun — fatiamento", () => {
@@ -219,17 +358,13 @@ describe("advanceRun — fatiamento", () => {
     expect(transition.processed).toBe(0);
   });
 
-  it("percorre o pipeline até parar em planning, sem inventar libraryPlan", async () => {
+  it("percorre o pipeline inteiro e para em awaiting_review", async () => {
     seed(3);
-    let result = await advanceRun({ runId: "run-1", orgId: "org-1" });
-    for (let i = 0; i < 5 && result.hasMore; i++) {
-      result = await advanceRun({ runId: "run-1", orgId: "org-1" });
-    }
+    const result = await drain();
 
-    expect(result.status).toBe("planning");
+    expect(result.status).toBe("awaiting_review");
     expect(result.hasMore).toBe(false);
-    expect(runs[0].status).toBe("planning");
-    // O agrupamento determinístico ficou no report; nenhum plano foi inventado.
+    expect(runs[0].status).toBe("awaiting_review");
     const report = runs[0].report as { grouping?: { families: unknown[] } };
     expect(report.grouping).toBeTruthy();
     expect(report.grouping!.families.length).toBeGreaterThan(0);
@@ -289,11 +424,28 @@ describe("advanceRun — claim entre invocações concorrentes", () => {
     expect(extractDocxMock).not.toHaveBeenCalled();
   });
 
-  it("run parado em planning não é reivindicado — espera o planner da Fase A2", async () => {
-    seed(1, "planning");
+  it("run em awaiting_review não é reivindicado — espera gente", async () => {
+    seed(1, "awaiting_review");
     const result = await advanceRun({ runId: "run-1", orgId: "org-1" });
     expect(result.claimed).toBe(false);
-    expect(runs[0].status).toBe("planning");
+    expect(runs[0].status).toBe("awaiting_review");
+  });
+
+  it("planning com claim vencido é retomável — a chamada do planner repete", async () => {
+    // É o caso que motiva `planning` estar em AUTO_ADVANCE_STATUSES: a chamada
+    // é única e longa, então é a que mais morre no timeout da função.
+    seed(2, "planning");
+    for (const item of items) {
+      item.status = "classified";
+      item.text = CONTRATO;
+      item.classification = { familyKey: "contrato_locacao:locacao:fiador" };
+    }
+    runs[0].startedAt = new Date(Date.now() - 10 * 60 * 1000);
+
+    const result = await advanceRun({ runId: "run-1", orgId: "org-1" });
+    expect(result.claimed).toBe(true);
+    expect(result.status).toBe("awaiting_review");
+    expect(runs[0].libraryPlan).toBeTruthy();
   });
 });
 
@@ -372,14 +524,11 @@ describe("advanceRun — falhas de item", () => {
 describe("advanceRun — idempotência", () => {
   it("reprocessar um run já classificado não reescreve item nenhum", async () => {
     seed(2);
-    let result = await advanceRun({ runId: "run-1", orgId: "org-1" });
-    while (result.hasMore) {
-      result = await advanceRun({ runId: "run-1", orgId: "org-1" });
-    }
+    await drain();
     const snapshot = JSON.parse(JSON.stringify(items));
     const extractCalls = extractDocxMock.mock.calls.length;
 
-    // O run está em `planning`: nem a rota nem o cron o reivindicam de novo.
+    // O run está em `awaiting_review`: nem a rota nem o cron o reivindicam.
     const again = await advanceRun({ runId: "run-1", orgId: "org-1" });
     expect(again.claimed).toBe(false);
     expect(extractDocxMock.mock.calls.length).toBe(extractCalls);
@@ -390,13 +539,228 @@ describe("advanceRun — idempotência", () => {
     seed(3);
     items[0].status = "discarded";
 
-    let result = await advanceRun({ runId: "run-1", orgId: "org-1" });
-    while (result.hasMore) {
-      result = await advanceRun({ runId: "run-1", orgId: "org-1" });
-    }
+    await drain();
 
     expect(items[0].status).toBe("discarded");
     expect(items[0].text).toBeNull();
     expect(extractDocxMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// Julgamento por LLM
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("advanceRun — classificador por LLM", () => {
+  it("com ANTHROPIC_API_KEY o classificador padrão é o LLM", async () => {
+    seed(2);
+    await drain();
+
+    const modelos = runStructuredMock.mock.calls.map(
+      (c) => (c[0] as StructuredCallInput).model
+    );
+    expect(modelos.filter((m) => m === INGEST_CLASSIFY_MODEL)).toHaveLength(2);
+    for (const item of items) {
+      expect((item.classification as ItemClassification).via).toBe("llm");
+    }
+    const report = runs[0].report as { planning?: PlanningReport };
+    expect(report.planning?.classifier).toBe("llm");
+  });
+
+  it("sem ANTHROPIC_API_KEY cai no determinístico e o run NÃO quebra", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    seed(2);
+    // O planner é injetado porque ele não tem substituto determinístico — o que
+    // este teste prova é que a CLASSIFICAÇÃO degrada sem derrubar o lote.
+    const planner = plannerReturning({ plan: emptyPlan(), accepted: true });
+
+    const result = await drain({ planner });
+
+    expect(result.status).toBe("awaiting_review");
+    expect(runs[0].error).toBeNull();
+    for (const item of items) {
+      expect((item.classification as ItemClassification).via).toBe("deterministic");
+    }
+    // Nenhuma chamada de classificação saiu.
+    expect(runStructuredMock).not.toHaveBeenCalled();
+    const report = runs[0].report as { planning?: PlanningReport };
+    expect(report.planning?.classifier).toBe("deterministic");
+  });
+
+  it("sem chave o PLANO para o run com o motivo escrito — não inventa plano", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    seed(2);
+
+    const result = await drain();
+
+    expect(result.status).toBe("failed");
+    expect(runs[0].libraryPlan).toBeNull();
+    expect(runs[0].error).toContain("chave da Anthropic");
+    // O que já foi lido e classificado continua no lugar.
+    expect(items.every((i) => i.status === "classified")).toBe(true);
+  });
+
+  it("falha da chamada de classificação não perde o item — vira determinístico", async () => {
+    seed(2);
+    runStructuredMock.mockImplementation(async (input: StructuredCallInput) => {
+      if (input.model === INGEST_CLASSIFY_MODEL) throw new Error("429 rate limit");
+      return structuredResult(input.model, rawPlan());
+    });
+
+    const result = await drain();
+
+    expect(result.status).toBe("awaiting_review");
+    for (const item of items) {
+      expect(item.status).toBe("classified");
+      expect((item.classification as ItemClassification).via).toBe("deterministic");
+    }
+  });
+});
+
+describe("advanceRun — estágio planning", () => {
+  it("o plano aceito é gravado em libraryPlan e o run vai a awaiting_review", async () => {
+    seed(2);
+    const result = await drain();
+
+    expect(result.status).toBe("awaiting_review");
+    const plan = runs[0].libraryPlan as LibraryPlan;
+    expect(plan.version).toBe(LIBRARY_PLAN_VERSION);
+    expect(plan.templates.map((t) => t.sourceItemId)).toEqual(["item-0"]);
+    const report = runs[0].report as { planning?: PlanningReport };
+    expect(report.planning?.accepted).toBe(true);
+    expect(report.planning?.attempts.length).toBeGreaterThan(0);
+  });
+
+  it("o planner recebe os itens com texto, classificação e piiReport, e o agrupamento do report", async () => {
+    seed(2);
+    const planner = plannerReturning({ plan: emptyPlan(), accepted: true });
+    await drain({ planner });
+
+    const [input] = (planner as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    const typed = input as {
+      items: Array<{ id: string; text: string; classification: unknown; piiReport: unknown }>;
+      grouping: { families: unknown[] };
+    };
+    expect(typed.items).toHaveLength(2);
+    expect(typed.items[0].text).toContain("CONTRATO DE LOCAÇÃO");
+    expect(typed.items[0].classification).toBeTruthy();
+    expect(typed.items[0].piiReport).toBeTruthy();
+    // É o MESMO agrupamento que ficou persistido no run.
+    const report = runs[0].report as { grouping: { families: unknown[] } };
+    expect(typed.grouping.families).toEqual(report.grouping.families);
+  });
+
+  it("plano RECUSADO também chega a awaiting_review, com as issues visíveis", async () => {
+    seed(2);
+    const recusado: LibraryPlan = {
+      ...emptyPlan(0.45),
+      issues: [
+        {
+          itemId: "item-0",
+          kind: "plan_invalid",
+          detail: "O modelo aponta para um arquivo que não está neste lote.",
+        },
+      ],
+    };
+    const planner = plannerReturning({
+      plan: recusado,
+      accepted: false,
+      escalated: true,
+    });
+
+    const result = await drain({ planner });
+
+    // Nunca morrer em silêncio num estado sem saída: quem decide é o operador.
+    expect(result.status).toBe("awaiting_review");
+    expect(runs[0].error).toBeNull();
+    const plan = runs[0].libraryPlan as LibraryPlan;
+    expect(plan.issues.map((i) => i.kind)).toContain("plan_invalid");
+    const report = runs[0].report as { planning?: PlanningReport };
+    expect(report.planning?.accepted).toBe(false);
+    expect(report.planning?.escalated).toBe(true);
+  });
+
+  it("sem orçamento para a chamada, a fatia termina em planning e pede re-encadeamento", async () => {
+    seed(2, "grouping");
+    for (const item of items) {
+      item.status = "classified";
+      item.text = CONTRATO;
+      item.classification = { familyKey: "contrato_locacao:locacao:fiador" };
+    }
+    const planner = plannerReturning({ plan: emptyPlan(), accepted: true });
+
+    const parcial = await advanceRun({
+      runId: "run-1",
+      orgId: "org-1",
+      planner,
+      budgetMs: 1_000,
+    });
+
+    expect(parcial.status).toBe("planning");
+    expect(parcial.hasMore).toBe(true);
+    expect(planner).not.toHaveBeenCalled();
+    // O claim foi liberado — o run não fica preso esperando a janela de stale.
+    expect(runs[0].startedAt).toBeNull();
+
+    const completo = await advanceRun({ runId: "run-1", orgId: "org-1", planner });
+    expect(completo.status).toBe("awaiting_review");
+    expect(planner).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("advanceRun — custo de IA", () => {
+  it("as duas etapas acumulam em aiCostUsd e chegam ao recordAIUsage", async () => {
+    seed(2);
+    await drain();
+
+    expect(Number(runs[0].aiCostUsd)).toBeGreaterThan(0);
+    const ops = recordedOperations();
+    expect(ops.filter((o) => o === "ingest_classify")).toHaveLength(2);
+    expect(ops).toContain("ingest_plan");
+  });
+
+  it("o gasto de uma invocação anterior entra no medidor da seguinte", async () => {
+    seed(2);
+    // Uma fatia que para logo depois de classificar: o gasto vive só na coluna.
+    const fatia = await advanceRun({ runId: "run-1", orgId: "org-1", maxSteps: 3 });
+    expect(fatia.status).toBe("classifying");
+    const parcial = Number(runs[0].aiCostUsd);
+    expect(parcial).toBeGreaterThan(0);
+
+    await drain();
+    expect(Number(runs[0].aiCostUsd)).toBeGreaterThan(parcial);
+  });
+
+  it("teto estourado na classificação para o run com mensagem legível", async () => {
+    seed(2);
+    const classifier = {
+      name: "llm",
+      classify: vi.fn(async () => {
+        throw new IngestionCostCapError(5.4321, 5);
+      }),
+    };
+
+    const result = await drain({ classifier });
+
+    expect(result.status).toBe("failed");
+    expect(runs[0].status).toBe("failed");
+    expect(runs[0].error).toContain("teto de custo de IA deste lote");
+    expect(runs[0].error).toContain("US$ 5.00");
+    expect(runs[0].error).toContain("US$ 5.4321");
+    // Parada controlada: o claim é liberado, nada fica preso.
+    expect(runs[0].startedAt).toBeNull();
+  });
+
+  it("teto estourado no plano para o run com mensagem legível", async () => {
+    seed(2);
+    const planner: LibraryPlanner = vi.fn(async () => {
+      throw new IngestionCostCapError(5.4321, 5);
+    });
+
+    const result = await drain({ planner });
+
+    expect(result.status).toBe("failed");
+    expect(runs[0].error).toContain("teto de custo de IA deste lote");
+    expect(runs[0].libraryPlan).toBeNull();
   });
 });

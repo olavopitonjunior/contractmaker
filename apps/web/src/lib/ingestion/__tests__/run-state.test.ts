@@ -64,14 +64,19 @@ describe("máquina de estados do run", () => {
     expect(canTransition("cancelled", "cancelled")).toBe(false);
   });
 
-  it("planning e awaiting_review não avançam sozinhos", () => {
-    expect(isAutoAdvanceable("planning")).toBe(false);
+  it("planning avança sozinho; o que espera gente não", () => {
+    // `planning` é trabalho de máquina: sem ele na lista, a corrente e o cron
+    // parariam a um passo da tela de revisão. E é ele que torna a chamada do
+    // planner retomável quando o claim vence.
+    expect(isAutoAdvanceable("planning")).toBe(true);
     expect(isAutoAdvanceable("awaiting_review")).toBe(false);
+    expect(isAutoAdvanceable("executing")).toBe(false);
     expect([...AUTO_ADVANCE_STATUSES]).toEqual([
       "queued",
       "extracting",
       "classifying",
       "grouping",
+      "planning",
     ]);
   });
 
@@ -206,12 +211,17 @@ describe("claim", () => {
     ).toBe(true);
   });
 
-  it("estágio que espera gente ou LLM não é reivindicável", () => {
+  it("estágio que espera gente não é reivindicável; planning é", () => {
+    // A chamada do planner é a mais longa do pipeline e a que mais morre no
+    // timeout — ela PRECISA ser reivindicável de novo.
     expect(
       isClaimable({ status: "planning", startedAt: null }, NOW, STALE_MS)
-    ).toBe(false);
+    ).toBe(true);
     expect(
       isClaimable({ status: "awaiting_review", startedAt: null }, NOW, STALE_MS)
+    ).toBe(false);
+    expect(
+      isClaimable({ status: "executing", startedAt: null }, NOW, STALE_MS)
     ).toBe(false);
     expect(isClaimable({ status: "done", startedAt: null }, NOW, STALE_MS)).toBe(
       false

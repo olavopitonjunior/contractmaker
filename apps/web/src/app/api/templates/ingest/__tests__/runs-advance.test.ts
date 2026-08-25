@@ -110,11 +110,11 @@ describe("POST /runs/:id/advance — re-encadeamento", () => {
     expect(chainAdvanceMock).toHaveBeenCalledWith("http://localhost", "run-1");
   });
 
-  it("não re-encadeia quando o run parou (planning espera o planner)", async () => {
+  it("não re-encadeia quando o run parou (awaiting_review espera gente)", async () => {
     advanceRunMock.mockResolvedValue({
       runId: "run-1",
       claimed: true,
-      status: "planning",
+      status: "awaiting_review",
       itemsTotal: 3,
       itemsDone: 3,
       processed: 0,

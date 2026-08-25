@@ -20,13 +20,23 @@
  * que a janela de stale expire no meio de uma fatia longa e um segundo worker
  * entre, os dois não escrevem o mesmo item.
  *
- * ## Onde a Fase A2 encaixa
+ * ## Os dois pontos de julgamento
  *
- * O run termina esta fase em `planning`, sem `libraryPlan`. `planning` não está
- * em `AUTO_ADVANCE_STATUSES`, então nem a rota nem o cron insistem nele: o run
- * fica parado, íntegro e legível, esperando o planner. Inventar um plano
- * determinístico aqui seria pior que não ter nenhum — o operador aprovaria uma
- * decisão que ninguém tomou.
+ * `classifying` roda o classificador por documento e `planning` roda o planner.
+ * Os dois custam IA e os dois passam pelo mesmo {@link IngestionAiMeter}: é ele
+ * que grava `AIUsage`, acumula `IngestionRun.aiCostUsd` e barra a próxima
+ * chamada quando o teto do lote estoura ({@link IngestionCostCapError}).
+ *
+ * O run atravessa o pipeline inteiro sozinho e para em `awaiting_review` — com
+ * `libraryPlan` gravado, aceito ou não. Um plano RECUSADO pelos guardrails
+ * também chega lá, com as issues explicando o quê: quem decide o que fazer com
+ * um plano que não passou é o operador, e um run morto num estágio sem saída
+ * tiraria dele essa chance.
+ *
+ * Os dois pontos degradam de formas DIFERENTES quando não há IA disponível, e a
+ * diferença é deliberada: a classificação cai no determinístico e o lote segue
+ * (ver {@link canUseLlm}); o plano não tem substituto determinístico e o run
+ * para com o motivo escrito (ver `defaultPlanner`).
  */
 
 import { prisma } from "@/lib/db/prisma";
@@ -37,11 +47,30 @@ import { computeSourceHash } from "@/lib/templates/upload-dedup";
 import { detectPii } from "@/lib/ingestion/pii";
 import {
   deterministicItemClassifier,
+  parseItemPiiReport,
   summarizePii,
   type ItemClassification,
   type ItemClassifier,
 } from "@/lib/ingestion/classifier";
-import { buildGroupingReport, type GroupableItem } from "@/lib/ingestion/grouping";
+import { createLlmItemClassifier } from "@/lib/ingestion/llm-classifier";
+import {
+  IngestionAiMeter,
+  IngestionCostCapError,
+  readAiCostUsd,
+} from "@/lib/ingestion/ai-budget";
+import {
+  buildGroupingReport,
+  type GroupableItem,
+  type GroupingReport,
+} from "@/lib/ingestion/grouping";
+import {
+  planLibrary,
+  type PlanAttemptRecord,
+  type PlanLibraryInput,
+  type PlanLibraryOptions,
+  type PlanLibraryResult,
+  type PlannerItem,
+} from "@/lib/ingestion/planner";
 import {
   batchSizeFor,
   isAutoAdvanceable,
@@ -73,6 +102,77 @@ const SLICE_BUDGET_MS = Number(process.env.INGESTION_SLICE_BUDGET_MS ?? "90000")
 /** Guarda contra laço infinito: nenhum run legítimo precisa de tantos passos. */
 const MAX_STEPS_PER_INVOCATION = 40;
 
+/**
+ * Tempo que o estágio `planning` exige ter pela frente antes de começar.
+ *
+ * A chamada do planner é UMA, indivisível e lenta (Opus 4.8 com `effort: high`,
+ * mais os degraus da escalação). Começá-la com 10s de orçamento significaria
+ * pagar o token e perder a resposta no timeout da Vercel. Então, quando não
+ * cabe, a fatia termina com o run em `planning` e a corrente reentra com os 90s
+ * inteiros — `planning` está em `AUTO_ADVANCE_STATUSES` justamente para isso.
+ *
+ * E se a chamada estourar mesmo assim: o run fica em `planning` com `startedAt`
+ * carimbado e, vencida a janela de stale, o sweeper o reivindica de novo (mesmo
+ * padrão do `ocr-worker`). Nada trava — no pior caso, repete.
+ */
+const PLAN_MIN_BUDGET_MS = Number(
+  process.env.INGESTION_PLAN_BUDGET_MS ?? "60000"
+);
+
+/**
+ * Assinatura de {@link planLibrary}. Existe como tipo para o teste injetar um
+ * planner falso — nenhum teste pode chegar na API de verdade.
+ */
+export type LibraryPlanner = (
+  input: PlanLibraryInput,
+  options: PlanLibraryOptions
+) => Promise<PlanLibraryResult>;
+
+/** O que fica em `IngestionRun.report.planning` — a trilha da decisão. */
+export interface PlanningReport {
+  plannedAt: string;
+  /** Passou nos guardrails E no piso de confiança. */
+  accepted: boolean;
+  /** Alguma tentativa saiu do degrau base (mais profundidade ou outro modelo). */
+  escalated: boolean;
+  confidence: number;
+  attempts: PlanAttemptRecord[];
+  /** Implementação que classificou os itens (`llm` ou `deterministic`). */
+  classifier: string;
+}
+
+/**
+ * Dá para julgar por LLM neste ambiente?
+ *
+ * Lido a cada chamada, e não no load do módulo, pelo mesmo motivo de
+ * `runMaxUsd`: é a alavanca do operador de plataforma e ela não pode exigir
+ * deploy. Sem chave o run NÃO quebra — cai no classificador determinístico, que
+ * é o que já rodava antes desta fase e sustenta o agrupamento sozinho.
+ */
+export function canUseLlm(): boolean {
+  return Boolean(process.env.ANTHROPIC_API_KEY);
+}
+
+/**
+ * O planner de produção — ou, sem chave, um que RECUSA.
+ *
+ * A classificação tem um caminho determinístico bom o bastante para o run
+ * seguir sem IA; o plano não tem, e inventar um faria o operador aprovar uma
+ * decisão que ninguém tomou. Então o run para com o motivo escrito, do mesmo
+ * jeito que para no teto de custo — nada do que já foi lido, classificado e
+ * agrupado se perde, e quem conserta é quem configura o ambiente.
+ */
+function defaultPlanner(): LibraryPlanner {
+  if (canUseLlm()) return planLibrary;
+  return async () => {
+    throw new Error(
+      "O plano da biblioteca depende do julgamento por IA e a chave da " +
+        "Anthropic não está configurada neste ambiente. O lote parou antes da " +
+        "decisão, com tudo que já foi lido e classificado preservado."
+    );
+  };
+}
+
 export interface AdvanceRunOptions {
   runId: string;
   /**
@@ -80,7 +180,13 @@ export interface AdvanceRunOptions {
    * ausente na varredura do cron, que já opera sobre ids que ela mesma listou.
    */
   orgId?: string;
+  /**
+   * Classificador por item. Ausente, o executor escolhe: LLM quando há
+   * `ANTHROPIC_API_KEY`, determinístico quando não há.
+   */
   classifier?: ItemClassifier;
+  /** Planner do lote. Ausente, o de produção (ver `defaultPlanner`). */
+  planner?: LibraryPlanner;
   now?: Date;
   budgetMs?: number;
   /**
@@ -110,6 +216,8 @@ interface RunRow {
   createdBy: string | null;
   status: string;
   report: unknown;
+  /** `Decimal` do Prisma — sempre pelo {@link readAiCostUsd}. */
+  aiCostUsd: unknown;
 }
 
 interface ItemRow {
@@ -121,6 +229,7 @@ interface ItemRow {
   status: ItemStatus;
   text: string | null;
   classification: unknown;
+  piiReport: unknown;
 }
 
 /**
@@ -134,7 +243,6 @@ export async function advanceRun(
   options: AdvanceRunOptions
 ): Promise<AdvanceRunResult> {
   const now = options.now ?? new Date();
-  const classifier = options.classifier ?? deterministicItemClassifier;
   const deadline = Date.now() + (options.budgetMs ?? SLICE_BUDGET_MS);
 
   // O claim vai no WHERE — é o UPDATE do Postgres que resolve a corrida entre
@@ -166,7 +274,14 @@ export async function advanceRun(
         id: options.runId,
         ...(options.orgId ? { orgId: options.orgId } : {}),
       },
-      select: { id: true, orgId: true, createdBy: true, status: true, report: true },
+      select: {
+        id: true,
+        orgId: true,
+        createdBy: true,
+        status: true,
+        report: true,
+        aiCostUsd: true,
+      },
     })) as RunRow | null;
     if (!run) {
       return {
@@ -185,6 +300,19 @@ export async function advanceRun(
     // primeira invocação.
     if (status === "queued") status = "extracting";
 
+    // Um medidor por invocação; o que atravessa invocações é `aiCostUsd`.
+    const meter = new IngestionAiMeter({
+      runId: run.id,
+      orgId: run.orgId,
+      userId: run.createdBy,
+      spentUsd: readAiCostUsd(run.aiCostUsd),
+    });
+    const classifier =
+      options.classifier ??
+      (canUseLlm() ? createLlmItemClassifier({ meter }) : deterministicItemClassifier);
+    const planner = options.planner ?? defaultPlanner();
+    let report = asRecord(run.report);
+
     const maxSteps = options.maxSteps ?? MAX_STEPS_PER_INVOCATION;
     let steps = 0;
     while (isAutoAdvanceable(status) && Date.now() < deadline && steps < maxSteps) {
@@ -194,10 +322,28 @@ export async function advanceRun(
 
       const slice = itemsForSlice(items, status, batchSizeFor(status));
       if (slice.length === 0) {
-        // Estágio vazio: ou avança para o próximo, ou (grouping) produz o
-        // relatório e avança.
+        // Estágio vazio: os dois estágios que não são item-a-item produzem seu
+        // artefato aqui — `grouping` o relatório, `planning` o plano — e só
+        // então avançam.
         if (status === "grouping") {
-          await persistGrouping(run, items, now);
+          report = await persistReport(run.id, {
+            ...report,
+            grouping: groupItems(items, now),
+          });
+        } else if (status === "planning") {
+          // Não começar o que não cabe. `steps > 1` porque uma invocação que
+          // ABRE em `planning` tem a fatia inteira pela frente: adiar ali seria
+          // adiar para sempre, com orçamento pequeno demais configurado.
+          if (steps > 1 && Date.now() + PLAN_MIN_BUDGET_MS > deadline) break;
+          report = await persistPlan({
+            run,
+            items,
+            now,
+            report,
+            planner,
+            meter,
+            classifierName: classifier.name,
+          });
         }
         const next = nextRunStatus(status);
         if (!next) break;
@@ -224,9 +370,13 @@ export async function advanceRun(
       data: { status, itemsTotal, itemsDone, startedAt: null },
     });
 
+    // `grouping` e `planning` não têm itens na fatia — o que sobrou de trabalho
+    // neles é o artefato que ainda não foi produzido, não uma lista.
     const hasMore =
       isAutoAdvanceable(status) &&
-      (itemsForSlice(finalItems, status).length > 0 || status === "grouping");
+      (itemsForSlice(finalItems, status).length > 0 ||
+        status === "grouping" ||
+        status === "planning");
 
     return {
       runId: run.id,
@@ -239,7 +389,15 @@ export async function advanceRun(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`[ingestion] run ${options.runId} falhou:`, message);
+    if (err instanceof IngestionCostCapError) {
+      // Parada CONTROLADA, não crash: a mensagem do erro já diz em PT-BR qual é
+      // o teto e quanto o lote gastou, e é ela que o operador lê na tela. Vira
+      // `failed` porque não há como seguir sem alguém subir o teto — mas o run
+      // segue íntegro e retomável, com tudo que já foi extraído no lugar.
+      console.warn(`[ingestion] run ${options.runId} parou no teto de custo:`, message);
+    } else {
+      console.error(`[ingestion] run ${options.runId} falhou:`, message);
+    }
     await prisma.ingestionRun
       .updateMany({
         where: { id: options.runId },
@@ -275,8 +433,16 @@ async function loadItems(runId: string): Promise<ItemRow[]> {
       status: true,
       text: true,
       classification: true,
+      piiReport: true,
     },
   })) as ItemRow[];
+}
+
+/** `IngestionRun.report` como objeto — `null` e Json não-objeto viram `{}`. */
+function asRecord(raw: unknown): Record<string, unknown> {
+  return raw && typeof raw === "object" && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : {};
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -398,9 +564,14 @@ async function classifyItem(
     });
     return written.count;
   } catch (err) {
-    // A classificação pode falhar por causa do desempate por IA (rate limit do
-    // Gemini). Não perder o item por isso: o palpite determinístico sozinho já
-    // sustenta o agrupamento, que é o que a Fase A1 entrega.
+    // O teto de custo NÃO é falha de item: seguir classificando (ainda que de
+    // graça, no determinístico) esconderia do operador que o lote foi
+    // interrompido por dinheiro. Sobe e para o run inteiro.
+    if (err instanceof IngestionCostCapError) throw err;
+    // O resto pode falhar por rate limit do provedor ou por uma resposta
+    // malformada. Não perder o item por isso: o palpite determinístico sozinho
+    // já sustenta o agrupamento, e é ele que rodava antes do julgamento por
+    // LLM entrar — degradar para ele é degradar para o comportamento conhecido.
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`[ingestion] classificação de ${item.id} caiu no fallback:`, msg);
     const { classification, piiReport } = await deterministicItemClassifier.classify({
@@ -428,11 +599,7 @@ async function classifyItem(
 // Estágio: group
 // ────────────────────────────────────────────────────────────────────────────
 
-async function persistGrouping(
-  run: RunRow,
-  items: readonly ItemRow[],
-  now: Date
-): Promise<void> {
+function groupItems(items: readonly ItemRow[], now: Date): GroupingReport {
   const groupable: GroupableItem[] = items
     .filter((i) => i.status === "classified" && (i.text ?? "").trim().length > 0)
     .map((i) => ({
@@ -441,17 +608,27 @@ async function persistGrouping(
       text: i.text ?? "",
       familyKey: readFamilyKey(i.classification),
     }));
+  return buildGroupingReport(groupable, now);
+}
 
-  const grouping = buildGroupingReport(groupable, now);
-  const previous =
-    run.report && typeof run.report === "object" && !Array.isArray(run.report)
-      ? (run.report as Record<string, unknown>)
-      : {};
-
+/**
+ * Mescla um pedaço no `report` do run e grava.
+ *
+ * O `where` leva só o id: quem serializa esta escrita é o claim do RUN, e
+ * exigir aqui o status de entrada do estágio quebraria o caso normal — o status
+ * só vai para o banco no fim da fatia, então em memória o run já está adiante
+ * do que a linha diz.
+ */
+async function persistReport(
+  runId: string,
+  report: Record<string, unknown>,
+  extra: Record<string, unknown> = {}
+): Promise<Record<string, unknown>> {
   await prisma.ingestionRun.updateMany({
-    where: { id: run.id },
-    data: { report: { ...previous, grouping } as object },
+    where: { id: runId },
+    data: { ...extra, report: report as object },
   });
+  return report;
 }
 
 /** Chave de família persistida no item; itens sem ela ficam na família vazia. */
@@ -461,4 +638,97 @@ function readFamilyKey(raw: unknown): string {
     if (typeof key === "string" && key) return key;
   }
   return "-:-:-";
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Estágio: planning
+// ────────────────────────────────────────────────────────────────────────────
+
+/** `IngestionItem.classification` cru → domínio, sem inventar campo. */
+function readClassification(raw: unknown): ItemClassification | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const value = raw as Partial<ItemClassification>;
+  return typeof value.familyKey === "string" ? (value as ItemClassification) : null;
+}
+
+/** O relatório de agrupamento gravado no run, ou null se não houver. */
+function readGrouping(report: Record<string, unknown>): GroupingReport | null {
+  const grouping = report.grouping;
+  if (!grouping || typeof grouping !== "object" || Array.isArray(grouping)) {
+    return null;
+  }
+  const value = grouping as Partial<GroupingReport>;
+  return Array.isArray(value.families) && Array.isArray(value.groups)
+    ? (grouping as GroupingReport)
+    : null;
+}
+
+/**
+ * Itens que o planner enxerga: todos os que têm texto, com o status real.
+ *
+ * O status vai junto (e o item `discarded` não é filtrado aqui) porque é assim
+ * que os guardrails conseguem RECUSAR um plano que elege um descartado como
+ * fonte — some com o item e a violação vira um "sourceItemId inexistente", que
+ * diz menos.
+ */
+function toPlannerItems(items: readonly ItemRow[]): PlannerItem[] {
+  return items
+    .filter((i) => (i.text ?? "").trim().length > 0)
+    .map((i) => ({
+      id: i.id,
+      filename: i.filename,
+      text: i.text ?? "",
+      status: i.status,
+      classification: readClassification(i.classification),
+      piiReport: parseItemPiiReport(i.piiReport),
+    }));
+}
+
+/**
+ * Roda o planner e grava o resultado.
+ *
+ * Grava o plano em `libraryPlan` mesmo quando os guardrails o RECUSARAM depois
+ * da escalação. O plano recusado já vem com as issues que explicam o quê
+ * (`plan_invalid`, `low_confidence`, …) e o run segue para `awaiting_review`:
+ * quem decide entre corrigir, aprovar em partes ou jogar fora é o operador.
+ * Deixar o run parado num estágio sem saída — ou apagar o plano — tiraria dele
+ * a única informação que existe sobre o lote.
+ */
+async function persistPlan(args: {
+  run: RunRow;
+  items: readonly ItemRow[];
+  now: Date;
+  report: Record<string, unknown>;
+  planner: LibraryPlanner;
+  meter: IngestionAiMeter;
+  classifierName: string;
+}): Promise<Record<string, unknown>> {
+  let report = args.report;
+  let grouping = readGrouping(report);
+  if (!grouping) {
+    // Run retomado de um estado antigo (ou de um `grouping` que não chegou a
+    // gravar): reconstruir é barato, determinístico e melhor que planejar sem
+    // saber o que agrupa com o quê.
+    grouping = groupItems(args.items, args.now);
+    report = await persistReport(args.run.id, { ...report, grouping });
+  }
+
+  const result = await args.planner(
+    { items: toPlannerItems(args.items), grouping },
+    { meter: args.meter }
+  );
+
+  const planning: PlanningReport = {
+    plannedAt: args.now.toISOString(),
+    accepted: result.accepted,
+    escalated: result.escalated,
+    confidence: result.plan.confidence,
+    attempts: result.attempts,
+    classifier: args.classifierName,
+  };
+  return persistReport(
+    args.run.id,
+    { ...report, planning },
+    { libraryPlan: result.plan as object }
+  );
 }
