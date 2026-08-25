@@ -1,0 +1,197 @@
+/**
+ * Cliente Anthropic para saídas ESTRUTURADAS, sem sampling params.
+ *
+ * ## Por que um caminho próprio, e não `getAnthropicClient().messages.create`
+ *
+ * Três incompatibilidades, todas com o mesmo desfecho (HTTP 400) e nenhuma
+ * detectável em typecheck:
+ *
+ * 1. **Sampling params.** Todo call-site do cliente antigo manda `temperature`
+ *    (o AgentConfig a expõe ao operador). `claude-opus-4-8`, `claude-opus-5` e
+ *    o resto da família 4.7+ REJEITAM `temperature`/`top_p`/`top_k`. É por isso que
+ *    `lib/ai/shared/models.ts` estava capado no 4.6 — e é isto que este módulo
+ *    destrava: aqui não existe parâmetro de amostragem para vazar.
+ * 2. **`budget_tokens`.** A profundidade de raciocínio nesses modelos é
+ *    `output_config.effort`; `thinking.budget_tokens` responde 400.
+ * 3. **Prefill.** O truque clássico de "abrir com `{`" para forçar JSON foi
+ *    REMOVIDO — mensagem final do assistente também responde 400. O substituto
+ *    é `output_config.format` (structured outputs), que é o que usamos.
+ *
+ * ## Por que `client.post` e não `client.messages.create`
+ *
+ * O `@anthropic-ai/sdk` do repo é o 0.30: os tipos dele não conhecem
+ * `thinking`, `output_config` nem os campos de cache em `usage`. Passar o corpo
+ * por `messages.create` exigiria um `as never` que apagaria a tipagem inteira
+ * do request. `client.post` mantém o SDK no que ele é bom (auth, base URL,
+ * retry, erros tipados) e nos deixa declarar o contrato do corpo e da resposta
+ * aqui, num lugar só, revisável.
+ *
+ * ## Cache de prompt
+ *
+ * O `system` é uma LISTA de blocos e o chamador marca o breakpoint com
+ * `cache: true` no último bloco ESTÁVEL (playbook + taxonomia). Dados voláteis
+ * — o documento, o digest do lote — entram depois do breakpoint, senão cada
+ * item do lote invalidaria o prefixo e o cache não pouparia nada.
+ *
+ * Sem streaming de propósito: as saídas aqui são curtas (uma classificação, um
+ * plano) e cabem folgadas dentro do timeout padrão do SDK.
+ */
+
+import type { Anthropic } from "@anthropic-ai/sdk";
+import { getAnthropicClient } from "./anthropic-client";
+
+/** Profundidade de raciocínio — `output_config.effort` da API atual. */
+export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+
+/** Bloco do system prompt. `cache: true` fecha o prefixo cacheável. */
+export interface SystemBlock {
+  text: string;
+  cache?: boolean;
+}
+
+export interface StructuredCallInput {
+  model: string;
+  system: SystemBlock[];
+  /** Conteúdo do turno do usuário — os dados voláteis da chamada. */
+  userContent: string;
+  /** JSON Schema da resposta. Objeto fechado (`additionalProperties: false`). */
+  schema: Record<string, unknown>;
+  maxTokens: number;
+  effort: EffortLevel;
+}
+
+export interface StructuredUsage {
+  promptTokens: number;
+  completionTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
+
+export interface StructuredCallResult<T> {
+  data: T;
+  model: string;
+  usage: StructuredUsage;
+  latencyMs: number;
+}
+
+/** Corpo enviado a `POST /v1/messages`. Note a AUSÊNCIA de sampling params. */
+interface StructuredRequestBody {
+  model: string;
+  max_tokens: number;
+  system: Array<{
+    type: "text";
+    text: string;
+    cache_control?: { type: "ephemeral" };
+  }>;
+  messages: Array<{ role: "user"; content: string }>;
+  thinking: { type: "adaptive" };
+  output_config: {
+    effort: EffortLevel;
+    format: { type: "json_schema"; schema: Record<string, unknown> };
+  };
+}
+
+/** Recorte da resposta que consumimos — os tipos do SDK 0.30 não a descrevem. */
+interface StructuredResponseBody {
+  model?: string;
+  content?: Array<{ type: string; text?: string }>;
+  /** Presente quando a API já entrega o JSON validado contra o schema. */
+  parsed_output?: unknown;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+  };
+}
+
+/** Falha ao obter JSON utilizável — separada para o chamador poder reagir. */
+export class StructuredOutputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StructuredOutputError";
+  }
+}
+
+function toSystemBlocks(
+  blocks: readonly SystemBlock[]
+): StructuredRequestBody["system"] {
+  return blocks.map((b) => ({
+    type: "text" as const,
+    text: b.text,
+    ...(b.cache ? { cache_control: { type: "ephemeral" as const } } : {}),
+  }));
+}
+
+/**
+ * Extrai o JSON da resposta. `parsed_output` é o caminho feliz; o fallback é o
+ * primeiro bloco de texto, porque structured outputs também devolve o JSON ali
+ * e uma resposta sem `parsed_output` (modelo mais antigo, campo renomeado) não
+ * pode derrubar o run inteiro.
+ */
+function extractJson(body: StructuredResponseBody): unknown {
+  if (body.parsed_output != null) return body.parsed_output;
+
+  const text = (body.content ?? [])
+    .filter((b) => b.type === "text" && typeof b.text === "string")
+    .map((b) => b.text as string)
+    .join("")
+    .trim();
+  if (!text) {
+    throw new StructuredOutputError("A resposta do modelo veio sem conteúdo.");
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new StructuredOutputError(
+      `A resposta do modelo não é JSON válido: ${text.slice(0, 200)}`
+    );
+  }
+}
+
+/**
+ * Uma chamada estruturada. Devolve o JSON cru (a VALIDAÇÃO de forma é do
+ * chamador — `lib/ingestion/*` tem os enums fechados do domínio) e a contagem
+ * de tokens, que o chamador grava em `AIUsage` e acumula no cap do run.
+ */
+export async function runStructured<T = unknown>(
+  input: StructuredCallInput,
+  client?: Pick<Anthropic, "post">
+): Promise<StructuredCallResult<T>> {
+  const anthropic = client ?? getAnthropicClient();
+  const body: StructuredRequestBody = {
+    model: input.model,
+    max_tokens: input.maxTokens,
+    system: toSystemBlocks(input.system),
+    messages: [{ role: "user", content: input.userContent }],
+    // EXPLÍCITO, sempre. No Opus 4.8 — o modelo do planner — omitir `thinking`
+    // significa rodar SEM thinking (o default adaptativo do Opus 5 não vale
+    // lá). A profundidade vem do `effort`, não de `budget_tokens` (400 aqui).
+    thinking: { type: "adaptive" },
+    output_config: {
+      effort: input.effort,
+      format: { type: "json_schema", schema: input.schema },
+    },
+  };
+
+  const t0 = Date.now();
+  const response = (await anthropic.post("/v1/messages", {
+    body,
+  })) as StructuredResponseBody;
+  const latencyMs = Date.now() - t0;
+
+  return {
+    data: extractJson(response) as T,
+    model: response.model ?? input.model,
+    usage: {
+      promptTokens: response.usage?.input_tokens ?? 0,
+      completionTokens: response.usage?.output_tokens ?? 0,
+      cacheReadTokens: response.usage?.cache_read_input_tokens ?? 0,
+      cacheWriteTokens: response.usage?.cache_creation_input_tokens ?? 0,
+    },
+    latencyMs,
+  };
+}
+
+/** O que o pipeline de ingestão injeta — existe para o teste poder substituir. */
+export type StructuredRunner = typeof runStructured;
