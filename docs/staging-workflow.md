@@ -149,6 +149,30 @@ Quem migra é o **`build:deploy`**, e é pra ele que o `buildCommand` do `vercel
 
 O projeto `web` tem o `DATABASE_URL`/`DIRECT_URL` do escopo **Preview** apontando pro branch Neon de **staging** — então preview de PR nunca migra nem lê o banco de produção. (Contexto: incidente 2026-07-14 em que um preview migrou prod e travou os deploys.)
 
+Conferido em 2026-08-25 comparando os hosts das env vars do projeto: Preview →
+`ep-morning-leaf-…`, Production → `ep-bitter-wildflower-…`. São variáveis
+separadas por escopo, e as de Preview foram criadas na data do incidente.
+
+> ⚠️ Dois comentários no código afirmavam o contrário — que o Preview do `web`
+> roda contra o banco de produção. Descrevem o mundo **antes** da correção de
+> 2026-07-14. `apps/web/scripts/vercel-migrate.mjs` foi corrigido; o cabeçalho de
+> `apps/web/prisma/migrations/20260824230000_ocr_shadow_comparison/migration.sql`
+> **fica errado de propósito** — a explicação abaixo.
+
+**Comentário errado em migration já aplicada se corrige aqui, nunca no arquivo.**
+Editar muda o SHA-256 gravado em `_prisma_migrations.checksum`. Isso **não**
+quebra o deploy: `prisma migrate deploy` — o que o `build:deploy` roda — decide o
+que aplicar por nome de diretório, e a própria doc da Prisma diz que ele *"does
+not look for drift in the database or changes in the Prisma schema"*. Quem
+compara checksum é o `diagnoseMigrationHistory` (a mensagem `was modified after
+it was applied` e o campo `editedMigrationNames` vivem em
+`diagnose_migration_history.rs`, não em `apply_migrations.rs`), usado por
+`prisma migrate dev` e `prisma migrate status`. Ou seja: quebraria a máquina de
+quem desenvolve — `prisma:migrate` em `apps/web/package.json` é `migrate dev`,
+que pode querer resetar o banco local — e o CI daqui não pegaria, porque só roda
+`prisma generate` e `prisma validate`. Risco no ambiente de desenvolvimento, não
+em produção.
+
 ## Asaas sandbox
 
 Subconta sandbox separada. Webhooks apontam pra:
