@@ -132,6 +132,15 @@ async function callGemini(
 }
 
 async function main() {
+  // `--vision` é outro bench: manda o BINÁRIO do documento em vez de texto, e
+  // mede alucinação e omissão separadamente, o que este aqui não faz. Vive em
+  // arquivo próprio porque misturar os dois pioraria os dois — entrypoint
+  // único só para não haver dois comandos a lembrar.
+  if (process.argv.includes("--vision")) {
+    await import("./run-vision");
+    return;
+  }
+
   const arg = process.argv.find((a) => a.startsWith("--models="));
   const only = arg ? arg.slice("--models=".length).split(",") : null;
   const models = only ? MODELS.filter((m) => only.includes(m.key)) : MODELS;
