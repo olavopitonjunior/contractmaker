@@ -402,6 +402,12 @@ const DISCARD_REASONS: PlanDiscardReason[] = [
   "pii_unrecoverable",
 ];
 
+/**
+ * Issues que o MODELO pode declarar — e é por esta lista que a saída dele é
+ * filtrada. `plan_invalid` fica de fora de propósito: ele é o veredicto dos
+ * guardrails, não uma opinião do planner. Um modelo capaz de carimbar o próprio
+ * plano como "recusado pela verificação automática" tornaria o carimbo inútil.
+ */
 const ISSUE_KINDS: PlanIssueKind[] = [
   "classification_conflict",
   "provider_in_template",
@@ -676,6 +682,14 @@ function toClause(raw: RawClause, index: BlockIndex): PlannedClause {
   // Sanitização DETERMINÍSTICA: o conteúdo da cláusula é o único campo do plano
   // que vira texto persistido com embedding, e confiar no modelo para limpá-lo
   // seria confiar num julgamento onde o erro é irreversível.
+  //
+  // LIMITAÇÃO CONHECIDA: sem `externalEntities`, NOME e ENDEREÇO não são
+  // alcançados aqui — `pii.ts` não faz NER por regex de propósito. O
+  // classificador LLM os identifica por item, mas o `piiReport` persistido
+  // guarda só CONTAGEM (nunca o valor), então na hora do plano os trechos não
+  // existem mais. Na prática quem cobre esse caso é o descarte
+  // `filled_instance` e a revisão humana; fechar de vez exige decidir persistir
+  // os trechos, que é mudança de contrato — reportada, não feita aqui.
   const content = sanitizePii(blocks.join("\n\n")).text;
 
   return {
@@ -809,9 +823,16 @@ export function providerInTemplateIssues(
 
 /**
  * Violações viram issues quando o plano é entregue à revisão em vez de
- * executado. O enum de `PlanIssueKind` é fechado (é contrato), então o que não
- * tem correspondente exato cai em `low_confidence` — que é literalmente o
- * significado: "isto aqui pede olho humano". O motivo real vai no `detail`.
+ * executado.
+ *
+ * O default é `plan_invalid`, e a distinção importa para quem lê a tela: "o
+ * modelo hesitou" (`low_confidence`, que é AUTOAVALIAÇÃO do planner abaixo do
+ * piso) e "o modelo propôs algo proibido" (`plan_invalid`, regra dura que
+ * sobreviveu à escalação) pedem reações diferentes do operador. Mandar
+ * violação de regra dura para `low_confidence` fazia a tela mentir. As duas
+ * exceções abaixo continuam existindo porque nomeiam o problema com mais
+ * precisão que "recusado": `pii_leftover` diz ONDE olhar, `slot_not_applicable`
+ * diz O QUE não encaixa.
  */
 function violationToIssue(v: PlanViolation): PlanIssue {
   const kind: PlanIssueKind =
@@ -821,7 +842,7 @@ function violationToIssue(v: PlanViolation): PlanIssue {
           v.kind === "slot_block_not_found" ||
           v.kind === "slot_block_too_short"
         ? "slot_not_applicable"
-        : "low_confidence";
+        : "plan_invalid";
   return { itemId: v.itemId, kind, detail: v.detail };
 }
 

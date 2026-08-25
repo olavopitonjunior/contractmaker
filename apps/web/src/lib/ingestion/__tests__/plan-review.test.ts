@@ -9,6 +9,8 @@ import {
   parseReviewedPlan,
   selectApproved,
   setAllDecisions,
+  ISSUE_KIND_LABELS,
+  isBlockingIssue,
 } from "@/lib/ingestion/plan-review";
 
 function plan(over: Partial<LibraryPlan> = {}): LibraryPlan {
@@ -211,5 +213,26 @@ describe("decisões da tela", () => {
       reviewedAt: "2026-08-25T12:00:00.000Z",
     });
     expect(reviewed.clauses[0].tags).toEqual(["garantia:fiador", "slot:garantia"]);
+  });
+});
+
+describe("rótulos das issues", () => {
+  it("nenhum rótulo é vazio — a tela cairia no kind cru", () => {
+    // A EXAUSTIVIDADE já é garantida em typecheck: ISSUE_KIND_LABELS é
+    // Record<PlanIssueKind, string>, então kind novo no contrato não compila
+    // sem rótulo. O que o tipo não pega é a string vazia.
+    for (const [kind, label] of Object.entries(ISSUE_KIND_LABELS)) {
+      expect(label.trim(), kind).not.toBe("");
+    }
+  });
+
+  it("plan_invalid é vermelho e não se confunde com low_confidence", () => {
+    // "o modelo hesitou" e "o modelo propôs algo proibido" pedem reações
+    // diferentes do operador — e ele pode aprovar mesmo assim, então a recusa
+    // não pode parecer um aviso.
+    expect(isBlockingIssue("plan_invalid")).toBe(true);
+    expect(isBlockingIssue("low_confidence")).toBe(false);
+    expect(ISSUE_KIND_LABELS.plan_invalid).not.toBe(ISSUE_KIND_LABELS.low_confidence);
+    expect(ISSUE_KIND_LABELS.plan_invalid).toContain("Recusado");
   });
 });

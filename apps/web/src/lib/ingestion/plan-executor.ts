@@ -377,7 +377,7 @@ function isClauseSlot(v: string): v is ClauseSlotKey {
 /** Chave de variante: o par (opção do form, garantidor) dentro de um slot. */
 function variantIdentity(clause: PlannedClause): string {
   const provider = normalizeVariantProvider(clause.provider) ?? "";
-  return `${clause.slot} ${clause.value.trim().toLowerCase()} ${provider}`;
+  return `${clause.slot}\u0000${clause.value.trim().toLowerCase()}\u0000${provider}`;
 }
 
 async function applyClause(args: {
@@ -414,7 +414,7 @@ async function applyClause(args: {
   const collision = args.applied.find(
     (c) =>
       c.status === "created" &&
-      `${c.slot} ${c.value.trim().toLowerCase()} ${c.provider ?? ""}` ===
+      `${c.slot}\u0000${c.value.trim().toLowerCase()}\u0000${c.provider ?? ""}` ===
         identity
   );
   if (collision) {

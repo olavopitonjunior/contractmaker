@@ -112,12 +112,19 @@ export interface PlanDiscard {
  * `provider_in_template` é o guardrail da regra 2: o planner propôs um modelo
  * que nomeia fornecedor fora do slot. `grouping_ambiguous` e `low_confidence`
  * pedem olho humano; `pii_leftover` bloqueia sugerir ativação do template.
+ *
+ * `plan_invalid` é a violação de regra dura que sobreviveu à escalação — o
+ * plano foi RECUSADO pelos guardrails, não apenas achado duvidoso. Existe
+ * separado de `low_confidence` porque quem lê a tela de revisão precisa saber a
+ * diferença: "o modelo hesitou" e "o modelo propôs algo proibido" pedem reações
+ * diferentes do operador. O motivo concreto vai no `detail`.
  */
 export type PlanIssueKind =
   | "classification_conflict"
   | "provider_in_template"
   | "pii_leftover"
   | "slot_not_applicable"
+  | "plan_invalid"
   | "low_confidence"
   | "grouping_ambiguous"
   | "acervo_incompleto";

@@ -330,9 +330,42 @@ describe("planner — plano recusado", () => {
     );
     // Nada de conserto silencioso: o plano volta como veio, com issue.
     expect(result.plan.templates[0].sourceItemId).toBe("item-que-nao-existe");
-    expect(result.plan.issues.some((i) => i.detail.includes("não está neste lote"))).toBe(
-      true
-    );
+
+    // Regra dura violada é `plan_invalid`, NÃO `low_confidence`: o operador
+    // precisa distinguir "o modelo hesitou" de "o modelo propôs algo proibido".
+    const recusa = result.plan.issues.find((i) => i.kind === "plan_invalid");
+    expect(recusa?.detail).toContain("não está neste lote");
+    expect(result.plan.issues.some((i) => i.kind === "low_confidence")).toBe(false);
+  });
+
+  it("problema de slot mantém o kind que o nomeia, em vez de virar plan_invalid", async () => {
+    // `slot_not_applicable` e `pii_leftover` continuam nomeando o problema com
+    // mais precisão que "recusado" — só o resto vira `plan_invalid`.
+    const bad = goodPlan();
+    bad.templates[0].slotBlocks = [{ slot: "garantia", blockRefs: ["B999"] }];
+    const r = runner(bad);
+    const { plan, accepted } = await planLibrary(input, { structured: r.fn });
+
+    expect(accepted).toBe(false);
+    expect(plan.issues.some((i) => i.kind === "slot_not_applicable")).toBe(true);
+  });
+
+  it("o conteúdo da cláusula sai sanitizado — o CPF do fiador não vira embedding", async () => {
+    const comFiador = goodPlan();
+    comFiador.clauses[0].blockRefs = [garantiaRef("fiador", "CONDIÇÃO DE FIADOR")];
+    comFiador.clauses[0].sourceItemId = "fiador";
+    const r = runner(comFiador);
+    const { plan } = await planLibrary(input, { structured: r.fn });
+
+    const clausula = plan.clauses[0];
+    const original = items.find((i) => i.id === "fiador")!.text;
+    // O bloco original tem CPF e RG reais; o do plano, só placeholder.
+    expect(original).toContain("555.666.777-20");
+    expect(clausula.content).not.toContain("555.666.777-20");
+    expect(clausula.content).toContain("000.000.000-00");
+    // Sem PII bloqueante detectável, o guardrail deixa passar — ver a limitação
+    // conhecida de NOME/ENDEREÇO documentada em `toClause`.
+    expect(plan.issues.some((i) => i.kind === "pii_leftover")).toBe(false);
   });
 
   it("as violações voltam no prompt da tentativa seguinte", async () => {
@@ -408,6 +441,8 @@ describe("planner — escalação por confiança baixa", () => {
       `${INGEST_ESCALATION_MODEL}/xhigh`,
     ]);
     expect(result.plan.issues.some((i) => i.kind === "low_confidence")).toBe(true);
+    // O plano é VÁLIDO — só pouco confiável. Nada de `plan_invalid` aqui.
+    expect(result.plan.issues.some((i) => i.kind === "plan_invalid")).toBe(false);
   });
 });
 
