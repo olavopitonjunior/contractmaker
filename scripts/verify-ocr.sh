@@ -176,13 +176,28 @@ if [[ -z "$VISTOS" ]]; then
   amarelo "nenhuma extração na janela — não prova nem refuta (OCR é sob demanda)"
 else
   printf '%s\n' "$VISTOS" | sed 's/^/        /'
-  RECENTE=$(printf '%s' "$VISTOS" | awk -F'\t' '$1=="ocr_form"{print $2; exit}')
-  if [[ -z "$RECENTE" ]]; then
-    amarelo "sem linha ocr_form na janela"
-  elif [[ "$RECENTE" == "$EXPECT_MODEL" ]]; then
-    verde "extração mais recente rodou em $RECENTE"
+
+  # A pergunta certa é "o modelo esperado JÁ rodou?", não "qual foi o último?".
+  #
+  # Comparar só a extração mais recente dá falso FAIL: se a última chamada é
+  # ANTERIOR à troca de env, ela legitimamente usou o modelo antigo — isso é
+  # histórico, não defeito. Foi o que o primeiro smoke em staging mostrou
+  # (última extração 10:46, env trocada às 13:00). FAIL que dispara sem defeito
+  # real ensina quem opera a ignorar o script.
+  #
+  # Distinguir "config não pegou" de "sem tráfego novo" exigiria a data do
+  # deploy, que este script não tem. Então: presença do modelo esperado é prova
+  # (PASS); ausência é falta de evidência (WARN), nunca FAIL.
+  ESPERADO=$(printf '%s' "$VISTOS" \
+    | awk -F'\t' -v m="$EXPECT_MODEL" '$1=="ocr_form" && $2==m {print $3"\t"$4; exit}')
+  RECENTE=$(printf '%s' "$VISTOS" | awk -F'\t' '$1=="ocr_form"{print $2"\t"$4; exit}')
+
+  if [[ -n "$ESPERADO" ]]; then
+    verde "modelo esperado já rodou em tráfego real ($(printf '%s' "$ESPERADO" | cut -f1) chamada(s), última em $(printf '%s' "$ESPERADO" | cut -f2))"
+  elif [[ -z "$RECENTE" ]]; then
+    amarelo "sem linha ocr_form na janela — não prova nem refuta"
   else
-    vermelho "extração mais recente rodou em '$RECENTE', não em '$EXPECT_MODEL'"
+    amarelo "modelo esperado ainda não rodou; a mais recente foi '$(printf '%s' "$RECENTE" | cut -f1)' em $(printf '%s' "$RECENTE" | cut -f2), possivelmente anterior ao deploy. Suba um documento e rode de novo."
   fi
 fi
 
