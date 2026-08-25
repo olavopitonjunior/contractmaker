@@ -397,9 +397,15 @@ export interface ExtractionIssue {
   reason: ExtractionIssueReason;
 }
 
-/** Chaves de OCR que carregam CPF, em qualquer categoria de documento. */
+/**
+ * Chaves de OCR que carregam CPF, em qualquer categoria de documento.
+ *
+ * `cpf` (sem sufixo) é a chave usada DENTRO de `partes[]` na ficha-resumo — o
+ * `COMBINED_PROMPT` usa `cpf_numero` no nível de cima e `cpf` no aninhado.
+ */
 const CPF_OCR_KEYS = [
   "cpf_numero",
+  "cpf",
   "conjuge_cpf",
   "outorgante_cpf",
   "outorgado_cpf",
@@ -445,6 +451,24 @@ export function collectExtractionIssues(
   const issues: ExtractionIssue[] = [];
   const push = (ocrKey: string, raw: unknown, reason: ExtractionIssueReason) =>
     issues.push({ ocrKey, raw, reason });
+
+  // A ficha-resumo guarda CPF e data DENTRO de `partes[]` / `imoveis[]`. Sem
+  // descer nesses arrays, justamente o documento que carrega mais CPFs — e que
+  // preenche o formulário inteiro — seria o único a nunca acusar problema.
+  // O rótulo ganha o índice (`partes[1].cpf`) para o revisor saber de QUEM é.
+  for (const listKey of ["partes", "imoveis"] as const) {
+    const lista = fields[listKey];
+    if (!Array.isArray(lista)) continue;
+    lista.forEach((item, i) => {
+      if (!item || typeof item !== "object") return;
+      for (const nested of collectExtractionIssues(
+        item as Record<string, unknown>,
+        today
+      )) {
+        push(`${listKey}[${i}].${nested.ocrKey}`, nested.raw, nested.reason);
+      }
+    });
+  }
 
   for (const [ocrKey, raw] of Object.entries(fields)) {
     if (raw === null || raw === undefined || raw === "") continue;

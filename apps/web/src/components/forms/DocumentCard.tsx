@@ -1,6 +1,10 @@
 "use client";
 
-import { FileText, Loader2, AlertCircle, X, CheckCircle2, RefreshCw, ExternalLink, Download, Sparkles, Wand2, FileSignature } from "lucide-react";
+import { useState } from "react";
+import { FileText, Loader2, AlertCircle, X, CheckCircle2, RefreshCw, ExternalLink, Download, Sparkles, Wand2, FileSignature, Eye, AlertTriangle } from "lucide-react";
+import { ExtractedDataDialog, type WritePreviewEntry } from "@/components/forms/ExtractedDataDialog";
+import { collectExtractionIssues } from "@/lib/forms/extracted-to-form";
+import { ocrFieldLabel } from "@/lib/forms/ocr-field-labels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -67,6 +71,14 @@ interface DocumentCardProps {
   /** Em voo (ex.: copiando o doc do formulário pro negócio) — desabilita as
    *  ações de mover/assinar e mostra spinner. */
   busy?: boolean;
+  /**
+   * O que o "Aplicar aos campos" escreveria, para o dialog de revisão mostrar
+   * ANTES de aplicar. Calculado por `computeDocWrites`, que precisa do adapter
+   * e do form — ambos vivem no DocumentosStep, não aqui. Função (e não valor)
+   * porque só interessa quando o dialog abre: rodar o mapper em toda renderização
+   * de todo card seria trabalho jogado fora.
+   */
+  getWritePreview?: (id: string) => WritePreviewEntry[] | null;
 }
 
 function statusLabel(status: DocumentCardStatus): string {
@@ -106,11 +118,25 @@ export function DocumentCard({
   onSendToSignature,
   readOnly = false,
   busy = false,
+  getWritePreview,
 }: DocumentCardProps) {
   const isImage = doc.mime.startsWith("image/");
   const fieldEntries = doc.fields
     ? Object.entries(doc.fields).filter(([, v]) => v !== null && v !== "")
     : [];
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [writePreview, setWritePreview] = useState<WritePreviewEntry[] | null>(null);
+  /** Calcula o preview UMA vez, no clique, e abre. */
+  const abrirDialog = () => {
+    setWritePreview(getWritePreview?.(doc.id) ?? null);
+    setDialogOpen(true);
+  };
+  // CPF com dígito verificador errado é o único problema que NÃO é descartado:
+  // entra no formulário parecendo bom e só falha na certidão ou na assinatura.
+  // Por isso ganha um aviso no próprio card, sem precisar abrir o dialog.
+  const criticos = collectExtractionIssues(doc.fields).filter(
+    (i) => i.reason === "cpf_invalido"
+  );
 
   return (
     <div
@@ -287,13 +313,26 @@ export function DocumentCard({
           <div className="grid grid-cols-1 gap-x-3 gap-y-0.5 sm:grid-cols-2">
             {fieldEntries.slice(0, 6).map(([k, v]) => (
               <div key={k} className="flex gap-1 truncate text-[11px]">
-                <span className="text-muted-foreground">{k.replace(/_/g, " ")}:</span>
+                <span className="text-muted-foreground">{ocrFieldLabel(k)}:</span>
                 <span className="truncate text-foreground" title={formatValue(v)}>
                   {formatValue(v)}
                 </span>
               </div>
             ))}
           </div>
+        )}
+
+        {criticos.length > 0 && doc.status === "ready" && (
+          <button
+            type="button"
+            onClick={abrirDialog}
+            className="mt-1 flex items-center gap-1 text-left text-[11px] text-destructive hover:underline"
+          >
+            <AlertTriangle className="h-3 w-3 shrink-0" />
+            {criticos.length === 1
+              ? "1 campo precisa de conferência"
+              : `${criticos.length} campos precisam de conferência`}
+          </button>
         )}
 
         {!readOnly && doc.status === "ready" && onAssignmentChange && (
@@ -316,6 +355,18 @@ export function DocumentCard({
 
         {doc.status === "ready" && (
           <div className="mt-1 flex flex-wrap gap-1">
+            {fieldEntries.length > 0 && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={abrirDialog}
+                className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                <Eye className="h-3 w-3 mr-1" />
+                Ver dados
+              </Button>
+            )}
             <Button
               type="button"
               size="sm"
@@ -389,6 +440,25 @@ export function DocumentCard({
           </div>
         )}
       </div>
+
+      {/* Montado só quando aberto, e o preview é calculado UMA vez, no clique
+          que abre — não a cada render. `getWritePreview` roda o mapper inteiro
+          e é recriado sempre que a lista de docs muda; chamá-lo inline no JSX
+          o re-executaria a cada re-render do card com o dialog aberto. */}
+      {dialogOpen && (
+        <ExtractedDataDialog
+          open={dialogOpen}
+          onOpenChange={(v) => {
+            setDialogOpen(v);
+            if (!v) setWritePreview(null);
+          }}
+          filename={doc.filename}
+          category={doc.category}
+          fields={doc.fields}
+          confidence={doc.confidence}
+          writePreview={writePreview}
+        />
+      )}
     </div>
   );
 }
