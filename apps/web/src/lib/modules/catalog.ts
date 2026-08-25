@@ -35,6 +35,7 @@ export const FEATURE = {
   VENDAS_MAX: "vendas.max",
   VENDAS_PROPOSTAS: "vendas.propostas",
   VENDAS_PESQUISAS: "vendas.pesquisas",
+  VENDAS_INGESTAO_ACERVO: "vendas.ingestao_acervo",
 
   // Módulo Locação
   LOCACAO_PIPELINE: "locacao.pipeline",
@@ -50,6 +51,7 @@ export const FEATURE = {
   LOCACAO_MAX: "locacao.max",
   LOCACAO_PROPOSTAS: "locacao.propostas",
   LOCACAO_PESQUISAS: "locacao.pesquisas",
+  LOCACAO_INGESTAO_ACERVO: "locacao.ingestao_acervo",
 } as const;
 
 export type FeatureKey = (typeof FEATURE)[keyof typeof FEATURE];
@@ -84,6 +86,14 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
       { key: FEATURE.VENDAS_MAX, label: "Max (agente WhatsApp) — vendas", default: false },
       { key: FEATURE.VENDAS_PROPOSTAS, label: "Propostas — vendas", default: true },
       { key: FEATURE.VENDAS_PESQUISAS, label: "Pesquisas de satisfação — vendas", default: true },
+      // Pipeline de ingestão em lote do acervo (a imobiliária joga os modelos
+      // todos de uma vez e o servidor monta a biblioteca). Default OFF: o
+      // pipeline gasta OCR e IA por arquivo, então entra tenant a tenant.
+      {
+        key: FEATURE.VENDAS_INGESTAO_ACERVO,
+        label: "Ingestão de acervo em lote — vendas",
+        default: false,
+      },
     ],
   },
   {
@@ -105,6 +115,11 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
       { key: FEATURE.LOCACAO_MAX, label: "Max (agente WhatsApp) — locação", default: false },
       { key: FEATURE.LOCACAO_PROPOSTAS, label: "Propostas — locação", default: true },
       { key: FEATURE.LOCACAO_PESQUISAS, label: "Pesquisas de satisfação — locação", default: true },
+      {
+        key: FEATURE.LOCACAO_INGESTAO_ACERVO,
+        label: "Ingestão de acervo em lote — locação",
+        default: false,
+      },
     ],
   },
 ] as const;
@@ -188,6 +203,20 @@ export function proposalFeatureForKind(kind: string): FeatureKey {
 export function surveyFeatureForKind(kind: string): FeatureKey {
   return kind === "locacao" ? FEATURE.LOCACAO_PESQUISAS : FEATURE.VENDAS_PESQUISAS;
 }
+
+/**
+ * Features da ingestão de acervo em lote — uma por módulo, como o Newton e as
+ * Propostas.
+ *
+ * A ingestão é TRANSVERSAL (o mesmo lote traz contrato de locação e CCV de
+ * venda) mas toda feature do catálogo pertence a exatamente um módulo. Então
+ * existe uma chave por módulo e a Central exige ao menos uma delas ligada — ver
+ * `lib/ingestion/guard.ts`.
+ */
+export const INGESTION_FEATURES: readonly FeatureKey[] = [
+  FEATURE.VENDAS_INGESTAO_ACERVO,
+  FEATURE.LOCACAO_INGESTAO_ACERVO,
+];
 
 /** Definição completa de um módulo. */
 export function moduleDef(module: ModuleKey): ModuleDef {
