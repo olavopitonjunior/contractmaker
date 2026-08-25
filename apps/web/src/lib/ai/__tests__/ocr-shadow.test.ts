@@ -86,9 +86,11 @@ describe("compararSombra", () => {
 
 describe("shadowModelFromEnv", () => {
   /**
-   * Desligado por padrão não é só cautela de produto: o projeto Vercel `web`
-   * roda previews contra o banco de PRODUÇÃO sem migrar, e com a flag ligada a
-   * escrita cairia numa tabela que ainda não existe lá.
+   * Desligado por padrão. A razão original era que o preview do projeto `web`
+   * rodava contra o banco de PRODUÇÃO — corrigido no incidente de 2026-07-14;
+   * hoje o escopo Preview aponta pro Neon de staging. O default continua
+   * desligado porque a sombra é uma segunda chamada de modelo por documento, e
+   * custo não deve ser efeito colateral de deploy.
    */
   it("sem a env, o shadow está desligado", () => {
     expect(shadowModelFromEnv({} as NodeJS.ProcessEnv)).toBeNull();
