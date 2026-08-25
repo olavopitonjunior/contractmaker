@@ -3,6 +3,7 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { getOnboardingStatus } from "@/lib/onboarding/status";
 import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
+import { isIngestionEnabled } from "@/lib/ingestion/guard";
 import { MODULE } from "@/lib/modules/catalog";
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
 import { OnboardingWelcomeModal } from "@/components/onboarding/OnboardingWelcomeModal";
@@ -15,7 +16,7 @@ export default async function OnboardingPage() {
   const org = await getUserOrg(session.user.id);
   if (!org) redirect("/login");
 
-  const [status, account, orgData, modules] = await Promise.all([
+  const [status, account, orgData, modules, ingestionEnabled] = await Promise.all([
     getOnboardingStatus(org.id),
     prisma.orgGoogleAccount.findUnique({
       where: { orgId: org.id },
@@ -32,6 +33,7 @@ export default async function OnboardingPage() {
       },
     }),
     getOrgModules(org.id),
+    isIngestionEnabled(org.id),
   ]);
 
   // Tenant só-locação (vendas off): o negócio nasce no board de locação, e a
@@ -59,6 +61,9 @@ export default async function OnboardingPage() {
         }}
         locacaoOnly={locacaoOnly}
         landingHref={landingHref}
+        // Mesma feature do pipeline de ingestão: sem ela o passo de modelos
+        // mostra só o CTA de sempre.
+        batchIngestion={ingestionEnabled ? { orgId: org.id } : null}
       />
     </div>
   );

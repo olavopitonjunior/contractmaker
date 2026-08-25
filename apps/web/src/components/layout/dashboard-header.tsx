@@ -41,6 +41,7 @@ const LABEL_MAP: Record<string, string> = {
   deals: "Negócios",
   clauses: "Cláusulas",
   templates: "Templates",
+  ingestion: "Envio de modelos",
   settings: "Configurações",
   financeiro: "Financeiro",
   cobranças: "Cobranças",

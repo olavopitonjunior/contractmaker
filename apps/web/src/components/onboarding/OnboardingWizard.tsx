@@ -22,6 +22,7 @@ import {
   stepUrl,
   type OnboardingStepKey,
 } from "@/lib/onboarding/steps";
+import { StartIngestionRunButton } from "@/components/templates/StartIngestionRunButton";
 import { GoogleDriveCard } from "@/components/settings/GoogleDriveCard";
 import { ClickSignConnectCard } from "@/components/settings/ClickSignConnectCard";
 import { AgencyProfileForm, type AgencyProfile } from "./AgencyProfileForm";
@@ -96,12 +97,18 @@ export function OnboardingWizard({
   profile,
   locacaoOnly,
   landingHref,
+  batchIngestion,
 }: {
   initialStatus: OnboardingStatus;
   google: GoogleDriveState;
   profile: AgencyProfile;
   locacaoOnly: boolean;
   landingHref: string;
+  /**
+   * Ingestão em lote habilitada pra esta imobiliária (mesma feature do
+   * pipeline). Ausente = o passo de modelos mostra só o CTA de sempre.
+   */
+  batchIngestion?: { orgId: string } | null;
 }) {
   const router = useRouter();
   const [status, setStatus] = useState(initialStatus);
@@ -368,6 +375,16 @@ export function OnboardingWizard({
                         {meta.cta}
                       </Link>
                     </Button>
+                    {/* Atalho do lote: sobe o acervo inteiro e abre a tela de
+                        conferência. É CTA — nunca dispara sozinho. */}
+                    {meta.ctaBatch && batchIngestion && (
+                      <StartIngestionRunButton
+                        orgId={batchIngestion.orgId}
+                        trigger="onboarding"
+                        variant="outline"
+                        label={meta.ctaBatch}
+                      />
+                    )}
                     {!activeStep?.done && (
                       <Button variant="outline" onClick={refresh} disabled={refreshing}>
                         <RefreshCw className={cn("mr-1.5 h-4 w-4", refreshing && "animate-spin")} />
