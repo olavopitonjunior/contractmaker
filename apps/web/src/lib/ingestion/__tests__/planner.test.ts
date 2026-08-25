@@ -511,6 +511,41 @@ describe("planner — escalação por confiança baixa", () => {
   });
 });
 
+/**
+ * `minimum`/`maximum` saíram do PLAN_SCHEMA porque `output_config.format` os
+ * recusa ("For 'number' type, properties maximum, minimum are not supported").
+ * Com isso, o parse é o ÚNICO lugar que impõe a faixa.
+ */
+describe("planner — a faixa de confidence agora é imposta no parse", () => {
+  it("valor acima de 1 é truncado, não aceito como veio", async () => {
+    const r = runner(goodPlan(7));
+    const result = await planLibrary(input, { structured: r.fn });
+
+    expect(result.plan.confidence).toBe(1);
+    expect(result.accepted).toBe(true);
+    // Truncar, e não rejeitar: um número cosmético não vale jogar fora o plano
+    // inteiro que a chamada cara acabou de produzir.
+    expect(r.calls).toHaveLength(1);
+  });
+
+  it("valor negativo vira 0", async () => {
+    const r = runner(goodPlan(-3), goodPlan(0.95));
+    const result = await planLibrary(input, { structured: r.fn });
+    expect(result.attempts[0].confidence).toBe(0);
+  });
+
+  it("confidence ausente ou não numérica vira 0 e faz a escada escalar", async () => {
+    const semNumero = { ...goodPlan(), confidence: "muito alta" };
+    const r = runner(semNumero, goodPlan(0.95));
+    const result = await planLibrary(input, { structured: r.fn });
+
+    // 0 fica abaixo do piso: o lado seguro de errar quando o campo não veio.
+    expect(result.attempts[0].confidence).toBe(0);
+    expect(result.escalated).toBe(true);
+    expect(result.accepted).toBe(true);
+  });
+});
+
 describe("planner — divergência de classificação e custo", () => {
   it("conflito heurística×LLM registrado no item vira issue no plano", async () => {
     const comConflito: PlanLibraryInput = {

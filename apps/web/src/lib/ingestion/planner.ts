@@ -537,7 +537,16 @@ export const PLAN_SCHEMA: Record<string, unknown> = {
         },
       },
     },
-    confidence: { type: "number", minimum: 0, maximum: 1 },
+    // Sem `minimum`/`maximum`: `output_config.format` recusa restrição de faixa
+    // em número ("For 'number' type, properties maximum, minimum are not
+    // supported"). A faixa fica na `description` — que o modelo lê — e em
+    // `toConfidence`, que é quem a impõe.
+    confidence: {
+      type: "number",
+      description:
+        "Sua avaliação honesta do plano inteiro, de 0 (nenhuma confiança) a 1 " +
+        "(certeza). Fora dessa faixa o valor é truncado.",
+    },
   },
 };
 
@@ -642,6 +651,21 @@ interface RawPlan {
 }
 
 const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
+
+/**
+ * Confiança em [0,1] — a ÚNICA guarda da faixa desde que `minimum`/`maximum`
+ * saíram do schema (`output_config.format` os recusa).
+ *
+ * Trunca em vez de rejeitar: jogar fora um plano inteiro porque o número da
+ * autoavaliação veio `1.2` seria trocar um defeito cosmético por uma chamada
+ * cara perdida. O default é 0, e não 0.5 como na classificação: plano sem
+ * autoavaliação fica ABAIXO de `MIN_PLAN_CONFIDENCE` e a escada escala, que é o
+ * lado seguro de errar quando o campo não veio.
+ */
+function toConfidence(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 0;
+  return Math.min(1, Math.max(0, raw));
+}
 
 /**
  * Resolve referências em parágrafos literais. Referência desconhecida vira o
@@ -779,10 +803,7 @@ export function materializePlan(
   index: BlockIndex,
   entitiesByItem: ItemPiiEntities = new Map()
 ): LibraryPlan {
-  const confidence =
-    typeof raw.confidence === "number" && Number.isFinite(raw.confidence)
-      ? Math.min(1, Math.max(0, raw.confidence))
-      : 0;
+  const confidence = toConfidence(raw.confidence);
 
   return {
     version: LIBRARY_PLAN_VERSION,

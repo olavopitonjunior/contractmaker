@@ -1,21 +1,25 @@
 /**
- * A guarda de regressão do 400 que derrubou o primeiro run em staging.
+ * A guarda de regressão dos 400 que o subconjunto de `output_config.format`
+ * já nos cobrou em staging, um por deploy:
  *
  * ```
- * output_config.format.schema: Invalid schema:
- * Enum value 'fiador' does not match declared type '['string', 'null']'
+ * Invalid schema: Enum value 'fiador' does not match declared type
+ * '['string', 'null']'
+ *
+ * For 'number' type, properties maximum, minimum are not supported
  * ```
  *
  * Nenhum teste desta base chega na API — então nenhum teste pegaria isso
- * sozinho. Aqui os schemas REAIS de `output_config.format` passam pelo
- * verificador estrutural (`lib/ai/shared/schema-lint.ts`), que é o que teria
- * reprovado o schema antes do deploy.
+ * sozinho. Aqui os schemas REAIS passam pelo verificador estrutural
+ * (`lib/ai/shared/schema-lint.ts`), que é o que teria reprovado os dois antes
+ * do deploy.
  */
 
 import { describe, it, expect } from "vitest";
 import {
   formatSchemaLintIssues,
   lintStructuredSchema,
+  UNSUPPORTED_KEYWORDS,
 } from "@/lib/ai/shared/schema-lint";
 import * as llmClassifier from "@/lib/ingestion/llm-classifier";
 import * as planner from "@/lib/ingestion/planner";
@@ -81,6 +85,64 @@ describe("schemas de output_config.format", () => {
     ).properties.garantiaTipo;
     expect(node.anyOf[0].enum).toContain("fiador");
     expect(node.anyOf[0].enum).toContain("seguro_fianca");
+  });
+
+  it("nenhum schema real carrega palavra-chave de restrição de valor", () => {
+    // Varredura independente do linter: se um `pattern` ou `minItems` voltar em
+    // qualquer profundidade, este teste diz exatamente onde.
+    const keywords = new Set(Object.keys(UNSUPPORTED_KEYWORDS));
+    /** Chaves cujo valor é um MAPA nome→schema: os nomes ali são do domínio. */
+    const NAME_MAPS = new Set(["properties", "$defs", "definitions"]);
+    const found: string[] = [];
+
+    /** `node` é sempre um nó de SCHEMA — nunca um mapa de nomes. */
+    function walkSchema(node: unknown, path: string): void {
+      if (Array.isArray(node)) {
+        node.forEach((child, i) => walkSchema(child, `${path}/${i}`));
+        return;
+      }
+      if (!node || typeof node !== "object") return;
+      const record = node as Record<string, unknown>;
+
+      for (const key of Object.keys(record)) {
+        if (keywords.has(key)) found.push(`${path}/${key}`);
+      }
+      for (const [key, value] of Object.entries(record)) {
+        if (!value || typeof value !== "object") continue;
+        // O campo `title` do planner mora numa chave de `properties`. Descer
+        // direto no mapa faria o nome do campo virar palavra-chave.
+        if (NAME_MAPS.has(key)) {
+          for (const [name, child] of Object.entries(value)) {
+            walkSchema(child, `${path}/${key}/${name}`);
+          }
+        } else {
+          walkSchema(value, `${path}/${key}`);
+        }
+      }
+    }
+
+    for (const [name, schema] of exportedSchemas()) walkSchema(schema, name);
+    expect(found).toEqual([]);
+  });
+
+  it("confidence perdeu minimum/maximum e ganhou a faixa na description", () => {
+    const nodes = [
+      (llmClassifier.CLASSIFICATION_SCHEMA as {
+        properties: { confidence: Record<string, unknown> };
+      }).properties.confidence,
+      (planner.PLAN_SCHEMA as {
+        properties: { confidence: Record<string, unknown> };
+      }).properties.confidence,
+    ];
+
+    for (const node of nodes) {
+      expect(node.type).toBe("number");
+      expect(node.minimum).toBeUndefined();
+      expect(node.maximum).toBeUndefined();
+      // O modelo lê a description — é lá que a faixa passou a viver.
+      expect(String(node.description)).toContain("0");
+      expect(String(node.description)).toContain("1");
+    }
   });
 
   it("matchCriteria do planner também saiu da união", () => {
