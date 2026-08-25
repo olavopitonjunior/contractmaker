@@ -73,6 +73,38 @@ export interface ItemClassification {
   reason: string;
   /** Presente só quando o item nasceu como descarte sugerido. */
   duplicate?: DuplicateSuggestion;
+  /**
+   * Rótulo HUMANO do fornecedor da garantia ("Porto Seguro", "Tokio Marine"),
+   * ou null. Rótulo e não slug de propósito: quem slugifica é o executor, com
+   * `slugifyProviderTag` — duas slugificações do mesmo nome divergiriam no
+   * primeiro acento e a cláusula ficaria inalcançável.
+   *
+   * Só o classificador LLM preenche: o determinístico não distingue "o
+   * documento é da Porto Seguro" de "o documento cita a Porto Seguro".
+   */
+  provider?: string | null;
+  /**
+   * O documento é uma INSTÂNCIA preenchida (dados reais de um cliente), não uma
+   * minuta em branco. Não é motivo de erro — é o insumo do descarte sugerido
+   * `filled_instance` e do gate de PII da cláusula.
+   */
+  isFilledInstance?: boolean;
+  /**
+   * Onde o LLM discordou do palpite determinístico. O LLM PREVALECE (é ele que
+   * está nos campos acima), mas a divergência não pode sumir: ela vira issue
+   * `classification_conflict` no plano, para a revisão humana ver que houve
+   * uma decisão a tomar e qual foi.
+   */
+  conflicts?: ItemClassificationConflict[];
+}
+
+/** Um campo em que heurística e LLM discordaram. */
+export interface ItemClassificationConflict {
+  field: "docType" | "subOption" | "modalidade" | "garantiaTipo";
+  /** Valor do palpite determinístico (o que `precomputeItemSignals` disse). */
+  heuristic: string | null;
+  /** Valor que o LLM devolveu — o que ficou gravado. */
+  llm: string | null;
 }
 
 /** Resumo de PII gravado em `IngestionItem.piiReport`. */
