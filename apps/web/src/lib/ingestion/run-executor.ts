@@ -41,6 +41,13 @@
  * A degradação da classificação vale só para falha TRANSITÓRIA (429, 5xx,
  * timeout, rede). Erro PERMANENTE — 4xx de requisição inválida, que é sempre
  * bug nosso — derruba o run: ver `classifyItem` e `runPlanner`.
+ *
+ * ## O plano tem um teto de TENTATIVAS, além do teto de custo
+ *
+ * A chamada do planner é a única do pipeline que pode morrer sem deixar rastro:
+ * quando a função estoura o `maxDuration` no meio dela, a Anthropic cobra e o
+ * medidor — que só grava no retorno — não vê nada. O run volta para o sweeper e
+ * a chamada repete, paga e invisível. {@link MAX_PLAN_ATTEMPTS} fecha esse laço.
  */
 
 import { prisma } from "@/lib/db/prisma";
@@ -100,12 +107,19 @@ export const MAX_TEXT_CHARS = 200_000;
 const MIN_TEXT_CHARS = 20;
 
 /**
- * Orçamento de uma invocação. O `maxDuration` da rota é 120s; o executor para
- * em 90s para sobrar tempo de gravar o estado e disparar o re-encadeamento —
+ * Orçamento de uma invocação. O `maxDuration` da rota é 300s; o executor para
+ * em 240s para sobrar tempo de gravar o estado e disparar o re-encadeamento —
  * uma fatia interrompida pelo timeout da Vercel deixaria o claim preso até a
  * janela de stale.
+ *
+ * A folga de 60s é a mesma proporção de antes (o par era 90s/120s). Quem mantém
+ * os dois números coerentes é o bloco "orçamento da fatia × maxDuration da rota"
+ * de `__tests__/run-executor.test.ts`, que lê o `maxDuration` das rotas do
+ * disco: mudar um sem o outro quebra o teste.
  */
-const SLICE_BUDGET_MS = Number(process.env.INGESTION_SLICE_BUDGET_MS ?? "90000");
+export const SLICE_BUDGET_MS = Number(
+  process.env.INGESTION_SLICE_BUDGET_MS ?? "240000"
+);
 
 /** Guarda contra laço infinito: nenhum run legítimo precisa de tantos passos. */
 const MAX_STEPS_PER_INVOCATION = 40;
@@ -116,16 +130,36 @@ const MAX_STEPS_PER_INVOCATION = 40;
  * A chamada do planner é UMA, indivisível e lenta (Opus 4.8 com `effort: high`,
  * mais os degraus da escalação). Começá-la com 10s de orçamento significaria
  * pagar o token e perder a resposta no timeout da Vercel. Então, quando não
- * cabe, a fatia termina com o run em `planning` e a corrente reentra com os 90s
- * inteiros — `planning` está em `AUTO_ADVANCE_STATUSES` justamente para isso.
+ * cabe, a fatia termina com o run em `planning` e a corrente reentra com os
+ * 240s inteiros — `planning` está em `AUTO_ADVANCE_STATUSES` justamente para
+ * isso.
  *
- * E se a chamada estourar mesmo assim: o run fica em `planning` com `startedAt`
- * carimbado e, vencida a janela de stale, o sweeper o reivindica de novo (mesmo
- * padrão do `ocr-worker`). Nada trava — no pior caso, repete.
+ * E se a chamada estourar mesmo assim, o sweeper reivindica o run e ela REPETE.
+ * É por isso que {@link MAX_PLAN_ATTEMPTS} existe: repetir não é de graça.
  */
-const PLAN_MIN_BUDGET_MS = Number(
-  process.env.INGESTION_PLAN_BUDGET_MS ?? "60000"
+export const PLAN_MIN_BUDGET_MS = Number(
+  process.env.INGESTION_PLAN_BUDGET_MS ?? "180000"
 );
+
+/**
+ * Quantas vezes um run tenta PLANEJAR antes de desistir.
+ *
+ * A repetição parecia inofensiva ("no pior caso, repete") e não é: a Anthropic
+ * cobra a chamada mesmo quando a nossa função morre antes da resposta, e o
+ * medidor só grava DEPOIS do retorno. Uma chamada que sempre estoura é, então,
+ * um laço infinito de chamadas pagas que não aparecem em `aiCostUsd` nem no
+ * cap — o único gasto do sistema que ninguém vê nascer.
+ *
+ * Três tentativas: as duas primeiras cobrem instabilidade real (deploy no meio,
+ * lentidão pontual do provedor); a terceira sem sucesso não é azar, é um lote
+ * que não cabe no tempo, e isso não melhora repetindo.
+ */
+export const MAX_PLAN_ATTEMPTS = Number(
+  process.env.INGESTION_PLAN_MAX_ATTEMPTS ?? "3"
+);
+
+/** Fração do orçamento a partir da qual uma chamada vira aviso no log. */
+const SLOW_CALL_RATIO = 0.5;
 
 /**
  * Assinatura de {@link planLibrary}. Existe como tipo para o teste injetar um
@@ -147,6 +181,64 @@ export interface PlanningReport {
   attempts: PlanAttemptRecord[];
   /** Implementação que classificou os itens (`llm` ou `deterministic`). */
   classifier: string;
+  /** Tempo de parede do estágio inteiro, escalação incluída. */
+  durationMs: number;
+}
+
+/**
+ * `IngestionRun.report.planAttempts` — o contador DURÁVEL de tentativas de
+ * planejamento do RUN.
+ *
+ * Não confundir com `PlanningReport.attempts`, que são os degraus da escada
+ * DENTRO de uma chamada bem-sucedida. Este conta quantas vezes o estágio
+ * `planning` foi iniciado — inclusive as vezes em que ele não voltou.
+ *
+ * Vive no `report` (JSON) e não numa coluna porque é diagnóstico de um estágio
+ * que já tem o resto do seu diário ali: `grouping`, `planning` e `timings` são
+ * todos do mesmo tipo de informação, e uma coluna a mais custaria uma migração
+ * para dar acesso indexado a um número que nenhuma consulta filtra.
+ */
+export interface PlanAttemptsReport {
+  count: number;
+  /** ISO do início da ÚLTIMA tentativa. */
+  startedAt: string;
+  /** Teto vigente quando a tentativa foi registrada. */
+  maxAttempts: number;
+}
+
+/**
+ * Cronômetro de um estágio que chama IA, acumulado ao longo do run inteiro.
+ * Fica em `IngestionRun.report.timings[estágio]`.
+ */
+export interface StageTiming {
+  calls: number;
+  totalMs: number;
+  maxMs: number;
+  lastMs: number;
+}
+
+/**
+ * O run gastou as tentativas de planejamento.
+ *
+ * Tipado pelo mesmo motivo de {@link IngestionCostCapError}: é parada
+ * CONTROLADA, não crash, e o executor precisa distinguir as duas para não
+ * gritar `console.error` num desfecho previsto.
+ */
+export class PlanAttemptLimitError extends Error {
+  readonly code = "INGESTION_PLAN_ATTEMPTS" as const;
+  readonly attempts: number;
+  constructor(attempts: number) {
+    super(
+      `O planejamento deste lote foi tentado ${attempts} vezes e não coube no ` +
+        `tempo da função. Cada tentativa é cobrada mesmo quando a resposta não ` +
+        `chega, então o lote parou aqui em vez de repetir sem fim. O que ` +
+        `costuma resolver: dividir o acervo em lotes menores (ou por tipo de ` +
+        `contrato) e disparar de novo. Tudo que já foi lido, classificado e ` +
+        `agrupado continua gravado.`
+    );
+    this.name = "PlanAttemptLimitError";
+    this.attempts = attempts;
+  }
 }
 
 /**
@@ -251,7 +343,8 @@ export async function advanceRun(
   options: AdvanceRunOptions
 ): Promise<AdvanceRunResult> {
   const now = options.now ?? new Date();
-  const deadline = Date.now() + (options.budgetMs ?? SLICE_BUDGET_MS);
+  const budgetMs = options.budgetMs ?? SLICE_BUDGET_MS;
+  const deadline = Date.now() + budgetMs;
 
   // O claim vai no WHERE — é o UPDATE do Postgres que resolve a corrida entre
   // duas invocações. Ver `runClaimWhere`.
@@ -320,6 +413,8 @@ export async function advanceRun(
       (canUseLlm() ? createLlmItemClassifier({ meter }) : deterministicItemClassifier);
     const planner = options.planner ?? defaultPlanner();
     let report = asRecord(run.report);
+    /** Não-nulo = esta invocação classificou algo e o cronômetro mudou. */
+    let classifyTiming: StageTiming | null = null;
 
     const maxSteps = options.maxSteps ?? MAX_STEPS_PER_INVOCATION;
     let steps = 0;
@@ -364,7 +459,14 @@ export async function advanceRun(
         if (status === "extracting") {
           processed += await extractItem(run, item);
         } else if (status === "classifying") {
+          const startedAt = Date.now();
           processed += await classifyItem(run, item, classifier);
+          const durationMs = Date.now() - startedAt;
+          classifyTiming = addCall(
+            classifyTiming ?? readTiming(report, "classify"),
+            durationMs
+          );
+          warnIfSlow(`a classificação de ${item.id}`, durationMs, budgetMs);
         }
       }
     }
@@ -373,9 +475,20 @@ export async function advanceRun(
     itemsTotal = finalItems.length;
     itemsDone = stageProgress(finalItems, status);
 
+    // O cronômetro da classificação vai junto do status, e não numa escrita por
+    // item: são até 25 itens por fatia, e medir não pode custar 25 UPDATEs.
+    if (classifyTiming) {
+      report = { ...report, timings: withTiming(report, "classify", classifyTiming) };
+    }
     await prisma.ingestionRun.updateMany({
       where: { id: run.id },
-      data: { status, itemsTotal, itemsDone, startedAt: null },
+      data: {
+        status,
+        itemsTotal,
+        itemsDone,
+        startedAt: null,
+        ...(classifyTiming ? { report: report as object } : {}),
+      },
     });
 
     // `grouping` e `planning` não têm itens na fatia — o que sobrou de trabalho
@@ -403,6 +516,13 @@ export async function advanceRun(
       // `failed` porque não há como seguir sem alguém subir o teto — mas o run
       // segue íntegro e retomável, com tudo que já foi extraído no lugar.
       console.warn(`[ingestion] run ${options.runId} parou no teto de custo:`, message);
+    } else if (err instanceof PlanAttemptLimitError) {
+      // Também parada controlada: o run gastou as tentativas de planejamento e
+      // parar é o desfecho DESEJADO, não uma falha do código.
+      console.warn(
+        `[ingestion] run ${options.runId} parou no teto de tentativas de plano:`,
+        message
+      );
     } else {
       console.error(`[ingestion] run ${options.runId} falhou:`, message);
     }
@@ -451,6 +571,65 @@ function asRecord(raw: unknown): Record<string, unknown> {
   return raw && typeof raw === "object" && !Array.isArray(raw)
     ? (raw as Record<string, unknown>)
     : {};
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Instrumentação
+// ────────────────────────────────────────────────────────────────────────────
+
+/** O cronômetro de um estágio já gravado no report, ou null. */
+function readTiming(
+  report: Record<string, unknown>,
+  stage: string
+): StageTiming | null {
+  const raw = asRecord(report.timings)[stage];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const value = raw as Partial<StageTiming>;
+  if (typeof value.calls !== "number" || typeof value.totalMs !== "number") {
+    return null;
+  }
+  return {
+    calls: value.calls,
+    totalMs: value.totalMs,
+    maxMs: value.maxMs ?? 0,
+    lastMs: value.lastMs ?? 0,
+  };
+}
+
+/** O bloco `timings` do report com UM estágio atualizado. */
+function withTiming(
+  report: Record<string, unknown>,
+  stage: string,
+  timing: StageTiming
+): Record<string, unknown> {
+  return { ...asRecord(report.timings), [stage]: timing };
+}
+
+function addCall(previous: StageTiming | null, durationMs: number): StageTiming {
+  return {
+    calls: (previous?.calls ?? 0) + 1,
+    totalMs: (previous?.totalMs ?? 0) + durationMs,
+    maxMs: Math.max(previous?.maxMs ?? 0, durationMs),
+    lastMs: durationMs,
+  };
+}
+
+/**
+ * Aviso quando uma chamada come uma fração grande demais do orçamento.
+ *
+ * Não interrompe nada — é o sinal que faltava para a fatia apertando aparecer
+ * ANTES de virar 504 no log da Vercel, que foi como este defeito apareceu. A
+ * régua é o orçamento INTEIRO, e não a fatia justa por item: o que interessa é a
+ * chamada patológica, não o ritmo (um estágio lento demais já transborda sozinho
+ * para a próxima invocação, que é o comportamento desenhado).
+ */
+function warnIfSlow(label: string, durationMs: number, budgetMs: number): void {
+  if (durationMs < budgetMs * SLOW_CALL_RATIO) return;
+  console.warn(
+    `[ingestion] ${label} levou ${Math.round(durationMs / 1000)}s — mais de ` +
+      `${Math.round(SLOW_CALL_RATIO * 100)}% do orçamento de ` +
+      `${Math.round(budgetMs / 1000)}s.`
+  );
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -789,11 +968,32 @@ async function persistPlan(args: {
     report = await persistReport(args.run.id, { ...report, grouping });
   }
 
+  const spent = readPlanAttempts(report);
+  if (spent >= MAX_PLAN_ATTEMPTS) throw new PlanAttemptLimitError(spent);
+
+  // A tentativa é contada ANTES da chamada, e gravada antes de ela voltar.
+  //
+  // Contar depois pareceria mais natural — só que a tentativa que interessa é
+  // justamente a que NÃO volta: a que estoura o `maxDuration` e mata a função
+  // no meio da chamada. Essa nunca chegaria ao incremento, o contador ficaria
+  // parado em zero e o sweeper repetiria a chamada (paga, e invisível ao
+  // `aiCostUsd`) para sempre. O preço de contar antes é uma tentativa "gasta"
+  // quando o banco cai logo depois — barato perto de um laço infinito.
+  const attempt: PlanAttemptsReport = {
+    count: spent + 1,
+    startedAt: new Date().toISOString(),
+    maxAttempts: MAX_PLAN_ATTEMPTS,
+  };
+  report = await persistReport(args.run.id, { ...report, planAttempts: attempt });
+
+  const startedAt = Date.now();
   const result = await runPlanner(
     args.planner,
     { items: toPlannerItems(args.items), grouping },
     args.meter
   );
+  const durationMs = Date.now() - startedAt;
+  warnIfSlow("a chamada do planner", durationMs, PLAN_MIN_BUDGET_MS);
 
   const planning: PlanningReport = {
     plannedAt: args.now.toISOString(),
@@ -802,10 +1002,21 @@ async function persistPlan(args: {
     confidence: result.plan.confidence,
     attempts: result.attempts,
     classifier: args.classifierName,
+    durationMs,
   };
   return persistReport(
     args.run.id,
-    { ...report, planning },
+    {
+      ...report,
+      planning,
+      timings: withTiming(report, "plan", addCall(readTiming(report, "plan"), durationMs)),
+    },
     { libraryPlan: result.plan as object }
   );
+}
+
+/** Tentativas de planejamento já gastas por este run. Ver {@link PlanAttemptsReport}. */
+function readPlanAttempts(report: Record<string, unknown>): number {
+  const count = asRecord(report.planAttempts).count;
+  return typeof count === "number" && count > 0 ? Math.floor(count) : 0;
 }

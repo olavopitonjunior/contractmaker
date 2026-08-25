@@ -9,7 +9,7 @@
  *
  * ## Por que um run tem estágios e não um booleano
  *
- * Uma invocação de `/advance` cabe em 120s (maxDuration da Vercel). Um acervo de
+ * Uma invocação de `/advance` cabe em 300s (maxDuration da Vercel). Um acervo de
  * imobiliária tem dezenas de arquivos e um PDF escaneado leva dezenas de
  * segundos só de OCR. Então cada invocação processa uma FATIA de itens do
  * estágio corrente e devolve; o run só troca de estágio quando NÃO sobra item
@@ -206,10 +206,12 @@ export function stageProgress(
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * Janela de stale do claim. Uma fatia inteira (5 PDFs de OCR) cabe folgada em
- * 120s; passou de 5min, o worker morreu e o run pode ser reclaimado.
+ * Janela de stale do claim. Tem de ser MAIOR que o `maxDuration` da rota (300s),
+ * senão o sweeper rouba o claim de um worker que ainda está vivo — e no estágio
+ * `planning` isso significaria pagar a mesma chamada duas vezes em paralelo.
+ * Passou de 10min, o worker morreu e o run pode ser reclaimado.
  */
-export const RUN_STALE_MS = Number(process.env.INGESTION_RUN_STALE_MS ?? "300000");
+export const RUN_STALE_MS = Number(process.env.INGESTION_RUN_STALE_MS ?? "600000");
 
 export interface RunClaimWhere {
   id: string;

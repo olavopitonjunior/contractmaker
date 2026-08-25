@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { Stream } from "@anthropic-ai/sdk/streaming";
 import {
   StructuredOutputError,
   runStructured,
@@ -19,6 +20,70 @@ const SCHEMA = {
 
 function fakeClient(response: unknown) {
   const post = vi.fn().mockResolvedValue(response);
+  return { client: { post } as never, post };
+}
+
+/**
+ * Os eventos SSE de uma resposta estruturada em streaming, na ordem e na forma
+ * que a API os manda: o `usage` chega PARTIDO (entrada em `message_start`,
+ * saída em `message_delta`) e o JSON vem em `text_delta`, não em
+ * `parsed_output`. É exatamente isso que o acumulador do SDK precisa remontar.
+ */
+function streamEvents(chunks: string[]): unknown[] {
+  return [
+    {
+      type: "message_start",
+      message: {
+        id: "msg_teste",
+        type: "message",
+        role: "assistant",
+        model: "claude-opus-4-8",
+        content: [],
+        stop_reason: null,
+        stop_sequence: null,
+        usage: {
+          input_tokens: 21_000,
+          output_tokens: 1,
+          cache_read_input_tokens: 4_000,
+          cache_creation_input_tokens: 900,
+        },
+      },
+    },
+    // O bloco de raciocínio do Opus 4.8 vem antes do texto e não pode
+    // atrapalhar o parse.
+    { type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } },
+    { type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "…" } },
+    { type: "content_block_stop", index: 0 },
+    { type: "content_block_start", index: 1, content_block: { type: "text", text: "" } },
+    ...chunks.map((text, i) => ({
+      type: "content_block_delta",
+      index: 1,
+      delta: { type: "text_delta", text },
+      chunk: i,
+    })),
+    { type: "content_block_stop", index: 1 },
+    {
+      type: "message_delta",
+      delta: { stop_reason: "end_turn", stop_sequence: null },
+      usage: { output_tokens: 1_500 },
+    },
+    { type: "message_stop" },
+  ];
+}
+
+/**
+ * Um cliente que devolve o `Stream` do SDK, como `client.post(..., {stream:
+ * true})` devolve. Nenhum teste chega na API: o duplo é a fonte dos eventos, e
+ * o acúmulo é o do SDK de verdade.
+ */
+function fakeStreamingClient(events: unknown[]) {
+  const post = vi.fn(async (...args: unknown[]) => {
+    void args;
+    async function* iterate() {
+      for (const event of events) yield event;
+    }
+    return new Stream(() => iterate()[Symbol.asyncIterator](), new AbortController());
+  });
   return { client: { post } as never, post };
 }
 
@@ -153,6 +218,66 @@ describe("cliente estruturado — a resposta", () => {
       cacheWriteTokens: 900,
     });
     expect(result.model).toBe("claude-haiku-4-5");
+  });
+});
+
+describe("cliente estruturado — streaming", () => {
+  it("por padrão NÃO faz streaming — a classificação é curta", async () => {
+    const { client, post } = fakeClient({ parsed_output: { ok: true } });
+    await runStructured(call(), client);
+
+    const [, options] = post.mock.calls[0];
+    expect((options as { body: Record<string, unknown> }).body).not.toHaveProperty("stream");
+    expect(options).not.toHaveProperty("stream");
+  });
+
+  it("com stream:true o campo vai no CORPO e nas opções do post", async () => {
+    const { client, post } = fakeStreamingClient(streamEvents(['{"ok":true}']));
+    await runStructured(call({ model: INGEST_PLAN_MODEL, effort: "high", stream: true }), client);
+
+    const [path, options] = post.mock.calls[0] as unknown as [
+      string,
+      { body: Record<string, unknown>; stream?: boolean },
+    ];
+    expect(path).toBe("/v1/messages");
+    // A API exige `stream` no corpo; o SDK exige na opção para parsear SSE.
+    expect(options.body.stream).toBe(true);
+    expect(options.stream).toBe(true);
+  });
+
+  it("remonta o JSON a partir dos text_delta, atravessando o bloco de raciocínio", async () => {
+    const { client } = fakeStreamingClient(
+      streamEvents(['{"ok"', ":tr", "ue}"])
+    );
+    const result = await runStructured<{ ok: boolean }>(
+      call({ model: INGEST_PLAN_MODEL, effort: "high", stream: true }),
+      client
+    );
+    expect(result.data.ok).toBe(true);
+    expect(result.model).toBe("claude-opus-4-8");
+  });
+
+  it("junta o usage partido entre message_start e message_delta", async () => {
+    // Sem isso o custo do plano sairia com `output_tokens: 1` — o valor
+    // provisório do primeiro evento — e o cap do run nunca fecharia.
+    const { client } = fakeStreamingClient(streamEvents(['{"ok":true}']));
+    const result = await runStructured(
+      call({ model: INGEST_PLAN_MODEL, effort: "high", stream: true }),
+      client
+    );
+    expect(result.usage).toEqual({
+      promptTokens: 21_000,
+      completionTokens: 1_500,
+      cacheReadTokens: 4_000,
+      cacheWriteTokens: 900,
+    });
+  });
+
+  it("streaming sem bloco de texto vira erro tipado, não crash", async () => {
+    const { client } = fakeStreamingClient(streamEvents([]));
+    await expect(
+      runStructured(call({ model: INGEST_PLAN_MODEL, effort: "high", stream: true }), client)
+    ).rejects.toBeInstanceOf(StructuredOutputError);
   });
 });
 

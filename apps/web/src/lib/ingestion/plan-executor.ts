@@ -19,7 +19,7 @@
  * ## Uma invocação, UM template
  *
  * Cada template copia um Doc no Drive, abre os slots e roda o pass de IA de
- * placeholders. Dois deles não cabem com folga nos 120s de `maxDuration`, e uma
+ * placeholders. Dois deles não cabem com folga no `maxDuration` da rota, e uma
  * fatia interrompida pelo timeout deixaria o claim preso até a janela de stale.
  * As cláusulas, ao contrário, são transação de banco: vão todas na primeira
  * fatia.
@@ -103,8 +103,8 @@ import { getOrgModules } from "@/lib/modules/read";
 /** Templates por invocação. Ver "Uma invocação, UM template" no cabeçalho. */
 const TEMPLATES_PER_SLICE = 1;
 
-/** Mesmo orçamento do `/advance`: para em 90s dos 120s de `maxDuration`. */
-const SLICE_BUDGET_MS = Number(process.env.INGESTION_SLICE_BUDGET_MS ?? "90000");
+/** Mesmo orçamento do `/advance`: para em 240s dos 300s de `maxDuration`. */
+const SLICE_BUDGET_MS = Number(process.env.INGESTION_SLICE_BUDGET_MS ?? "240000");
 
 /**
  * Operações de IA que o pipeline de ingestão pode gastar. A `AIUsage` não tem

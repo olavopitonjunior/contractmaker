@@ -9,9 +9,10 @@ import { authorizeIngestion } from "@/lib/ingestion/route-auth";
 import type { ReviewedLibraryPlan } from "@/lib/ingestion/library-plan";
 
 export const runtime = "nodejs";
-// Cada fatia sobe UM template (Drive + pass de IA). O executor para em 90s pra
-// sobrar tempo de gravar o relatório e re-encadear.
-export const maxDuration = 120;
+// Cada fatia sobe UM template (Drive + pass de IA). O executor para em 240s pra
+// sobrar tempo de gravar o relatório e re-encadear — cópia de Doc mais um pass
+// de IA por template não cabia com folga nos 120s de antes.
+export const maxDuration = 300;
 
 const MAX_ENTRIES = 500;
 
