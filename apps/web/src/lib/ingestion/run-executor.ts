@@ -80,6 +80,7 @@ import {
 } from "@/lib/ingestion/grouping";
 import {
   planLibrary,
+  type IndexBudgetReport,
   type PlanAttemptRecord,
   type PlanLibraryInput,
   type PlanLibraryOptions,
@@ -179,6 +180,12 @@ export interface PlanningReport {
   escalated: boolean;
   confidence: number;
   attempts: PlanAttemptRecord[];
+  /**
+   * Quanto do lote coube no índice de parágrafos. Fica no relatório porque um
+   * corte silencioso produz um plano que parece certo: o operador precisa ver
+   * quantos blocos entraram, quantos ficaram de fora e de quais famílias.
+   */
+  indexBudget: IndexBudgetReport;
   /** Implementação que classificou os itens (`llm` ou `deterministic`). */
   classifier: string;
   /** Tempo de parede do estágio inteiro, escalação incluída. */
@@ -1001,6 +1008,7 @@ async function persistPlan(args: {
     escalated: result.escalated,
     confidence: result.plan.confidence,
     attempts: result.attempts,
+    indexBudget: result.indexBudget,
     classifier: args.classifierName,
     durationMs,
   };

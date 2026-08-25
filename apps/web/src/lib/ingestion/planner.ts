@@ -109,8 +109,19 @@ const DEPTH_STEP_INDEX = 2;
 /** Teto por célula da matriz de divergência levada ao prompt. */
 export const MAX_DIGEST_CELL_CHARS = 600;
 
-/** Teto de blocos indexados — um lote patológico não pode estourar o contexto. */
+/**
+ * Orçamento GLOBAL do índice de blocos — um lote patológico não pode estourar o
+ * contexto.
+ *
+ * O teto NÃO é gasto por ordem de chegada: ele é repartido entre as famílias do
+ * lote (ver {@link allocateFamilyBudgets}). Por ordem de chegada, as primeiras
+ * famílias consumiam o índice inteiro e as últimas chegavam ao planner sem um
+ * único parágrafo citável — sem erro, sem aviso, e com o plano saindo "válido".
+ */
 export const MAX_INDEXED_BLOCKS = 200;
+
+/** Família de um item que o agrupamento não conhece. Não deve acontecer. */
+const UNKNOWN_FAMILY = "(sem família)";
 
 /**
  * Linhas da matriz de divergência levadas por grupo. Um grupo real diverge em
@@ -167,6 +178,8 @@ export interface PlanLibraryResult {
   accepted: boolean;
   attempts: PlanAttemptRecord[];
   escalated: boolean;
+  /** O planner viu o lote inteiro? Vai para o `report` do run. */
+  indexBudget: IndexBudgetReport;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -201,35 +214,236 @@ export interface GroupDifference {
   rows: DifferenceRowView[];
 }
 
+/** Quanto do índice uma família perdeu para o orçamento. */
+export interface FamilyIndexBudget {
+  familyKey: string;
+  indexed: number;
+  dropped: number;
+}
+
+/**
+ * O que o índice deixou de fora. Vai para o `report` do run e vira issue no
+ * plano: um corte que só aparece no log produz um plano que PARECE certo, com
+ * famílias planejadas a partir de material que o modelo nunca viu.
+ */
+export interface IndexBudgetReport {
+  /** {@link MAX_INDEXED_BLOCKS} vigente quando o lote foi analisado. */
+  limit: number;
+  indexed: number;
+  dropped: number;
+  truncated: boolean;
+  /** Só as famílias que perderam parágrafos, da que mais perdeu para a que menos. */
+  families: FamilyIndexBudget[];
+  /** Itens que perderam ao menos um parágrafo. É o que torna o digest honesto. */
+  droppedItemIds: string[];
+}
+
 export interface BatchAnalysis {
   index: BlockIndex;
   groups: GroupDifference[];
   singles: PlannerItem[];
+  /** O índice cortou alguma coisa? Ver {@link IndexBudgetReport}. */
+  budget: IndexBudgetReport;
 }
 
-class BlockRegistry implements BlockIndex {
-  readonly byRef = new Map<string, IndexedBlock>();
-  readonly byItem = new Map<string, IndexedBlock[]>();
-  private readonly seen = new Map<string, IndexedBlock>();
-  private n = 0;
+/** Um parágrafo candidato ao índice, antes de saber se há orçamento para ele. */
+interface BlockCandidate {
+  itemId: string;
+  familyKey: string;
+  text: string;
+}
 
-  push(itemId: string, text: string): IndexedBlock | null {
+interface PendingCell {
+  itemId: string;
+  candidates: BlockCandidate[];
+}
+
+interface PendingRow {
+  anchorIndex: number;
+  primary: boolean;
+  cells: PendingCell[];
+}
+
+interface PendingGroup {
+  group: ConsolidationCandidate;
+  commonParagraphCount: number;
+  commonPreview: string;
+  rows: PendingRow[];
+}
+
+/**
+ * Reparte `budget` entre as famílias por MAX-MIN FAIRNESS: da que menos pede
+ * para a que mais pede, cada família leva o que pediu ou a fatia igual do que
+ * sobrou — o que for menor.
+ *
+ * A escolha é essa, e não um rateio proporcional, por duas propriedades que o
+ * corte precisa ter. (1) Enquanto o lote inteiro couber, TODA família leva tudo:
+ * o lote que funciona hoje não muda em nada. (2) Passado o teto, quem é cortado
+ * é só quem pede acima da média, e nunca até zero — a família pequena (a única
+ * minuta de fiador do acervo) continua inteira, que é justamente o material que
+ * o proporcional reduziria a um parágrafo.
+ *
+ * Com MAIS famílias que orçamento a soma passa do teto, de propósito: família
+ * muda no índice é o defeito que este cálculo existe para não ter, e um
+ * parágrafo por família custa menos que o plano decidir sem saber que ela existe.
+ */
+function allocateFamilyBudgets(
+  demand: ReadonlyMap<string, number>,
+  budget: number
+): Map<string, number> {
+  const out = new Map<string, number>();
+  const families = [...demand].sort(
+    (a, b) => a[1] - b[1] || a[0].localeCompare(b[0])
+  );
+  let remaining = budget;
+  let pending = families.length;
+  for (const [familyKey, wanted] of families) {
+    const share = Math.max(1, Math.floor(remaining / pending));
+    const granted = Math.min(wanted, share);
+    out.set(familyKey, granted);
+    remaining -= granted;
+    pending -= 1;
+  }
+  return out;
+}
+
+/**
+ * Escolhe QUAIS parágrafos da família entram, em rodadas por documento. Ficar
+ * só com o começo da lista deixaria os últimos documentos da família sem nada —
+ * o mesmo defeito do teto cego, um nível abaixo.
+ */
+function admitByRound(
+  candidates: readonly BlockCandidate[],
+  quota: number
+): Set<BlockCandidate> {
+  const admitted = new Set<BlockCandidate>();
+  if (quota <= 0 || candidates.length === 0) return admitted;
+
+  const byItem = new Map<string, BlockCandidate[]>();
+  for (const candidate of candidates) {
+    const list = byItem.get(candidate.itemId);
+    if (list) list.push(candidate);
+    else byItem.set(candidate.itemId, [candidate]);
+  }
+  const queues = [...byItem.values()];
+  const rounds = Math.max(...queues.map((q) => q.length));
+
+  for (let round = 0; round < rounds && admitted.size < quota; round++) {
+    for (const queue of queues) {
+      if (admitted.size >= quota) break;
+      if (round < queue.length) admitted.add(queue[round]);
+    }
+  }
+  return admitted;
+}
+
+/**
+ * Coleta os parágrafos citáveis do lote e só no fim decide quais cabem.
+ *
+ * Coletar antes de cortar é o que permite um corte informado: a demanda de cada
+ * família só é conhecida depois de percorrer o lote inteiro, e é ela que diz
+ * quanto do índice cada família merece.
+ */
+class BlockCollector {
+  private readonly seen = new Map<string, BlockCandidate>();
+  private readonly order: BlockCandidate[] = [];
+
+  push(itemId: string, familyKey: string, text: string): BlockCandidate | null {
     const trimmed = text.trim();
     if (!trimmed) return null;
     const dedupe = `${itemId}\u0000${paragraphKey(trimmed)}`;
     const existing = this.seen.get(dedupe);
     if (existing) return existing;
-    if (this.byRef.size >= MAX_INDEXED_BLOCKS) return null;
 
-    this.n += 1;
-    const block: IndexedBlock = { ref: `B${this.n}`, itemId, text: trimmed };
-    this.seen.set(dedupe, block);
-    this.byRef.set(block.ref, block);
-    const list = this.byItem.get(itemId);
-    if (list) list.push(block);
-    else this.byItem.set(itemId, [block]);
-    return block;
+    const candidate: BlockCandidate = { itemId, familyKey, text: trimmed };
+    this.seen.set(dedupe, candidate);
+    this.order.push(candidate);
+    return candidate;
   }
+
+  /**
+   * Fecha o índice: reparte o orçamento, admite por rodadas e só então numera as
+   * referências. A numeração segue a ordem de COLETA, e não a de admissão, para
+   * que `B1, B2, B3…` continuem aparecendo em ordem crescente no digest.
+   */
+  build(budget: number): {
+    index: BlockIndex;
+    blockOf: (candidate: BlockCandidate) => IndexedBlock | null;
+    report: IndexBudgetReport;
+  } {
+    const byFamily = new Map<string, BlockCandidate[]>();
+    for (const candidate of this.order) {
+      const list = byFamily.get(candidate.familyKey);
+      if (list) list.push(candidate);
+      else byFamily.set(candidate.familyKey, [candidate]);
+    }
+    const quotas = allocateFamilyBudgets(
+      new Map([...byFamily].map(([key, list]) => [key, list.length])),
+      budget
+    );
+
+    const admitted = new Set<BlockCandidate>();
+    const families: FamilyIndexBudget[] = [];
+    for (const [familyKey, candidates] of byFamily) {
+      const kept = admitByRound(candidates, quotas.get(familyKey) ?? 0);
+      for (const candidate of kept) admitted.add(candidate);
+      const dropped = candidates.length - kept.size;
+      if (dropped > 0) families.push({ familyKey, indexed: kept.size, dropped });
+    }
+    families.sort(
+      (a, b) => b.dropped - a.dropped || a.familyKey.localeCompare(b.familyKey)
+    );
+
+    const byRef = new Map<string, IndexedBlock>();
+    const byItem = new Map<string, IndexedBlock[]>();
+    const blocks = new Map<BlockCandidate, IndexedBlock>();
+    const droppedItems = new Set<string>();
+    let n = 0;
+    for (const candidate of this.order) {
+      if (!admitted.has(candidate)) {
+        droppedItems.add(candidate.itemId);
+        continue;
+      }
+      n += 1;
+      const block: IndexedBlock = {
+        ref: `B${n}`,
+        itemId: candidate.itemId,
+        text: candidate.text,
+      };
+      blocks.set(candidate, block);
+      byRef.set(block.ref, block);
+      const list = byItem.get(candidate.itemId);
+      if (list) list.push(block);
+      else byItem.set(candidate.itemId, [block]);
+    }
+
+    return {
+      index: { byRef, byItem },
+      blockOf: (candidate) => blocks.get(candidate) ?? null,
+      report: {
+        limit: budget,
+        indexed: n,
+        dropped: this.order.length - n,
+        truncated: this.order.length > n,
+        families,
+        droppedItemIds: [...droppedItems].sort(),
+      },
+    };
+  }
+}
+
+/** itemId → família fina, com o agrupamento como fonte e a classificação como reserva. */
+function familyKeyIndex(input: PlanLibraryInput): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const family of input.grouping.families) {
+    for (const id of family.itemIds) out.set(id, family.familyKey);
+  }
+  for (const item of input.items) {
+    if (!out.has(item.id)) {
+      out.set(item.id, item.classification?.familyKey ?? UNKNOWN_FAMILY);
+    }
+  }
+  return out;
 }
 
 /**
@@ -248,9 +462,10 @@ class BlockRegistry implements BlockIndex {
  * seguro-fiança sozinho no lote também precisa ter a cláusula dele disponível.
  */
 export function analyzeBatch(input: PlanLibraryInput): BatchAnalysis {
-  const registry = new BlockRegistry();
+  const collector = new BlockCollector();
   const byId = new Map(input.items.map((i) => [i.id, i]));
-  const groups: GroupDifference[] = [];
+  const familyOf = familyKeyIndex(input);
+  const pending: PendingGroup[] = [];
 
   for (const candidate of input.grouping.groups) {
     const docs = candidate.memberIds
@@ -270,16 +485,18 @@ export function analyzeBatch(input: PlanLibraryInput): BatchAnalysis {
     const matrix = buildDifferenceMatrix(consolidation);
     const primaryAnchor = primaryDifferenceRow(matrix)?.anchorIndex ?? null;
 
-    const rows: DifferenceRowView[] = [];
+    const rows: PendingRow[] = [];
     for (const row of matrix.slice(0, MAX_DIFFERENCE_ROWS_PER_GROUP)) {
       const cells = Object.entries(row.byDoc)
         .map(([itemId, paragraphs]) => ({
           itemId,
-          blocks: paragraphs
-            .map((p) => registry.push(itemId, p))
-            .filter((b): b is IndexedBlock => Boolean(b)),
+          candidates: paragraphs
+            .map((p) =>
+              collector.push(itemId, familyOf.get(itemId) ?? candidate.familyKey, p)
+            )
+            .filter((b): b is BlockCandidate => Boolean(b)),
         }))
-        .filter((cell) => cell.blocks.length > 0);
+        .filter((cell) => cell.candidates.length > 0);
       if (cells.length === 0) continue;
       rows.push({
         anchorIndex: row.anchorIndex,
@@ -288,7 +505,7 @@ export function analyzeBatch(input: PlanLibraryInput): BatchAnalysis {
       });
     }
 
-    groups.push({
+    pending.push({
       group: candidate,
       commonParagraphCount: consolidation.commonParagraphs.length,
       commonPreview: clip(consolidation.commonParagraphs[0] ?? "", MAX_DIGEST_CELL_CHARS),
@@ -299,12 +516,38 @@ export function analyzeBatch(input: PlanLibraryInput): BatchAnalysis {
   const grouped = new Set(input.grouping.groups.flatMap((g) => g.memberIds));
   const singles = input.items.filter((i) => !grouped.has(i.id));
   for (const item of singles) {
+    const familyKey = familyOf.get(item.id) ?? UNKNOWN_FAMILY;
     for (const excerpt of garantiaExcerpts(item.text)) {
-      for (const p of excerpt.paragraphs) registry.push(item.id, p);
+      for (const p of excerpt.paragraphs) collector.push(item.id, familyKey, p);
     }
   }
 
-  return { index: registry, groups, singles };
+  const { index, blockOf, report } = collector.build(MAX_INDEXED_BLOCKS);
+
+  // Célula e linha que ficaram sem bloco algum somem da matriz: exibir uma
+  // posição de divergência vazia diria ao planner que os membros não divergem
+  // ali, que é o oposto do que aconteceu.
+  const groups: GroupDifference[] = pending.map((g) => ({
+    group: g.group,
+    commonParagraphCount: g.commonParagraphCount,
+    commonPreview: g.commonPreview,
+    rows: g.rows
+      .map((row) => ({
+        anchorIndex: row.anchorIndex,
+        primary: row.primary,
+        cells: row.cells
+          .map((cell) => ({
+            itemId: cell.itemId,
+            blocks: cell.candidates
+              .map(blockOf)
+              .filter((b): b is IndexedBlock => Boolean(b)),
+          }))
+          .filter((cell) => cell.blocks.length > 0),
+      }))
+      .filter((row) => row.cells.length > 0),
+  }));
+
+  return { index, groups, singles, budget: report };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -337,6 +580,34 @@ function describeItem(item: PlannerItem): string {
 }
 
 /**
+ * O aviso que mantém o digest HONESTO quando o índice virou amostra.
+ *
+ * Um modelo que acha que viu o lote inteiro decide diferente de um que sabe que
+ * viu parte: o primeiro conclui "esta família não tem cláusula de fiança" a
+ * partir de uma ausência que é do índice, não do acervo. O aviso vai no TOPO,
+ * antes de qualquer documento, porque é premissa de tudo o que vem depois.
+ */
+function indexBudgetNotice(budget: IndexBudgetReport): string[] {
+  if (!budget.truncated) return [];
+  return [
+    "## ATENÇÃO — O ÍNDICE DE BLOCOS ABAIXO É UMA AMOSTRA DO LOTE",
+    "",
+    `O lote não coube inteiro no índice: ${budget.indexed} parágrafos foram indexados e ` +
+      `${budget.dropped} ficaram de fora. O orçamento foi repartido entre as famílias, ` +
+      "então nenhuma ficou sem blocos — mas estas estão representadas por parte do " +
+      "material:",
+    ...budget.families.map(
+      (f) => `- ${f.familyKey}: ${f.indexed} parágrafos no índice, ${f.dropped} fora`,
+    ),
+    "",
+    "Planeje com o que está aqui e NÃO conclua que um trecho não existe só porque ele " +
+      "não aparece: registre uma issue `acervo_incompleto` nomeando as famílias em que " +
+      "você decidiu sem ver o material inteiro.",
+    "",
+  ];
+}
+
+/**
  * O digest do lote — classificações, matriz de agrupamento e o índice de blocos.
  * É o único conteúdo VOLÁTIL da chamada e por isso vai no turno do usuário,
  * depois do breakpoint de cache do system.
@@ -345,7 +616,8 @@ export function buildBatchDigest(
   input: PlanLibraryInput,
   analysis: BatchAnalysis
 ): string {
-  const lines: string[] = [];
+  const lines: string[] = [...indexBudgetNotice(analysis.budget)];
+  const cut = new Set(analysis.budget.droppedItemIds);
 
   lines.push(`## DOCUMENTOS DO LOTE (${input.items.length})`, "");
   for (const item of input.items) lines.push(describeItem(item));
@@ -393,9 +665,20 @@ export function buildBatchDigest(
   for (const item of analysis.singles) {
     lines.push(`- [${item.id}] ${item.filename}`);
     const blocks = analysis.index.byItem.get(item.id) ?? [];
-    if (blocks.length === 0) lines.push("    (sem trecho de garantia indexado)");
+    if (blocks.length === 0) {
+      // A distinção importa: "não achei trecho de garantia neste documento" e
+      // "achei e não coube" levam o planner a decisões opostas sobre a família.
+      lines.push(
+        cut.has(item.id)
+          ? "    (os trechos de garantia deste documento não couberam no índice)"
+          : "    (sem trecho de garantia indexado)"
+      );
+    }
     for (const block of blocks) {
       lines.push(`    ${block.ref}: ${clip(block.text, MAX_DIGEST_CELL_CHARS)}`);
+    }
+    if (blocks.length > 0 && cut.has(item.id)) {
+      lines.push("    (parte dos trechos deste documento não coube no índice)");
     }
   }
 
@@ -599,6 +882,10 @@ possivelmente truncados na exibição. Sempre que precisar apontar um parágrafo
 em \`slotBlocks.blockRefs\` ou em \`clauses.blockRefs\` — use a REFERÊNCIA. Nunca
 copie nem reescreva o texto: o sistema materializa o parágrafo íntegro a partir
 da referência. Uma referência de um item diferente do \`sourceItemId\` é erro.
+
+O índice pode ser uma AMOSTRA do lote. Quando for, o digest avisa no topo e diz
+quais famílias ficaram parcialmente representadas — nesse caso, planeje com o
+que está no índice e registre \`acervo_incompleto\` nomeando essas famílias.
 
 ## As duas regras de produto
 
@@ -880,6 +1167,37 @@ export function classificationConflictIssues(
 }
 
 /**
+ * O corte do índice vira issue.
+ *
+ * Sem isto o defeito é o pior tipo: o plano sai "válido", passa nos guardrails e
+ * chega à revisão humana com famílias sub-representadas sem que nada indique
+ * isso. Com 11 documentos não aparece; com 50, aparece calado.
+ *
+ * O kind é `acervo_incompleto` porque é o que existe hoje mais perto de "o
+ * planner decidiu sem ver parte do material" — o detail deixa explícito que a
+ * lacuna é do ÍNDICE, não do que a imobiliária mandou.
+ */
+export function indexTruncationIssues(budget: IndexBudgetReport): PlanIssue[] {
+  if (!budget.truncated) return [];
+  const families = budget.families
+    .map((f) => `${f.familyKey} (${f.dropped} de ${f.indexed + f.dropped} fora)`)
+    .join("; ");
+  return [
+    {
+      itemId: null,
+      kind: "acervo_incompleto",
+      detail:
+        `O lote é maior que o índice de parágrafos que cabe num plano: ${budget.indexed} ` +
+        `parágrafos foram levados ao planner e ${budget.dropped} ficaram de fora (teto de ` +
+        `${budget.limit}). O corte foi repartido entre as famílias — nenhuma ficou sem ` +
+        `material —, mas estas foram planejadas a partir de uma amostra: ${families}. ` +
+        `Confira os modelos e as cláusulas dessas famílias antes de aplicar: o planner ` +
+        `decidiu sem ver parte dos documentos.`,
+    },
+  ];
+}
+
+/**
  * Regra 2, cobrada sobre o TEXTO: o documento que virou template nomeia uma
  * garantidora do catálogo padrão fora dos parágrafos que saíram para o slot.
  *
@@ -1058,6 +1376,7 @@ export async function planLibrary(
       ...plan.issues,
       ...classificationConflictIssues(input.items),
       ...providerInTemplateIssues(plan, input.items),
+      ...indexTruncationIssues(analysis.budget),
     ];
 
     const verdict = validateLibraryPlan({ plan, items });
@@ -1073,7 +1392,13 @@ export async function planLibrary(
     last = { plan, violations: verdict.violations };
 
     if (verdict.ok && plan.confidence >= MIN_PLAN_CONFIDENCE) {
-      return { plan, accepted: true, attempts, escalated: escalatedIn(attempts, ladder) };
+      return {
+        plan,
+        accepted: true,
+        attempts,
+        escalated: escalatedIn(attempts, ladder),
+        indexBudget: analysis.budget,
+      };
     }
 
     // Último degrau: não há para onde subir.
@@ -1119,5 +1444,11 @@ export async function planLibrary(
       : []),
   ];
 
-  return { plan, accepted: false, attempts, escalated: escalatedIn(attempts, ladder) };
+  return {
+    plan,
+    accepted: false,
+    attempts,
+    escalated: escalatedIn(attempts, ladder),
+    indexBudget: analysis.budget,
+  };
 }

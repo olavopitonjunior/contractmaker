@@ -46,6 +46,10 @@ import {
   type PlanningReport,
   type StageTiming,
 } from "@/lib/ingestion/run-executor";
+import {
+  MAX_INDEXED_BLOCKS,
+  type IndexBudgetReport,
+} from "@/lib/ingestion/planner";
 import { RUN_STALE_MS } from "@/lib/ingestion/run-state";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -256,6 +260,18 @@ function structuredResult(model: string, data: unknown) {
   };
 }
 
+/** Índice sem corte — o caso normal, e o que o planner falso devolve. */
+function fullIndexBudget(): IndexBudgetReport {
+  return {
+    limit: MAX_INDEXED_BLOCKS,
+    indexed: 0,
+    dropped: 0,
+    truncated: false,
+    families: [],
+    droppedItemIds: [],
+  };
+}
+
 /** Um plano injetável — o caminho que não passa por modelo nenhum. */
 function plannerReturning(result: {
   plan: LibraryPlan;
@@ -283,6 +299,7 @@ function plannerReturning(result: {
           durationMs: result.delayMs ?? 0,
         },
       ],
+      indexBudget: fullIndexBudget(),
     };
   });
 }
@@ -949,6 +966,7 @@ describe("advanceRun — teto de tentativas de planejamento", () => {
         accepted: true,
         escalated: false,
         attempts: [],
+        indexBudget: fullIndexBudget(),
       };
     });
 
