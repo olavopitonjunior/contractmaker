@@ -198,7 +198,7 @@ export const GARANTIA_TIPOS = [
   "fiador",
   "caucao",
   "seguro_fianca",
-  "garantia_digital",
+  "garantia_onerosa",
   "titulo_capitalizacao",
   "propria",
   "sem_garantia",
@@ -211,11 +211,43 @@ export const GARANTIA_LABELS: Record<GarantiaTipo, string> = {
   fiador: "Fiador",
   caucao: "Caução",
   seguro_fianca: "Seguro fiança",
-  garantia_digital: "Garantia digital",
+  garantia_onerosa: "Garantia onerosa",
   titulo_capitalizacao: "Título de capitalização",
   propria: "Garantia própria",
   sem_garantia: "Sem garantia",
 };
+
+/**
+ * Valores de `garantia.tipo` que saíram da taxonomia mas seguem gravados.
+ *
+ * `garantia_digital` era o nome antigo da MODALIDADE que hoje se chama
+ * `garantia_onerosa`. O rótulo antigo descrevia o FORNECEDOR (Almada, Loft,
+ * CredAluga…) e não a modalidade — e fornecedor nunca definiu modalidade: ele
+ * entra como `provider`, que é a dimensão secundária do slot de cláusula.
+ *
+ * A migration `20260825120000_garantia_onerosa_rename` faz o backfill dos
+ * pontos de persistência; este mapa é a rede de segurança pra dado que a
+ * migration não alcança (Contract.dataJson congelado, rascunho em localStorage,
+ * payload de integração antiga).
+ */
+const LEGACY_GARANTIA_TIPOS: Record<string, GarantiaTipo> = {
+  garantia_digital: "garantia_onerosa",
+};
+
+/**
+ * NORMALIZADOR ÚNICO de `garantia.tipo`. Todo ponto que LÊ dado gravado
+ * (dataJson, matchCriteria, tags do acervo, Zod de formulário) passa por aqui —
+ * é o que impede um deal antigo de perder a variante de template e a cláusula
+ * de garantia por causa do rename.
+ *
+ * Devolve `null` pra qualquer coisa que não seja um tipo conhecido (nem atual
+ * nem legado): fato desconhecido não pontua e não desclassifica.
+ */
+export function normalizeGarantiaTipo(value: unknown): GarantiaTipo | null {
+  if (typeof value !== "string") return null;
+  if ((GARANTIA_TIPOS as readonly string[]).includes(value)) return value as GarantiaTipo;
+  return LEGACY_GARANTIA_TIPOS[value] ?? null;
+}
 
 export type PessoaTipo = "pf" | "pj";
 export const PESSOA_LABELS: Record<PessoaTipo, string> = {
@@ -273,9 +305,19 @@ const booleanFromForm = z.preprocess(
   z.boolean().nullish()
 );
 
+/**
+ * Aceita o valor LEGADO na entrada e grava sempre o canônico. Um template salvo
+ * antes do rename mantém `matchCriteria.garantia = "garantia_digital"`; sem esta
+ * coerção, reabrir e salvar a tela de edição o rejeitaria como enum inválido.
+ */
+const garantiaTipoFromStored = z.preprocess(
+  (v) => (typeof v === "string" ? (normalizeGarantiaTipo(v) ?? v) : v),
+  z.enum(GARANTIA_TIPOS).nullish()
+);
+
 export const matchCriteriaSchema = z
   .object({
-    garantia: z.enum(GARANTIA_TIPOS).nullish(),
+    garantia: garantiaTipoFromStored,
     fiadorPessoa: z.enum(["pf", "pj"]).nullish(),
     pessoa: z.enum(["pf", "pj"]).nullish(),
     admImobiliaria: booleanFromForm,
@@ -292,9 +334,8 @@ export function parseMatchCriteria(raw: unknown): TemplateMatchCriteria | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const obj = raw as Record<string, unknown>;
   const out: TemplateMatchCriteria = {};
-  if ((GARANTIA_TIPOS as readonly string[]).includes(obj.garantia as string)) {
-    out.garantia = obj.garantia as GarantiaTipo;
-  }
+  const garantia = normalizeGarantiaTipo(obj.garantia);
+  if (garantia) out.garantia = garantia;
   if (obj.fiadorPessoa === "pf" || obj.fiadorPessoa === "pj") {
     out.fiadorPessoa = obj.fiadorPessoa;
   }
@@ -355,9 +396,9 @@ export function deriveTemplateFacts(dataJson: unknown): TemplateFacts {
   >;
 
   const garantiaObj = data.garantia as { tipo?: unknown; fiador?: unknown } | undefined;
-  const garantia = (GARANTIA_TIPOS as readonly string[]).includes(garantiaObj?.tipo as string)
-    ? (garantiaObj!.tipo as GarantiaTipo)
-    : null;
+  // Normaliza o legado: um deal gravado antes do rename precisa continuar
+  // puxando a MESMA variante de template e a MESMA cláusula de slot.
+  const garantia = normalizeGarantiaTipo(garantiaObj?.tipo);
   const fiadorPessoa = garantia === "fiador" ? pessoaFromParte(garantiaObj?.fiador) : null;
 
   // `locatarios` (locação) e `compradores` (proposta de compra — ali o

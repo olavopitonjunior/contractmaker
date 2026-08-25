@@ -3,45 +3,21 @@ import { z } from "zod";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/db/prisma";
-import { uploadFileAsGoogleDoc } from "@/lib/google/upload-file-as-gdoc";
 import { isGoogleDocsFeatureEnabled } from "@/lib/google/client";
-import { insertPlaceholdersWithAI } from "@/lib/templates/ai-placeholder-insertion";
 import {
   UPLOAD_MODALIDADES,
   matchCriteriaSchema,
-  schemaTypeForModalidade,
 } from "@/lib/contracts/template-category";
+import { CLAUSE_SLOT_KEYS, type ClauseSlotKey } from "@/lib/templates/clause-slots";
 import {
-  computeSourceHash,
-  findDuplicateTemplate,
-  resolveUniqueTemplateName,
-  type DuplicateTemplate,
-} from "@/lib/templates/upload-dedup";
-import { getDocPlainText } from "@/lib/google/docs";
-import {
-  CLAUSE_SLOT_KEYS,
-  slotDeclarationComment,
-  slotToken,
-  type ClauseSlotKey,
-} from "@/lib/templates/clause-slots";
-import {
-  applyClauseSlotToDoc,
-  type ApplyClauseSlotReport,
-} from "@/lib/templates/apply-clause-slot";
-
-/**
- * O "source" de um template engine="google_docs" é só um cabeçalho — o conteúdo
- * real vive no Drive. É logo abaixo dele que a declaração dos slots entra,
- * quando (e só quando) o token de fato foi escrito no documento.
- */
-const GOOGLE_DOCS_SOURCE_HEADER =
-  "<!-- engine=google_docs: a fonte é o Google Doc -->";
+  DuplicateTemplateError,
+  TemplateDriveUploadError,
+  ingestTemplateFromDocx,
+} from "@/lib/templates/ingest-template-from-docx";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const DOCX_MIME =
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const MAX_BYTES = 20 * 1024 * 1024;
 
 // Modalidades aceitas na ingestão de modelo. `administracao_locacao` é o
@@ -75,36 +51,18 @@ function readJsonField(formData: FormData, field: string): unknown {
   return JSON.parse(raw);
 }
 
-/** Sinaliza o 409 de dentro da transação do claim (aborta e faz rollback). */
-class DuplicateTemplateError extends Error {
-  constructor(readonly existing: DuplicateTemplate) {
-    super("DUPLICATE_TEMPLATE");
-  }
-}
-
-/**
- * Remove a claim-row quando o pipeline falha. Best-effort: um erro aqui só
- * significa que o hash segue ocupado por um draft — o operador reingere com
- * `force=true`.
- */
-async function dropClaimRow(id: string): Promise<void> {
-  await prisma.contractTemplate.delete({ where: { id } }).catch((err) => {
-    console.error("[templates/from-docx] falha ao limpar a claim-row:", err);
-  });
-}
-
 /**
  * POST /api/templates/from-docx (multipart)
  *
- * Ingestão "modelo da imobiliária → template": sobe o DOCX como Google Doc
- * nativo (layout/timbrado preservados, no Drive da org quando conectada),
- * cria ContractTemplate engine="google_docs" em status DRAFT e roda o pass
- * de IA que insere {{placeholders}} (best-effort — falha não bloqueia; o
- * operador revisa e ajusta na página de revisão antes de ativar).
+ * Casca fina: autentica, valida o multipart e delega pra
+ * `ingestTemplateFromDocx` (lib/templates/ingest-template-from-docx.ts), que é
+ * onde vive o pipeline — claim-row do `sourceHash`, conversão em Google Doc,
+ * abertura dos slots, pass de IA e declaração conferida contra o documento
+ * final. O executor da ingestão em lote chama a mesma função direto, sem HTTP
+ * self-call.
  *
  * UM arquivo por request — o pipeline Drive + IA é pesado e cabe no
- * maxDuration de 120s. O upload em lote da UI é uma fila sequencial client-side
- * que chama esta rota N vezes.
+ * maxDuration de 120s.
  *
  * Dedup por conteúdo (SHA-256 do DOCX em `ContractTemplate.sourceHash`):
  * arquivo já ingerido no org (e não arquivado) devolve 409 DUPLICATE_TEMPLATE
@@ -192,11 +150,6 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
-  // O que o cliente PEDIU. O que será DECLARADO no template depende do
-  // resultado real de `applyClauseSlotToDoc` (ver mais abaixo).
-  const requestedSlots = (Object.keys(slotBlocks) as ClauseSlotKey[]).filter(
-    (s) => (slotBlocks[s] ?? []).length > 0
-  );
 
   const buffer = Buffer.from(await file.arrayBuffer());
   // DOCX é um ZIP — valida o magic header (PK\3\4) contra renomeados.
@@ -213,50 +166,18 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const sourceHash = computeSourceHash(buffer);
-  const baseName =
-    name ?? `Modelo da imobiliária — ${file.name.replace(/\.docx$/i, "")}`;
-
-  // ─── CLAIM-ROW ────────────────────────────────────────────────────────────
-  // O dedup-check e a criação da row rodam na MESMA transação e ANTES do
-  // pipeline Drive+IA. O check ficava separado do create por ~2min de pipeline:
-  // duas requests com o MESMO arquivo (o upload em lote da UI, um duplo-clique)
-  // passavam as duas pelo check e criavam dois drafts.
-  //
-  // A row nasce sem `googleTemplateDocId` — é um CLAIM do hash. A 2ª request
-  // concorrente enxerga a claim-row (status "draft" participa do dedup) e leva
-  // 409 na hora. `force=true` continua pulando o check.
-  let template: { id: string; name: string };
   try {
-    template = await prisma.$transaction(async (tx) => {
-      if (!force) {
-        const existing = await findDuplicateTemplate(tx, org.id, sourceHash);
-        if (existing) throw new DuplicateTemplateError(existing);
-      }
-      const templateName = await resolveUniqueTemplateName(tx, org.id, baseName);
-      return tx.contractTemplate.create({
-        data: {
-          orgId: org.id,
-          name: templateName,
-          description: "Template criado a partir do modelo DOCX da imobiliária.",
-          engine: "google_docs",
-          status: "draft",
-          isDefault: false,
-          // Preenchido depois que o Drive converter o DOCX.
-          googleTemplateDocId: null,
-          modalidade,
-          schemaType: schemaTypeForModalidade(modalidade),
-          // Nasce SEM declaração de slot. A declaração
-          // (`<!-- slots: {{slot_garantia}} -->`) só é escrita depois que o
-          // token de fato entrou no Doc — ver o bloco de slots mais abaixo.
-          handlebarsSource: GOOGLE_DOCS_SOURCE_HEADER,
-          version: "1.0.0",
-          sourceHash,
-          matchCriteria: (matchCriteria ?? undefined) as object | undefined,
-        },
-        select: { id: true, name: true },
-      });
+    const result = await ingestTemplateFromDocx({
+      orgId: org.id,
+      buffer,
+      filename: file.name,
+      modalidade,
+      name,
+      force,
+      matchCriteria,
+      slotBlocks,
     });
+    return NextResponse.json(result);
   } catch (err) {
     if (err instanceof DuplicateTemplateError) {
       return NextResponse.json(
@@ -268,176 +189,9 @@ export async function POST(req: NextRequest) {
         { status: 409 }
       );
     }
+    if (err instanceof TemplateDriveUploadError) {
+      return NextResponse.json({ error: err.message }, { status: 502 });
+    }
     throw err;
   }
-
-  // Daqui pra frente a claim-row EXISTE. Qualquer falha tem de removê-la: um
-  // draft sem `googleTemplateDocId` seria um template quebrado na listagem E
-  // ocuparia o hash pra sempre (o operador nunca mais reingeriria o arquivo).
-  let uploaded: { docId: string; webViewLink: string; embedLink: string };
-  try {
-    uploaded = await uploadFileAsGoogleDoc({
-      buffer,
-      sourceMime: DOCX_MIME,
-      name: `[MODELO] ${template.name}`,
-      orgId: org.id,
-    });
-  } catch (err) {
-    await dropClaimRow(template.id);
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(
-      { error: `Falha ao converter DOCX em Google Doc: ${msg}` },
-      { status: 502 }
-    );
-  }
-
-  try {
-    await prisma.contractTemplate.update({
-      where: { id: template.id },
-      data: { googleTemplateDocId: uploaded.docId },
-    });
-  } catch (err) {
-    await dropClaimRow(template.id);
-    throw err;
-  }
-
-  // Abre os slots ANTES do pass de IA: com a cláusula variável já trocada pelo
-  // token, o mapeamento de placeholders não gasta esforço num texto que vai
-  // deixar de existir.
-  const slotReports: ApplyClauseSlotReport[] = [];
-  for (const slot of requestedSlots) {
-    slotReports.push(
-      await applyClauseSlotToDoc({
-        docId: uploaded.docId,
-        slot,
-        paragraphs: slotBlocks[slot] ?? [],
-      })
-    );
-  }
-
-  // Pass de IA best-effort: insere {{placeholders}} no doc. Falha não
-  // bloqueia — o template fica draft e o operador faz manualmente na revisão.
-  // (Não derruba a claim-row: o doc já existe e o template é utilizável.)
-  let report = null;
-  try {
-    report = await insertPlaceholdersWithAI({
-      docId: uploaded.docId,
-      modalidade,
-      orgId: org.id,
-    });
-  } catch (err) {
-    console.error("[templates/from-docx] Pass de IA falhou (segue draft):", err);
-  }
-
-  // ─── DECLARAÇÃO DO SLOT ───────────────────────────────────────────────────
-  // DEPOIS do pass de IA, e derivada do estado FINAL do documento.
-  //
-  // Declarar um slot que não está no Doc é a pior falha possível deste fluxo:
-  // na geração, `replacePlaceholdersInDoc` não acharia `{{slot_garantia}}`, a
-  // cláusula resolvida seria descartada em silêncio e o contrato sairia com a
-  // garantia HARDCODED da variante de referência — cliente escolhe caução no
-  // formulário e assina fiador.
-  //
-  // Declarar antes da IA abria exatamente esse buraco: o pass rodava depois e
-  // podia reescrever o token (mapeando o trecho pro legado
-  // `{{clausula_garantia}}`), deixando o template declarado-sem-token. A guarda
-  // `already-tokenized` em `ai-placeholder-insertion` fecha a causa; ler o doc
-  // aqui fecha o efeito, inclusive pra qualquer outra mutação futura entre o
-  // apply e a declaração.
-  //
-  // Quando o slot não sobrevive, o modelo segue com a cláusula fixa
-  // (comportamento pré-consolidação) e o motivo vai pro `draftReport.slots`, que
-  // a página de revisão mostra e usa pra travar a ativação.
-  const appliedReports = slotReports.filter((r) => r.applied);
-  let finalDocText: string | null = null;
-  if (appliedReports.length > 0) {
-    try {
-      finalDocText = await getDocPlainText(uploaded.docId);
-    } catch (err) {
-      console.error(
-        "[templates/from-docx] não consegui reler o doc pra declarar os slots:",
-        err
-      );
-    }
-  }
-  // Doc ilegível → não declara (fail-closed): melhor um token órfão, que
-  // `cleanupOrphanPlaceholders` limpa na geração, do que uma declaração mentindo.
-  const survivingSlots = appliedReports
-    .filter((r) => (finalDocText ? finalDocText.includes(r.token!) : false))
-    .map((r) => r.slot);
-
-  // "Não consegui ler" NÃO é "o token sumiu". `applyClauseSlotToDoc` já releu e
-  // confirmou o token; se esta terceira leitura cai num 429/403 transitório,
-  // rebaixar o slot como `verify-failed` afirmaria uma coisa que não sabemos.
-  // O slot é marcado como não-conferido (segura a ativação do mesmo jeito, e a
-  // página de revisão manda revalidar), mas o motivo diz a verdade.
-  const unverified = finalDocText === null;
-  const lostSlots = new Set(
-    appliedReports.map((r) => r.slot).filter((s) => !survivingSlots.includes(s))
-  );
-  const finalSlotReports: ApplyClauseSlotReport[] = slotReports.map((r) =>
-    lostSlots.has(r.slot) && r.applied
-      ? {
-          ...r,
-          applied: false,
-          token: null,
-          issues: [
-            ...r.issues,
-            {
-              paragraph: `{{${slotToken(r.slot)}}}`,
-              reason: unverified
-                ? ("verify-unavailable" as const)
-                : ("verify-failed" as const),
-            },
-          ],
-        }
-      : r
-  );
-
-  if (survivingSlots.length > 0) {
-    try {
-      await prisma.contractTemplate.update({
-        where: { id: template.id },
-        data: {
-          handlebarsSource: [
-            GOOGLE_DOCS_SOURCE_HEADER,
-            slotDeclarationComment(survivingSlots),
-          ].join("\n"),
-        },
-      });
-    } catch (err) {
-      // Sem a declaração o template é um modelo comum com um `{{slot_*}}` órfão
-      // — que `cleanupOrphanPlaceholders` remove na geração. Degrada, não quebra.
-      console.error("[templates/from-docx] falha ao declarar os slots:", err);
-    }
-  }
-
-  // O relatório é gravado FORA do try do pass de IA: os avisos de slot precisam
-  // chegar à página de revisão mesmo quando a IA falha (antes, um erro na IA
-  // engolia junto o motivo de o slot não ter aberto).
-  if (report || finalSlotReports.length > 0) {
-    try {
-      await prisma.contractTemplate.update({
-        where: { id: template.id },
-        data: {
-          draftReport: {
-            ...((report ?? {}) as object),
-            ...(finalSlotReports.length ? { slots: finalSlotReports } : {}),
-          } as object,
-        },
-      });
-    } catch (err) {
-      console.error("[templates/from-docx] falha ao gravar o draftReport:", err);
-    }
-  }
-
-  return NextResponse.json({
-    templateId: template.id,
-    name: template.name,
-    docId: uploaded.docId,
-    webViewLink: uploaded.webViewLink,
-    embedLink: uploaded.embedLink,
-    report,
-    slots: slotReports,
-  });
 }

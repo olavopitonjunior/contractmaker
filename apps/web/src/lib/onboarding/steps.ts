@@ -53,6 +53,13 @@ export interface StepMeta {
   icon: LucideIcon;
   /** Rótulo do CTA que leva à página real (quando o passo é um link externo). */
   cta?: string;
+  /**
+   * CTA SECUNDÁRIO que executa uma ação no lugar de navegar. Hoje só o passo de
+   * modelos tem um: abrir o lote de ingestão automática, que existe atrás da
+   * feature de ingestão. Nunca dispara sozinho — subir o acervo inteiro é uma
+   * decisão do operador, não um efeito colateral de abrir o onboarding.
+   */
+  ctaBatch?: string;
 }
 
 export const STEP_META: Record<OnboardingStepKey, StepMeta> = {
@@ -86,6 +93,7 @@ export const STEP_META: Record<OnboardingStepKey, StepMeta> = {
       "Envie os contratos e propostas de vocês do jeito que estão — pode mandar os repetidos (com fiador, com caução, um por seguradora). Nós lemos os arquivos, juntamos os parecidos num modelo só, separamos o que é cláusula e montamos a biblioteca da imobiliária; você só confirma. O painel “Modelos do sistema” mostra o que ainda falta.",
     icon: FileText,
     cta: "Enviar meus modelos",
+    ctaBatch: "Envie seus modelos de uma vez",
   },
   clicksign: {
     key: "clicksign",

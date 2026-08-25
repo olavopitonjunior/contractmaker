@@ -107,10 +107,15 @@ export const GARANTIA_TIPO_LABELS: Record<string, string> = {
   cessao_fiduciaria: "Cessão fiduciária",
   fiador: "Fiador",
   seguro_fianca: "Seguro-fiança",
-  garantia_digital: "Garantia locatícia (digital)",
+  garantia_onerosa: "Garantia onerosa",
   titulo_capitalizacao: "Título de capitalização",
   propria: "Garantia própria",
   sem_garantia: "Não possui garantia",
+  // Legado: `garantia_digital` virou `garantia_onerosa` (o fornecedor — Almada,
+  // Loft, CredAluga — nunca definiu a modalidade). A migration de backfill cobre
+  // as tabelas; a chave fica aqui pra row que a migration não alcance não
+  // aparecer na UI como slug cru.
+  garantia_digital: "Garantia onerosa",
 };
 
 // Lifecycle novo (pendente→em_analise→aprovada→vigente→executada/finalizada) em
@@ -165,7 +170,7 @@ const fiadorPartySchema = z.object({
 });
 
 // União discriminada por tipo — cada modalidade tem o payload mínimo do benchmark.
-export const guaranteeCreateSchema = z.discriminatedUnion("tipo", [
+const guaranteeCreateUnion = z.discriminatedUnion("tipo", [
   z.object({
     tipo: z.literal("fiador"),
     fiador: fiadorPartySchema,
@@ -198,8 +203,10 @@ export const guaranteeCreateSchema = z.discriminatedUnion("tipo", [
     ...guaranteeBaseFields,
   }),
   z.object({
-    tipo: z.literal("garantia_digital"),
-    provider: z.string().min(2), // credpago | garantti | creditas | ...
+    tipo: z.literal("garantia_onerosa"),
+    // Fornecedor da garantia (Almada | Loft | CredAluga | …). O fornecedor NÃO
+    // define a modalidade — entra como dimensão secundária (tag `provider:*`).
+    provider: z.string().min(2),
     taxaMensal: z.number().nonnegative().optional(),
     ...guaranteeBaseFields,
   }),
@@ -210,6 +217,20 @@ export const guaranteeCreateSchema = z.discriminatedUnion("tipo", [
     ...guaranteeBaseFields,
   }),
 ]);
+
+/**
+ * `garantia_digital` (nome antigo da modalidade) ainda chega de cliente que não
+ * atualizou — MCP server, integração externa, aba aberta antes do deploy. O
+ * preprocess reescreve o discriminante ANTES da união: aceita o legado na
+ * entrada e grava sempre `garantia_onerosa`.
+ */
+export const guaranteeCreateSchema = z.preprocess((raw) => {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const obj = raw as Record<string, unknown>;
+    if (obj.tipo === "garantia_digital") return { ...obj, tipo: "garantia_onerosa" };
+  }
+  return raw;
+}, guaranteeCreateUnion);
 
 export type GuaranteeCreateInput = z.infer<typeof guaranteeCreateSchema>;
 

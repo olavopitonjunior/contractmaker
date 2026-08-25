@@ -72,7 +72,7 @@ function toGuaranteeData(data: GuaranteeCreateInput) {
           ...observacoes,
         },
       };
-    case "garantia_digital":
+    case "garantia_onerosa":
       return {
         ...base,
         provider: data.provider,

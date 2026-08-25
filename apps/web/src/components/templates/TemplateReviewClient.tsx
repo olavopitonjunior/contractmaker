@@ -115,6 +115,12 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
   const [status, setStatus] = useState(template.status);
   const [isDefault, setIsDefault] = useState(template.isDefault);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  /**
+   * Mensagem do 409 `SLOT_CLAUSE_MISSING` do PATCH — o modelo tem espaço de
+   * cláusula e o acervo da imobiliária ainda não tem cláusula aprovada pra ele.
+   * A trava é do servidor; aqui só mostramos o efeito e a saída consciente.
+   */
+  const [slotGap, setSlotGap] = useState<string | null>(null);
 
   // Revisão por IA — parte do relatório persistido na ingestão (é ele que traz
   // os avisos de slot), sobrescrito quando o operador roda a IA de novo.
@@ -181,6 +187,11 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
         body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 409 && data?.code === "SLOT_CLAUSE_MISSING") {
+        // Não é erro de operação: é uma decisão que falta ser tomada.
+        setSlotGap(data.error as string);
+        return;
+      }
       if (!res.ok) throw new Error(data.error ?? "Falha ao atualizar template");
       toast.success(okMsg);
       if (typeof body.status === "string") setStatus(body.status);
@@ -258,6 +269,49 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
 
   return (
     <div className="space-y-4">
+      <AlertDialog open={slotGap !== null} onOpenChange={(o) => !o && setSlotGap(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Falta a cláusula deste modelo no acervo
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>{slotGap}</p>
+                <p>
+                  <a
+                    href="/clauses"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium underline"
+                  >
+                    Abrir o acervo de cláusulas
+                  </a>{" "}
+                  — aprove a cláusula lá e volte para ativar.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Voltar e aprovar a cláusula</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setSlotGap(null);
+                // Saída consciente: o texto padrão da plataforma é legítimo pra
+                // quem não tem redação própria — só não pode acontecer sem
+                // ninguém saber.
+                void patchTemplate(
+                  { status: "active", forceActivate: true },
+                  "Template ativado com o texto padrão da plataforma no espaço de cláusula."
+                );
+              }}
+            >
+              Ativar mesmo assim
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>

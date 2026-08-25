@@ -29,6 +29,8 @@ import {
   GARANTIA_TIPOS,
   PESSOA_LABELS,
   modalidadeLabel,
+  normalizeGarantiaTipo,
+  type GarantiaTipo,
 } from "@/lib/contracts/template-category";
 import {
   INGEST_DOC_TYPE_DEFS,
@@ -49,6 +51,17 @@ import {
   type ConsolidationPlan,
   type DifferenceRow,
 } from "@/lib/templates/consolidation";
+import {
+  collidingVariantValues,
+  consolidatedMatchCriteria,
+  garantiaSlotCandidate,
+  guessDocumentGarantia,
+  ingestionFamilyKey,
+  parseSlotReports,
+  slotFailureMessage,
+  suggestProviderName,
+  type SlotBlockCandidate,
+} from "@/lib/templates/ingestion-triage";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Estado
@@ -84,14 +97,32 @@ interface Entry {
   docType: IngestDocType | null;
   subOption: string | null;
   criteria: Partial<Record<CriteriaField, string>>;
+  /**
+   * O operador confirmou trocar a cláusula de garantia deste arquivo AVULSO por
+   * um slot. Sempre explícito: sem marcar, o modelo nasce com a cláusula fixa
+   * (comportamento de sempre).
+   */
+  openSlot?: boolean;
+  /** Garantidor da cláusula do slot no caminho avulso (rótulo humano). */
+  slotProvider?: string;
   /** Resultado do commit — link de revisão do template criado. */
   templateId?: string;
+}
+
+/** O que a tela oferece a um arquivo avulso que pode abrir slot de garantia. */
+interface SlotOffer {
+  garantia: GarantiaTipo;
+  candidate: SlotBlockCandidate;
+  /** Palpite do garantidor lido do próprio trecho (default do campo). */
+  provider: string | null;
 }
 
 interface GroupDecision {
   consolidate: boolean;
   /** fileId → opção do formulário (tipo de garantia). */
   values: Record<string, string>;
+  /** fileId → garantidor da variante (rótulo humano, vazio = genérica). */
+  providers: Record<string, string>;
 }
 
 /** O grupo cru + o que a tela precisa pra mostrar e consolidar. */
@@ -100,6 +131,7 @@ interface GroupView extends ConsolidationGroup {
   matrix: DifferenceRow[];
   primary: DifferenceRow | null;
   suggested: Record<string, string>;
+  suggestedProviders: Record<string, string>;
 }
 
 const CRITERIA_OPTIONS: Record<
@@ -218,6 +250,21 @@ export function DocumentIngestionDialog({
     setBusy(false);
   }
 
+  // ── Garantia de cada arquivo (escolha do operador ou palpite) ────────────
+  // É o que separa as famílias no agrupamento e o que rotula a cláusula do slot
+  // no caminho avulso.
+  const garantiaOf = useMemo(() => {
+    const map = new Map<string, GarantiaTipo | null>();
+    for (const e of entries) {
+      if (!e.text) continue;
+      map.set(
+        e.id,
+        normalizeGarantiaTipo(e.criteria.garantia) ?? guessDocumentGarantia(e.text)
+      );
+    }
+    return map;
+  }, [entries]);
+
   // ── Agrupamento (determinístico, no browser) ─────────────────────────────
   const groups = useMemo<GroupView[]>(() => {
     // Só DOCX de MODELO entram: PDF não vira template e cláusulas avulsas não
@@ -237,7 +284,15 @@ export function DocumentIngestionDialog({
         id: e.id,
         name: e.file.name,
         text: e.text ?? "",
-        family: modalidadeForIngest(e.docType!, e.subOption),
+        // Família FINA: modalidade + garantia. Só a modalidade juntaria numa
+        // base única a locação com fiador e a com caução — o texto é o mesmo
+        // menos uma cláusula —, e garantias diferentes são contratos
+        // diferentes. O que pode (e deve) consolidar é a MESMA garantia com
+        // fornecedores diferentes.
+        family: ingestionFamilyKey({
+          modalidade: modalidadeForIngest(e.docType!, e.subOption),
+          garantia: garantiaOf.get(e.id) ?? null,
+        }),
       })
     );
     const byId = new Map(normalized.map((n) => [n.id, n]));
@@ -248,14 +303,17 @@ export function DocumentIngestionDialog({
       const matrix = buildDifferenceMatrix(plan);
       const primary = primaryDifferenceRow(matrix);
       const suggested: Record<string, string> = {};
+      const suggestedProviders: Record<string, string> = {};
       for (const id of g.memberIds) {
         const text = (primary?.byDoc[id] ?? []).join("\n");
         const guess = text ? suggestGarantiaTipo(text) : null;
         if (guess) suggested[id] = guess;
+        const provider = text ? suggestProviderName(text) : null;
+        if (provider) suggestedProviders[id] = provider;
       }
-      return { ...g, plan, matrix, primary, suggested };
+      return { ...g, plan, matrix, primary, suggested, suggestedProviders };
     });
-  }, [entries]);
+  }, [entries, garantiaOf]);
 
   const groupOf = useMemo(() => {
     const map = new Map<string, GroupView>();
@@ -263,11 +321,38 @@ export function DocumentIngestionDialog({
     return map;
   }, [groups]);
 
+  // ── Slot no arquivo avulso ───────────────────────────────────────────────
+  // Sem consolidação não há "diferença entre variantes" pra isolar, então o
+  // bloco candidato sai da heurística de trecho de garantia do próprio texto.
+  // Exige garantia conhecida: é ela que TAGUEIA a cláusula no acervo — sem tag,
+  // o slot cairia no texto canônico e a redação da imobiliária se perderia.
+  const slotOffers = useMemo(() => {
+    const map = new Map<string, SlotOffer>();
+    for (const e of entries) {
+      if (e.fileKind !== "docx" || !e.text || !e.docType || e.docType === "clausulas") {
+        continue;
+      }
+      if (!ingestDocTypeDef(e.docType).slots.includes("garantia")) continue;
+      const garantia = garantiaOf.get(e.id);
+      if (!garantia) continue;
+      const candidate = garantiaSlotCandidate(e.text);
+      if (candidate) {
+        map.set(e.id, {
+          garantia,
+          candidate,
+          provider: suggestProviderName(candidate.paragraphs.join("\n")),
+        });
+      }
+    }
+    return map;
+  }, [entries, garantiaOf]);
+
   function decisionFor(g: GroupView): GroupDecision {
     return (
       decisions[g.id] ?? {
         consolidate: true,
         values: { ...g.suggested },
+        providers: { ...g.suggestedProviders },
       }
     );
   }
@@ -280,20 +365,40 @@ export function DocumentIngestionDialog({
   }
 
   // ── Criação ──────────────────────────────────────────────────────────────
+
+  /**
+   * Grava as cláusulas do slot no acervo. Roda SEMPRE antes de criar o
+   * template: o `applyClauseSlotToDoc` apaga o trecho do Doc, então uma cláusula
+   * que não chegou ao acervo é redação da imobiliária perdida — a geração
+   * cairia no texto canônico da plataforma sem ninguém perceber.
+   */
+  async function sendSlotClauses(input: {
+    sourceName: string;
+    variants: Array<{ value: string; provider?: string; content: string }>;
+  }): Promise<void> {
+    const res = await fetch("/api/templates/ingest/clauses", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        slot: "garantia",
+        sourceName: input.sourceName,
+        variants: input.variants,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error ?? "Falha ao gravar as cláusulas");
+  }
+
   async function sendTemplate(
     entry: Entry,
     extra?: {
       slotBlocks?: Record<string, string[]>;
-      /**
-       * Sobrescreve o `matchCriteria` do card. A consolidação passa `{}`: o
-       * template da família é GENÉRICO por definição — quem discrimina a
-       * variante é o slot de cláusula, não o critério de seleção.
-       */
+      /** Sobrescreve o `matchCriteria` do card (a consolidação monta o seu). */
       criteria?: Partial<Record<CriteriaField, string>>;
     }
-  ): Promise<string | null> {
+  ): Promise<{ templateId: string | null; slotFailure: string | null }> {
     const modalidade = modalidadeForIngest(entry.docType!, entry.subOption);
-    if (!modalidade) return null;
+    if (!modalidade) return { templateId: null, slotFailure: null };
     const criteria = extra?.criteria ?? entry.criteria;
     const fd = new FormData();
     fd.append("file", entry.file);
@@ -310,7 +415,13 @@ export function DocumentIngestionDialog({
       throw new Error("Este arquivo já foi importado antes — pule ou remova o antigo.");
     }
     if (!res.ok) throw new Error(data?.error ?? "Falha ao criar o modelo");
-    return (data.templateId as string) ?? null;
+    // O slot é ADITIVO: a trava tudo-ou-nada pode ter recusado o bloco e o
+    // modelo existe do mesmo jeito, com a cláusula fixa. Reportamos o motivo no
+    // card em vez de tratar como erro de criação.
+    return {
+      templateId: (data.templateId as string) ?? null,
+      slotFailure: slotFailureMessage(parseSlotReports(data.slots)),
+    };
   }
 
   async function sendToAcervo(entry: Entry): Promise<void> {
@@ -346,6 +457,9 @@ export function DocumentIngestionDialog({
         .map((m) => ({
           entry: m,
           value: decision.values[m.id],
+          // Com a família fina o grupo tem UMA garantia: o que separa as
+          // variantes no acervo é o garantidor (`provider:porto_seguro`).
+          provider: decision.providers[m.id]?.trim() || undefined,
           content: (g.primary!.byDoc[m.id] ?? []).join("\n\n"),
         }))
         .filter((v) => v.value && v.content.trim().length >= 20);
@@ -361,32 +475,36 @@ export function DocumentIngestionDialog({
         // ordem inversa, uma falha aqui deixaria um template com slot apontando
         // pra um acervo vazio, e o retry esbarraria no 409 de duplicata (o
         // arquivo já teria virado template) — sem caminho de conserto na tela.
-        const res = await fetch("/api/templates/ingest/clauses", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            slot: "garantia",
-            sourceName: reference.file.name.replace(/\.docx$/i, ""),
-            variants: variants.map((v) => ({ value: v.value, content: v.content })),
-          }),
+        await sendSlotClauses({
+          sourceName: reference.file.name.replace(/\.docx$/i, ""),
+          variants: variants.map((v) => ({
+            value: v.value,
+            provider: v.provider,
+            content: v.content,
+          })),
         });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data?.error ?? "Falha ao gravar as cláusulas");
         clauses += variants.length;
 
-        // O template da família é GENÉRICO: `criteria: {}` (ver F4). Marcá-lo
-        // com a garantia da variante de referência o desclassificaria em todo
-        // formulário que escolhesse outra garantia.
-        const templateId = await sendTemplate(reference, {
+        // O grupo tem UMA garantia (a família é `modalidade:garantia`), então o
+        // modelo é marcado com ela: sem nenhum eixo no `matchCriteria` ele
+        // pontua 0 no pareamento e nunca é escolhido por um fato do formulário.
+        // O que discrimina o FORNECEDOR continua sendo o slot, não o critério.
+        const created = await sendTemplate(reference, {
           slotBlocks: { garantia: g.primary.byDoc[reference.id] ?? [] },
-          criteria: {},
+          criteria: consolidatedMatchCriteria({
+            familyGarantia: garantiaOf.get(reference.id) ?? null,
+            variantValues: members.map((m) => decision.values[m.id]),
+            memberCriteria: members.map((m) => m.criteria),
+          }),
         });
         templates += 1;
 
         patch(reference.id, {
           status: "done",
-          templateId: templateId ?? undefined,
-          message: `Modelo da família criado com slot de garantia · ${variants.length} cláusula(s) no acervo`,
+          templateId: created.templateId ?? undefined,
+          message:
+            created.slotFailure ??
+            `Modelo da família criado com slot de garantia · ${variants.length} cláusula(s) no acervo`,
         });
         const labeled = new Set(variants.map((v) => v.entry.id));
         for (const m of members) {
@@ -430,12 +548,38 @@ export function DocumentIngestionDialog({
           clauses += 1;
           patch(entry.id, { status: "done", message: "Enviado pro acervo" });
         } else {
-          const templateId = await sendTemplate(entry);
+          // Slot no arquivo AVULSO: só quando o operador confirmou no card. A
+          // ordem é a mesma da consolidação (cláusula primeiro, template
+          // depois) e pela mesma razão — falha aqui não deixa um modelo com
+          // slot apontando pro vazio, e o retry não esbarra no 409 de duplicata.
+          const offer = entry.openSlot ? slotOffers.get(entry.id) : undefined;
+          if (offer) {
+            await sendSlotClauses({
+              sourceName: entry.file.name.replace(/\.docx$/i, ""),
+              variants: [
+                {
+                  value: offer.garantia,
+                  provider:
+                    (entry.slotProvider ?? offer.provider ?? "").trim() || undefined,
+                  content: offer.candidate.paragraphs.join("\n\n"),
+                },
+              ],
+            });
+            clauses += 1;
+          }
+          const created = await sendTemplate(
+            entry,
+            offer ? { slotBlocks: { garantia: offer.candidate.paragraphs } } : undefined
+          );
           templates += 1;
           patch(entry.id, {
             status: "done",
-            templateId: templateId ?? undefined,
-            message: "Modelo criado — revise antes de ativar",
+            templateId: created.templateId ?? undefined,
+            message:
+              created.slotFailure ??
+              (offer
+                ? "Modelo criado com espaço de garantia · 1 cláusula no acervo — revise antes de ativar"
+                : "Modelo criado — revise antes de ativar"),
           });
         }
       } catch (err) {
@@ -526,9 +670,10 @@ export function DocumentIngestionDialog({
             </ol>
             <p className="rounded-lg border border-violet-300 bg-violet-50/50 px-3 py-2 text-xs leading-snug dark:border-violet-900 dark:bg-violet-950/20">
               Pode enviar vários arquivos repetidos — o mesmo contrato com
-              fiador, com caução, um por seguradora. É esperado: nós juntamos os
-              parecidos e mostramos o que muda entre eles antes de criar
-              qualquer coisa.
+              fiador, com caução, um por seguradora. É esperado: cada garantia
+              vira um modelo próprio (são contratos diferentes) e as versões que
+              só mudam de fornecedor viram um modelo só, com a cláusula da
+              seguradora escolhida pelo formulário.
             </p>
             <div className="space-y-1.5">
               <Label>Arquivos (DOCX ou PDF, até 20MB cada)</Label>
@@ -598,6 +743,7 @@ export function DocumentIngestionDialog({
                     <FileCard
                       entry={entry}
                       docTypes={docTypes}
+                      slotOffer={slotOffers.get(entry.id)}
                       disabled={busy}
                       onChange={(next) => patch(entry.id, next)}
                     />
@@ -671,11 +817,14 @@ export function DocumentIngestionDialog({
 function FileCard({
   entry,
   docTypes,
+  slotOffer,
   disabled,
   onChange,
 }: {
   entry: Entry;
   docTypes: IngestDocTypeDef[];
+  /** Bloco de garantia que este arquivo pode transformar em slot (se houver). */
+  slotOffer?: SlotOffer;
   disabled: boolean;
   onChange: (next: Partial<Entry>) => void;
 }) {
@@ -761,6 +910,9 @@ function FileCard({
                   docType: next,
                   subOption: nextDef?.subOptions[0]?.value ?? null,
                   criteria: {},
+                  // Outro tipo, outro bloco candidato (ou nenhum): a confirmação
+                  // de abrir o slot valia pro que estava escolhido antes.
+                  openSlot: false,
                 });
               }}
             >
@@ -826,6 +978,59 @@ function FileCard({
             </div>
           )}
 
+          {slotOffer && (
+            <div className="rounded-md border border-violet-300 bg-violet-50/50 p-2.5 dark:border-violet-900 dark:bg-violet-950/20">
+              <p className="text-xs font-medium">
+                Transformar a cláusula de{" "}
+                {GARANTIA_LABELS[slotOffer.garantia].toLowerCase()} num espaço
+                reutilizável?
+              </p>
+              <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+                O trecho abaixo sai do modelo e vai para o acervo como a cláusula
+                de {GARANTIA_LABELS[slotOffer.garantia].toLowerCase()}. No lugar
+                dele fica um espaço que recebe a cláusula do fornecedor escolhido
+                no formulário — é assim que trocar de seguradora deixa de exigir
+                um modelo novo.
+              </p>
+              <p className="mt-1.5 rounded bg-background px-2 py-1.5 text-[11px] leading-snug">
+                {slotOffer.candidate.paragraphs.join(" ").slice(0, 240)}
+                {slotOffer.candidate.paragraphs.join(" ").length > 240 ? "…" : ""}
+              </p>
+              {slotOffer.candidate.skipped.length > 0 && (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {slotOffer.candidate.skipped.length} trecho(s) vizinho(s)
+                  continuam no modelo — são curtos demais ou se repetem no
+                  documento, e trocá-los mexeria no lugar errado.
+                </p>
+              )}
+              <label className="mt-1.5 flex items-start gap-1.5 text-[11px]">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={entry.openSlot === true}
+                  disabled={disabled}
+                  onChange={(e) => onChange({ openSlot: e.target.checked })}
+                />
+                <span>
+                  Sim, abrir o espaço de garantia neste modelo. Sem marcar, o
+                  modelo fica com esta cláusula fixa, como hoje.
+                </span>
+              </label>
+              {entry.openSlot && (
+                <div className="mt-1.5 flex items-center gap-2">
+                  <Label className="text-[11px]">Fornecedor desta redação</Label>
+                  <Input
+                    className="h-7 flex-1 text-xs"
+                    placeholder="Ex.: Porto Seguro (vazio = vale para qualquer um)"
+                    value={entry.slotProvider ?? slotOffer.provider ?? ""}
+                    disabled={disabled}
+                    onChange={(e) => onChange({ slotProvider: e.target.value })}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
           {def && def.subOptions.length > 0 && (
             <p className="text-[11px] text-muted-foreground">
               Vai virar um modelo de{" "}
@@ -881,6 +1086,12 @@ function GroupCard({
   );
   const otherRows = group.matrix.filter(
     (r) => r.anchorIndex !== group.primary?.anchorIndex
+  );
+  const collisions = collidingVariantValues(
+    members.map((m) => ({
+      value: decision.values[m.id],
+      provider: decision.providers[m.id],
+    }))
   );
 
   return (
@@ -1022,10 +1233,37 @@ function GroupCard({
                       </option>
                     ))}
                   </select>
+                  <Input
+                    className="h-7 flex-1 text-xs"
+                    aria-label="Fornecedor desta versão"
+                    placeholder="Fornecedor (ex.: Porto Seguro)"
+                    value={decision.providers[m.id] ?? ""}
+                    disabled={disabled || blocks.length === 0}
+                    onChange={(e) =>
+                      onChange({
+                        providers: { ...decision.providers, [m.id]: e.target.value },
+                      })
+                    }
+                  />
                 </div>
               </div>
             );
           })}
+
+          {collisions.length > 0 && (
+            // O servidor recusa o lote inteiro (422) quando duas versões da
+            // mesma garantia não têm garantidor que as separe — elas seriam a
+            // MESMA cláusula do acervo. Avisar aqui evita a viagem perdida.
+            <p className="rounded-md bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+              Duas versões estão marcadas como{" "}
+              {collisions
+                .map((v) => GARANTIA_LABELS[v as GarantiaTipo] ?? v)
+                .join(", ")}{" "}
+              com o mesmo fornecedor. Informe o fornecedor de cada uma (é ele que
+              separa a redação de cada seguradora no acervo) — sem isso o grupo
+              não é criado.
+            </p>
+          )}
 
           {otherRows.length > 0 && (
             <p className="text-[11px] text-muted-foreground">

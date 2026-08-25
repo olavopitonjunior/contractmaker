@@ -36,13 +36,15 @@ const MODALIDADES: Array<{ value: string; label: string }> = [
   { value: "fiador", label: "Fiador" },
   { value: "titulo_capitalizacao", label: "Título de capitalização" },
   { value: "caucao", label: "Caução" },
-  { value: "garantia_digital", label: "Garantia digital (CredPago/Garantti)" },
+  { value: "garantia_onerosa", label: "Garantia onerosa" },
   { value: "cessao_fiduciaria", label: "Cessão fiduciária" },
 ];
 
 const PROVIDERS_FIANCA = ["Porto Seguro", "Tokio Marine", "Pottencial", "Too Seguros"];
 const PROVIDERS_CAP = ["PortoCap", "Icatu"];
-const PROVIDERS_DIGITAL = ["credpago", "garantti", "creditas"];
+// Fornecedores de garantia onerosa. Variam por imobiliária — a lista é só um
+// atalho; "Outro" mantém o campo livre.
+const PROVIDERS_ONEROSA = ["Almada", "Loft", "CredAluga", "CredPago", "Garantti"];
 
 function fmtBRL(v: number): string {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -149,8 +151,8 @@ export function ContratarGarantiaDialog({ leaseContractId, valorAluguel, substit
                 }
               : undefined,
         });
-      case "garantia_digital":
-        if (providerFinal.length < 2) return fail("Informe o provedor.");
+      case "garantia_onerosa":
+        if (providerFinal.length < 2) return fail("Informe o fornecedor.");
         return wrap({
           ...base,
           provider: providerFinal,
@@ -439,10 +441,10 @@ export function ContratarGarantiaDialog({ leaseContractId, valorAluguel, substit
             </div>
           )}
 
-          {tipo === "garantia_digital" && (
+          {tipo === "garantia_onerosa" && (
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
-                <ProviderSelect options={PROVIDERS_DIGITAL} />
+                <ProviderSelect options={PROVIDERS_ONEROSA} />
               </div>
               <div className="space-y-1">
                 <Label>Taxa mensal (R$)</Label>

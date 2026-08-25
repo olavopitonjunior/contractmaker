@@ -124,6 +124,10 @@
     {
       "path": "/api/cron/asaas/transfer-dispatch",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/ingestion/advance",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

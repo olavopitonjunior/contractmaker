@@ -279,6 +279,7 @@ model Organization {
   userNotificationPrefs      UserNotificationPreference[]
   userNotificationDeliveries UserNotificationDelivery[]
   templates           ContractTemplate[]
+  ingestionRuns       IngestionRun[]
   clauses             Clause[]
   agentConfig         AgentConfig?
   agentProfiles       AgentProfile[]
@@ -1454,6 +1455,85 @@ model ContractTemplate {
   proposals   Proposal[]
 
   @@index([orgId, sourceHash])
+}
+
+// ============================================
+// INGESTION PIPELINE (acervo da imobiliária → biblioteca)
+// ============================================
+
+// Um lote de ingestão: a imobiliária joga o acervo inteiro de uma vez e o
+// pipeline server-side o transforma em biblioteca (templates + cláusulas).
+//
+// Por que existe uma TABELA e não só memória: a orquestração antiga vivia no
+// `DocumentIngestionDialog` (client-side), então fechar a aba no meio de 60
+// arquivos perdia tudo. O run é o ponto de retomada — cada invocação de
+// `/advance` processa uma FATIA e o cron varre o que travou.
+model IngestionRun {
+  id      String @id @default(cuid())
+  orgId   String
+  createdBy String?
+  // "central" (Central de ingestão) | "onboarding" (provisionamento do tenant)
+  trigger String @default("central")
+  // queued|extracting|classifying|grouping|planning|awaiting_review|executing|
+  // done|failed|cancelled — transições em lib/ingestion/run-state.ts
+  status  String @default("queued")
+
+  itemsTotal Int @default(0)
+  itemsDone  Int @default(0)
+
+  // Decisão de conjunto (Fase A2, LLM): o que a biblioteca deve virar.
+  libraryPlan  Json?
+  // O mesmo plano depois da revisão humana — o que o executor de fato aplica.
+  planReviewed Json?
+  // Relatório do run. Na Fase A1 carrega `{ grouping: … }`, o resultado
+  // determinístico do agrupamento por família fina.
+  report       Json?
+  aiCostUsd    Decimal? @db.Decimal(12, 6)
+  error        String?
+
+  // CLAIM do run, no padrão de `FormAttachment.extractingStartedAt`: uma
+  // invocação só assume o run se `startedAt` está null (livre) ou velho demais
+  // (worker morreu). O teste da disponibilidade vai no `where` do updateMany —
+  // é isso que torna o claim atômico entre duas invocações concorrentes.
+  startedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  org   Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  items IngestionItem[]
+
+  @@index([orgId, status])
+  @@index([status, updatedAt])
+}
+
+// Um arquivo do lote. `blobUrl` porque o upload é client-direct pro Vercel Blob
+// (o corpo de função serverless para em ~4.5MB) — o executor baixa de lá.
+model IngestionItem {
+  id       String @id @default(cuid())
+  runId    String
+  filename String
+  // "docx" | "pdf" — do sniff de magic header, não do content-type do browser.
+  fileKind String
+  blobUrl  String
+  // SHA-256 do arquivo, mesma identidade de `ContractTemplate.sourceHash`.
+  sourceHash String
+  // pending|extracted|classified|planned|executed|discarded|error
+  status   String @default("pending")
+
+  // Texto extraído (DOCX via mammoth, PDF via OCR), cortado em 200k chars —
+  // mesmo teto de `ingest/analyze`.
+  text           String? @db.Text
+  classification Json?
+  piiReport      Json?
+  error          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  run IngestionRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, status])
 }
 
 // ============================================

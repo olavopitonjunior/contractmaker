@@ -68,8 +68,8 @@ Analise o documento anexo (contrato de locação ou proposta) e extraia os dados
     "condominio_mensal": 0
   },
   "garantia": {
-    "tipo": "fiador" | "caucao" | "seguro_fianca" | "garantia_digital" | "titulo_capitalizacao" | "propria" | "sem_garantia",
-    "provider": "...",            // seguradora/subscritora quando houver
+    "tipo": "fiador" | "caucao" | "seguro_fianca" | "garantia_onerosa" | "titulo_capitalizacao" | "propria" | "sem_garantia",
+    "provider": "...",            // seguradora/subscritora/fornecedor quando houver
     "cobertura_meses": 0,
     "caucao_meses": 0,            // nº de aluguéis caucionados
     "titulo_valor": 0,            // título de capitalização: valor nominal
@@ -91,6 +91,7 @@ Regras:
 - Parte PJ: use "razao_social" + "cnpj" (não "nome"+"cpf") e preencha "representante" quando o contrato nomear quem assina pela empresa.
 - Se houver múltiplos locadores/locatários, retorne array com TODOS. "imovel" é UM objeto (o imóvel locado), não array.
 - "garantia.fiador": preencher apenas quando tipo = "fiador" e o contrato qualificar o fiador.
+- "garantia_onerosa": modalidade PAGA prestada por um fornecedor de garantia locatícia (garantia onerosa, fiança digital, carta de fiança). O nome do fornecedor vai em "provider" — ele nunca define a modalidade.
 - "vigencia_meses": calcular pela vigência declarada (ex: "30 meses", ou início/fim explícitos).
 - "dia_vencimento": dia do mês do pagamento do aluguel (1-28).
 - "encargos"/"iptu_mensal"/"condominio_mensal": só quando o contrato disser que são pagos junto com o aluguel/no mesmo boleto.

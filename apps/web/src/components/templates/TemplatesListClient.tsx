@@ -116,14 +116,26 @@ export function TemplatesListClient({
     }
   }
 
-  async function restoreTemplate(id: string) {
+  async function restoreTemplate(id: string, forceActivate = false) {
     setBusyId(id);
     try {
       const res = await fetch(`/api/templates/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "active" }),
+        body: JSON.stringify({ status: "active", ...(forceActivate ? { forceActivate } : {}) }),
       });
+      const data = await res.json().catch(() => ({}));
+      // O modelo tem espaço de cláusula e o acervo ainda não tem cláusula
+      // aprovada pra ele: reativar assim faria o contrato sair com o texto
+      // padrão da plataforma no lugar da redação da imobiliária. A trava é do
+      // servidor; aqui damos a saída consciente.
+      if (res.status === 409 && data?.code === "SLOT_CLAUSE_MISSING") {
+        setBusyId(null);
+        if (confirm(`${data.error}\n\nAtivar mesmo assim?`)) {
+          await restoreTemplate(id, true);
+        }
+        return;
+      }
       if (!res.ok) {
         toast.error("Falha ao restaurar");
         return;

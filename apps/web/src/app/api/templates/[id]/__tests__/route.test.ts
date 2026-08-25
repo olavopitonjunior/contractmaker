@@ -166,6 +166,108 @@ describe("PATCH /api/templates/[id]", () => {
   });
 });
 
+/**
+ * Ativar um modelo com espaço de cláusula sem cláusula aprovada no acervo é a
+ * falha SILENCIOSA deste fluxo: o contrato sai com o texto canônico da
+ * plataforma no lugar da redação da imobiliária, e o documento fica plausível.
+ * A trava mora no servidor porque é por aqui que passam TODOS os caminhos de
+ * ativação (a tela de revisão e a listagem).
+ */
+describe("PATCH /api/templates/[id] — trava da ativação com slot", () => {
+  const COM_SLOT = {
+    ...TEMPLATE,
+    status: "draft",
+    modalidade: "locacao",
+    category: null,
+    matchCriteria: { garantia: "seguro_fianca" },
+    handlebarsSource:
+      "<!-- engine=google_docs -->\n<!-- slots: {{slot_garantia}} -->",
+  };
+
+  beforeEach(() => {
+    p.contractTemplate.findFirst = findFirstHonoringWhere(COM_SLOT);
+    p.knowledgeItem.findMany = vi.fn().mockResolvedValue([]);
+  });
+
+  it("409 quando o acervo não tem cláusula aprovada pro slot", async () => {
+    const res = await PATCH(req({ status: "active" }), { params: { id: "t1" } });
+
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.code).toBe("SLOT_CLAUSE_MISSING");
+    expect(body.error).toContain("texto padrão da plataforma");
+    expect(body.gaps[0].slot).toBe("garantia");
+    expect(p.contractTemplate.update).not.toHaveBeenCalled();
+  });
+
+  it("procura a cláusula NO ACERVO DA ORG e pela garantia do modelo", async () => {
+    await PATCH(req({ status: "active" }), { params: { id: "t1" } });
+
+    const where = p.knowledgeItem.findMany.mock.calls[0][0].where;
+    expect(where.orgId).toBe("org-1");
+    expect(where.status).toBe("approved");
+    expect(where.parentId).toBeNull();
+    expect(where.tags.hasEvery).toEqual([
+      "slot:garantia",
+      "garantia:seguro_fianca",
+    ]);
+  });
+
+  it("ativa quando existe cláusula aprovada do tenant", async () => {
+    p.knowledgeItem.findMany = vi.fn().mockResolvedValue([{ id: "kb-1" }]);
+
+    const res = await PATCH(req({ status: "active" }), { params: { id: "t1" } });
+
+    expect(res.status).toBe(200);
+    expect(p.contractTemplate.update.mock.calls[0][0].data.status).toBe("active");
+  });
+
+  it("`forceActivate` é a saída consciente — o texto padrão é legítimo", async () => {
+    const res = await PATCH(req({ status: "active", forceActivate: true }), {
+      params: { id: "t1" },
+    });
+
+    expect(res.status).toBe(200);
+    expect(p.knowledgeItem.findMany).not.toHaveBeenCalled();
+    expect(p.contractTemplate.update.mock.calls[0][0].data.status).toBe("active");
+  });
+
+  it("modelo SEM slot ativa sem consultar o acervo", async () => {
+    p.contractTemplate.findFirst = findFirstHonoringWhere({
+      ...COM_SLOT,
+      handlebarsSource: "<p>modelo comum</p>",
+    });
+
+    const res = await PATCH(req({ status: "active" }), { params: { id: "t1" } });
+
+    expect(res.status).toBe(200);
+    expect(p.knowledgeItem.findMany).not.toHaveBeenCalled();
+  });
+
+  it("PATCH que não ativa (renomear, arquivar) não passa pela trava", async () => {
+    const renomeia = await PATCH(req({ name: "Outro nome" }), { params: { id: "t1" } });
+    expect(renomeia.status).toBe(200);
+
+    const arquiva = await PATCH(req({ status: "archived" }), { params: { id: "t1" } });
+    expect(arquiva.status).toBe(200);
+    expect(p.knowledgeItem.findMany).not.toHaveBeenCalled();
+  });
+
+  it("modelo JÁ ativo não é retravado por um PATCH qualquer", async () => {
+    p.contractTemplate.findFirst = findFirstHonoringWhere({
+      ...COM_SLOT,
+      status: "active",
+    });
+
+    const res = await PATCH(req({ status: "active", isDefault: true }), {
+      params: { id: "t1" },
+    });
+
+    expect(res.status).toBe(200);
+    expect(p.knowledgeItem.findMany).not.toHaveBeenCalled();
+  });
+});
+
 describe("DELETE /api/templates/[id]", () => {
   it("404 cross-org sem apagar nem arquivar", async () => {
     mockGetUserOrg.mockResolvedValue({ ...createMockOrg(), id: "org-2" } as never);
