@@ -221,6 +221,19 @@ function rawPlan(sourceItemId = "item-0") {
   };
 }
 
+/**
+ * Uma falha da API com a MESMA forma que o SDK 0.30 entrega — `status`,
+ * `error.error.type` e `request_id`. É por esses campos que o executor decide
+ * entre fallback e parada, então o duplo tem de carregá-los.
+ */
+function apiError(status: number, errorType: string, message: string): Error {
+  const err = new Error(message) as Error & Record<string, unknown>;
+  err.status = status;
+  err.request_id = "req_teste";
+  err.error = { type: "error", error: { type: errorType, message } };
+  return err;
+}
+
 function structuredResult(model: string, data: unknown) {
   return {
     data,
@@ -600,10 +613,12 @@ describe("advanceRun — classificador por LLM", () => {
     expect(items.every((i) => i.status === "classified")).toBe(true);
   });
 
-  it("falha da chamada de classificação não perde o item — vira determinístico", async () => {
+  it("falha TRANSITÓRIA da chamada de classificação não perde o item — vira determinístico", async () => {
     seed(2);
     runStructuredMock.mockImplementation(async (input: StructuredCallInput) => {
-      if (input.model === INGEST_CLASSIFY_MODEL) throw new Error("429 rate limit");
+      if (input.model === INGEST_CLASSIFY_MODEL) {
+        throw apiError(429, "rate_limit_error", "429 rate limit");
+      }
       return structuredResult(input.model, rawPlan());
     });
 
@@ -614,6 +629,121 @@ describe("advanceRun — classificador por LLM", () => {
       expect(item.status).toBe("classified");
       expect((item.classification as ItemClassification).via).toBe("deterministic");
     }
+  });
+
+  it("erro de rede continua caindo no fallback", async () => {
+    seed(2);
+    runStructuredMock.mockImplementation(async (input: StructuredCallInput) => {
+      if (input.model === INGEST_CLASSIFY_MODEL) throw new Error("fetch failed");
+      return structuredResult(input.model, rawPlan());
+    });
+
+    const result = await drain();
+
+    expect(result.status).toBe("awaiting_review");
+    for (const item of items) {
+      expect((item.classification as ItemClassification).via).toBe("deterministic");
+    }
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// O bug que o fallback escondeu no primeiro run em staging: um 400 de schema
+// inválido classificou os 11 itens como `deterministic` e ninguém percebeu.
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("advanceRun — erro PERMANENTE da API não vira fallback silencioso", () => {
+  const SCHEMA_400 =
+    "output_config.format.schema: Invalid schema: Enum value 'fiador' does not " +
+    "match declared type '['string', 'null']'";
+
+  it("o 400 da classificação derruba o run em vez de degradar", async () => {
+    seed(2);
+    runStructuredMock.mockImplementation(async (input: StructuredCallInput) => {
+      if (input.model === INGEST_CLASSIFY_MODEL) {
+        throw apiError(400, "invalid_request_error", SCHEMA_400);
+      }
+      return structuredResult(input.model, rawPlan());
+    });
+
+    const result = await drain();
+
+    expect(result.status).toBe("failed");
+    expect(runs[0].status).toBe("failed");
+    // Nenhum item foi carimbado como classificado por heurística.
+    expect(
+      items.filter(
+        (i) => (i.classification as ItemClassification | null)?.via === "deterministic"
+      )
+    ).toHaveLength(0);
+    expect(runs[0].libraryPlan).toBeNull();
+    // O operador precisa ler o que a API disse, com o rastro para depurar.
+    expect(runs[0].error).toContain("status=400");
+    expect(runs[0].error).toContain("invalid_request_error");
+    expect(runs[0].error).toContain("request_id=req_teste");
+    // Parada controlada: o claim é liberado.
+    expect(runs[0].startedAt).toBeNull();
+  });
+
+  it("401 de chave errada também para o lote", async () => {
+    seed(2);
+    runStructuredMock.mockImplementation(async () => {
+      throw apiError(401, "authentication_error", "invalid x-api-key");
+    });
+
+    const result = await drain();
+
+    expect(result.status).toBe("failed");
+    expect(runs[0].error).toContain("status=401");
+  });
+
+  it("o 400 do planner falha o run com o diagnóstico completo", async () => {
+    seed(2);
+    runStructuredMock.mockImplementation(async (input: StructuredCallInput) => {
+      if (input.model === INGEST_CLASSIFY_MODEL) {
+        return structuredResult(INGEST_CLASSIFY_MODEL, RAW_CLASSIFICATION);
+      }
+      throw apiError(400, "invalid_request_error", SCHEMA_400);
+    });
+
+    const result = await drain();
+
+    expect(result.status).toBe("failed");
+    expect(runs[0].libraryPlan).toBeNull();
+    expect(runs[0].error).toContain("recusado pela API");
+    expect(runs[0].error).toContain("request_id=req_teste");
+    // O que já foi classificado por LLM continua no lugar — o run é retomável.
+    expect(items.every((i) => i.status === "classified")).toBe(true);
+  });
+
+  it("o teto de custo segue relançado, e não é confundido com erro da API", async () => {
+    seed(2);
+    const classifier = {
+      name: "llm",
+      classify: vi.fn(async () => {
+        throw new IngestionCostCapError(5.4321, 5);
+      }),
+    };
+
+    const result = await drain({ classifier });
+
+    expect(result.status).toBe("failed");
+    expect(runs[0].error).toContain("teto de custo de IA deste lote");
+    // A mensagem do teto chega inteira, sem o embrulho de "recusado pela API".
+    expect(runs[0].error).not.toContain("recusado pela API");
+  });
+
+  it("o teto de custo no planner também segue relançado sem embrulho", async () => {
+    seed(2);
+    const planner: LibraryPlanner = vi.fn(async () => {
+      throw new IngestionCostCapError(5.4321, 5);
+    });
+
+    const result = await drain({ planner });
+
+    expect(result.status).toBe("failed");
+    expect(runs[0].error).toContain("teto de custo de IA deste lote");
+    expect(runs[0].error).not.toContain("recusado pela API");
   });
 });
 

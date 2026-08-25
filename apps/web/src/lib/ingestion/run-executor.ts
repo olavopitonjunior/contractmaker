@@ -37,6 +37,10 @@
  * diferença é deliberada: a classificação cai no determinístico e o lote segue
  * (ver {@link canUseLlm}); o plano não tem substituto determinístico e o run
  * para com o motivo escrito (ver `defaultPlanner`).
+ *
+ * A degradação da classificação vale só para falha TRANSITÓRIA (429, 5xx,
+ * timeout, rede). Erro PERMANENTE — 4xx de requisição inválida, que é sempre
+ * bug nosso — derruba o run: ver `classifyItem` e `runPlanner`.
  */
 
 import { prisma } from "@/lib/db/prisma";
@@ -53,6 +57,10 @@ import {
   type ItemClassifier,
 } from "@/lib/ingestion/classifier";
 import { createLlmItemClassifier } from "@/lib/ingestion/llm-classifier";
+import {
+  describeApiFailure,
+  formatApiFailure,
+} from "@/lib/ai/shared/api-failure";
 import {
   IngestionAiMeter,
   IngestionCostCapError,
@@ -568,12 +576,46 @@ async function classifyItem(
     // graça, no determinístico) esconderia do operador que o lote foi
     // interrompido por dinheiro. Sobe e para o run inteiro.
     if (err instanceof IngestionCostCapError) throw err;
-    // O resto pode falhar por rate limit do provedor ou por uma resposta
+
+    const failure = describeApiFailure(err);
+    if (failure.permanent) {
+      // Bug NOSSO (schema inválido, modelo inexistente, parâmetro proibido,
+      // chave errada). Sobe e derruba o run, em vez de cair no fallback.
+      //
+      // POR QUE FALHAR O RUN, e não "seguir com fallback + issue":
+      //
+      // 1. Um 4xx de requisição inválida atinge TODOS os itens igualmente — não
+      //    é um documento estranho, é a chamada. O fallback produziria um lote
+      //    inteiro classificado por heurística, que é exatamente o desfecho que
+      //    passou despercebido no primeiro run em staging.
+      // 2. Uma issue só apareceria no plano, e o plano é justamente o que pode
+      //    sair "aceito" por cima da classificação degradada — o carimbo de
+      //    sucesso apagaria o sintoma.
+      // 3. `failed` não perde nada: texto extraído e itens já classificados
+      //    ficam gravados, o run é retomável, e a coluna `error` (que o outer
+      //    catch preenche com esta mensagem) é o que o operador lê na Central.
+      //
+      // Transitório continua caindo no fallback, logo abaixo: é para isso que
+      // o fallback existe.
+      console.error(
+        `[ingestion] classificação de ${item.id} falhou por erro PERMANENTE da API:`,
+        formatApiFailure(failure)
+      );
+      throw new Error(
+        `A chamada de classificação foi recusada pela API (${formatApiFailure(failure)}). ` +
+          "É um defeito da requisição, não instabilidade: o lote parou em vez de " +
+          "cair no classificador determinístico e esconder o problema."
+      );
+    }
+
+    // Falha TRANSITÓRIA — rate limit, 5xx, timeout, rede, ou uma resposta
     // malformada. Não perder o item por isso: o palpite determinístico sozinho
     // já sustenta o agrupamento, e é ele que rodava antes do julgamento por
     // LLM entrar — degradar para ele é degradar para o comportamento conhecido.
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[ingestion] classificação de ${item.id} caiu no fallback:`, msg);
+    console.warn(
+      `[ingestion] classificação de ${item.id} caiu no fallback:`,
+      formatApiFailure(failure)
+    );
     const { classification, piiReport } = await deterministicItemClassifier.classify({
       filename: item.filename,
       text,
@@ -685,6 +727,40 @@ function toPlannerItems(items: readonly ItemRow[]): PlannerItem[] {
 }
 
 /**
+ * Chama o planner e faz a MESMA distinção de `classifyItem` entre erro nosso e
+ * instabilidade do provedor.
+ *
+ * A diferença é que aqui não existe fallback a suprimir: o plano não tem
+ * substituto determinístico e qualquer falha já derruba o run. O que faltava
+ * era DEPURABILIDADE — a mensagem da API sozinha não carrega `request_id` nem o
+ * tipo do erro, e foi por isso que o 400 do schema levou um run inteiro para
+ * ser entendido. Erro permanente vira `console.error` com o diagnóstico
+ * completo e uma mensagem que diz ao operador que o defeito é nosso.
+ */
+async function runPlanner(
+  planner: LibraryPlanner,
+  input: PlanLibraryInput,
+  meter: IngestionAiMeter
+): Promise<PlanLibraryResult> {
+  try {
+    return await planner(input, { meter });
+  } catch (err) {
+    if (err instanceof IngestionCostCapError) throw err;
+    const failure = describeApiFailure(err);
+    if (!failure.permanent) throw err;
+    console.error(
+      "[ingestion] o planner foi recusado por erro PERMANENTE da API:",
+      formatApiFailure(failure)
+    );
+    throw new Error(
+      `O plano da biblioteca foi recusado pela API (${formatApiFailure(failure)}). ` +
+        "É um defeito da requisição, não instabilidade — repetir o run não " +
+        "resolve. O lote parou com tudo que já foi lido e classificado no lugar."
+    );
+  }
+}
+
+/**
  * Roda o planner e grava o resultado.
  *
  * Grava o plano em `libraryPlan` mesmo quando os guardrails o RECUSARAM depois
@@ -713,9 +789,10 @@ async function persistPlan(args: {
     report = await persistReport(args.run.id, { ...report, grouping });
   }
 
-  const result = await args.planner(
+  const result = await runPlanner(
+    args.planner,
     { items: toPlannerItems(args.items), grouping },
-    { meter: args.meter }
+    args.meter
   );
 
   const planning: PlanningReport = {
