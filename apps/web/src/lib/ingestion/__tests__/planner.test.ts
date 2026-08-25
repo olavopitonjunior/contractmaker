@@ -5,12 +5,15 @@ import {
   MAX_DIGEST_CELL_CHARS,
   MAX_INDEXED_BLOCKS,
   MIN_PLAN_CONFIDENCE,
+  PLAN_LADDER_STEPS,
   analyzeBatch,
   buildBatchDigest,
   materializePlan,
   planLibrary,
   type BatchAnalysis,
   type PlanLibraryInput,
+  type PlanLibraryOptions,
+  type PlanLibraryResult,
   type PlannerItem,
 } from "@/lib/ingestion/planner";
 import {
@@ -225,6 +228,21 @@ function runner(...responses: unknown[]) {
   return { fn: fn as never, calls };
 }
 
+/**
+ * Roda a escada INTEIRA, uma invocação por degrau — o que o executor do run faz
+ * ao longo de várias fatias. `planLibrary` sozinho dá um degrau e volta.
+ */
+async function runLadder(
+  batch: PlanLibraryInput,
+  options: PlanLibraryOptions = {}
+): Promise<PlanLibraryResult> {
+  let result = await planLibrary(batch, options);
+  for (let i = 0; i < PLAN_LADDER_STEPS && result.nextLadder; i++) {
+    result = await planLibrary(batch, { ...options, ladder: result.nextLadder });
+  }
+  return result;
+}
+
 /** O plano que o corpus real deveria produzir. */
 function goodPlan(confidence = 0.88) {
   const providers: Array<[string, string]> = [
@@ -364,7 +382,7 @@ describe("planner — plano recusado", () => {
     const bad = goodPlan();
     bad.templates[0].sourceItemId = "item-que-nao-existe";
     const r = runner(bad);
-    const result = await planLibrary(input, { structured: r.fn });
+    const result = await runLadder(input, { structured: r.fn });
 
     expect(result.accepted).toBe(false);
     expect(result.attempts[0].violations.map((v) => v.kind)).toContain(
@@ -386,7 +404,7 @@ describe("planner — plano recusado", () => {
     const bad = goodPlan();
     bad.templates[0].slotBlocks = [{ slot: "garantia", blockRefs: ["B999"] }];
     const r = runner(bad);
-    const { plan, accepted } = await planLibrary(input, { structured: r.fn });
+    const { plan, accepted } = await runLadder(input, { structured: r.fn });
 
     expect(accepted).toBe(false);
     expect(plan.issues.some((i) => i.kind === "slot_not_applicable")).toBe(true);
@@ -450,24 +468,88 @@ describe("planner — plano recusado", () => {
     expect(plan.clauses[0].content).toContain("000.000.000-00");
   });
 
-  it("as violações voltam no prompt da tentativa seguinte", async () => {
+  it("duas cláusulas do mesmo garantidor: o acervo não as distingue", async () => {
+    // As tags são DERIVADAS aqui (slot + valor + provider), então o modelo não
+    // consegue errar o conjunto — mas consegue propor duas cláusulas que
+    // colidem nele, que é o 422 que a ingestão de cláusulas já recusa.
+    const bad = goodPlan();
+    bad.clauses[1].provider = "Porto Seguro";
+    const r = runner(bad);
+    const { plan, accepted } = await runLadder(input, { structured: r.fn });
+
+    expect(accepted).toBe(false);
+    const detalhes = plan.issues.map((i) => i.detail).join("\n");
+    expect(detalhes).toContain("mesmas etiquetas");
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// A escada em degraus
+//
+// O defeito que estes testes fecham: a escada inteira rodava dentro de UMA
+// invocação. Com 147s medidos por chamada contra os 300s de `maxDuration`, o
+// segundo degrau matava a função — e levava junto o motivo da recusa do
+// primeiro, que é informação de produto.
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("planner — um degrau por invocação", () => {
+  /** Um plano que os guardrails recusam: locação sem critério de garantia. */
+  function invalidPlan() {
     const bad = goodPlan();
     bad.templates[1].matchCriteria = {} as never;
-    const r = runner(bad);
-    await planLibrary(input, { structured: r.fn });
+    return bad;
+  }
 
-    expect(r.calls.length).toBeGreaterThan(1);
+  it("uma invocação faz UMA chamada, mesmo com o plano recusado", async () => {
+    const r = runner(invalidPlan());
+    const result = await planLibrary(input, { structured: r.fn });
+
+    expect(r.calls).toHaveLength(1);
+    expect(result.accepted).toBe(false);
+    // O degrau seguinte volta como estado, não como outra chamada.
+    expect(result.nextLadder?.stepIndex).toBe(1);
+    expect(result.attempts).toHaveLength(1);
+  });
+
+  it("o degrau recusado GRAVA as violações — é o insumo do degrau seguinte", async () => {
+    const r = runner(invalidPlan());
+    const primeiro = await planLibrary(input, { structured: r.fn });
+
+    const violacoes = primeiro.nextLadder!.attempts[0].violations;
+    expect(violacoes.map((v) => v.kind)).toContain("missing_garantia_criteria");
+
+    // A invocação seguinte monta o prompt com o que ficou gravado.
+    const segundo = await planLibrary(input, {
+      structured: r.fn,
+      ladder: primeiro.nextLadder!,
+    });
     expect(r.calls[1].userContent).toContain("O PLANO ANTERIOR FOI RECUSADO");
     expect(r.calls[1].userContent).toContain("missing_garantia_criteria");
+    expect(segundo.attempts).toHaveLength(2);
+  });
+
+  it("aceito no degrau 2: o plano volta pronto e a escada acaba", async () => {
+    const r = runner(invalidPlan(), goodPlan());
+    const primeiro = await planLibrary(input, { structured: r.fn });
+    const segundo = await planLibrary(input, {
+      structured: r.fn,
+      ladder: primeiro.nextLadder!,
+    });
+
+    expect(segundo.accepted).toBe(true);
+    expect(segundo.nextLadder).toBeNull();
+    expect(r.calls).toHaveLength(2);
+    expect(segundo.plan.templates).toHaveLength(3);
+    // O histórico atravessa as invocações inteiro.
+    expect(segundo.attempts.map((a) => a.ok)).toEqual([false, true]);
+    expect(segundo.attempts.map((a) => a.attempt)).toEqual([1, 2]);
   });
 
   it("inválido duas vezes sobe a PROFUNDIDADE antes de trocar de modelo", async () => {
     // Opus 4.8 e Opus 5 custam igual por token, então mais raciocínio no mesmo
     // modelo sai mais barato que outro modelo — e é mais previsível.
-    const bad = goodPlan();
-    bad.templates[1].matchCriteria = {} as never;
-    const r = runner(bad);
-    const result = await planLibrary(input, { structured: r.fn });
+    const r = runner(invalidPlan());
+    const result = await runLadder(input, { structured: r.fn });
 
     expect(r.calls.map((c) => `${c.model}/${c.effort}`)).toEqual([
       `${INGEST_PLAN_MODEL}/high`,
@@ -477,28 +559,40 @@ describe("planner — plano recusado", () => {
     ]);
     expect(result.escalated).toBe(true);
     expect(result.accepted).toBe(false);
-    expect(result.attempts).toHaveLength(4);
+    expect(result.attempts).toHaveLength(PLAN_LADDER_STEPS);
+    expect(result.nextLadder).toBeNull();
   });
 
-  it("duas cláusulas do mesmo garantidor: o acervo não as distingue", async () => {
-    // As tags são DERIVADAS aqui (slot + valor + provider), então o modelo não
-    // consegue errar o conjunto — mas consegue propor duas cláusulas que
-    // colidem nele, que é o 422 que a ingestão de cláusulas já recusa.
-    const bad = goodPlan();
-    bad.clauses[1].provider = "Porto Seguro";
-    const r = runner(bad);
-    const { plan, accepted } = await planLibrary(input, { structured: r.fn });
+  it("escada esgotada devolve as issues — todas as violações continuam no relatório", async () => {
+    const r = runner(invalidPlan());
+    const result = await runLadder(input, { structured: r.fn });
 
-    expect(accepted).toBe(false);
-    const detalhes = plan.issues.map((i) => i.detail).join("\n");
-    expect(detalhes).toContain("mesmas etiquetas");
+    // O plano final chega à revisão humana com o motivo da recusa…
+    expect(result.plan.issues.some((i) => i.kind === "plan_invalid")).toBe(true);
+    // …e o degrau 1 continua gravado com o que ele propôs de errado.
+    expect(result.attempts[0].violations.map((v) => v.kind)).toContain(
+      "missing_garantia_criteria"
+    );
+  });
+
+  it("o orçamento de degraus encerra a escada antes do fim dela", async () => {
+    // É o que sobra quando degraus anteriores morreram no timeout: o run não
+    // tem mais chamada para comprar, e o plano em mãos vai para a revisão em
+    // vez de virar `failed`.
+    const r = runner(invalidPlan());
+    const result = await planLibrary(input, { structured: r.fn, stepBudget: 1 });
+
+    expect(r.calls).toHaveLength(1);
+    expect(result.nextLadder).toBeNull();
+    expect(result.accepted).toBe(false);
+    expect(result.plan.issues.some((i) => i.kind === "plan_invalid")).toBe(true);
   });
 });
 
 describe("planner — escalação por confiança baixa", () => {
   it("plano válido com confiança baixa pula a repetição e vai direto ao xhigh", async () => {
     const r = runner(goodPlan(0.4), goodPlan(0.95));
-    const result = await planLibrary(input, { structured: r.fn });
+    const result = await runLadder(input, { structured: r.fn });
 
     // Sem violação a devolver, refazer a MESMA pergunta com a MESMA
     // profundidade não mudaria nada — o degrau do meio é pulado.
@@ -514,7 +608,7 @@ describe("planner — escalação por confiança baixa", () => {
 
   it("confiança baixa até no último degrau vira issue low_confidence", async () => {
     const r = runner(goodPlan(0.3));
-    const result = await planLibrary(input, { structured: r.fn });
+    const result = await runLadder(input, { structured: r.fn });
 
     expect(result.accepted).toBe(false);
     expect(r.calls.map((c) => `${c.model}/${c.effort}`)).toEqual([
@@ -686,7 +780,7 @@ describe("planner — a faixa de confidence agora é imposta no parse", () => {
   it("confidence ausente ou não numérica vira 0 e faz a escada escalar", async () => {
     const semNumero = { ...goodPlan(), confidence: "muito alta" };
     const r = runner(semNumero, goodPlan(0.95));
-    const result = await planLibrary(input, { structured: r.fn });
+    const result = await runLadder(input, { structured: r.fn });
 
     // 0 fica abaixo do piso: o lado seguro de errar quando o campo não veio.
     expect(result.attempts[0].confidence).toBe(0);
@@ -761,9 +855,9 @@ describe("planner — divergência de classificação e custo", () => {
     const r = runner(bad);
 
     await expect(
-      planLibrary(input, { structured: r.fn, meter })
+      runLadder(input, { structured: r.fn, meter })
     ).rejects.toBeInstanceOf(IngestionCostCapError);
-    // Uma chamada aconteceu (US$ 0,08 > teto); a seguinte foi barrada.
+    // Um degrau aconteceu (US$ 0,08 > teto); o seguinte foi barrado.
     expect(r.calls).toHaveLength(1);
   });
 });
@@ -888,7 +982,7 @@ describe("planner — o índice é repartido entre as famílias", () => {
     }
   });
 
-  it("truncar vira issue acervo_incompleto, com os números e as famílias", async () => {
+  it("truncar vira issue index_truncated, com os números e as famílias", async () => {
     const grande = syntheticBatch(
       Array.from({ length: 8 }, () => ({ docs: 3, paragraphs: 20 }))
     );
@@ -906,11 +1000,16 @@ describe("planner — o índice é repartido entre as famílias", () => {
     expect(result.indexBudget.dropped).toBe(8 * 3 * 20 - MAX_INDEXED_BLOCKS);
     expect(result.indexBudget.families).toHaveLength(8);
 
-    const issue = result.plan.issues.find((i) => i.kind === "acervo_incompleto");
+    // `index_truncated`, e não `acervo_incompleto`: a lacuna é do índice (o
+    // material veio e não coube), não do que a imobiliária mandou.
+    const issue = result.plan.issues.find((i) => i.kind === "index_truncated");
     expect(issue?.itemId).toBeNull();
     expect(issue?.detail).toContain(String(result.indexBudget.indexed));
     expect(issue?.detail).toContain(String(result.indexBudget.dropped));
     expect(issue?.detail).toContain("contrato_locacao:locacao:garantia_0");
+    expect(result.plan.issues.some((i) => i.kind === "acervo_incompleto")).toBe(
+      false
+    );
   });
 
   it("o digest avisa que o índice é amostra e os números batem com o indexado", () => {
@@ -971,6 +1070,6 @@ describe("planner — o lote que funciona hoje não muda", () => {
 
     expect(result.accepted).toBe(true);
     expect(result.indexBudget.truncated).toBe(false);
-    expect(result.plan.issues.some((i) => i.kind === "acervo_incompleto")).toBe(false);
+    expect(result.plan.issues.some((i) => i.kind === "index_truncated")).toBe(false);
   });
 });

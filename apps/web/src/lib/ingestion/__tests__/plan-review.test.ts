@@ -235,4 +235,16 @@ describe("rótulos das issues", () => {
     expect(ISSUE_KIND_LABELS.plan_invalid).not.toBe(ISSUE_KIND_LABELS.low_confidence);
     expect(ISSUE_KIND_LABELS.plan_invalid).toContain("Recusado");
   });
+
+  it("index_truncated é vermelho: muda o que a aprovação significa", () => {
+    // Aprovar sabendo que famílias inteiras foram planejadas sobre uma amostra
+    // é uma decisão; aprovar sem saber é um acidente. Bloqueia o olhar, não o
+    // botão — o operador continua podendo aprovar.
+    expect(isBlockingIssue("index_truncated")).toBe(true);
+    // Lacunas de lados opostos: a do índice e a do acervo não se confundem.
+    expect(ISSUE_KIND_LABELS.index_truncated).not.toBe(
+      ISSUE_KIND_LABELS.acervo_incompleto
+    );
+    expect(isBlockingIssue("acervo_incompleto")).toBe(false);
+  });
 });

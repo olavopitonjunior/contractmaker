@@ -26,15 +26,31 @@
  * ## Escalação
  *
  * Plano inválido duas vezes, ou confiança abaixo de {@link MIN_PLAN_CONFIDENCE},
- * sobe um degrau da escada (`ladder`, em `planLibrary`). A primeira escalação NÃO troca de
- * modelo: sobe o `effort` de `high` para `xhigh` no mesmo Opus 4.8. Opus 4.8 e
- * Opus 5 custam o mesmo por token, então mais profundidade sai mais barato que
- * outro modelo (menos tokens gerados do zero) e o comportamento continua
- * previsível. Só quando nem o `xhigh` resolve é que o Opus 5 entra.
+ * sobe um degrau da escada ({@link PLAN_LADDER_STEPS} degraus, ver `buildLadder`).
+ * A primeira escalação NÃO troca de modelo: sobe o `effort` de `high` para
+ * `xhigh` no mesmo Opus 4.8. Opus 4.8 e Opus 5 custam o mesmo por token, então
+ * mais profundidade sai mais barato que outro modelo (menos tokens gerados do
+ * zero) e o comportamento continua previsível. Só quando nem o `xhigh` resolve é
+ * que o Opus 5 entra.
  *
  * Persistindo, o run NÃO é executado: o plano volta com `accepted: false` e as
  * issues explicando, para a revisão humana decidir. Um plano recusado custa
  * revisão a mais; um plano consertado em silêncio custa uma biblioteca errada.
+ *
+ * ## UM degrau por invocação
+ *
+ * `planLibrary` faz UMA chamada e volta. A escada inteira NÃO cabe numa
+ * invocação: uma chamada medida em staging levou 147s (23.708 tokens de entrada,
+ * 11.602 de saída, US$ 0,44) contra os 300s de `maxDuration` da rota — duas já
+ * estouram. Rodando a escada em laço, foi exatamente o que aconteceu: a primeira
+ * chamada voltou e foi cobrada, os guardrails recusaram o plano, a segunda
+ * começou e a função morreu aos 301s, levando junto o motivo da recusa.
+ *
+ * Então o degrau vira a unidade de trabalho da FATIA do pipeline: o estado da
+ * escada ({@link PlanLadderState}) entra por `options.ladder`, o resultado
+ * devolve o próximo degrau em `nextLadder`, e quem persiste e re-encadeia é o
+ * executor do run — a mesma maquinaria (claim atômico, `hasMore`, sweeper) que
+ * já move os outros estágios.
  */
 
 import { GARANTIA_TIPOS } from "@/lib/contracts/template-category";
@@ -106,6 +122,29 @@ export interface PlanStep {
  */
 const DEPTH_STEP_INDEX = 2;
 
+/**
+ * A escada da escalação. Os dois primeiros degraus são o MESMO modelo e a mesma
+ * profundidade — o segundo existe só para devolver as violações e dar ao modelo
+ * a chance de corrigir. O terceiro sobe o `effort`; o quarto, o modelo. Ver
+ * {@link DEPTH_STEP_INDEX}.
+ */
+export function buildLadder(planModel: string, escalationModel: string): PlanStep[] {
+  return [
+    { model: planModel, effort: "high" },
+    { model: planModel, effort: "high" },
+    { model: planModel, effort: "xhigh" },
+    { model: escalationModel, effort: "xhigh" },
+  ];
+}
+
+/**
+ * Quantos degraus a escada tem. É o teto de chamadas PAGAS de um plano que
+ * corre sem intercorrência, e por isso o teto de degraus do run
+ * (`MAX_PLAN_STEPS`, em run-executor.ts) não pode ser menor — senão a escada
+ * seria truncada em silêncio antes de chegar ao último modelo.
+ */
+export const PLAN_LADDER_STEPS = buildLadder("", "").length;
+
 /** Teto por célula da matriz de divergência levada ao prompt. */
 export const MAX_DIGEST_CELL_CHARS = 600;
 
@@ -154,13 +193,6 @@ export interface PlanLibraryInput {
   grouping: GroupingReport;
 }
 
-export interface PlanLibraryOptions {
-  structured?: StructuredRunner;
-  meter?: IngestionAiMeter;
-  planModel?: string;
-  escalationModel?: string;
-}
-
 export interface PlanAttemptRecord {
   attempt: number;
   model: string;
@@ -172,14 +204,51 @@ export interface PlanAttemptRecord {
   durationMs: number;
 }
 
+/**
+ * Onde a escada parou — o que atravessa invocações.
+ *
+ * As VIOLAÇÕES do degrau anterior, que são o insumo do prompt seguinte, não têm
+ * campo próprio: elas são as do último registro de `attempts`. Um campo separado
+ * guardaria os mesmos bytes num segundo lugar, e o segundo lugar é onde a cópia
+ * envelhece.
+ */
+export interface PlanLadderState {
+  /** Degrau a executar nesta invocação. */
+  stepIndex: number;
+  /** Degraus que já rodaram e VOLTARAM, em ordem. */
+  attempts: PlanAttemptRecord[];
+}
+
+export interface PlanLibraryOptions {
+  structured?: StructuredRunner;
+  meter?: IngestionAiMeter;
+  planModel?: string;
+  escalationModel?: string;
+  /** Onde a escada parou. Ausente = primeiro degrau. */
+  ladder?: PlanLadderState;
+  /**
+   * Quantos degraus este run ainda pode PAGAR. Chegando em 1, o degrau desta
+   * invocação é tratado como último: o plano vai para a revisão humana com as
+   * issues em vez de pedir uma chamada que o run não tem mais como comprar.
+   */
+  stepBudget?: number;
+}
+
 export interface PlanLibraryResult {
   plan: LibraryPlan;
   /** Passou nos guardrails E na confiança mínima. */
   accepted: boolean;
+  /** Histórico CUMULATIVO: os degraus anteriores mais o desta invocação. */
   attempts: PlanAttemptRecord[];
   escalated: boolean;
   /** O planner viu o lote inteiro? Vai para o `report` do run. */
   indexBudget: IndexBudgetReport;
+  /**
+   * O próximo degrau, ou `null` quando a escada acabou (plano aceito, último
+   * degrau ou orçamento de degraus no fim). Não-nulo = o run continua em
+   * `planning` e a corrente reentra.
+   */
+  nextLadder: PlanLadderState | null;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -601,7 +670,7 @@ function indexBudgetNotice(budget: IndexBudgetReport): string[] {
     ),
     "",
     "Planeje com o que está aqui e NÃO conclua que um trecho não existe só porque ele " +
-      "não aparece: registre uma issue `acervo_incompleto` nomeando as famílias em que " +
+      "não aparece: registre uma issue `index_truncated` nomeando as famílias em que " +
       "você decidiu sem ver o material inteiro.",
     "",
   ];
@@ -710,6 +779,7 @@ const ISSUE_KINDS: PlanIssueKind[] = [
   "slot_not_applicable",
   "low_confidence",
   "grouping_ambiguous",
+  "index_truncated",
   "acervo_incompleto",
 ];
 
@@ -885,7 +955,7 @@ da referência. Uma referência de um item diferente do \`sourceItemId\` é erro
 
 O índice pode ser uma AMOSTRA do lote. Quando for, o digest avisa no topo e diz
 quais famílias ficaram parcialmente representadas — nesse caso, planeje com o
-que está no índice e registre \`acervo_incompleto\` nomeando essas famílias.
+que está no índice e registre \`index_truncated\` nomeando essas famílias.
 
 ## As duas regras de produto
 
@@ -908,6 +978,8 @@ que está no índice e registre \`acervo_incompleto\` nomeando essas famílias.
   garantidora fora do trecho que virou slot;
 - \`slot_not_applicable\`: o documento pede um espaço que a família não tem;
 - \`grouping_ambiguous\`: o agrupamento não conta uma história coerente;
+- \`index_truncated\`: você decidiu sobre uma família sem ver o material inteiro,
+  porque o índice de blocos veio truncado (o digest avisa quando isso acontece);
 - \`acervo_incompleto\`: falta no lote um modelo que a imobiliária claramente usa
   (por exemplo, há cláusulas de quatro seguradoras mas nenhum contrato de fiador);
 - \`pii_leftover\`, \`low_confidence\`: quando couber.
@@ -1173,9 +1245,10 @@ export function classificationConflictIssues(
  * chega à revisão humana com famílias sub-representadas sem que nada indique
  * isso. Com 11 documentos não aparece; com 50, aparece calado.
  *
- * O kind é `acervo_incompleto` porque é o que existe hoje mais perto de "o
- * planner decidiu sem ver parte do material" — o detail deixa explícito que a
- * lacuna é do ÍNDICE, não do que a imobiliária mandou.
+ * O kind é `index_truncated`, e não `acervo_incompleto`: a lacuna é do ÍNDICE
+ * (o material veio e não coube), não do que a imobiliária mandou. As duas pedem
+ * reações opostas do operador — mandar mais documentos não conserta um índice
+ * cheio.
  */
 export function indexTruncationIssues(budget: IndexBudgetReport): PlanIssue[] {
   if (!budget.truncated) return [];
@@ -1185,7 +1258,7 @@ export function indexTruncationIssues(budget: IndexBudgetReport): PlanIssue[] {
   return [
     {
       itemId: null,
-      kind: "acervo_incompleto",
+      kind: "index_truncated",
       detail:
         `O lote é maior que o índice de parágrafos que cabe num plano: ${budget.indexed} ` +
         `parágrafos foram levados ao planner e ${budget.dropped} ficaram de fora (teto de ` +
@@ -1298,7 +1371,12 @@ function guardItems(items: readonly PlannerItem[]): PlanGuardItem[] {
 }
 
 /**
- * Roda o planner e devolve o plano com o veredicto dos guardrails.
+ * Roda UM degrau da escada e devolve o plano com o veredicto dos guardrails.
+ *
+ * Uma chamada de modelo por invocação — ver "UM degrau por invocação" no
+ * cabeçalho do módulo. Quando o degrau não resolve e ainda há para onde subir, o
+ * resultado volta com `accepted: false` e `nextLadder` preenchido; quem grava o
+ * estado e chama de novo é o executor do run.
  *
  * Nunca escreve no banco: o run é quem persiste `libraryPlan`. Nunca "conserta"
  * um plano recusado.
@@ -1308,21 +1386,20 @@ export async function planLibrary(
   options: PlanLibraryOptions = {}
 ): Promise<PlanLibraryResult> {
   const call = options.structured ?? runStructured;
-  const planModel = options.planModel ?? INGEST_PLAN_MODEL;
-  const escalationModel = options.escalationModel ?? INGEST_ESCALATION_MODEL;
+  const ladder = buildLadder(
+    options.planModel ?? INGEST_PLAN_MODEL,
+    options.escalationModel ?? INGEST_ESCALATION_MODEL
+  );
 
-  /**
-   * A escada da escalação. Os dois primeiros degraus são o MESMO modelo e a
-   * mesma profundidade — o segundo existe só para devolver as violações e dar
-   * ao modelo a chance de corrigir. O terceiro sobe o `effort`; o quarto, o
-   * modelo. Ver {@link DEPTH_STEP_INDEX}.
-   */
-  const ladder: PlanStep[] = [
-    { model: planModel, effort: "high" },
-    { model: planModel, effort: "high" },
-    { model: planModel, effort: "xhigh" },
-    { model: escalationModel, effort: "xhigh" },
-  ];
+  const stepIndex = Math.min(
+    Math.max(options.ladder?.stepIndex ?? 0, 0),
+    ladder.length - 1
+  );
+  const attempts = [...(options.ladder?.attempts ?? [])];
+  const feedback = attempts[attempts.length - 1]?.violations ?? [];
+  const stepBudget = options.stepBudget ?? ladder.length;
+  /** Não há degrau seguinte: nem na escada, nem no orçamento do run. */
+  const lastStep = stepIndex >= ladder.length - 1 || stepBudget <= 1;
 
   const analysis = analyzeBatch(input);
   const index = analysis.index;
@@ -1340,115 +1417,101 @@ export async function planLibrary(
     { text: playbooks.map((p) => p.prompt).join("\n\n"), cache: true },
   ];
 
-  const attempts: PlanAttemptRecord[] = [];
-  let stepIndex = 0;
-  let feedback: PlanViolation[] = [];
-  let last: { plan: LibraryPlan; violations: PlanViolation[] } | null = null;
+  options.meter?.assertWithinCap();
+  const step = ladder[stepIndex];
 
-  for (let attempt = 1; attempt <= ladder.length; attempt++) {
-    options.meter?.assertWithinCap();
-    const step = ladder[stepIndex];
+  const result = await call<RawPlan>({
+    model: step.model,
+    system,
+    userContent: `${digest}${feedbackBlock(feedback)}`,
+    schema: PLAN_SCHEMA,
+    maxTokens: 16_000,
+    effort: step.effort,
+    // 16.000 tokens de saída com `effort` alto é minutos de geração. Sem
+    // streaming a requisição fica muda até a resposta inteira ficar pronta, e
+    // foi assim que esta chamada morreu no `maxDuration` da função em staging.
+    stream: true,
+  });
 
-    const result = await call<RawPlan>({
-      model: step.model,
-      system,
-      userContent: `${digest}${feedbackBlock(feedback)}`,
-      schema: PLAN_SCHEMA,
-      maxTokens: 16_000,
-      effort: step.effort,
-      // 16.000 tokens de saída com `effort` alto é minutos de geração. Sem
-      // streaming a requisição fica muda até a resposta inteira ficar pronta, e
-      // foi assim que esta chamada morreu no `maxDuration` da função em staging.
-      stream: true,
+  if (options.meter) {
+    await options.meter.record({
+      operation: "ingest_plan",
+      model: result.model,
+      usage: result.usage,
+      latencyMs: result.latencyMs,
     });
-
-    if (options.meter) {
-      await options.meter.record({
-        operation: "ingest_plan",
-        model: result.model,
-        usage: result.usage,
-        latencyMs: result.latencyMs,
-      });
-    }
-
-    const plan = materializePlan(result.data ?? {}, index, piiEntities);
-    plan.issues = [
-      ...plan.issues,
-      ...classificationConflictIssues(input.items),
-      ...providerInTemplateIssues(plan, input.items),
-      ...indexTruncationIssues(analysis.budget),
-    ];
-
-    const verdict = validateLibraryPlan({ plan, items });
-    attempts.push({
-      attempt,
-      model: step.model,
-      effort: step.effort,
-      ok: verdict.ok,
-      confidence: plan.confidence,
-      violations: verdict.violations,
-      durationMs: result.latencyMs,
-    });
-    last = { plan, violations: verdict.violations };
-
-    if (verdict.ok && plan.confidence >= MIN_PLAN_CONFIDENCE) {
-      return {
-        plan,
-        accepted: true,
-        attempts,
-        escalated: escalatedIn(attempts, ladder),
-        indexBudget: analysis.budget,
-      };
-    }
-
-    // Último degrau: não há para onde subir.
-    if (stepIndex >= ladder.length - 1) break;
-
-    if (!verdict.ok) {
-      feedback = verdict.violations;
-      // Um degrau por recusa. O 2º degrau é a MESMA pergunta com as violações
-      // em mãos; a partir da segunda recusa a escada já subiu para o effort
-      // maior, que é onde a profundidade muda de verdade.
-      stepIndex += 1;
-    } else {
-      // Plano válido, mas o próprio planner não confia nele. Não há violação a
-      // devolver, então repetir no mesmo degrau não muda nada: pula direto para
-      // onde a profundidade sobe.
-      feedback = [];
-      stepIndex = Math.max(stepIndex + 1, DEPTH_STEP_INDEX);
-    }
   }
 
-  const plan = last?.plan ?? {
-    version: LIBRARY_PLAN_VERSION,
-    templates: [],
-    clauses: [],
-    discards: [],
-    issues: [],
-    confidence: 0,
-  };
-  const violations = last?.violations ?? [];
+  const plan = materializePlan(result.data ?? {}, index, piiEntities);
   plan.issues = [
     ...plan.issues,
-    ...violations.map(violationToIssue),
-    ...(plan.confidence < MIN_PLAN_CONFIDENCE
-      ? [
-          {
-            itemId: null,
-            kind: "low_confidence" as const,
-            detail:
-              `O plano saiu com confiança ${plan.confidence.toFixed(2)}, abaixo do ` +
-              `mínimo de ${MIN_PLAN_CONFIDENCE}. Revise item a item antes de aplicar.`,
-          },
-        ]
-      : []),
+    ...classificationConflictIssues(input.items),
+    ...providerInTemplateIssues(plan, input.items),
+    ...indexTruncationIssues(analysis.budget),
   ];
+
+  const verdict = validateLibraryPlan({ plan, items });
+  attempts.push({
+    attempt: attempts.length + 1,
+    model: step.model,
+    effort: step.effort,
+    ok: verdict.ok,
+    confidence: plan.confidence,
+    violations: verdict.violations,
+    durationMs: result.latencyMs,
+  });
+
+  const accepted = verdict.ok && plan.confidence >= MIN_PLAN_CONFIDENCE;
+  const escalated = escalatedIn(attempts, ladder);
+
+  if (!accepted && !lastStep) {
+    // Um degrau por recusa. O 2º degrau é a MESMA pergunta com as violações em
+    // mãos; a partir da segunda recusa a escada já subiu para o effort maior,
+    // que é onde a profundidade muda de verdade.
+    //
+    // Plano VÁLIDO com confiança baixa é o outro caso: não há violação a
+    // devolver, então repetir no mesmo degrau não muda nada e a escada pula
+    // direto para onde a profundidade sobe.
+    const nextStepIndex = verdict.ok
+      ? Math.max(stepIndex + 1, DEPTH_STEP_INDEX)
+      : stepIndex + 1;
+    return {
+      plan,
+      accepted: false,
+      attempts,
+      escalated,
+      indexBudget: analysis.budget,
+      nextLadder: {
+        stepIndex: Math.min(nextStepIndex, ladder.length - 1),
+        attempts,
+      },
+    };
+  }
+
+  if (!accepted) {
+    plan.issues = [
+      ...plan.issues,
+      ...verdict.violations.map(violationToIssue),
+      ...(plan.confidence < MIN_PLAN_CONFIDENCE
+        ? [
+            {
+              itemId: null,
+              kind: "low_confidence" as const,
+              detail:
+                `O plano saiu com confiança ${plan.confidence.toFixed(2)}, abaixo do ` +
+                `mínimo de ${MIN_PLAN_CONFIDENCE}. Revise item a item antes de aplicar.`,
+            },
+          ]
+        : []),
+    ];
+  }
 
   return {
     plan,
-    accepted: false,
+    accepted,
     attempts,
-    escalated: escalatedIn(attempts, ladder),
+    escalated,
     indexBudget: analysis.budget,
+    nextLadder: null,
   };
 }

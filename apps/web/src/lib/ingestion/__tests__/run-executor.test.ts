@@ -36,20 +36,22 @@ vi.mock("@/lib/knowledge/upload-classifier", () => ({
 
 import {
   advanceRun,
-  MAX_PLAN_ATTEMPTS,
+  MAX_PLAN_STEPS,
   PLAN_MIN_BUDGET_MS,
   SLICE_BUDGET_MS,
   type AdvanceRunOptions,
   type AdvanceRunResult,
   type LibraryPlanner,
-  type PlanAttemptsReport,
   type PlanningReport,
   type StageTiming,
 } from "@/lib/ingestion/run-executor";
 import {
   MAX_INDEXED_BLOCKS,
+  PLAN_LADDER_STEPS,
   type IndexBudgetReport,
+  type PlanLadderState,
 } from "@/lib/ingestion/planner";
+import type { PlanViolation } from "@/lib/ingestion/plan-guardrails";
 import { RUN_STALE_MS } from "@/lib/ingestion/run-state";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -300,9 +302,56 @@ function plannerReturning(result: {
         },
       ],
       indexBudget: fullIndexBudget(),
+      nextLadder: null,
     };
   });
 }
+
+/**
+ * Um planner de escada: cada degrau devolve o que a lista mandar, e a escada
+ * avança sozinha como a de verdade. É o que permite observar o pipeline dando
+ * UM degrau por invocação sem tocar em modelo nenhum.
+ */
+function ladderPlanner(
+  steps: ReadonlyArray<{ plan: LibraryPlan; accepted: boolean; violations?: PlanViolation[] }>
+): LibraryPlanner {
+  return vi.fn(async (_input, options) => {
+    const ladder = options.ladder ?? { stepIndex: 0, attempts: [] };
+    const step = steps[Math.min(ladder.stepIndex, steps.length - 1)];
+    const attempts = [
+      ...ladder.attempts,
+      {
+        attempt: ladder.attempts.length + 1,
+        model: INGEST_PLAN_MODEL,
+        effort: "high" as const,
+        ok: step.accepted,
+        confidence: step.plan.confidence,
+        violations: step.violations ?? [],
+        durationMs: 1,
+      },
+    ];
+    const nextIndex = ladder.stepIndex + 1;
+    const exhausted =
+      step.accepted ||
+      nextIndex >= PLAN_LADDER_STEPS ||
+      (options.stepBudget ?? PLAN_LADDER_STEPS) <= 1;
+    return {
+      plan: step.plan,
+      accepted: step.accepted,
+      escalated: ladder.stepIndex > 0,
+      attempts,
+      indexBudget: fullIndexBudget(),
+      nextLadder: exhausted ? null : { stepIndex: nextIndex, attempts },
+    };
+  });
+}
+
+/** A violação que o degrau 1 registra nos testes da escada. */
+const VIOLACAO: PlanViolation = {
+  kind: "missing_garantia_criteria",
+  itemId: "item-0",
+  detail: "O modelo de locação não diz qual garantia ele atende.",
+};
 
 function emptyPlan(confidence = 0.9): LibraryPlan {
   return {
@@ -928,17 +977,155 @@ describe("advanceRun — custo de IA", () => {
   });
 });
 
-describe("advanceRun — teto de tentativas de planejamento", () => {
-  /** Um run parado em `planning`, com tudo pronto para a chamada. */
-  function seedPlanning(): void {
-    seed(2, "planning");
-    for (const item of items) {
-      item.status = "classified";
-      item.text = CONTRATO;
-      item.classification = { familyKey: "contrato_locacao:locacao:fiador" };
-    }
+/** Um run parado em `planning`, com tudo pronto para a chamada. */
+function seedPlanning(): void {
+  seed(2, "planning");
+  for (const item of items) {
+    item.status = "classified";
+    item.text = CONTRATO;
+    item.classification = { familyKey: "contrato_locacao:locacao:fiador" };
   }
+}
 
+function planning(): PlanningReport | undefined {
+  return (runs[0].report as { planning?: PlanningReport }).planning;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// A escada em degraus
+//
+// Um degrau é uma chamada de ~147s contra os 300s de `maxDuration` da rota:
+// dois não cabem numa invocação. O estágio `planning` passa a fatiar por
+// DEGRAU, como os outros fatiam por item.
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("advanceRun — a escada do planner, um degrau por invocação", () => {
+  it("degrau recusado grava as violações, devolve hasMore e NÃO grava o plano", async () => {
+    seedPlanning();
+    const planner = ladderPlanner([
+      { plan: emptyPlan(0.5), accepted: false, violations: [VIOLACAO] },
+      { plan: emptyPlan(), accepted: true },
+    ]);
+
+    const primeira = await advanceRun({ runId: "run-1", orgId: "org-1", planner });
+
+    expect(planner).toHaveBeenCalledTimes(1);
+    expect(primeira.status).toBe("planning");
+    expect(primeira.hasMore).toBe(true);
+    // O claim foi liberado — a corrente reentra sem esperar a janela de stale.
+    expect(runs[0].startedAt).toBeNull();
+    // Um degrau intermediário não é o plano do lote.
+    expect(runs[0].libraryPlan).toBeNull();
+    // Mas o que ele propôs de errado fica GRAVADO — é o ganho de persistir a
+    // escada: antes, a função morria no degrau 2 e levava isto junto.
+    expect(planning()?.attempts).toHaveLength(1);
+    expect(planning()?.attempts[0].violations[0].kind).toBe(
+      "missing_garantia_criteria"
+    );
+    expect(planning()?.nextStepIndex).toBe(1);
+    expect(planning()?.accepted).toBe(false);
+  });
+
+  it("a invocação seguinte usa as violações do degrau anterior", async () => {
+    seedPlanning();
+    const planner = ladderPlanner([
+      { plan: emptyPlan(0.5), accepted: false, violations: [VIOLACAO] },
+      { plan: emptyPlan(), accepted: true },
+    ]);
+
+    await advanceRun({ runId: "run-1", orgId: "org-1", planner });
+    await advanceRun({ runId: "run-1", orgId: "org-1", planner });
+
+    const calls = (planner as unknown as ReturnType<typeof vi.fn>).mock.calls;
+    const ladder = (calls[1][1] as { ladder?: PlanLadderState }).ladder;
+    expect(ladder?.stepIndex).toBe(1);
+    expect(ladder?.attempts[0].violations[0].detail).toBe(VIOLACAO.detail);
+  });
+
+  it("aceito no degrau 2: o plano é gravado e o run vai a awaiting_review", async () => {
+    seedPlanning();
+    const aceito: LibraryPlan = {
+      ...emptyPlan(),
+      templates: [
+        {
+          sourceItemId: "item-0",
+          name: "Locação residencial — fiador",
+          modalidade: "locacao",
+          matchCriteria: { garantia: "fiador" },
+          rationale: "Minuta completa.",
+        },
+      ],
+    };
+    const planner = ladderPlanner([
+      { plan: emptyPlan(0.5), accepted: false, violations: [VIOLACAO] },
+      { plan: aceito, accepted: true },
+    ]);
+
+    await advanceRun({ runId: "run-1", orgId: "org-1", planner });
+    const segunda = await advanceRun({ runId: "run-1", orgId: "org-1", planner });
+
+    expect(planner).toHaveBeenCalledTimes(2);
+    expect(segunda.status).toBe("awaiting_review");
+    expect((runs[0].libraryPlan as LibraryPlan).templates).toHaveLength(1);
+    expect(planning()?.accepted).toBe(true);
+    expect(planning()?.nextStepIndex).toBeNull();
+    expect(planning()?.stepsStarted).toBe(2);
+    // O histórico dos DOIS degraus continua no relatório do run.
+    expect(planning()?.attempts).toHaveLength(2);
+    expect(planning()?.attempts[0].violations[0].kind).toBe(
+      "missing_garantia_criteria"
+    );
+  });
+
+  it("escada esgotada vai a awaiting_review com as issues, não a failed", async () => {
+    seedPlanning();
+    const recusado: LibraryPlan = {
+      ...emptyPlan(0.4),
+      issues: [
+        {
+          itemId: "item-0",
+          kind: "plan_invalid",
+          detail: "O modelo de locação não diz qual garantia ele atende.",
+        },
+      ],
+    };
+    const planner = ladderPlanner([
+      { plan: recusado, accepted: false, violations: [VIOLACAO] },
+    ]);
+
+    let result = await advanceRun({ runId: "run-1", orgId: "org-1", planner });
+    for (let i = 0; i < PLAN_LADDER_STEPS && result.hasMore; i++) {
+      result = await advanceRun({ runId: "run-1", orgId: "org-1", planner });
+    }
+
+    expect(planner).toHaveBeenCalledTimes(PLAN_LADDER_STEPS);
+    // Quem decide o que fazer com um plano recusado é o operador.
+    expect(result.status).toBe("awaiting_review");
+    expect(runs[0].error).toBeNull();
+    expect((runs[0].libraryPlan as LibraryPlan).issues.map((i) => i.kind)).toContain(
+      "plan_invalid"
+    );
+    expect(planning()?.attempts).toHaveLength(PLAN_LADDER_STEPS);
+  });
+
+  it("uma invocação dá UM degrau e para — nem com orçamento de sobra ela emenda", async () => {
+    seedPlanning();
+    const planner = ladderPlanner([
+      { plan: emptyPlan(0.5), accepted: false, violations: [VIOLACAO] },
+    ]);
+
+    await advanceRun({
+      runId: "run-1",
+      orgId: "org-1",
+      planner,
+      budgetMs: SLICE_BUDGET_MS,
+    });
+
+    expect(planner).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("advanceRun — teto de degraus de planejamento", () => {
   /**
    * O que o sweeper faz com um run cuja função morreu no meio da chamada: o
    * claim vence, o run volta a ser reivindicável e a chamada REPETE. É este laço
@@ -950,51 +1137,48 @@ describe("advanceRun — teto de tentativas de planejamento", () => {
     runs[0].error = null;
   }
 
-  function planAttempts(): PlanAttemptsReport | undefined {
-    return (runs[0].report as { planAttempts?: PlanAttemptsReport }).planAttempts;
-  }
-
-  it("a tentativa é gravada ANTES da chamada — a que morre no timeout também conta", async () => {
+  it("o degrau é gravado ANTES da chamada — o que morre no timeout também conta", async () => {
     seedPlanning();
     const planner: LibraryPlanner = vi.fn(async () => {
       // No instante em que o planner é chamado o contador JÁ está no banco.
-      // Contado depois, o caso que interessa (a chamada que não volta) nunca
+      // Contado depois, o caso que interessa (o degrau que não volta) nunca
       // seria contado.
-      expect(planAttempts()?.count).toBe(1);
+      expect(planning()?.stepsStarted).toBe(1);
       return {
         plan: emptyPlan(),
         accepted: true,
         escalated: false,
         attempts: [],
         indexBudget: fullIndexBudget(),
+        nextLadder: null,
       };
     });
 
     await advanceRun({ runId: "run-1", orgId: "org-1", planner });
     expect(planner).toHaveBeenCalledTimes(1);
-    expect(planAttempts()?.maxAttempts).toBe(MAX_PLAN_ATTEMPTS);
+    expect(planning()?.maxSteps).toBe(MAX_PLAN_STEPS);
   });
 
-  it("esgotadas as tentativas o run vai a failed em vez de repetir a chamada paga", async () => {
+  it("esgotados os degraus o run vai a failed em vez de repetir a chamada paga", async () => {
     seedPlanning();
     const planner: LibraryPlanner = vi.fn(async () => {
       throw new Error("a função morreu antes da resposta");
     });
 
-    for (let i = 0; i < MAX_PLAN_ATTEMPTS; i++) {
+    for (let i = 0; i < MAX_PLAN_STEPS; i++) {
       resumeAfterDeath();
       await advanceRun({ runId: "run-1", orgId: "org-1", planner });
     }
-    expect(planner).toHaveBeenCalledTimes(MAX_PLAN_ATTEMPTS);
-    expect(planAttempts()?.count).toBe(MAX_PLAN_ATTEMPTS);
+    expect(planner).toHaveBeenCalledTimes(MAX_PLAN_STEPS);
+    expect(planning()?.stepsStarted).toBe(MAX_PLAN_STEPS);
 
     resumeAfterDeath();
     const result = await advanceRun({ runId: "run-1", orgId: "org-1", planner });
 
     expect(result.status).toBe("failed");
     expect(runs[0].status).toBe("failed");
-    // A quarta volta não gasta chamada nenhuma.
-    expect(planner).toHaveBeenCalledTimes(MAX_PLAN_ATTEMPTS);
+    // A volta seguinte não gasta chamada nenhuma.
+    expect(planner).toHaveBeenCalledTimes(MAX_PLAN_STEPS);
     expect(runs[0].error).toContain("não coube no tempo");
     expect(runs[0].error).toContain("lotes menores");
     // Parada controlada: o claim é liberado e nada do lote se perde.
@@ -1002,14 +1186,47 @@ describe("advanceRun — teto de tentativas de planejamento", () => {
     expect(items.every((i) => i.status === "classified")).toBe(true);
   });
 
+  it("o degrau que morre come um degrau da escada, e ela termina mais cedo", async () => {
+    seedPlanning();
+    const morto: LibraryPlanner = vi.fn(async () => {
+      throw new Error("a função morreu antes da resposta");
+    });
+    // O primeiro degrau não volta: pago, invisível ao medidor, e contado.
+    await advanceRun({ runId: "run-1", orgId: "org-1", planner: morto });
+    expect(planning()?.stepsStarted).toBe(1);
+
+    const vivo = ladderPlanner([
+      { plan: emptyPlan(0.4), accepted: false, violations: [VIOLACAO] },
+    ]);
+    let result: AdvanceRunResult;
+    do {
+      resumeAfterDeath();
+      result = await advanceRun({ runId: "run-1", orgId: "org-1", planner: vivo });
+    } while (result.hasMore);
+
+    // Um degrau a menos que a escada inteira — e ainda assim revisável.
+    expect(vivo).toHaveBeenCalledTimes(MAX_PLAN_STEPS - 1);
+    expect(result.status).toBe("awaiting_review");
+    expect(runs[0].libraryPlan).not.toBeNull();
+  });
+
   it("o contador é do RUN e sobrevive à invocação — vive no report", async () => {
     seedPlanning();
     runs[0].report = {
-      planAttempts: {
-        count: MAX_PLAN_ATTEMPTS,
+      planning: {
         startedAt: new Date().toISOString(),
-        maxAttempts: MAX_PLAN_ATTEMPTS,
-      },
+        stepsStarted: MAX_PLAN_STEPS,
+        maxSteps: MAX_PLAN_STEPS,
+        nextStepIndex: 0,
+        attempts: [],
+        classifier: "llm",
+        durationMs: 0,
+        plannedAt: null,
+        accepted: false,
+        escalated: false,
+        confidence: 0,
+        indexBudget: null,
+      } satisfies PlanningReport,
     };
     const planner = plannerReturning({ plan: emptyPlan(), accepted: true });
 
@@ -1094,6 +1311,19 @@ describe("orçamento da fatia × maxDuration da rota", () => {
   it("o piso do planner cabe na fatia — senão `planning` nunca começaria", () => {
     expect(PLAN_MIN_BUDGET_MS).toBeLessThan(SLICE_BUDGET_MS);
     expect(PLAN_MIN_BUDGET_MS).toBeGreaterThan(0);
+  });
+
+  it("o piso reserva folga sobre o degrau medido em staging (147s)", () => {
+    // O piso protege UM degrau, não a escada inteira — é por isso que ele cabe.
+    // A folga existe porque a duração varia com o tamanho do lote.
+    const MEDIDO_MS = 147_000;
+    expect(PLAN_MIN_BUDGET_MS).toBeGreaterThan(MEDIDO_MS * 1.25);
+  });
+
+  it("o teto de degraus não trunca a escada em silêncio", () => {
+    // Teto menor que a escada faria o run parar antes do último modelo sem que
+    // nada no relatório dissesse que faltou degrau.
+    expect(MAX_PLAN_STEPS).toBeGreaterThanOrEqual(PLAN_LADDER_STEPS);
   });
 
   it("a janela de stale é maior que o maxDuration — o sweeper não rouba worker vivo", () => {
