@@ -137,6 +137,26 @@ describe("GET /api/agents/profile", () => {
     expect(json.modelSource).toBe("platform");
     expect(json.instructions.platform).toBe("Fale sempre em português.");
     expect(json.instructions.tenant).toBe("Trate o cliente por você.");
+
+    /**
+     * **`maxPolicy` faz parte do contrato e não tinha asserção nenhuma.**
+     *
+     * O campo entrou com a política de capabilities e este arquivo — 9 casos
+     * cobrindo escopo, `agentKey` ausente, agente interno e o caminho feliz —
+     * não o mencionava uma vez. Achado no gate de promoção, depois de o PR já
+     * estar mergeado em `staging`.
+     *
+     * A forma VAZIA é a que importa afirmar: é o que trafega para toda org que
+     * nunca configurou nada, ou seja, as quatro de produção hoje. E é objeto
+     * com as três chaves, nunca `null` — o consumidor lê
+     * `politica.byRole?.[role]`, e `null` funcionaria por acidente até alguém
+     * trocar por acesso direto.
+     */
+    expect(json.maxPolicy).toEqual({
+      byRole: {},
+      byRecipient: {},
+      brokerDefault: [],
+    });
   });
 
   it("o texto do tenant sai CERCADO no bloco composto", async () => {

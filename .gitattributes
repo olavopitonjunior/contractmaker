@@ -33,3 +33,8 @@
 *.ttf binary
 *.docx binary
 *.xlsx binary
+
+# Shell de operação: CRLF quebra o shebang com $'\r': command not found.
+# Este é o primeiro `.sh` versionado do repo, e o histórico acima mostra que
+# CRLF já deixou a CI vermelha por semanas.
+*.sh text eol=lf

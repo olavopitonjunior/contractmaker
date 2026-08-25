@@ -21,12 +21,29 @@ import { timingSafeEqual } from "node:crypto";
  * Retorna `null` quando autorizado; a `NextResponse` de erro caso contrário.
  */
 export function requireCronAuth(req: Request): NextResponse | null {
-  const secret = process.env.CRON_SECRET;
+  return requireBearerAuth(
+    req,
+    ["CRON_SECRET"],
+    "CRON_SECRET não configurado — cron desabilitado por segurança"
+  );
+}
+
+/**
+ * A mesma coisa, com a lista de envs aberta — a primeira definida vence.
+ *
+ * Existe para rota que precisa de um secret PRÓPRIO sem perder o fallback: o
+ * `/api/admin/ocr-verify` aceita `OPS_VERIFY_SECRET` e cai em `CRON_SECRET`.
+ * Sem isso, ele reimplementaria este arquivo inteiro por causa de uma linha — e
+ * um fix de parsing de header aqui não chegaria lá, em silêncio.
+ */
+export function requireBearerAuth(
+  req: Request,
+  envVars: string[],
+  msgNaoConfigurado: string
+): NextResponse | null {
+  const secret = envVars.map((v) => process.env[v]).find(Boolean);
   if (!secret) {
-    return NextResponse.json(
-      { error: "CRON_SECRET não configurado — cron desabilitado por segurança" },
-      { status: 503 }
-    );
+    return NextResponse.json({ error: msgNaoConfigurado }, { status: 503 });
   }
 
   const authHeader = req.headers.get("authorization") ?? "";

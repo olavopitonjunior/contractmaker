@@ -580,3 +580,26 @@ Por isso o teste do lado do Max **remove cada chave e exige que o resultado
 mude**: se remover `brokerDefault` não alterasse nada, é porque ele não a estava
 lendo.
 
+### 11.6 Igualdade PROFUNDA, nunca de string, ao afirmar o round-trip
+
+Quem for escrever teste ou smoke contra o banco: compare os objetos, **não** o
+JSON serializado.
+
+`jsonb` do Postgres **não preserva ordem de chave** — ele normaliza, ordenando
+por comprimento e depois bytewise. E `getMaxPolicy` reconstrói o objeto iterando
+`Object.entries` do que o Prisma devolveu, então a ordem interna de `byRole`
+vem do banco, não do que foi gravado.
+
+Hoje passaria por sorte: `admin` e `sales` têm 5 letras e `admin < sales`. No
+dia em que um tenant usar `owner` e `finance`, o `jsonb` devolve `owner` (5)
+antes de `finance` (7), e um teste escrito em ordem alfabética quebraria **sem
+que nada estivesse errado**.
+
+A ordem de nível superior é segura — `getMaxPolicy` monta
+`{ byRole, byRecipient, brokerDefault }` explicitamente no código. É a de dentro
+que é do banco.
+
+Isto vale para o round-trip. A **serialização** do §11.5 continua sendo afirmada
+byte a byte de propósito: lá o que está sob teste é o que atravessa a rede,
+montado por `JSON.stringify` do nosso literal, e não passou por `jsonb` nenhum.
+

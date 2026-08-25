@@ -1,5 +1,11 @@
 # Contractmaker — Claude Code Context
 
+## Project Defaults
+
+Codebase TypeScript. Todo código novo em TypeScript com tipos explícitos; evitar
+`any`. Rodar typecheck e build **antes** de declarar uma tarefa concluída — não
+depois, e não "provavelmente passa".
+
 ## Visão geral
 
 Plataforma de gestão de vendas e contratos imobiliários. Esteira: Lead/form público → Kanban → contrato (template **ou** upload) → editor Google Docs embedado → assinatura ClickSign → PDF assinado de volta na pasta. Pagadoria integrada com Asaas. Due diligence via Infosimples.
@@ -184,23 +190,21 @@ Disparo manual no Deal → aba Certidões. `POST /api/deals/:id/certidoes` 202 +
 
 **Two-step (TJSP/TJRJ/TJMS/TRF3/ONR):** `pedido-*` 200 → `awaiting_portal` → cron `poll-portal` chama o `obter` via `buildObterArgs` (e-SAJ: `pedido_data` **ISO** — `normalizePedidoData`, senão 607; TRF3 `numero_certidao`+`trim`). `decideObterOutcome`: conta/integração → falha já; transitório → 3×; senão reagenda até `maxPortalWaitMs` (TJSP **7d**, TJRJ 14d) → `failed_permanent`+`portalUrl`. **620 "já existe"** → `recoverOriginalProtocol` (parte+tipo) → `awaiting_portal`; senão `duplicate_pending`.
 
-**Schema:** `CertidaoJob` (campos em `prisma/schema.prisma`) — chaves: `batchId`, `targetKind/targetIndex`, `status`, `resultCode`, `retryCount`/`maxRetries` (3), `missingFields[]`, `portalUrl`.
+Arquitetura, estados (`classifyOutcome`), backoffs, catálogo (`endpoints.ts`,
+`CATEGORIES_REQUIRING_PDF`), budget guard, planner e o mapa por portal estão em
+[docs/certidoes-architecture.md](docs/certidoes-architecture.md) e
+[docs/certidoes-known-issues.md](docs/certidoes-known-issues.md). Memórias
+[[certidoes_retry_backoffs]], [[certidoes_estados_ricos]],
+[[certidoes_falso_negativo]], [[project_certidoes_overhaul_2026_05]].
 
-**Estados** (`outcome-classifier.ts::classifyOutcome`) — `success`/`informativo`/`api_error`/`portal_unavailable`(615/665/666)/`rate_limited`(668)/`data_missing`(606/612/613, `missingFields[]`)/`data_invalid`(614)/`failed_permanent`(esgotado, `portalUrl`)/`duplicate_pending`(620)/`skipped`. Backoffs em [[certidoes_retry_backoffs]], [[certidoes_estados_ricos]].
+O que fica aqui é o que os docs não cobrem:
 
-**Anti-falso-negativo:** exige-PDF sem `site_receipts[0]` → `failed`; negativa informativa exige evidência de ausência (600 cru → retry→falha #67); billing respeita `header.billable===false`. [[certidoes_falso_negativo]].
-
-**Planner** (`planner.ts`): vendedores/compradores/imóveis + diligenciados (tier **padrao** #66: pré-marcados; comprador segue opcional). PF sem `data_nascimento` bloqueia PGFN/TJSP/Antecedentes.
-
-**Endpoints:** Federais (PGFN/CNDT/TRF), trabalhistas (CEAT), cíveis (TJSP/TJRJ 2-step, TJRS), E-Proc SP, protestos CENPROT (SP + Nacional, GOV.BR). Antecedentes PF auto em financiamento.
-
-**Imóvel (Phase L):** matrícula ONR/ARISP 2-step (`requiresOnrAuth`/`onrActive`, `INFOSIMPLES_ONR_*`, saldo próprio; normalizer expõe ônus), IPTU/CND municipal por `UF|cidade` (`MUNICIPAL_BY_KEY`; SP `sql`/RJ `inscricao` ok, BH `identificador`+datas), CCIR. Renderizam no grupo "Imóvel:". **Curitiba** = CND por contribuinte → pessoa (`MUNICIPAL_PESSOA_BY_KEY`). Ver [[project_certidoes_onr_imovel]].
-
-**Catálogo** (`endpoints.ts`): `category`/`emitsPdf?`/`portalUrl?`/`CATEGORIES_REQUIRING_PDF`. Normalizers; 6xx→`nao_emitida`.
-
-**Budget guard** `INFOSIMPLES_MONTHLY_BUDGET_CENTS` (5000): POST 402 + o **cron** checa antes de cada chamada + **circuit breaker** (603 → para).
-
-**Problemas + UX:** falha terminal → sino + digest; painel `/settings/certidoes`; aba com régua 3 cores, IA on-demand, ZIP dedupe+`%PDF`. [[project_certidoes_overhaul_2026_05]]. Mapa por portal: `docs/certidoes-known-issues.md`.
+- **`decideObterOutcome`:** conta/integração → falha já; transitório → 3×; senão reagenda até **`maxPortalWaitMs`** (TJSP **7d**, TJRJ 14d) → `failed_permanent`+`portalUrl`.
+- **620 "já existe"** → **`recoverOriginalProtocol`** (parte+tipo) → `awaiting_portal`; senão `duplicate_pending`.
+- **Imóvel (Phase L):** matrícula ONR/ARISP 2-step (**`requiresOnrAuth`**/`onrActive`, `INFOSIMPLES_ONR_*`, saldo próprio; normalizer expõe ônus); IPTU/CND municipal por `UF|cidade` (**`MUNICIPAL_BY_KEY`**; SP `sql`/RJ `inscricao` ok, BH `identificador`+datas); CCIR. **Curitiba** = CND por contribuinte → pessoa (**`MUNICIPAL_PESSOA_BY_KEY`**). [[project_certidoes_onr_imovel]].
+- **Planner:** PF sem `data_nascimento` bloqueia PGFN/TJSP/Antecedentes. Tier **padrao** pré-marca diligenciados; comprador segue opcional. **Antecedentes PF entram automaticamente quando `modalidade === "financiamento"`** (obrigatório lá, facultativo em particular) — a regra só existe em `planner.ts`, não nos docs de certidões.
+- **Anti-falso-negativo:** exige-PDF sem `site_receipts[0]` → `failed`; billing respeita `header.billable===false`.
+- **Gaps** (portal manual): CNIB, ITR, TJMG/TJPR/TJES cível, IPTU Vitória/CG.
 
 **Gaps** (portal manual): CNIB, ITR, TJMG/TJPR/TJES cível, IPTU Vitória/CG.
 
@@ -212,56 +216,38 @@ Segundo provider via `CertidaoJob.provider="serasa"` (5 endpoints PF+PJ + víncu
 
 Envelope vincula a UM de dois (CHECK XOR): Contract aprovado (`source="contract"`, `Envelope.contractId`) ou DealAttachment avulso (`source="attachment"`, `Envelope.attachmentId`).
 
-**Caminho A — Contract aprovado:** `executor.ts::sendEnvelopeForContract` exige `status === "aprovado"`, gera PDF via `generateContractPdfBuffer` (Drive export se há `googleDocId`; Puppeteer + Handlebars fallback), signers via `dealDataToSigners(dataJson)`. `POST /api/contracts/[id]/envelopes`.
+Fluxo completo, quirks da v3, diálogo de envio, webhook e sync em
+[docs/clicksign-v3.md](docs/clicksign-v3.md) — **consultar antes de mexer**.
+Memórias [feedback_clicksign_v3_quirks], [project_signers_subpartes_2026_07].
 
-**Caminho B — DealAttachment avulso:** `sendEnvelopeForAttachment` baixa PDF via `downloadBufferFromUrl`, signers 100% do dialog. Não exige aprovação. `POST /api/deals/[dealId]/envelopes`. UI: aba Assinaturas → "+ Enviar documento da pasta". Use cases: aditivos, distratos, procurações, recibos.
+O que morde e não pode ser esquecido:
 
-**Helper `createEnvelopeFromBuffer`** (privado): upload snapshot → `prisma.envelope.create` → ClickSign API (createEnvelope → addDocument → addSigners → addRequirements → activate). Falha → `status: failed` + `deleteDraftEnvelope` best-effort. O `withOrgBudgetLock` que envolve o create continua ali apesar do nome: ele serializa o re-check "1 envelope ativo por contrato" (sem ele, dois envios paralelos do mesmo contrato criam 2 envelopes — cobrança dobrada).
-
-**Listagem unificada:** `GET /api/deals/[dealId]/envelopes` retorna ambos com `subjectLabel` server-side. Hook `useDealEnvelopePolling(dealId)`. **Cancelamento:** `DELETE /api/deals/[dealId]/envelopes/[envelopeId]` (deal-level) ou `DELETE /api/contracts/[id]/envelopes/[envelopeId]` (legado).
-
-**Custo:** `Envelope.costCents` é ESTIMATIVA INTERNA (tabela em `lib/clicksign/costs.ts`, nunca conferida com plano real) — telemetria, não exibida em tela e não usada pra barrar nada. **Não existe orçamento mensal**: o `getMonthlyBudgetCents` foi removido em 08/2026 por recusar envio com valor inventado. **402 agora significa limite do PLANO da conta ClickSign**, classificado a partir da recusa dela em `lib/clicksign/quota.ts` (`isPlanQuotaError` → `EnvelopePlanLimitError`, `code: CLICKSIGN_PLAN_LIMIT`). Todo 4xx de envio loga o corpo cru como `[clicksign] falha 4xx`.
-
-**Diálogo de envio (`SendEnvelopeDialog.tsx`):** linhas editáveis Nome/Email/CPF agrupadas por origem. Vendedor + Comprador titulares sempre signers; **Corretora(s) e Testemunhas opt-in**. Linhas com `addedDuringDialog=true` em aprovado mostram banner amarelo: aparecem só no certificado ClickSign, não no PDF congelado.
-
-- **Múltiplos comissionados:** itera `comissao.comissionados[]` (canônico); array vazio → fallback hidrata 1 row do legado `imobiliaria_*`
-- **Sub-partes:** cônjuge/procurador/representante usam o `sourceIndex` do titular + `subKind`; papel em `roles.ts`. **Opt-out** — ver [[project_signers_subpartes_2026_07]]
-- **Submit:** `PATCH .../signers-data` (whitelist regex: contatos do titular e das sub-partes, `comissao.comissionados`, `testemunhas`) → `POST .../envelopes`. `SourceKind = vendedor|comprador|testemunha|corretora`
-
-**Quirks v3** (memória [feedback_clicksign_v3_quirks]): host `app.clicksign.com` + `?access_token=` query (Bearer dá 401 enganoso); `documentation` com máscara (helper `formatCpfCnpj`); requirement `action="agree"`+`role` (mapping em `executor.ts::defaultRoleForSourceKind`); `communicate_by` removido — email via `signer.email`+`activateEnvelope`; status canônico em `/events` (não `/signers`); webhook sem `envelope.id` — lookup por `documentClicksignId === document.key`; match signer por key + fallback email lowercase (PATCH gera `remove+add_signer` com key novo).
-
-**Webhook close** (`https://imobpro.ia.br/api/webhooks/clicksign`): valida HMAC-SHA256 (header `content-hmac` ou `x-clicksign-signature`). Eventos `close|auto_close|document_closed` disparam `downloadSignedPdf` fire-and-forget → `uploadBufferToStorage` (`envelopes/<id>/signed.pdf`) → grava `Envelope.signedDocumentUrl`. Cria DealAttachment automático (idempotente via `findFirst { dealId, url }`): `category="contrato_assinado"` (contract) ou `"documento_assinado"` (attachment), `source="clicksign_signed"`.
-
-**Sync — 3 caminhos:** webhook (fast path 1-3s) · botão Atualizar `POST .../sync` (pulla /events, reconcilia signer-by-signer; `?debug=1` retorna shapes crus) · cron diário 06 UTC (`/api/cron/clicksign/sync-envelopes`, só envelope-level running→closed, redundância).
-
-**Diagnostics admin:** `GET /api/admin/clicksign/{webhooks, webhook-attempts, envelope-events/[envelopeId]}`.
+- **`withOrgBudgetLock` não é sobre orçamento.** Ele serializa o re-check "1 envelope ativo por contrato". Sem ele, dois envios paralelos do mesmo contrato criam 2 envelopes — **cobrança dobrada**.
+- **Não existe orçamento mensal.** `getMonthlyBudgetCents` foi removido em 08/2026 por recusar envio com valor inventado. **402 = limite do PLANO da conta** (`lib/clicksign/quota.ts::isPlanQuotaError` → `EnvelopePlanLimitError`).
+- **`Envelope.costCents` é estimativa interna**, nunca conferida com o plano real. Telemetria — não exibir nem barrar nada com ela.
+- **Caminho A exige `status === "aprovado"`; o caminho B (anexo avulso) não.**
+- **Signer adicionado no dialog** (`addedDuringDialog=true`) de contrato aprovado entra só no certificado, **não** no PDF congelado.
+- **Status canônico vem de `/events`, não de `/signers`** — e o webhook não traz `envelope.id` (lookup por `documentClicksignId === document.key`).
 
 ## Pagadoria (Asaas)
 
 Documentação consolidada em [docs/pagadoria-handoff.md](docs/pagadoria-handoff.md) — sempre consultar antes de mexer.
 
-**Fases entregues:**
-- **1a-1b** RBAC (`CustomRole`+`PERMISSION.*`) + 2FA + SessionElevation + TrustedDevice + `AsaasAccount` (apiKey AES-256-GCM) + KYC multipart + `CommissionCharge` status canônico + idempotência via `AsaasWebhookEvent.asaasEventId`
-- **2** `/financeiro` + `/pay/[token]` com taxas (`OrgFinancialSettings.finePercent/interestPercentMonth`), branding org, PII mascarada
-- **3** `AsaasTransfer` (dual approval > `dualApprovalCapCents`) + `BankReconciliation` auto-match via `externalReference` + 4 relatórios
-- **4** notif bell, devices UI, platform fee (`platformFeePercent` + `platformFeeWalletId`)
-- **5** `SplitRecipient` + `composeSplits()` (max 10, sem duplicatas/wallet própria, soma ≤100%). Persiste em `CommissionCharge.splitJson`
-- **Multi-account** (memória [project_multi_account_asaas]): N contas Asaas/org. `Organization.activeAsaasAccountId` define o default. `AsaasAccountPermission { accountId, userId, capability }`, caps `view|create_charge|init_transfer|configure` (owner bypassa). Helpers em `lib/asaas/account.ts`; `requireAccountCapability` em `rbac/guard.ts`. Endpoints `/api/financeiro/accounts/*` + UI `/settings/pagamentos/contas/*`. `<AccountSwitcher />` lê `?accountId=` e dispara `/activate`. Webhook `ACCOUNT_STATUS_UPDATED` refresca KYC. **Cobranças em aberto NÃO migram entre contas**
+Fases 1a-1b a 5 (RBAC, 2FA, `/financeiro`, `AsaasTransfer`, platform fee,
+`SplitRecipient`), multi-account e o v2 Wizard estão detalhados **no handoff** —
+inclusive `ChargeWizard`, `deriveComissionados`, hide-from-payer, magic link,
+`CommissionChargeDraft` e o validate por etapa. Memórias
+[project_multi_account_asaas] e [project_pagadoria_v2].
 
-### v2 Wizard (memória [project_pagadoria_v2])
+O que fica aqui é só o que morde e não está no handoff:
 
-- **ChargeWizard:** 4 etapas em 3 modes (`commission_from_deal | avulsa_in_deal | avulsa_standalone`). `CommissionCharge.kind` + `categoryLabel?`. `OrgFinancialSettings.notify*` (6 flags) + `notifyChargeEvent`. Cron D-3 `/api/cron/charges/due-soon` (12 UTC)
-- **Mapper imobiliária→comissionados[]:** `deriveComissionados()` em `GET .../contract-data-summary` converte legado mono-corretora quando o array está vazio
-- **Multi-corretora:** `comissao.comissionados[].papel: enum(captador|intermediador|indicador|imobiliaria_principal|outro)`, superRefine soma ≤100%. Templates `ccv_*_v2.hbs` com loop + fallback `imobiliaria_*`
-- **Hide-from-payer:** `splitJson.display.{hiddenRecipientIds,consolidationMap}` + `generatePayerVisibleDescription()` em `lib/asaas/commission.ts`. Asaas não expõe split publicamente
-- **Rascunho SplitRecipient:** `pendingFields String[]` não-vazio → `active: false`; `splitDispatcher` pula com `AsaasTransfer FAILED` mas cobrança emite. UI "⚠️ Pendentes" + `[Pedir dados]`
-- **Magic link:** `completionToken/Exp` (JWT-HMAC, 7d) → `/financeiro/completar-cadastro?token=` → `POST /api/public/split-recipients/complete`
-- **Wizard draft:** `CommissionChargeDraft { dealId, userId @@unique, state, expiresAt }` (30d TTL). Cron 03 UTC limpa
-- **Validate por etapa:** `POST .../commission-charges/validate?step=payer|charge|splits|all` — funções puras em `lib/asaas/charge-validators.ts`
-
-**QA:** preflight `GET /api/admin/preflight-qa` (30+ checks). Setup `apps/web/scripts/setup-pagadoria-qa.ts`. Sandbox helper `lib/asaas/sandbox.ts::approveSandboxAccount` força 4 status pra APPROVED via `POST /v3/sandbox/myAccount/approve` — guard interno rejeita se `ASAAS_ENV=production`.
-
-**Webhook:** `https://imobpro.ia.br/api/webhooks/asaas` (id `3bd623b8-ed2e-45d4-b201-648f46ee404b`). Conta PJ ativa em prod desde 2026-04-27. `bankAccountInfo=PENDING` não bloqueia recebimento — usar `general=APPROVED` como gate.
+- **`AsaasTransfer` exige dual approval acima de `dualApprovalCapCents`.**
+- **`notifyChargeEvent`** dispara as 6 flags `OrgFinancialSettings.notify*`; cron D-3 em `/api/cron/charges/due-soon` (12 UTC).
+- **Cobranças em aberto NÃO migram entre contas** ao trocar a conta Asaas ativa.
+- **Gate de KYC é `general=APPROVED`** — `bankAccountInfo=PENDING` não bloqueia recebimento.
+- **`approveSandboxAccount`** (`lib/asaas/sandbox.ts`) tem guard que rejeita se `ASAAS_ENV=production`.
+- Webhook prod: `https://imobpro.ia.br/api/webhooks/asaas` (id `3bd623b8-ed2e-45d4-b201-648f46ee404b`). Conta PJ ativa desde 2026-04-27.
+- Preflight de QA: `GET /api/admin/preflight-qa` (30+ checks).
 
 ## Notificações do processo → corretores
 
@@ -381,3 +367,25 @@ Não-óbvios (enums e structure: ver `prisma/schema.prisma`):
 - **Split Asaas:** rejeita wallet própria, duplicatas, max 10. Sandbox rejeita docs de identidade via API — usar `approveSandboxAccount`
 - **Form público é anônimo até o envio; depois fecha.** Gate em `lib/forms/form-gate.ts`: `completedAt != null && reopenedAt == null` → só membro da org (checa OrgMembership, não só sessão). Discrimina por `completedAt`, NÃO por `status` (deal de import nasce `vinculado` e nunca vira `completo`). Vale pras 2 esteiras (`/api/forms/[token]` e `/api/locacao/forms/[token]`) + subtoken/anexos/from-main. Reabrir: `POST .../lock {locked:false,reopen:true}`. Anexos já vistos seguem acessíveis (URL pública do Blob)
 - **Operacionais em memória**: ver `MEMORY.md` (OAuth 7d, printf, env pull, Resend sandbox, Handlebars shadowing, timezone, PowerShell)
+
+## Working Style
+
+Antes de rodar sequência **destrutiva** no Bash (delete, revoke, force, reset,
+overwrite, drop), enunciar o plano em 2-3 bullets e esperar confirmação. Comando
+demorado mas seguro — aguardar CI, aguardar deploy, consultar banco — roda direto,
+sem pedir permissão. Preferir um comando composto a várias chamadas exploratórias.
+
+## Deployment Verification
+
+Depois de mudar qualquer env var (nome de modelo do OCR, flag, segredo), **não
+presuma que pegou**. Verificar em três passos: (1) confirmar que a var está no
+config do deploy, (2) disparar rebuild/redeploy, (3) bater no serviço rodando e
+afirmar que a resposta reflete o valor novo. **Reportar o valor observado, não o
+pretendido.**
+
+Três armadilhas já medidas neste projeto (detalhe na memória
+[[reference-vercel-env-armadilhas]]):
+
+- **`vercel redeploy` reaproveita o snapshot de env do deploy anterior** — fica READY rodando o valor velho. Para a troca pegar, criar deploy novo a partir do git.
+- **Env `sensitive` não pode ser lida de volta nem convertida.** Sem conseguir ler, não há como verificar o que produção roda. Para valor que não é credencial (nome de modelo, booleano), usar `encrypted`.
+- **O oráculo que vale é o runtime, não a env.** Aqui: a coluna `AIUsage.model` no banco diz qual modelo realmente rodou. Env declara intenção; a linha no banco é prova.
