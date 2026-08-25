@@ -36,16 +36,23 @@ desktop.ini
 /Modelo teste.pdf
 /Modelo*.pdf
 
-# Corpus do bench de VISÃO — documentos REAIS (RG, CPF, CNH, matrícula) de
-# pessoas reais, baixados do Blob por `scripts/ai-bench/pull-fixtures.ts`.
+# Corpus do bench de VISÃO — documentos REAIS (RG, CPF, CNH, matrícula,
+# certidões) de pessoas reais, baixados por `scripts/ai-bench/pull-fixtures.ts`.
+# Este repositório é PÚBLICO.
 #
-# Esta regra existe ANTES de qualquer documento tocar o disco, e é a única
-# defesa: o gitleaks do pre-commit procura padrão de credencial, não CPF dentro
-# de um PDF escaneado. Se um documento vazar para um commit, ele fica no
-# histórico do repositório PÚBLICO para sempre.
+# Esta regra é a única defesa: o gitleaks do pre-commit procura padrão de
+# credencial, não CPF dentro de um PDF escaneado. Documento que entre num
+# commit fica no histórico público, e reescrever histórico público não é uma
+# opção realista.
 #
-# O gabarito (`ground-truth.json`) também entra aqui: ele contém os valores
-# corretos dos campos, ou seja, exatamente o PII do documento em texto puro.
+# O gabarito (`ground-truth.json`) entra junto: ele carrega os valores corretos
+# dos campos — o mesmo PII do documento, só que em texto puro e indexável.
+#
+# ⚠️ A regra tem que viver na `staging`, não só na branch de quem baixa o
+# corpus. Em 24/08 ela existia apenas na branch do bench, e um `git add -A` em
+# branches criadas de `staging` — que ainda não tinha a regra — publicou os
+# documentos DUAS vezes. Conferir só a branch em que se está não basta: o que
+# protege é a regra estar no ponto de onde todas as branches nascem.
 apps/web/scripts/ai-bench/fixtures/vision/
 
 # storage

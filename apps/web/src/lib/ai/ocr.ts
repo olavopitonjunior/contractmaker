@@ -2,7 +2,14 @@ import { Anthropic } from "@anthropic-ai/sdk";
 import { ocrModelFromEnv } from "./agents/model-provenance";
 import { GoogleGenAI } from "@google/genai";
 import type { ExtractionResult } from "./types";
-import { recordAIUsage, geminiUsageToTokens } from "./usage";
+import { recordAIUsage, geminiUsageToTokens, calcCostUsd } from "./usage";
+import { waitUntil } from "@vercel/functions";
+import { prisma } from "@/lib/db/prisma";
+import {
+  compararSombra,
+  shadowModelFromEnv,
+  type ComparacaoSombra,
+} from "./ocr-shadow";
 import type { GeminiUsageMetadata } from "./usage";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -751,12 +758,117 @@ export async function classifyAndExtract(
 
   const parsed = parseGeminiJson(text);
 
+  // Shadow: roda um segundo modelo SÓ para medir divergência. Nunca altera o
+  // que o usuário vê, e não pode atrasar a resposta — por isso vem depois do
+  // `parsed` e é fire-and-forget.
+  dispararSombra({
+    primario: { documentType: parsed.tipo, fields: parsed.fields },
+    primaryModel: modelUsed,
+    primaryLatencyMs: Date.now() - t0,
+    base64Data,
+    mimeType,
+    ctx,
+  });
+
   return {
     documentType: parsed.tipo,
     fields: parsed.fields as Record<string, string>,
     confidence: parsed.confidence,
     rawText: text,
   };
+}
+
+/**
+ * Dispara a chamada sombra e grava a comparação. Nunca lança, nunca espera.
+ *
+ * **Duas camadas de proteção, e as duas são necessárias:**
+ *
+ * 1. Desligado por padrão (`OCR_SHADOW_MODEL` vazio). Sem isso, um deploy de
+ *    preview do projeto `web` — que fala com o banco de PRODUÇÃO — tentaria
+ *    escrever numa tabela que produção ainda não tem.
+ * 2. `try/catch` em tudo. Mesmo ligado, falha de sombra é irrelevante para o
+ *    usuário: ele já tem o resultado do modelo primário na mão.
+ */
+function dispararSombra(p: {
+  primario: { documentType: string; fields: Record<string, unknown> };
+  primaryModel: string;
+  primaryLatencyMs: number;
+  base64Data: string;
+  mimeType: string;
+  ctx?: OcrUsageContext;
+}): void {
+  const shadowModel = shadowModelFromEnv();
+  if (!shadowModel || shadowModel === p.primaryModel) return;
+
+  const tarefa = (async () => {
+    const t0 = Date.now();
+    let comparacao: ComparacaoSombra | null = null;
+    let erro: string | null = null;
+    let custo = 0;
+    let latencia = 0;
+
+    try {
+      const r = await callGemini(shadowModel, p.base64Data, p.mimeType);
+      latencia = Date.now() - t0;
+      const tok = geminiUsageToTokens(r.usage, shadowModel);
+      custo = calcCostUsd(shadowModel, tok.promptTokens, tok.completionTokens);
+      const sombra = parseGeminiJson(r.text);
+      comparacao = compararSombra(p.primario, {
+        documentType: sombra.tipo,
+        fields: sombra.fields,
+      });
+      if (p.ctx) {
+        recordAIUsage({
+          orgId: p.ctx.orgId,
+          userId: p.ctx.userId,
+          contractId: p.ctx.contractId,
+          provider: "gemini",
+          model: shadowModel,
+          // Operação PRÓPRIA: sem isso o custo da sombra entraria no total do
+          // OCR e o painel diria que a extração ficou 2x mais cara.
+          operation: "ocr_shadow",
+          promptTokens: tok.promptTokens,
+          completionTokens: tok.completionTokens,
+          thoughtsTokens: tok.thoughtsTokens,
+          latencyMs: latencia,
+          success: true,
+        });
+      }
+    } catch (err) {
+      latencia = Date.now() - t0;
+      erro = (err instanceof Error ? err.message : String(err)).slice(0, 300);
+    }
+
+    try {
+      await prisma.ocrShadowComparison.create({
+        data: {
+          orgId: p.ctx?.orgId ?? null,
+          attachmentId: p.ctx?.contractId ?? null,
+          primaryModel: p.primaryModel,
+          shadowModel,
+          primaryCategory: p.primario.documentType,
+          shadowCategory: comparacao?.categoriaSombra ?? null,
+          categoryDiverged: comparacao?.categoriaDivergiu ?? false,
+          fieldsEqual: comparacao?.camposIguais ?? 0,
+          fieldsDiverged: comparacao?.camposDivergentes ?? [],
+          fieldsOnlyPrimary: comparacao?.camposSoNoPrimario ?? [],
+          fieldsOnlyShadow: comparacao?.camposSoNaSombra ?? [],
+          primaryLatencyMs: p.primaryLatencyMs,
+          shadowLatencyMs: latencia,
+          shadowCostUsd: custo,
+          shadowError: erro,
+        },
+      });
+    } catch (err) {
+      console.error("[ocr-shadow] falha ao gravar comparação:", err);
+    }
+  })();
+
+  try {
+    waitUntil(tarefa);
+  } catch {
+    void tarefa;
+  }
 }
 
 /**

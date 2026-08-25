@@ -2282,6 +2282,53 @@ model DocumentStyle {
 // helper in src/lib/ai/usage.ts; never blocks the AI flow.
 // ============================================
 
+/// Divergência entre o modelo de OCR em produção e um modelo SOMBRA, medida em
+/// tráfego real. O usuário nunca vê a sombra — ela só alimenta esta tabela.
+///
+/// ── O que NÃO está aqui, de propósito ────────────────────────────────────
+///
+/// Nenhum VALOR extraído. Só nome de campo e contagem.
+///
+/// Gravar o valor criaria uma segunda cópia de CPF, RG e nome da mãe numa
+/// tabela que ninguém trata como sensível, com retenção indefinida e fora de
+/// qualquer fluxo de exclusão do titular. Para responder "os modelos divergem,
+/// e em quais campos?", o nome do campo basta — e é a pergunta que esta tabela
+/// existe para responder.
+model OcrShadowComparison {
+  id           String  @id @default(cuid())
+  orgId        String?
+  /// Sem FK: o anexo pode ser apagado e a medição continua válida.
+  attachmentId String?
+
+  primaryModel String
+  shadowModel  String
+
+  primaryCategory   String?
+  shadowCategory    String?
+  categoryDiverged  Boolean @default(false)
+
+  /// Preenchidos pelos dois com o MESMO valor (tolerante a formatação).
+  fieldsEqual        Int      @default(0)
+  /// Preenchidos pelos dois com valores diferentes. NOMES, nunca valores.
+  fieldsDiverged     String[]
+  /// Só o primário leu — a sombra perderia o dado.
+  fieldsOnlyPrimary  String[]
+  /// Só a sombra leu — o primário está perdendo o dado HOJE.
+  fieldsOnlyShadow   String[]
+
+  primaryLatencyMs Int     @default(0)
+  shadowLatencyMs  Int     @default(0)
+  shadowCostUsd    Decimal @default(0) @db.Decimal(12, 6)
+  /// Sombra falhou (quota, 400, timeout). A linha existe mesmo assim: taxa de
+  /// falha do candidato é resultado, não caso a descartar.
+  shadowError      String?
+
+  createdAt DateTime @default(now())
+
+  @@index([orgId, createdAt])
+  @@index([shadowModel, createdAt])
+}
+
 model AIUsage {
   id               String   @id @default(cuid())
   /// `null` = custo de PLATAFORMA (ingestão/embedding da base universal), que
