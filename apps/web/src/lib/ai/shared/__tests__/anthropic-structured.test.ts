@@ -51,15 +51,28 @@ describe("cliente estruturado — o corpo da requisição", () => {
     expect(body).not.toHaveProperty("top_k");
   });
 
-  it("usa thinking adaptativo e effort — nada de budget_tokens (400 nesses modelos)", async () => {
+  it("no modelo do PLANNER usa thinking adaptativo e effort — nada de budget_tokens", async () => {
     const { client, post } = fakeClient({ parsed_output: { ok: true } });
-    await runStructured(call({ effort: "high" }), client);
+    await runStructured(call({ model: INGEST_PLAN_MODEL, effort: "high" }), client);
 
     const body = post.mock.calls[0][1].body as Record<string, unknown>;
     expect(body.thinking).toEqual({ type: "adaptive" });
     expect(JSON.stringify(body)).not.toContain("budget_tokens");
     expect(body.output_config).toEqual({
       effort: "high",
+      format: { type: "json_schema", schema: SCHEMA },
+    });
+  });
+
+  it("no modelo do CLASSIFICADOR (Haiku 4.5) não manda thinking nem effort", async () => {
+    // O 400 que derrubou o run: "adaptive thinking is not supported on this
+    // model". O mesmo parâmetro é obrigatório no Opus 4.8 e proibido aqui.
+    const { client, post } = fakeClient({ parsed_output: { ok: true } });
+    await runStructured(call({ model: INGEST_CLASSIFY_MODEL, effort: "low" }), client);
+
+    const body = post.mock.calls[0][1].body as Record<string, unknown>;
+    expect(body).not.toHaveProperty("thinking");
+    expect(body.output_config).toEqual({
       format: { type: "json_schema", schema: SCHEMA },
     });
   });

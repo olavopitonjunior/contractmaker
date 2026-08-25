@@ -17,6 +17,18 @@
  *    REMOVIDO — mensagem final do assistente também responde 400. O substituto
  *    é `output_config.format` (structured outputs), que é o que usamos.
  *
+ * ## O corpo NÃO é o mesmo para todo modelo
+ *
+ * As três incompatibilidades acima valem em qualquer modelo que usamos. Os
+ * parâmetros de RACIOCÍNIO não: `thinking` e `output_config.effort` existem na
+ * família 4.6+ e respondem 400 no Haiku 4.5, que é a geração anterior. Foi o
+ * terceiro 400 deste run ("adaptive thinking is not supported on this model").
+ *
+ * Por isso o corpo é montado a partir de uma TABELA DE CAPACIDADES
+ * (`lib/ai/shared/model-capabilities.ts`), em {@link buildStructuredRequest}, e
+ * não escrito à mão como se todo modelo fosse igual. `lib/ai/shared/request-lint.ts`
+ * é a guarda local: reprova a combinação incompatível sem chamar a API.
+ *
  * ## Por que `client.post` e não `client.messages.create`
  *
  * O `@anthropic-ai/sdk` do repo é o 0.30: os tipos dele não conhecem
@@ -39,6 +51,11 @@
 
 import type { Anthropic } from "@anthropic-ai/sdk";
 import { getAnthropicClient } from "./anthropic-client";
+import {
+  capabilitiesFor,
+  isKnownModel,
+  supportsEffort,
+} from "@/lib/ai/shared/model-capabilities";
 
 /** Profundidade de raciocínio — `output_config.effort` da API atual. */
 export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
@@ -74,8 +91,13 @@ export interface StructuredCallResult<T> {
   latencyMs: number;
 }
 
-/** Corpo enviado a `POST /v1/messages`. Note a AUSÊNCIA de sampling params. */
-interface StructuredRequestBody {
+/**
+ * Corpo enviado a `POST /v1/messages`. Note a AUSÊNCIA de sampling params.
+ *
+ * `thinking` e `output_config.effort` são OPCIONAIS aqui porque nem toda
+ * geração de modelo os aceita — ver {@link buildStructuredRequest}.
+ */
+export interface StructuredRequestBody {
   model: string;
   max_tokens: number;
   system: Array<{
@@ -84,9 +106,9 @@ interface StructuredRequestBody {
     cache_control?: { type: "ephemeral" };
   }>;
   messages: Array<{ role: "user"; content: string }>;
-  thinking: { type: "adaptive" };
+  thinking?: { type: "adaptive" };
   output_config: {
-    effort: EffortLevel;
+    effort?: EffortLevel;
     format: { type: "json_schema"; schema: Record<string, unknown> };
   };
 }
@@ -150,6 +172,54 @@ function extractJson(body: StructuredResponseBody): unknown {
 }
 
 /**
+ * Monta o corpo da requisição a partir das CAPACIDADES do modelo.
+ *
+ * Os parâmetros de raciocínio não são universais e o mesmo valor é obrigatório
+ * num modelo e proibido em outro:
+ *
+ * - família 4.6+ (`claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`…):
+ *   `thinking: {type:"adaptive"}` EXPLÍCITO — no Opus 4.8, que é o modelo do
+ *   planner, omitir significa rodar sem raciocínio nenhum — mais
+ *   `output_config.effort` para a profundidade;
+ * - `claude-haiku-4-5`: sem `thinking` e sem `effort`. Não traduzimos para o
+ *   `budget_tokens` antigo de propósito: classificação estruturada barata não
+ *   precisa de raciocínio estendido, e é um parâmetro a menos para dar errado;
+ * - desconhecido: conservador, sem os dois. Ver `CONSERVATIVE_FALLBACK`.
+ *
+ * O que é invariante em TODOS: zero sampling params, zero prefill,
+ * `output_config.format` para structured output.
+ *
+ * Exportado para o teste conseguir inspecionar o corpo sem rede — é sobre ele
+ * que `lintStructuredRequest` roda em `__tests__/request-lint.test.ts`.
+ */
+export function buildStructuredRequest(
+  input: StructuredCallInput
+): StructuredRequestBody {
+  const caps = capabilitiesFor(input.model);
+  if (!isKnownModel(input.model)) {
+    // Não é fatal — a chamada roda sem os parâmetros de raciocínio. Mas fica
+    // dito, porque um modelo fora da tabela quer dizer que alguém trocou uma
+    // constante sem passar pelas capacidades.
+    console.warn(
+      `[anthropic] modelo "${input.model}" não está na tabela de capacidades; ` +
+        "seguindo sem `thinking` e sem `effort` (ver model-capabilities.ts)."
+    );
+  }
+
+  return {
+    model: input.model,
+    max_tokens: input.maxTokens,
+    system: toSystemBlocks(input.system),
+    messages: [{ role: "user", content: input.userContent }],
+    ...(caps.adaptiveThinking ? { thinking: { type: "adaptive" as const } } : {}),
+    output_config: {
+      ...(supportsEffort(caps) ? { effort: input.effort } : {}),
+      format: { type: "json_schema" as const, schema: input.schema },
+    },
+  };
+}
+
+/**
  * Uma chamada estruturada. Devolve o JSON cru (a VALIDAÇÃO de forma é do
  * chamador — `lib/ingestion/*` tem os enums fechados do domínio) e a contagem
  * de tokens, que o chamador grava em `AIUsage` e acumula no cap do run.
@@ -159,20 +229,7 @@ export async function runStructured<T = unknown>(
   client?: Pick<Anthropic, "post">
 ): Promise<StructuredCallResult<T>> {
   const anthropic = client ?? getAnthropicClient();
-  const body: StructuredRequestBody = {
-    model: input.model,
-    max_tokens: input.maxTokens,
-    system: toSystemBlocks(input.system),
-    messages: [{ role: "user", content: input.userContent }],
-    // EXPLÍCITO, sempre. No Opus 4.8 — o modelo do planner — omitir `thinking`
-    // significa rodar SEM thinking (o default adaptativo do Opus 5 não vale
-    // lá). A profundidade vem do `effort`, não de `budget_tokens` (400 aqui).
-    thinking: { type: "adaptive" },
-    output_config: {
-      effort: input.effort,
-      format: { type: "json_schema", schema: input.schema },
-    },
-  };
+  const body = buildStructuredRequest(input);
 
   const t0 = Date.now();
   const response = (await anthropic.post("/v1/messages", {
