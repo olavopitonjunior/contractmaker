@@ -159,6 +159,9 @@ export function compararCampos(
 
 export interface Agregado {
   documentos: number;
+  /** Comparações de campo. É o denominador das taxas — sem ele não dá para
+   *  saber se uma diferença de 1 ponto percentual é sinal ou uma ocorrência. */
+  comparacoes: number;
   acuraciaPonderada: number;
   taxaAlucinacao: number;
   taxaOmissao: number;
@@ -183,6 +186,7 @@ export function agregar(placares: PlacarDocumento[]): Agregado {
   if (placares.length === 0) {
     return {
       documentos: 0,
+      comparacoes: 0,
       acuraciaPonderada: 0,
       taxaAlucinacao: 0,
       taxaOmissao: 0,
@@ -215,6 +219,7 @@ export function agregar(placares: PlacarDocumento[]): Agregado {
 
   return {
     documentos: placares.length,
+    comparacoes: campos,
     acuraciaPonderada: pesoTotal > 0 ? pesoAcertado / pesoTotal : 0,
     taxaAlucinacao: campos > 0 ? alucinacoes / campos : 0,
     taxaOmissao: campos > 0 ? omissoes / campos : 0,
@@ -242,6 +247,37 @@ export interface Veredito {
  * viaja para o contrato, para a certidão e para a assinatura sem ninguém
  * conferir, enquanto o campo vazio para na primeira leitura humana.
  */
+/**
+ * Diferença mínima de taxa de alucinação para o veto disparar.
+ *
+ * ── Por que existe ────────────────────────────────────────────────────────
+ *
+ * A primeira versão comparava as taxas com `>` estrito. Parecia rigoroso e era
+ * inútil: com ~150 comparações de campo por braço, 1 ponto percentual é UMA
+ * ocorrência, e a taxa do próprio baseline oscilou entre execuções idênticas —
+ * 2,2%, depois 1,9%, depois 0,6%, sem nada mudar.
+ *
+ * O resultado é que o critério reprovava TODOS os candidatos com base em quem
+ * teve mais sorte no sorteio. E o teste que o desmascara não é um candidato
+ * reprovado: é o BASELINE reprovando a si mesmo — comparado à sua própria
+ * execução anterior, ele não passaria. Um critério que reprova o incumbente
+ * contra ele mesmo está quebrado independentemente de quem beneficia.
+ *
+ * 2 pontos percentuais em ~150 comparações são ~3 ocorrências. Ainda é pouco,
+ * e por isso o veredito também exige um número mínimo de comparações — sem
+ * volume, a resposta honesta é "não medi o suficiente", não um veredito.
+ */
+const DELTA_MINIMO_ALUCINACAO = 0.02;
+
+/**
+ * Comparações de campo mínimas para qualquer veredito.
+ *
+ * Abaixo disso a diferença entre dois modelos é indistinguível de ruído em
+ * qualquer direção, e emitir APROVADO/REPROVADO daria ares de decisão ao que é
+ * sorteio. 300 comparações ≈ 10 documentos × 15 campos × 2 repetições.
+ */
+const COMPARACOES_MINIMAS = 300;
+
 export function avaliar(baseline: Agregado, candidato: Agregado): Veredito {
   const motivos: string[] = [];
   const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -264,11 +300,25 @@ export function avaliar(baseline: Agregado, candidato: Agregado): Veredito {
       motivos: ["o baseline não produziu medição — não há contra o que comparar"],
     };
   }
+  // Sem volume, "aprovado" e "reprovado" são os dois desonestos.
+  const menor = Math.min(baseline.comparacoes, candidato.comparacoes);
+  if (menor < COMPARACOES_MINIMAS) {
+    return {
+      aprovado: false,
+      motivos: [
+        `amostra pequena demais para veredito: ${menor} comparações de campo ` +
+          `(mínimo ${COMPARACOES_MINIMAS}). Aumente --repeticoes ou anote mais ` +
+          `documentos — nesse tamanho, 1 ponto percentual é UMA ocorrência.`,
+      ],
+    };
+  }
 
-  if (candidato.taxaAlucinacao > baseline.taxaAlucinacao) {
+  const delta = candidato.taxaAlucinacao - baseline.taxaAlucinacao;
+  if (delta > DELTA_MINIMO_ALUCINACAO) {
     motivos.push(
       `alucina mais que o baseline (${pct(candidato.taxaAlucinacao)} vs ` +
-        `${pct(baseline.taxaAlucinacao)}) — veto, mesmo com acurácia melhor`
+        `${pct(baseline.taxaAlucinacao)}, diferença de ${pct(delta)}) — veto, ` +
+        `mesmo com acurácia melhor`
     );
   }
   if (candidato.acuraciaPonderada < baseline.acuraciaPonderada) {

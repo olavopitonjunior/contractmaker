@@ -11,6 +11,11 @@ import {
   type ComparacaoSombra,
 } from "./ocr-shadow";
 import type { GeminiUsageMetadata } from "./usage";
+import {
+  chamarOpenAIOcr,
+  isModeloOpenAI,
+  schemaJsonDeCampos,
+} from "./ocr-openai";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -782,11 +787,56 @@ function shouldTryFallbackModel(err: unknown): boolean {
   );
 }
 
+/**
+ * Uma chamada de extração, no provedor do modelo pedido.
+ *
+ * O nome `callGemini` ficou por trás deste despacho porque a cascata de
+ * fallback, o registro de uso e o parse já falam com ele — trocar a assinatura
+ * espalharia a mudança por cinco call-sites sem ganho. O que muda é que agora
+ * um modelo `gpt-*` sai por outro caminho.
+ */
 async function callGemini(
   model: string,
   base64Data: string,
   mimeType: string
 ): Promise<{ text: string; usage: GeminiUsageMetadata | undefined }> {
+  if (isModeloOpenAI(model)) {
+    // Duas etapas também aqui: sem a categoria não há schema, e o schema com
+    // todos os campos de todas as categorias foi medido como pior que nenhum.
+    let schema: Record<string, unknown> | null = null;
+    if (structuredOutputEnabled()) {
+      try {
+        const cls = await chamarOpenAIOcr({
+          modelo: model, prompt: COMBINED_PROMPT, base64: base64Data, mimeType,
+          schema: { type: "object",
+            properties: { tipo: { type: "string" }, confidence: { type: "number" } },
+            required: ["tipo", "confidence"] },
+        });
+        const campos = CAMPOS_POR_CATEGORIA[parseGeminiJson(cls.text).tipo];
+        schema = campos ? schemaJsonDeCampos(campos) : null;
+      } catch {
+        // Classificação é auxiliar: falhou, extrai sem schema.
+        schema = null;
+      }
+    }
+    const r = await chamarOpenAIOcr({
+      modelo: model, prompt: COMBINED_PROMPT, base64: base64Data, mimeType, schema,
+    });
+    // Traduz para o shape do `usageMetadata` do Gemini, que é o que
+    // `geminiUsageToTokens` e o registro de uso já consomem. `thoughts` fica
+    // ZERO de propósito: na OpenAI o raciocínio JÁ está em `completion_tokens`,
+    // e somá-lo de novo dobraria o custo reportado.
+    return {
+      text: r.text,
+      usage: {
+        promptTokenCount: r.promptTokens,
+        candidatesTokenCount: r.completionTokens,
+        thoughtsTokenCount: 0,
+        totalTokenCount: r.promptTokens + r.completionTokens,
+      },
+    };
+  }
+
   const ai = getGenAI();
   const contents = [
     { text: COMBINED_PROMPT },
@@ -1088,7 +1138,11 @@ export async function classifyAndExtract(
   if (ctx) {
     // Phase F.I-β — provider correto conforme modelo usado (pode ter
     // caído na cascata Gemini → Claude Haiku).
-    const providerUsed = modelUsed.startsWith("claude") ? "anthropic" : "gemini";
+    const providerUsed = modelUsed.startsWith("claude")
+      ? "anthropic"
+      : isModeloOpenAI(modelUsed)
+        ? "openai"
+        : "gemini";
     const tok = geminiUsageToTokens(usage, modelUsed);
     recordAIUsage({
       orgId: ctx.orgId,
