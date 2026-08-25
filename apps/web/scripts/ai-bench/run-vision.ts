@@ -62,7 +62,55 @@ interface Braco {
   modelo: string;
   comSchema: boolean;
   rotulo: string;
+  /**
+   * Duas chamadas: classificar (schema mínimo) e depois extrair com o schema
+   * DA CATEGORIA. Existe porque o superset numa chamada só se mostrou pior que
+   * não ter schema nenhum — ver `CAMPOS_POR_CATEGORIA`.
+   */
+  duasEtapas?: boolean;
 }
+
+/**
+ * Campos que o `COMBINED_PROMPT` lista PARA CADA CATEGORIA.
+ *
+ * ── Por que isto existe ──────────────────────────────────────────────────
+ *
+ * Medido em 24/08 no `gemini-2.5-flash`, mesmo documento, `finishReason=STOP`
+ * nos dois casos (não é truncamento):
+ *
+ *   CNH (PDF digital limpo):  11 campos SEM schema  →  3 campos com o SUPERSET
+ *   certidão de nascimento:   23 campos SEM schema  →  2 campos com o SUPERSET
+ *
+ * E com o schema ENXUTO da categoria a extração volta — no RG, 8 campos contra
+ * 7 sem schema e 3 com superset. Ou seja: o problema não é structured output,
+ * é declarar ~55 propriedades majoritariamente irrelevantes numa chamada só.
+ *
+ * `outro` fica DE FORA de propósito: o contrato dele no prompt é free-form
+ * ("inclua todos os dados relevantes"), e qualquer schema o limita — medido,
+ * 22 campos sem schema contra 7 com o enxuto.
+ */
+const CAMPOS_POR_CATEGORIA: Record<string, string[]> = {
+  rg: ["nome_completo", "rg_numero", "orgao_expedidor", "data_nascimento", "sexo",
+       "naturalidade", "filiacao_mae", "filiacao_pai", "conjuge_nome", "conjuge_cpf",
+       "cpf_numero", "data_emissao"],
+  cpf: ["nome_completo", "cpf_numero", "data_nascimento", "situacao_cadastral"],
+  cnh: ["nome_completo", "cpf_numero", "rg_numero", "data_nascimento", "sexo",
+        "naturalidade", "filiacao_mae", "filiacao_pai", "categoria", "data_emissao",
+        "data_validade", "registro_cnh", "conjuge_nome", "conjuge_cpf"],
+  matricula: ["matricula_numero", "cartorio", "endereco_completo", "bairro", "cidade",
+              "uf", "cep", "proprietario_nome", "area_total", "onus_existentes",
+              "descricao_imovel"],
+  iptu: ["inscricao_iptu", "inscricao_municipal", "sql", "endereco", "bairro", "cidade",
+         "uf", "valor_venal", "ano_referencia", "debitos_pendentes"],
+  escritura: ["vendedor_nome", "comprador_nome", "valor_transacao", "data_lavratura",
+              "cartorio", "endereco_imovel", "matricula_referenciada"],
+  procuracao: ["outorgante_nome", "outorgante_cpf", "outorgado_nome", "outorgado_cpf",
+               "poderes_resumo", "data_lavratura", "prazo_validade"],
+  comprovante_residencia: ["titular_nome", "endereco_completo", "bairro", "cidade",
+                           "uf", "cep", "emissor"],
+  certidao_casamento: ["conjuge1_nome", "conjuge1_cpf", "conjuge2_nome", "conjuge2_cpf",
+                       "data_casamento", "regime_bens", "cartorio", "data_lavratura"],
+};
 
 const BRACOS: Braco[] = [
   { chave: "baseline", modelo: "gemini-2.5-flash", comSchema: false, rotulo: "2.5-flash (produção hoje)" },
@@ -70,7 +118,40 @@ const BRACOS: Braco[] = [
   { chave: "lite35", modelo: "gemini-3.5-flash-lite", comSchema: true, rotulo: "3.5-flash-lite + schema" },
   { chave: "lite31", modelo: "gemini-3.1-flash-lite", comSchema: true, rotulo: "3.1-flash-lite + schema" },
   { chave: "gemma", modelo: "gemma-4-31b-it", comSchema: true, rotulo: "gemma-4-31b + schema" },
+  { chave: "duas35", modelo: "gemini-3.5-flash-lite", comSchema: true, duasEtapas: true,
+    rotulo: "3.5-flash-lite 2 etapas" },
+  { chave: "duas25", modelo: "gemini-2.5-flash", comSchema: true, duasEtapas: true,
+    rotulo: "2.5-flash 2 etapas" },
 ];
+
+/** Schema só de classificação — saída minúscula, para a 1a etapa ser barata. */
+function schemaDeCategoria() {
+  return {
+    type: "OBJECT",
+    properties: {
+      tipo: { type: "STRING", format: "enum", enum: CATEGORIAS },
+      confidence: { type: "NUMBER" },
+    },
+    required: ["tipo", "confidence"],
+  };
+}
+
+/** Schema de extração com APENAS os campos da categoria detectada. */
+function schemaDaCategoria(cat: string) {
+  const campos = CAMPOS_POR_CATEGORIA[cat];
+  if (!campos) return null; // `outro`/`ficha_resumo`: free-form, sem schema
+  const properties: Record<string, unknown> = {};
+  for (const k of campos) properties[k] = { type: "STRING", nullable: true };
+  return {
+    type: "OBJECT",
+    properties: {
+      tipo: { type: "STRING", format: "enum", enum: CATEGORIAS },
+      campos: { type: "OBJECT", properties },
+      confidence: { type: "NUMBER" },
+    },
+    required: ["tipo", "campos", "confidence"],
+  };
+}
 
 const CATEGORIAS = [
   "rg", "cpf", "cnh", "matricula", "iptu", "escritura", "procuracao",
@@ -99,6 +180,9 @@ const CAMPOS_DO_PROMPT = [
   "poderes_resumo", "prazo_validade", "titular_nome", "emissor",
   "conjuge1_nome", "conjuge1_cpf", "conjuge2_nome", "conjuge2_cpf",
   "data_casamento", "regime_bens", "tipo_documento",
+  // PJ no nível plano — comprovante de Pix e cartão CNPJ caem em `outro`, e
+  // sem estas chaves o braço com schema seria punido por não poder devolvê-las.
+  "cnpj", "razao_social",
 ];
 
 /**
@@ -233,18 +317,44 @@ async function main() {
         const t0 = Date.now();
         let texto = "";
         let usage: GeminiUsageMetadata | undefined;
+        // Nas duas etapas, o custo é a SOMA das duas chamadas — cobrar só a
+        // segunda esconderia metade do preço do formato.
+        let custoExtra = 0;
         try {
+          const partes = [
+            { text: COMBINED_PROMPT },
+            { inlineData: { mimeType: caso.mime, data: base64 } },
+          ];
+
+          let schemaDaVez: unknown = braco.comSchema ? schemaDeSaida() : null;
+
+          if (braco.duasEtapas) {
+            // Etapa 1 — classificar. Saída minúscula, schema de dois campos.
+            const cls = await ai.models.generateContent({
+              model: braco.modelo,
+              contents: partes,
+              config: {
+                responseMimeType: "application/json",
+                responseSchema: schemaDeCategoria() as never,
+              },
+            });
+            const clsUsage = (cls as { usageMetadata?: GeminiUsageMetadata }).usageMetadata;
+            const tokCls = geminiUsageToTokens(clsUsage, braco.modelo);
+            custoExtra = calcCostUsd(braco.modelo, tokCls.promptTokens, tokCls.completionTokens);
+            const cat = normalizarCategoria(parseTolerante(cls.text ?? "")?.tipo);
+            // `outro` e `ficha_resumo` seguem SEM schema: free-form é o
+            // contrato deles no prompt, e qualquer schema os limita.
+            schemaDaVez = schemaDaCategoria(cat);
+          }
+
           const res = await ai.models.generateContent({
             model: braco.modelo,
-            contents: [
-              { text: COMBINED_PROMPT },
-              { inlineData: { mimeType: caso.mime, data: base64 } },
-            ],
-            ...(braco.comSchema
+            contents: partes,
+            ...(schemaDaVez
               ? {
                   config: {
                     responseMimeType: "application/json",
-                    responseSchema: schemaDeSaida(),
+                    responseSchema: schemaDaVez as never,
                   },
                 }
               : {}),
@@ -274,7 +384,8 @@ async function main() {
         const latenciaMs = Date.now() - t0;
         const parsed = parseTolerante(texto);
         const tok = geminiUsageToTokens(usage, braco.modelo);
-        const custoUsd = calcCostUsd(braco.modelo, tok.promptTokens, tok.completionTokens);
+        const custoUsd =
+          calcCostUsd(braco.modelo, tok.promptTokens, tok.completionTokens) + custoExtra;
         const campos = (parsed?.campos ?? null) as Record<string, unknown> | null;
 
         resultados[braco.chave].push({
