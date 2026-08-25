@@ -107,6 +107,30 @@ interface RawClassification {
   reason: string;
 }
 
+/**
+ * Campo de vocabulário fechado que também aceita `null`.
+ *
+ * NÃO use `{ type: ["string","null"], enum: [...valores, null] }`: o validador
+ * de `output_config.format` checa cada valor do enum contra o `type` DECLARADO
+ * e não destrincha a união — responde 400 ("Enum value 'fiador' does not match
+ * declared type '['string','null']'") e derruba o run. Com `anyOf` cada ramo é
+ * consistente consigo mesmo, que é o subconjunto padrão que a API aceita.
+ *
+ * Plano B, caso `anyOf` também seja recusado um dia: `type: "string"` com um
+ * valor-sentinela ("nenhum") no enum, traduzido para `null` no parse. Fica
+ * documentado e NÃO implementado — trocar ausência por sentinela obriga todo
+ * consumidor a conhecer a convenção.
+ */
+function nullableEnum(
+  values: readonly string[],
+  description: string
+): Record<string, unknown> {
+  return {
+    anyOf: [{ type: "string", enum: [...values] }, { type: "null" }],
+    description,
+  };
+}
+
 /** JSON Schema da saída — objeto fechado, enums nos valores canônicos. */
 export const CLASSIFICATION_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -123,27 +147,22 @@ export const CLASSIFICATION_SCHEMA: Record<string, unknown> = {
     "reason",
   ],
   properties: {
-    docType: {
-      type: ["string", "null"],
-      enum: [...INGEST_DOC_TYPES, null],
-      description: "Tipo do documento na linguagem do usuário.",
-    },
-    subOption: {
-      type: ["string", "null"],
-      enum: [...SUB_OPTIONS, null],
-      description: "Sub-opção do tipo. Null quando o tipo não tem sub-opção.",
-    },
-    modalidade: {
-      type: ["string", "null"],
-      enum: [...MODALIDADES, null],
-      description: "Modalidade canônica de ContractTemplate.",
-    },
-    garantiaTipo: {
-      type: ["string", "null"],
-      enum: [...GARANTIA_TIPOS, null],
-      description:
-        "Garantia locatícia do documento. Null fora de locação/proposta de locação.",
-    },
+    docType: nullableEnum(
+      INGEST_DOC_TYPES,
+      "Tipo do documento na linguagem do usuário."
+    ),
+    subOption: nullableEnum(
+      SUB_OPTIONS,
+      "Sub-opção do tipo. Null quando o tipo não tem sub-opção."
+    ),
+    modalidade: nullableEnum(
+      MODALIDADES,
+      "Modalidade canônica de ContractTemplate."
+    ),
+    garantiaTipo: nullableEnum(
+      GARANTIA_TIPOS,
+      "Garantia locatícia do documento. Null fora de locação/proposta de locação."
+    ),
     provider: {
       type: ["string", "null"],
       description:

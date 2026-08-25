@@ -428,6 +428,19 @@ const ISSUE_KINDS: PlanIssueKind[] = [
   "acervo_incompleto",
 ];
 
+/**
+ * Campo de vocabulário fechado que também aceita `null`.
+ *
+ * `{ type: ["string","null"], enum: [...valores, null] }` responde 400: o
+ * validador de `output_config.format` compara cada valor do enum com o `type`
+ * DECLARADO e não destrincha a união. Com `anyOf`, cada ramo fecha em si mesmo.
+ * Mesma restrição — e mesma explicação longa — de `nullableEnum` em
+ * `lib/ingestion/llm-classifier.ts`.
+ */
+function nullableEnum(values: readonly string[]): Record<string, unknown> {
+  return { anyOf: [{ type: "string", enum: [...values] }, { type: "null" }] };
+}
+
 /** JSON Schema da saída do planner. Blocos por REFERÊNCIA, tags derivadas depois. */
 export const PLAN_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -448,9 +461,9 @@ export const PLAN_SCHEMA: Record<string, unknown> = {
             type: "object",
             additionalProperties: false,
             properties: {
-              garantia: { type: ["string", "null"], enum: [...GARANTIA_TIPOS, null] },
-              fiadorPessoa: { type: ["string", "null"], enum: ["pf", "pj", null] },
-              pessoa: { type: ["string", "null"], enum: ["pf", "pj", null] },
+              garantia: nullableEnum(GARANTIA_TIPOS),
+              fiadorPessoa: nullableEnum(["pf", "pj"]),
+              pessoa: nullableEnum(["pf", "pj"]),
               admImobiliaria: { type: ["boolean", "null"] },
             },
           },
