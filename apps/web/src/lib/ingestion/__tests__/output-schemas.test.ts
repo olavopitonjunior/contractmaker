@@ -145,6 +145,65 @@ describe("schemas de output_config.format", () => {
     }
   });
 
+  it("todo objeto dos schemas reais é estrito: required completo e fechado", () => {
+    // Varredura independente do linter. Se um campo novo entrar em `properties`
+    // e ninguém o puser em `required`, este teste diz onde.
+    const NAME_MAPS = new Set(["properties", "$defs", "definitions"]);
+    const found: string[] = [];
+
+    function walkSchema(node: unknown, path: string): void {
+      if (Array.isArray(node)) {
+        node.forEach((child, i) => walkSchema(child, `${path}/${i}`));
+        return;
+      }
+      if (!node || typeof node !== "object") return;
+      const record = node as Record<string, unknown>;
+      const properties = record.properties;
+
+      if (properties && typeof properties === "object") {
+        const names = Object.keys(properties);
+        const required = Array.isArray(record.required) ? record.required : [];
+        const missing = names.filter((n) => !required.includes(n));
+        if (missing.length) found.push(`${path} fora de required: ${missing.join(",")}`);
+        if (record.additionalProperties !== false) {
+          found.push(`${path} sem additionalProperties:false`);
+        }
+        // `required` apontando para campo inexistente é erro do outro lado.
+        const orphan = required.filter((n) => !names.includes(n as string));
+        if (orphan.length) found.push(`${path} required órfão: ${orphan.join(",")}`);
+      }
+
+      for (const [key, value] of Object.entries(record)) {
+        if (!value || typeof value !== "object") continue;
+        if (NAME_MAPS.has(key)) {
+          for (const [name, child] of Object.entries(value)) {
+            walkSchema(child, `${path}/${key}/${name}`);
+          }
+        } else {
+          walkSchema(value, `${path}/${key}`);
+        }
+      }
+    }
+
+    for (const [name, schema] of exportedSchemas()) walkSchema(schema, name);
+    expect(found).toEqual([]);
+  });
+
+  it("os campos antes opcionais do template entraram em required", () => {
+    const node = (
+      planner.PLAN_SCHEMA as {
+        properties: {
+          templates: { items: { required: string[]; properties: object } };
+        };
+      }
+    ).properties.templates.items;
+
+    for (const field of ["slotBlocks", "isDefaultSuggested", "groupId"]) {
+      expect(node.required).toContain(field);
+    }
+    expect(node.required.sort()).toEqual(Object.keys(node.properties).sort());
+  });
+
   it("matchCriteria do planner também saiu da união", () => {
     const criteria = (
       planner.PLAN_SCHEMA as {
