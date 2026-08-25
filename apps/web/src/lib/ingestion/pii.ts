@@ -57,6 +57,10 @@
  * `{ kind, excerpt }` e nós resolvemos os spans por busca literal no texto
  * (tolerante a espaçamento e caixa), o que mantém o módulo determinístico.
  *
+ * Como os trechos só existem durante a classificação, {@link spansFromFindings}
+ * e {@link entitiesFromSpans} permitem PERSISTIR a posição dessas entidades e
+ * recuperá-las depois, sem nunca guardar o valor — ver {@link PiiSpan}.
+ *
  * ## Performance
  *
  * Textos de até ~200k chars. Todas as expressões são lineares: sem
@@ -481,6 +485,101 @@ export function resolveExternalEntities(
   }
 
   return findings.sort((a, b) => a.start - b.start);
+}
+
+// ---------------------------------------------------------------------------
+// Offsets persistíveis das entidades externas
+// ---------------------------------------------------------------------------
+
+/**
+ * As categorias que NENHUM detector determinístico alcança. São as únicas cujos
+ * offsets vale a pena persistir: para todas as outras, redetectar sai mais
+ * barato e mais confiável que confiar numa posição gravada.
+ */
+export const OFFSET_TRACKED_PII_KINDS: readonly PiiKind[] = ["person_name", "address"];
+
+/**
+ * Posição de uma entidade no texto de ONDE ela foi detectada. Carrega só as
+ * coordenadas — nunca o valor. Persistir isso não acrescenta exposição: o texto
+ * inteiro, com a PII, já está guardado; o que faltava era conseguir apontar.
+ */
+export interface PiiSpan {
+  kind: PiiKind;
+  /** Índice inicial (inclusivo). */
+  start: number;
+  /** Índice final (exclusivo). */
+  end: number;
+}
+
+export interface ResolvedPiiSpans {
+  /** Entidades prontas para {@link resolveExternalEntities}. */
+  entities: ExternalEntity[];
+  /**
+   * Todos os spans foram confirmados contra o texto. `false` significa "não sei
+   * o que estes offsets apontam" — quem chama tem de FALHAR FECHADO, porque
+   * sanitizar o trecho errado é indistinguível de não sanitizar nada.
+   */
+  trusted: boolean;
+}
+
+const FNV_OFFSET_BASIS = 0x811c9dc5;
+const FNV_PRIME = 0x01000193;
+
+function fnv1a(text: string, seed: number): number {
+  let hash = seed >>> 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    hash = Math.imul(hash ^ (code & 0xff), FNV_PRIME) >>> 0;
+    hash = Math.imul(hash ^ (code >>> 8), FNV_PRIME) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+/**
+ * Impressão digital determinística do texto (comprimento + dois FNV-1a).
+ *
+ * Não é hash criptográfico e não precisa ser: a única pergunta que ela responde
+ * é "os offsets gravados foram calculados sobre ESTE texto?". Guardar o trecho
+ * (ou o texto) para conferir seria cópia de dado sensível; a impressão digital
+ * não volta a ser nome nenhum.
+ */
+export function textFingerprint(text: string): string {
+  const a = fnv1a(text, FNV_OFFSET_BASIS);
+  const b = fnv1a(text, FNV_PRIME);
+  return `${text.length.toString(36)}.${a.toString(36)}.${b.toString(36)}`;
+}
+
+/** Offsets das entidades de {@link OFFSET_TRACKED_PII_KINDS}, prontos para gravar. */
+export function spansFromFindings(findings: readonly PiiFinding[]): PiiSpan[] {
+  return findings
+    .filter((f) => OFFSET_TRACKED_PII_KINDS.includes(f.kind))
+    .map((f) => ({ kind: f.kind, start: f.start, end: f.end }));
+}
+
+/**
+ * Recupera os trechos a partir dos offsets. Um span fora dos limites, invertido
+ * ou apontando para espaço em branco invalida o CONJUNTO INTEIRO — meia
+ * resolução daria a falsa impressão de que a PII foi tratada.
+ */
+export function entitiesFromSpans(
+  text: string,
+  spans: readonly PiiSpan[],
+): ResolvedPiiSpans {
+  const entities: ExternalEntity[] = [];
+  for (const span of spans) {
+    if (!Number.isInteger(span.start) || !Number.isInteger(span.end)) {
+      return { entities: [], trusted: false };
+    }
+    if (span.start < 0 || span.end > text.length || span.end <= span.start) {
+      return { entities: [], trusted: false };
+    }
+    const excerpt = text.slice(span.start, span.end).trim();
+    if (excerpt.length < MIN_EXTERNAL_EXCERPT_LENGTH) {
+      return { entities: [], trusted: false };
+    }
+    entities.push({ kind: span.kind, excerpt });
+  }
+  return { entities, trusted: true };
 }
 
 // ---------------------------------------------------------------------------

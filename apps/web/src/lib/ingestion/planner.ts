@@ -62,8 +62,12 @@ import {
   type EffortLevel,
   type StructuredRunner,
 } from "@/lib/ai/shared/anthropic-structured";
-import { sanitizePii } from "@/lib/ingestion/pii";
-import type { ItemClassification } from "@/lib/ingestion/classifier";
+import { sanitizePii, type ExternalEntity } from "@/lib/ingestion/pii";
+import {
+  externalPiiEntities,
+  type ItemClassification,
+  type ItemPiiReport,
+} from "@/lib/ingestion/classifier";
 import type {
   ConsolidationCandidate,
   GroupingReport,
@@ -126,6 +130,12 @@ export interface PlannerItem {
   /** `IngestionItem.status`; `discarded` mantém o item fora de fonte de plano. */
   status?: string;
   classification: ItemClassification | null;
+  /**
+   * `IngestionItem.piiReport`. É dele que saem os offsets de nome e endereço —
+   * sem ele a cláusula deste item sai do planner sem essas duas categorias
+   * tratadas e o executor a barra.
+   */
+  piiReport?: ItemPiiReport | null;
 }
 
 export interface PlanLibraryInput {
@@ -674,23 +684,33 @@ function toTemplate(raw: RawTemplate, index: BlockIndex): PlannedTemplate {
   return template;
 }
 
-function toClause(raw: RawClause, index: BlockIndex): PlannedClause {
+function toClause(
+  raw: RawClause,
+  index: BlockIndex,
+  entitiesByItem: ItemPiiEntities
+): PlannedClause {
   const slot = str(raw.slot) as ClauseSlotKey;
   const value = str(raw.value);
   const provider = str(raw.provider) || null;
   const blocks = resolveRefs(raw.blockRefs, index);
+  const sourceItemId = str(raw.sourceItemId);
   // Sanitização DETERMINÍSTICA: o conteúdo da cláusula é o único campo do plano
   // que vira texto persistido com embedding, e confiar no modelo para limpá-lo
   // seria confiar num julgamento onde o erro é irreversível.
   //
-  // LIMITAÇÃO CONHECIDA: sem `externalEntities`, NOME e ENDEREÇO não são
-  // alcançados aqui — `pii.ts` não faz NER por regex de propósito. O
-  // classificador LLM os identifica por item, mas o `piiReport` persistido
-  // guarda só CONTAGEM (nunca o valor), então na hora do plano os trechos não
-  // existem mais. Na prática quem cobre esse caso é o descarte
-  // `filled_instance` e a revisão humana; fechar de vez exige decidir persistir
-  // os trechos, que é mudança de contrato — reportada, não feita aqui.
-  const content = sanitizePii(blocks.join("\n\n")).text;
+  // NOME e ENDEREÇO não têm detector por regex (`pii.ts` não faz NER de
+  // propósito): quem os acha é o classificador LLM, que gravou os OFFSETS no
+  // `piiReport` do item. Os trechos são resolvidos no texto do ITEM e entram
+  // aqui como `externalEntities` — `resolveExternalEntities` faz busca LITERAL
+  // dentro do conteúdo da cláusula, que é um recorte do mesmo texto. Resolver o
+  // trecho e procurá-lo, em vez de traduzir offset de item para offset de
+  // cláusula, é o caminho mais simples de provar correto: não há aritmética de
+  // coordenadas para errar e a busca já trata múltiplas ocorrências.
+  //
+  // Item sem offsets confiáveis sai com a lista VAZIA — a cláusula segue com o
+  // nome e é o gate do `plan-executor` que a barra, fechado.
+  const externalEntities = entitiesByItem.get(sourceItemId) ?? [];
+  const content = sanitizePii(blocks.join("\n\n"), undefined, { externalEntities }).text;
 
   return {
     slot,
@@ -698,7 +718,7 @@ function toClause(raw: RawClause, index: BlockIndex): PlannedClause {
     provider,
     title: str(raw.title),
     content,
-    sourceItemId: str(raw.sourceItemId),
+    sourceItemId,
     // Tags DERIVADAS, nunca pedidas ao modelo: é por igualdade deste conjunto
     // que `ingestSlotClauses` decide o que arquivar.
     tags: [
@@ -723,8 +743,29 @@ function toIssues(raw: RawPlan["issues"]): PlanIssue[] {
   return out;
 }
 
+/** Nome e endereço já resolvidos, por item de origem. Ver {@link toClause}. */
+export type ItemPiiEntities = ReadonlyMap<string, ExternalEntity[]>;
+
+/**
+ * Resolve, item a item, os offsets de nome/endereço gravados na classificação.
+ * Item cujos offsets não batem com o texto entra com lista vazia — o planner não
+ * é o gate. Quem falha fechado é o executor, antes de gravar.
+ */
+export function itemPiiEntities(items: readonly PlannerItem[]): ItemPiiEntities {
+  const out = new Map<string, ExternalEntity[]>();
+  for (const item of items) {
+    const resolved = externalPiiEntities(item.text, item.piiReport ?? null);
+    out.set(item.id, resolved.trusted ? resolved.entities : []);
+  }
+  return out;
+}
+
 /** Converte a saída crua do modelo no `LibraryPlan` do contrato. */
-export function materializePlan(raw: RawPlan, index: BlockIndex): LibraryPlan {
+export function materializePlan(
+  raw: RawPlan,
+  index: BlockIndex,
+  entitiesByItem: ItemPiiEntities = new Map()
+): LibraryPlan {
   const confidence =
     typeof raw.confidence === "number" && Number.isFinite(raw.confidence)
       ? Math.min(1, Math.max(0, raw.confidence))
@@ -733,7 +774,7 @@ export function materializePlan(raw: RawPlan, index: BlockIndex): LibraryPlan {
   return {
     version: LIBRARY_PLAN_VERSION,
     templates: (raw.templates ?? []).map((t) => toTemplate(t, index)),
-    clauses: (raw.clauses ?? []).map((c) => toClause(c, index)),
+    clauses: (raw.clauses ?? []).map((c) => toClause(c, index, entitiesByItem)),
     discards: (raw.discards ?? [])
       .filter((d) => DISCARD_REASONS.includes(str(d?.reason) as PlanDiscardReason))
       .map((d) => ({
@@ -903,6 +944,7 @@ export async function planLibrary(
 
   const analysis = analyzeBatch(input);
   const index = analysis.index;
+  const piiEntities = itemPiiEntities(input.items);
   const digest = buildBatchDigest(input, analysis);
   const items = guardItems(input.items);
   const playbooks = playbooksForModalidades(
@@ -943,7 +985,7 @@ export async function planLibrary(
       });
     }
 
-    const plan = materializePlan(result.data ?? {}, index);
+    const plan = materializePlan(result.data ?? {}, index, piiEntities);
     plan.issues = [
       ...plan.issues,
       ...classificationConflictIssues(input.items),

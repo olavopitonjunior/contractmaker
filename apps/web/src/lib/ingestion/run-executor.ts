@@ -417,7 +417,7 @@ async function classifyItem(
       data: {
         status: "classified",
         classification: classification as object,
-        piiReport: (piiReport ?? summarizePii(detectPii(text))) as object,
+        piiReport: (piiReport ?? summarizePii(detectPii(text), text)) as object,
       },
     });
     return written.count;

@@ -42,6 +42,8 @@ vi.mock("@/lib/modules/read", async () => {
 import { DuplicateTemplateError } from "@/lib/templates/ingest-template-from-docx";
 import { executePlanSlice } from "@/lib/ingestion/plan-executor";
 import { readExecutionReport } from "@/lib/ingestion/execution-report";
+import { summarizePii } from "@/lib/ingestion/classifier";
+import { detectPii } from "@/lib/ingestion/pii";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Harness: banco em memória que HONRA o `where`.
@@ -74,6 +76,8 @@ interface FakeItem {
   fileKind: string;
   blobUrl: string;
   status: string;
+  text: string | null;
+  piiReport: unknown;
   createdAt: Date;
 }
 
@@ -188,6 +192,51 @@ const DIRTY_CLAUSE_TEXT =
   "O fiador Sr. Fulano, inscrito no CPF 111.444.777-35, responde solidariamente " +
   "pelas obrigações do presente contrato de locação residencial urbana.";
 
+// ── Nome e endereço: as duas categorias sem detector determinístico ──────────
+// Dados FICTÍCIOS. Nenhum detector por regex os acha; quem os aponta é o
+// classificador LLM, e é por isso que os offsets precisam ser persistidos.
+const FIADOR_NAME = "JOANA EXEMPLO DA SILVA";
+const FIADOR_ADDRESS = "Rua Inventada, nº 404, Bairro Fictício";
+
+/** Cláusula de garantia que nomeia o fiador — o que não pode virar embedding. */
+const NAMED_CLAUSE_TEXT =
+  `Assina na condição de fiador e devedor solidário ${FIADOR_NAME}, ` +
+  "residente e domiciliada na cidade de Piracicaba/SP, por todas as obrigações " +
+  "assumidas pelo locatário neste contrato.";
+
+/** O texto do item: o documento inteiro, do qual a cláusula é um recorte. */
+const ITEM_TEXT = [
+  "CONTRATO DE LOCAÇÃO RESIDENCIAL",
+  "",
+  NAMED_CLAUSE_TEXT,
+  "",
+  `Endereço do fiador: ${FIADOR_ADDRESS}.`,
+].join("\n");
+
+/** O `piiReport` que o classificador LLM grava para esse item. */
+function piiReportFor(text: string): unknown {
+  const findings = detectPii(text, {
+    externalEntities: [
+      { kind: "person_name", excerpt: FIADOR_NAME },
+      { kind: "address", excerpt: FIADOR_ADDRESS },
+    ],
+  });
+  return summarizePii(findings, text);
+}
+
+function clauseWithContent(content: string): LibraryPlan["clauses"][number] {
+  return {
+    slot: "garantia",
+    value: "fiador",
+    provider: null,
+    title: "Fiador",
+    content,
+    sourceItemId: "item-0",
+    tags: ["slot:garantia", "garantia:fiador"],
+    rationale: "Bloco divergente.",
+  };
+}
+
 function plan(overrides: Partial<LibraryPlan> = {}): LibraryPlan {
   return {
     version: LIBRARY_PLAN_VERSION,
@@ -243,6 +292,9 @@ function seed(args: {
   reviewed: ReviewedLibraryPlan;
   itemCount?: number;
   status?: string;
+  /** Texto extraído e relatório de PII do `item-0` — o gate lê os dois. */
+  itemText?: string;
+  itemPiiReport?: unknown;
 }): void {
   runs = [
     {
@@ -268,6 +320,8 @@ function seed(args: {
     fileKind: "docx",
     blobUrl: `https://s.public.blob.vercel-storage.com/ingestion/org-1/contrato-${i}.docx`,
     status: "classified",
+    text: i === 0 ? (args.itemText ?? null) : null,
+    piiReport: i === 0 ? (args.itemPiiReport ?? null) : null,
     createdAt: new Date(2026, 7, 25, 10, 0, i),
   }));
 }
@@ -417,6 +471,101 @@ describe("executePlanSlice — gate de PII", () => {
     expect(report.counts.piiBlocked).toBe(1);
     expect(report.discards.some((d) => d.reason === "pii_unrecoverable")).toBe(true);
     expect(report.issues.some((i) => i.kind === "pii_leftover")).toBe(true);
+  });
+
+  it("cláusula com NOME de fiador é barrada — os offsets do item alcançam o trecho", async () => {
+    // A lacuna que este gate fecha: nome não tem detector por regex. Quem o
+    // achou foi o classificador, que gravou os OFFSETS; o texto do item nunca
+    // saiu de lá, então o trecho volta a ser localizável.
+    const p = plan({ clauses: [clauseWithContent(NAMED_CLAUSE_TEXT)] });
+    seed({
+      plan: p,
+      reviewed: reviewed(p),
+      itemText: ITEM_TEXT,
+      itemPiiReport: piiReportFor(ITEM_TEXT),
+    });
+
+    await runToCompletion();
+
+    expect(ingestClausesMock).not.toHaveBeenCalled();
+    const report = readExecutionReport(runs[0].report)!;
+    expect(report.clauses[0].status).toBe("pii_blocked");
+    expect(report.clauses[0].piiKinds).toContain("person_name");
+    expect(report.discards.some((d) => d.reason === "pii_unrecoverable")).toBe(true);
+    expect(report.issues.some((i) => i.kind === "pii_leftover")).toBe(true);
+    // O nome não chega ao acervo por nenhum caminho.
+    expect(JSON.stringify(runs[0].report)).not.toContain(FIADOR_NAME);
+  });
+
+  it("a mesma cláusula já sanitizada passa — o placeholder não reacusa", async () => {
+    const p = plan({
+      clauses: [clauseWithContent(NAMED_CLAUSE_TEXT.replace(FIADOR_NAME, "[NOME]"))],
+    });
+    seed({
+      plan: p,
+      reviewed: reviewed(p),
+      itemText: ITEM_TEXT,
+      itemPiiReport: piiReportFor(ITEM_TEXT),
+    });
+
+    await runToCompletion();
+
+    const report = readExecutionReport(runs[0].report)!;
+    expect(report.clauses[0].status).toBe("created");
+    expect(ingestClausesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("offsets que não batem com o texto: falha FECHADA, mesmo com cláusula limpa", async () => {
+    // Item reextraído depois da classificação: os offsets apontam para outro
+    // lugar. Sem confirmar que o trecho foi tratado, não se grava.
+    const p = plan({ clauses: [clauseWithContent(CLAUSE_TEXT)] });
+    seed({
+      plan: p,
+      reviewed: reviewed(p),
+      itemText: `Cabeçalho novo da reextração.\n${ITEM_TEXT}`,
+      itemPiiReport: piiReportFor(ITEM_TEXT),
+    });
+
+    await runToCompletion();
+
+    expect(ingestClausesMock).not.toHaveBeenCalled();
+    const report = readExecutionReport(runs[0].report)!;
+    expect(report.clauses[0].status).toBe("pii_blocked");
+    expect(report.clauses[0].piiKinds).toEqual(["person_name", "address"]);
+    expect(report.clauses[0].detail).toContain("Não foi possível confirmar");
+    expect(report.discards.some((d) => d.reason === "pii_unrecoverable")).toBe(true);
+    expect(report.issues.some((i) => i.kind === "pii_leftover")).toBe(true);
+  });
+
+  it("piiReport antigo (só contagem, sem offsets) também falha fechado", async () => {
+    // Compat de LEITURA não é compat de política: um relatório que afirma haver
+    // nome no arquivo e não diz onde é exatamente o caso que não dá para tratar.
+    const p = plan({ clauses: [clauseWithContent(CLAUSE_TEXT)] });
+    seed({
+      plan: p,
+      reviewed: reviewed(p),
+      itemText: ITEM_TEXT,
+      itemPiiReport: { total: 1, byKind: { person_name: 1 }, maxConfidence: 0.9 },
+    });
+
+    await runToCompletion();
+
+    expect(ingestClausesMock).not.toHaveBeenCalled();
+    expect(readExecutionReport(runs[0].report)!.clauses[0].status).toBe("pii_blocked");
+  });
+
+  it("item sem nome nem endereço: relatório antigo continua passando", async () => {
+    const p = plan();
+    seed({
+      plan: p,
+      reviewed: reviewed(p),
+      itemText: ITEM_TEXT,
+      itemPiiReport: { total: 2, byKind: { cpf: 2 }, maxConfidence: 0.99 },
+    });
+
+    await runToCompletion();
+
+    expect(readExecutionReport(runs[0].report)!.clauses[0].status).toBe("created");
   });
 
   it("o modelo do mesmo arquivo continua sendo criado — o gate é da cláusula", async () => {

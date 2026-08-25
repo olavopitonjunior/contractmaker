@@ -11,7 +11,12 @@ import {
   type PlanLibraryInput,
   type PlannerItem,
 } from "@/lib/ingestion/planner";
-import { deterministicItemClassifier } from "@/lib/ingestion/classifier";
+import {
+  deterministicItemClassifier,
+  summarizePii,
+  type ItemPiiReport,
+} from "@/lib/ingestion/classifier";
+import { detectPii, type ExternalEntity } from "@/lib/ingestion/pii";
 import { buildGroupingReport } from "@/lib/ingestion/grouping";
 import { IngestionAiMeter, IngestionCostCapError } from "@/lib/ingestion/ai-budget";
 import { INGEST_ESCALATION_MODEL, INGEST_PLAN_MODEL } from "@/lib/ai/shared/models";
@@ -55,6 +60,21 @@ let items: PlannerItem[];
 let input: PlanLibraryInput;
 let analysis: BatchAnalysis;
 
+/**
+ * Nome e endereço do FIADOR na minuta — dados fictícios do corpus versionado.
+ * São as duas categorias que só o classificador LLM acha; aqui elas entram como
+ * se ele as tivesse apontado.
+ */
+const FIADOR_ENTITIES: ExternalEntity[] = [
+  { kind: "person_name", excerpt: "PEDRO FIADOR TESTE" },
+  { kind: "address", excerpt: "Rua das Acácias Fictícias, nº 88" },
+];
+
+/** O `piiReport` que o classificador LLM gravaria para o item do fiador. */
+function fiadorPiiReport(text: string): ItemPiiReport {
+  return summarizePii(detectPii(text, { externalEntities: FIADOR_ENTITIES }), text);
+}
+
 beforeAll(async () => {
   const porto = read("03-RES-PORTO-SEGURO.txt");
   const raw = [
@@ -73,7 +93,12 @@ beforeAll(async () => {
       text: r.text,
       upload: UPLOAD,
     });
-    items.push({ ...r, status: "classified", classification });
+    items.push({
+      ...r,
+      status: "classified",
+      classification,
+      piiReport: r.id === "fiador" ? fiadorPiiReport(r.text) : null,
+    });
   }
 
   const grouping = buildGroupingReport(
@@ -359,13 +384,53 @@ describe("planner — plano recusado", () => {
 
     const clausula = plan.clauses[0];
     const original = items.find((i) => i.id === "fiador")!.text;
-    // O bloco original tem CPF e RG reais; o do plano, só placeholder.
+    // O bloco original tem CPF e RG; o do plano, só placeholder.
     expect(original).toContain("555.666.777-20");
     expect(clausula.content).not.toContain("555.666.777-20");
     expect(clausula.content).toContain("000.000.000-00");
-    // Sem PII bloqueante detectável, o guardrail deixa passar — ver a limitação
-    // conhecida de NOME/ENDEREÇO documentada em `toClause`.
     expect(plan.issues.some((i) => i.kind === "pii_leftover")).toBe(false);
+  });
+
+  it("nome e endereço do fiador também saem — os offsets do item os alcançam", async () => {
+    // Era a lacuna: `pii.ts` não faz NER, então NOME/ENDEREÇO só existiam
+    // enquanto o classificador rodava. Com os offsets no `piiReport`, o trecho
+    // volta a ser localizável no texto do item e some da cláusula.
+    const comFiador = goodPlan();
+    comFiador.clauses[0].blockRefs = [garantiaRef("fiador", "CONDIÇÃO DE FIADOR")];
+    comFiador.clauses[0].sourceItemId = "fiador";
+    const r = runner(comFiador);
+    const { plan } = await planLibrary(input, { structured: r.fn });
+
+    const clausula = plan.clauses[0];
+    const original = items.find((i) => i.id === "fiador")!.text;
+    expect(original).toContain("PEDRO FIADOR TESTE");
+    expect(clausula.content).not.toContain("PEDRO FIADOR TESTE");
+    expect(clausula.content).toContain("[NOME]");
+    expect(clausula.content).not.toContain("Rua das Acácias Fictícias");
+    expect(clausula.content).toContain("[ENDEREÇO]");
+  });
+
+  it("item sem offsets confiáveis: a cláusula sai como veio, para o executor barrar", async () => {
+    // O planner não é o gate. Quando os offsets não batem com o texto (item
+    // reprocessado), ele não inventa sanitização — quem falha fechado é o
+    // `plan-executor`, antes de gravar.
+    const semOffsets: PlanLibraryInput = {
+      ...input,
+      items: input.items.map((i) =>
+        i.id === "fiador"
+          ? { ...i, piiReport: { ...i.piiReport!, textFingerprint: "outro-texto" } }
+          : i
+      ),
+    };
+    const comFiador = goodPlan();
+    comFiador.clauses[0].blockRefs = [garantiaRef("fiador", "CONDIÇÃO DE FIADOR")];
+    comFiador.clauses[0].sourceItemId = "fiador";
+    const r = runner(comFiador);
+    const { plan } = await planLibrary(semOffsets, { structured: r.fn });
+
+    expect(plan.clauses[0].content).toContain("PEDRO FIADOR TESTE");
+    // O CPF continua sendo pego pelo detector determinístico.
+    expect(plan.clauses[0].content).toContain("000.000.000-00");
   });
 
   it("as violações voltam no prompt da tentativa seguinte", async () => {

@@ -4,6 +4,7 @@ import {
   BLOCKING_PII_KINDS,
   DEFAULT_MIN_CONFIDENCE,
   detectPii,
+  entitiesFromSpans,
   hasBlockingPii,
   isValidCnpjNumber,
   isValidCpfNumber,
@@ -11,6 +12,8 @@ import {
   resolveExternalEntities,
   sanitizeAndAudit,
   sanitizePii,
+  spansFromFindings,
+  textFingerprint,
   type PiiFinding,
   type PiiKind,
 } from "../pii";
@@ -347,6 +350,61 @@ describe("trecho realista de contrato de locação (dados fictícios)", () => {
     expect(after.text).toContain(PII_PLACEHOLDERS.person_name);
     expect(after.text).toContain(PII_PLACEHOLDERS.address);
     expect(after.text.split("\n")).toHaveLength(CLAUSE.split("\n").length);
+  });
+});
+
+describe("offsets persistíveis de nome e endereço", () => {
+  const TEXT =
+    "Assina como fiador MARCOS EXEMPLO NETO, residente na Rua Inventada, nº 77, " +
+    "Bairro Fictício, nesta cidade, por todas as obrigações do contrato.";
+  const ENTITIES = [
+    { kind: "person_name" as const, excerpt: "MARCOS EXEMPLO NETO" },
+    { kind: "address" as const, excerpt: "Rua Inventada, nº 77" },
+  ];
+
+  it("só nome e endereço ganham offset — o resto é redetectável", () => {
+    const spans = spansFromFindings(
+      detectPii(`${TEXT} CPF ${CPF_A}.`, { externalEntities: ENTITIES })
+    );
+    expect(spans.map((s) => s.kind).sort()).toEqual(["address", "person_name"]);
+  });
+
+  it("o offset devolve o trecho de volta, sem nunca guardar o valor", () => {
+    const spans = spansFromFindings(detectPii(TEXT, { externalEntities: ENTITIES }));
+    expect(JSON.stringify(spans)).not.toContain("MARCOS");
+
+    const resolved = entitiesFromSpans(TEXT, spans);
+    expect(resolved.trusted).toBe(true);
+    expect(resolved.entities.map((e) => e.excerpt).sort()).toEqual([
+      "MARCOS EXEMPLO NETO",
+      "Rua Inventada, nº 77",
+    ]);
+  });
+
+  it("span fora dos limites invalida o CONJUNTO — meia resolução engana", () => {
+    const spans = spansFromFindings(detectPii(TEXT, { externalEntities: ENTITIES }));
+    const resolved = entitiesFromSpans(TEXT, [
+      ...spans,
+      { kind: "person_name" as const, start: TEXT.length - 2, end: TEXT.length + 50 },
+    ]);
+    expect(resolved.trusted).toBe(false);
+    expect(resolved.entities).toEqual([]);
+  });
+
+  it("span invertido ou em branco não é aceito", () => {
+    expect(
+      entitiesFromSpans(TEXT, [{ kind: "person_name", start: 40, end: 10 }]).trusted
+    ).toBe(false);
+    expect(
+      entitiesFromSpans("   nome   ", [{ kind: "person_name", start: 0, end: 3 }]).trusted
+    ).toBe(false);
+  });
+
+  it("a impressão digital muda com o texto e não carrega o texto", () => {
+    expect(textFingerprint(TEXT)).toBe(textFingerprint(`${TEXT}`));
+    expect(textFingerprint(TEXT)).not.toBe(textFingerprint(`${TEXT} `));
+    expect(textFingerprint(TEXT)).not.toBe(textFingerprint(TEXT.replace("77", "78")));
+    expect(textFingerprint(TEXT)).not.toContain("MARCOS");
   });
 });
 

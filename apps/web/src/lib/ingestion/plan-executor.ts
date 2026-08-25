@@ -38,11 +38,26 @@
  * embedding é irreversível. O plano promete conteúdo já sanitizado; este módulo
  * confere antes de gravar e recusa o que ainda tiver PII bloqueante. Recusar
  * uma cláusula custa uma cláusula; gravar CPF de cliente custa um vazamento.
+ *
+ * NOME e ENDEREÇO não têm detector determinístico, então a conferência deles
+ * depende dos offsets que a classificação gravou em `IngestionItem.piiReport`.
+ * Quando esses offsets não podem ser confirmados contra o texto do item, a
+ * cláusula é recusada do mesmo jeito: "não sei se está limpo" e "está sujo"
+ * levam à mesma decisão quando o erro não tem volta.
  */
 
 import { prisma } from "@/lib/db/prisma";
 import { embedKnowledgeItem } from "@/lib/ai/knowledge";
-import { detectPii, hasBlockingPii, type PiiFinding } from "@/lib/ingestion/pii";
+import {
+  detectPii,
+  hasBlockingPii,
+  OFFSET_TRACKED_PII_KINDS,
+  type PiiFinding,
+} from "@/lib/ingestion/pii";
+import {
+  externalPiiEntities,
+  parseItemPiiReport,
+} from "@/lib/ingestion/classifier";
 import {
   parseLibraryPlan,
   parseReviewedPlan,
@@ -154,6 +169,16 @@ interface ItemRow {
   fileKind: string;
   blobUrl: string;
   status: string;
+  /** Texto extraído — é contra ele que os offsets de nome/endereço resolvem. */
+  text: string | null;
+  /** `ItemPiiReport` cru; ver o gate de PII em {@link applyClause}. */
+  piiReport: unknown;
+}
+
+/** O que `countSettled` precisa saber de um item — nem texto, nem PII. */
+interface SettledRow {
+  id: string;
+  status: string;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -229,6 +254,8 @@ export async function executePlanSlice(
         fileKind: true,
         blobUrl: true,
         status: true,
+        text: true,
+        piiReport: true,
       },
     })) as ItemRow[];
     const itemById = new Map(items.map((i) => [i.id, i]));
@@ -428,7 +455,35 @@ async function applyClause(args: {
   }
 
   // ─── GATE DE PII ─────────────────────────────────────────────────────────
-  const findings: PiiFinding[] = detectPii(clause.content);
+  // NOME e ENDEREÇO não têm detector determinístico: quem os achou foi o
+  // classificador, que gravou os OFFSETS no `piiReport` do item. Resolvemos o
+  // trecho no TEXTO DO ITEM e deixamos `resolveExternalEntities` procurá-lo
+  // literalmente dentro do conteúdo da cláusula — a cláusula é um recorte do
+  // item, então não há tradução de coordenadas a errar e a busca literal já
+  // trata múltiplas ocorrências.
+  const external = args.item
+    ? externalPiiEntities(args.item.text, parseItemPiiReport(args.item.piiReport))
+    : // Sem o item não há texto contra o que confirmar nada.
+      { entities: [], trusted: false };
+  if (!external.trusted) {
+    // FALHA FECHADA: o relatório diz que este arquivo tem nome/endereço e não
+    // dá para apontar onde (texto reprocessado, extração diferente, relatório
+    // antigo). Sem confirmação de que o trecho foi tratado, a cláusula não vira
+    // embedding — o mesmo tratamento da PII bloqueante.
+    return {
+      ...base,
+      status: "pii_blocked",
+      piiKinds: [...OFFSET_TRACKED_PII_KINDS],
+      detail:
+        "Não foi possível confirmar, no texto do arquivo, os trechos de nome e " +
+        "endereço marcados na classificação. Cláusula não gravada — texto com " +
+        "PII ganha embedding e não dá para desfazer.",
+    };
+  }
+
+  const findings: PiiFinding[] = detectPii(clause.content, {
+    externalEntities: external.entities,
+  });
   if (hasBlockingPii(findings)) {
     return {
       ...base,
@@ -666,7 +721,7 @@ async function persistReport(
   });
 }
 
-function countSettled(items: readonly ItemRow[], report: ExecutionReport): number {
+function countSettled(items: readonly SettledRow[], report: ExecutionReport): number {
   const touched = new Set<string>([
     ...report.templates.map((t) => t.sourceItemId),
     ...report.clauses.map((c) => c.sourceItemId),
@@ -708,10 +763,12 @@ async function finalize(args: {
       ? (run.report as Record<string, unknown>)
       : {};
 
+  // Só o que a contagem final precisa: recarregar o texto de todos os itens
+  // custaria megabytes para responder "quantos itens ficaram resolvidos?".
   const items = (await prisma.ingestionItem.findMany({
     where: { runId: run.id },
-    select: { id: true, filename: true, fileKind: true, blobUrl: true, status: true },
-  })) as ItemRow[];
+    select: { id: true, status: true },
+  })) as SettledRow[];
 
   await prisma.ingestionRun.updateMany({
     where: { id: run.id },

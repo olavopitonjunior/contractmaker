@@ -439,7 +439,10 @@ export function createLlmItemClassifier(
         }),
       };
 
-      return { classification, piiReport: summarizePii(findings) };
+      // O `input.text` vai junto: é sobre ele que os offsets de nome/endereço
+      // são calculados, e são esses offsets que mantêm os dois alcançáveis
+      // depois — a contagem sozinha não localiza nada.
+      return { classification, piiReport: summarizePii(findings, input.text) };
     },
   };
 }

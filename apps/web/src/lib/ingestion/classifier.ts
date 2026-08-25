@@ -37,7 +37,17 @@ import {
   type IngestDocType,
 } from "@/lib/templates/ingestion-types";
 import type { UploadClassification, UploadKind } from "@/lib/knowledge/upload-classifier";
-import { detectPii, type PiiFinding, type PiiKind } from "@/lib/ingestion/pii";
+import {
+  detectPii,
+  entitiesFromSpans,
+  OFFSET_TRACKED_PII_KINDS,
+  spansFromFindings,
+  textFingerprint,
+  type PiiFinding,
+  type PiiKind,
+  type PiiSpan,
+  type ResolvedPiiSpans,
+} from "@/lib/ingestion/pii";
 
 /** Quem decidiu a classificação deste item. */
 export type ClassifiedVia = "intake" | "deterministic" | "llm";
@@ -115,6 +125,24 @@ export interface ItemPiiReport {
   byKind: Partial<Record<PiiKind, number>>;
   /** Maior confiança observada; 0 quando nada foi detectado. */
   maxConfidence: number;
+  /**
+   * Offsets de NOME e ENDEREÇO no `IngestionItem.text` — as duas categorias que
+   * nenhum detector determinístico alcança e que, sem isso, deixariam de existir
+   * assim que a classificação terminasse (ver `externalPiiEntities`).
+   *
+   * São coordenadas, não valores: o documento inteiro, com toda a PII, já está
+   * em `IngestionItem.text`, então gravar a POSIÇÃO não acrescenta exposição
+   * nenhuma — só torna o trecho alcançável de novo.
+   *
+   * Ausente em relatórios gravados antes desta mudança.
+   */
+  externalSpans?: PiiSpan[];
+  /**
+   * Impressão digital do texto sobre o qual `externalSpans` foi calculado. Sem
+   * ela (ou com ela diferente) os offsets não são confiáveis — ver
+   * {@link textFingerprint}.
+   */
+  textFingerprint?: string;
 }
 
 export interface ClassifyItemInput {
@@ -233,15 +261,94 @@ export function precomputeItemSignals(input: ClassifyItemInput): ItemSignals {
   };
 }
 
-/** Contagem de PII por categoria — o relatório nunca guarda o valor detectado. */
-export function summarizePii(findings: readonly PiiFinding[]): ItemPiiReport {
+/**
+ * Contagem de PII por categoria — o relatório nunca guarda o valor detectado.
+ *
+ * `text` é o texto sobre o qual os findings foram calculados: dele saem a
+ * impressão digital e os offsets de nome/endereço. Sem ele o relatório continua
+ * válido, só não dá para recuperar essas duas categorias mais tarde.
+ */
+export function summarizePii(
+  findings: readonly PiiFinding[],
+  text?: string
+): ItemPiiReport {
   const byKind: Partial<Record<PiiKind, number>> = {};
   let maxConfidence = 0;
   for (const f of findings) {
     byKind[f.kind] = (byKind[f.kind] ?? 0) + 1;
     if (f.confidence > maxConfidence) maxConfidence = f.confidence;
   }
-  return { total: findings.length, byKind, maxConfidence };
+  const report: ItemPiiReport = { total: findings.length, byKind, maxConfidence };
+  if (typeof text === "string") {
+    report.externalSpans = spansFromFindings(findings);
+    report.textFingerprint = textFingerprint(text);
+  }
+  return report;
+}
+
+/** Lê o `IngestionItem.piiReport` cru do banco. Tolerante ao formato antigo. */
+export function parseItemPiiReport(raw: unknown): ItemPiiReport | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const byKind =
+    r.byKind && typeof r.byKind === "object" && !Array.isArray(r.byKind)
+      ? (r.byKind as Partial<Record<PiiKind, number>>)
+      : {};
+  const report: ItemPiiReport = {
+    total: typeof r.total === "number" ? r.total : 0,
+    byKind,
+    maxConfidence: typeof r.maxConfidence === "number" ? r.maxConfidence : 0,
+  };
+  if (Array.isArray(r.externalSpans)) {
+    // Span de categoria inesperada é DESCARTADO, não convertido: a contagem
+    // deixa de bater com `byKind` e `externalPiiEntities` falha fechado, que é
+    // a reação certa a um relatório que não entendemos.
+    report.externalSpans = r.externalSpans.filter(
+      (s): s is PiiSpan =>
+        !!s &&
+        typeof s === "object" &&
+        OFFSET_TRACKED_PII_KINDS.includes((s as PiiSpan).kind) &&
+        typeof (s as PiiSpan).start === "number" &&
+        typeof (s as PiiSpan).end === "number"
+    );
+  }
+  if (typeof r.textFingerprint === "string") report.textFingerprint = r.textFingerprint;
+  return report;
+}
+
+/** Quantas ocorrências de nome/endereço o relatório afirma que existem. */
+function offsetTrackedCount(report: ItemPiiReport | null): number {
+  if (!report) return 0;
+  let total = 0;
+  for (const kind of OFFSET_TRACKED_PII_KINDS) total += report.byKind[kind] ?? 0;
+  return total;
+}
+
+/**
+ * Recupera NOME e ENDEREÇO de um item já classificado, resolvendo os offsets
+ * persistidos contra o texto dele.
+ *
+ * `trusted: false` quer dizer "o relatório afirma que há nome/endereço aqui e eu
+ * NÃO consigo apontar onde" — texto reprocessado, extração diferente, ou
+ * relatório do formato antigo (só contagem). Nesse caso quem chama tem de falhar
+ * fechado: sem confirmação de que o trecho foi tratado, o conteúdo não pode
+ * virar embedding.
+ */
+export function externalPiiEntities(
+  text: string | null | undefined,
+  report: ItemPiiReport | null
+): ResolvedPiiSpans {
+  const expected = offsetTrackedCount(report);
+  if (expected === 0) return { entities: [], trusted: true };
+
+  const spans = report?.externalSpans;
+  if (!Array.isArray(spans) || spans.length !== expected) {
+    return { entities: [], trusted: false };
+  }
+  if (!text || report?.textFingerprint !== textFingerprint(text)) {
+    return { entities: [], trusted: false };
+  }
+  return entitiesFromSpans(text, spans);
 }
 
 /**
@@ -266,7 +373,7 @@ export const deterministicItemClassifier: ItemClassifier = {
         confidence: input.upload.confidence,
         reason: signals.reason,
       },
-      piiReport: summarizePii(detectPii(input.text)),
+      piiReport: summarizePii(detectPii(input.text), input.text),
     };
   },
 };
