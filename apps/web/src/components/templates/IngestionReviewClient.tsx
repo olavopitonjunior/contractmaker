@@ -410,12 +410,37 @@ function SuggestOnlyNotice() {
       <p className="font-medium">Nada entra no ar sozinho.</p>
       <p className="mt-1 text-muted-foreground">
         Os modelos aprovados aqui nascem como <strong>rascunho</strong> e as cláusulas
-        entram no acervo <strong>aguardando aprovação</strong>. Para um modelo passar a
-        gerar contrato, revise-o em Modelos → abrir → “Validar e ativar”; para a
-        cláusula valer na geração, aprove-a no acervo de cláusulas. Enquanto isso, nada
-        do que já funciona hoje muda.
+        entram no acervo <strong>aguardando aprovação</strong>. Enquanto isso, nada do
+        que já funciona hoje muda.
       </p>
+      <ActivationOrder />
     </div>
+  );
+}
+
+/**
+ * A ordem NÃO é decorativa: o modelo com espaço de cláusula não carrega a
+ * redação no corpo — quem a devolve na geração é o acervo, e só cláusula
+ * aprovada conta. Ativar o modelo antes de aprovar a cláusula faria o contrato
+ * sair com o texto padrão da plataforma no lugar do texto da imobiliária. A
+ * ativação tem trava pra isso; o aviso existe pra ela nunca precisar aparecer.
+ */
+function ActivationOrder() {
+  return (
+    <ol className="mt-2 space-y-1 text-muted-foreground">
+      <li>
+        <strong>1.</strong> Aprove a cláusula no{" "}
+        <Link href="/clauses" className="font-medium underline">
+          acervo de cláusulas
+        </Link>{" "}
+        — é ela que entra no espaço do modelo na hora de gerar o contrato.
+      </li>
+      <li>
+        <strong>2.</strong> Só então ative o modelo (Modelos → abrir → “Ativar
+        template”). Na ordem inversa, o contrato sai com o texto padrão da plataforma
+        no lugar da redação de vocês.
+      </li>
+    </ol>
   );
 }
 
@@ -706,6 +731,13 @@ function ExecutionReportView({
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {report.templates.some((t) => (t.slotsApplied?.length ?? 0) > 0) && (
+        <section className="space-y-1 rounded-lg border border-violet-300 bg-violet-50/50 p-3 text-xs dark:border-violet-900 dark:bg-violet-950/20">
+          <p className="font-medium">Para começar a valer, nesta ordem:</p>
+          <ActivationOrder />
         </section>
       )}
 
