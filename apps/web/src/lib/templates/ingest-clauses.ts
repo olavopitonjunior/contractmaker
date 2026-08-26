@@ -264,6 +264,16 @@ export type ClauseIngestDb = {
  * Duas etapas de propósito: o `hasEvery` do banco é filtro GROSSO (usa o índice
  * e reduz o conjunto), a igualdade de conjunto é a DECISÃO. Sem a segunda, a
  * primeira arquiva por subconjunto — ver o cabeçalho do módulo.
+ *
+ * `pending` entra junto com `approved` porque o acervo não pode terminar num
+ * estado que o próprio sistema proíbe: o guardrail `duplicate_clause_tags`
+ * recusa duas cláusulas com o mesmo conjunto de tags DENTRO de um plano, já que
+ * o resolvedor de slot não teria como escolher entre elas. Sem esta linha, dois
+ * runs sobre o mesmo acervo produziam exatamente esse par — foi o que aconteceu
+ * no piloto da Ativa, onde as sete cláusulas de fornecedor viraram catorze e o
+ * curador veria cada uma duas vezes na fila de aprovação. Uma cláusula pendente
+ * é sugestão que ninguém referendou; a sugestão mais nova a substitui sem perda.
+ * Arquivar, e não apagar, mantém o rastro de quem sugeriu o quê.
  */
 async function archiveSupersededClauses(
   tx: ClauseIngestTx,
@@ -274,7 +284,7 @@ async function archiveSupersededClauses(
     where: {
       orgId,
       category: "clause",
-      status: "approved",
+      status: { in: ["approved", "pending"] },
       tags: { hasEvery: tags },
     },
     select: { id: true, tags: true },

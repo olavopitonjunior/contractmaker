@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { Stream } from "@anthropic-ai/sdk/streaming";
 import {
   StructuredOutputError,
+  StructuredOutputTruncatedError,
   runStructured,
 } from "@/lib/ai/shared/anthropic-structured";
 import {
@@ -190,6 +191,39 @@ describe("cliente estruturado — a resposta", () => {
     await expect(runStructured(call(), client)).rejects.toBeInstanceOf(
       StructuredOutputError
     );
+  });
+
+  it("resposta CORTADA no teto de saída é diagnosticada como corte, não como JSON inválido", async () => {
+    // A distinção não é cosmética: "não é JSON válido" manda quem lê procurar
+    // defeito de formato, quando o que falta é espaço. O lote de 20 documentos
+    // da Ativa perdeu um diagnóstico inteiro por causa dessa frase.
+    const { client } = fakeClient({
+      stop_reason: "max_tokens",
+      content: [{ type: "text", text: '{"templates":[{"name":"Seguro-Fian' }],
+    });
+    const erro = await runStructured(call(), client).catch((e) => e);
+    expect(erro).toBeInstanceOf(StructuredOutputTruncatedError);
+    expect(erro).toBeInstanceOf(StructuredOutputError); // quem só quer o tipo base
+    expect(erro.message).toMatch(/cortada no limite de tokens/);
+  });
+
+  it("corte é detectado ANTES de `parsed_output` — resposta cortada não traz plano bom", async () => {
+    const { client } = fakeClient({
+      stop_reason: "max_tokens",
+      parsed_output: { ok: true },
+    });
+    await expect(runStructured(call(), client)).rejects.toBeInstanceOf(
+      StructuredOutputTruncatedError
+    );
+  });
+
+  it("`stop_reason` normal não atrapalha o caminho feliz", async () => {
+    const { client } = fakeClient({
+      stop_reason: "end_turn",
+      parsed_output: { ok: true },
+    });
+    const result = await runStructured<{ ok: boolean }>(call(), client);
+    expect(result.data.ok).toBe(true);
   });
 
   it("resposta sem conteúdo nenhum também é erro tipado", async () => {

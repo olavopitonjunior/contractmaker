@@ -1360,6 +1360,24 @@ function escalatedIn(
   return attempts.some((a) => a.model !== base.model || a.effort !== base.effort);
 }
 
+/**
+ * Teto de saída do plano, em função do tamanho do lote.
+ *
+ * O plano carrega TEXTO: o `content` inteiro de cada cláusula (a da Loft tem
+ * 6.255 caracteres) e os parágrafos literais de `slotBlocks`. Cresce com o
+ * acervo, não com o número de decisões. O piloto de 11 documentos consumiu
+ * quase os 16.000 tokens que eram fixos aqui; o lote de 20 estourou e a
+ * resposta voltou cortada no meio de um `matchCriteria`.
+ *
+ * A folga base cobre o esqueleto do plano (issues, descartes, justificativas) e
+ * o por-documento cobre um template ou uma cláusula longa. O teto duro existe
+ * porque saída muito longa não cabe no orçamento da fatia: a partir daí o certo
+ * é dividir o lote por família, não pedir mais tokens.
+ */
+export function planMaxTokens(itemCount: number): number {
+  return Math.min(48_000, 8_000 + Math.max(itemCount, 1) * 1_600);
+}
+
 function guardItems(items: readonly PlannerItem[]): PlanGuardItem[] {
   return items.map((i) => ({
     id: i.id,
@@ -1425,7 +1443,7 @@ export async function planLibrary(
     system,
     userContent: `${digest}${feedbackBlock(feedback)}`,
     schema: PLAN_SCHEMA,
-    maxTokens: 16_000,
+    maxTokens: planMaxTokens(input.items.length),
     effort: step.effort,
     // 16.000 tokens de saída com `effort` alto é minutos de geração. Sem
     // streaming a requisição fica muda até a resposta inteira ficar pronta, e

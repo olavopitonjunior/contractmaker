@@ -328,12 +328,39 @@ describe("POST /api/templates/ingest/clauses", () => {
         where: expect.objectContaining({
           orgId: "org1",
           category: "clause",
-          status: "approved",
+          status: { in: ["approved", "pending"] },
           tags: { hasEvery: ["slot:garantia", "garantia:fiador"] },
         }),
       })
     );
     expect(createRowsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("cláusula PENDENTE do mesmo conjunto de tags é substituída, não duplicada", async () => {
+    // Dois runs sobre o mesmo acervo. Sem incluir `pending` na varredura, o
+    // segundo empilhava um par indistinguível: o resolvedor de slot não teria
+    // como escolher, e o curador veria a mesma cláusula duas vezes na fila.
+    kiFindMany.mockResolvedValue([
+      {
+        id: "sugestao-do-run-anterior",
+        tags: ["slot:garantia", "garantia:fiador"],
+      },
+    ]);
+
+    const res = await POST(
+      req({
+        slot: "garantia",
+        sourceName: "Locação",
+        variants: [{ value: "fiador", content: CLAUSULA_FIADOR }],
+      }) as never
+    );
+    expect(res.status).toBe(201);
+    expect(kiUpdateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["sugestao-do-run-anterior"] } },
+      data: { status: "archived" },
+    });
+    const [{ archivedIds }] = (await res.json()).items;
+    expect(archivedIds).toEqual(["sugestao-do-run-anterior"]);
   });
 
   it("falha na gravação não deixa nada pela metade", async () => {
