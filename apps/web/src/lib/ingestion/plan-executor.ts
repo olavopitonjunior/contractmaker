@@ -47,6 +47,7 @@
  */
 
 import { prisma } from "@/lib/db/prisma";
+import { stripNulDeep } from "@/lib/ingestion/pg-text";
 import { embedKnowledgeItem } from "@/lib/ai/knowledge";
 import {
   detectPii,
@@ -63,6 +64,7 @@ import {
   parseReviewedPlan,
   selectApproved,
   clauseKey,
+  KEY_SEP,
 } from "@/lib/ingestion/plan-review";
 import {
   runClaimWhere,
@@ -404,7 +406,7 @@ function isClauseSlot(v: string): v is ClauseSlotKey {
 /** Chave de variante: o par (opção do form, garantidor) dentro de um slot. */
 function variantIdentity(clause: PlannedClause): string {
   const provider = normalizeVariantProvider(clause.provider) ?? "";
-  return `${clause.slot}\u0000${clause.value.trim().toLowerCase()}\u0000${provider}`;
+  return `${clause.slot}${KEY_SEP}${clause.value.trim().toLowerCase()}${KEY_SEP}${provider}`;
 }
 
 async function applyClause(args: {
@@ -441,7 +443,7 @@ async function applyClause(args: {
   const collision = args.applied.find(
     (c) =>
       c.status === "created" &&
-      `${c.slot}\u0000${c.value.trim().toLowerCase()}\u0000${c.provider ?? ""}` ===
+      `${c.slot}${KEY_SEP}${c.value.trim().toLowerCase()}${KEY_SEP}${c.provider ?? ""}` ===
         identity
   );
   if (collision) {
@@ -717,7 +719,7 @@ async function persistReport(
   // O `grouping` da Fase A1 continua no report — o relatório final é aditivo.
   await prisma.ingestionRun.updateMany({
     where: { id: runId },
-    data: { report: { ...previous, execution: report } as object },
+    data: { report: stripNulDeep({ ...previous, execution: report }) as object },
   });
 }
 
@@ -774,7 +776,7 @@ async function finalize(args: {
     where: { id: run.id },
     data: {
       status: "done",
-      report: { ...previous, execution: report } as object,
+      report: stripNulDeep({ ...previous, execution: report }) as object,
       itemsDone: countSettled(items, report),
       itemsTotal: items.length,
       ...(cost === null ? {} : { aiCostUsd: cost }),
