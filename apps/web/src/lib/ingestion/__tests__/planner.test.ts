@@ -10,6 +10,7 @@ import {
   buildBatchDigest,
   materializePlan,
   planLibrary,
+  planMaxTokens,
   type BatchAnalysis,
   type PlanLibraryInput,
   type PlanLibraryOptions,
@@ -361,13 +362,21 @@ describe("planner — o plano do corpus real", () => {
     expect(call.userContent).toContain("## DOCUMENTOS DO LOTE");
   });
 
-  it("pede a resposta em STREAMING — 16k tokens de saída não cabem numa chamada muda", async () => {
+  it("pede a resposta em STREAMING — saída longa não cabe numa chamada muda", async () => {
     // Foi assim que a chamada morreu em staging: 504 na Vercel, sem plano e sem
     // erro registrado. Saída longa sem streaming é o caso clássico de timeout.
     const r = runner(goodPlan());
     await planLibrary(input, { structured: r.fn });
     expect(r.calls[0].stream).toBe(true);
-    expect(r.calls[0].maxTokens).toBe(16_000);
+  });
+
+  it("o teto de saída vem do TAMANHO do lote, não de uma constante", async () => {
+    // Constante de 16k: coube em 11 documentos, cortou o plano de 20 no meio de
+    // um `matchCriteria`. O plano carrega o texto das cláusulas, então cresce
+    // com o acervo.
+    const r = runner(goodPlan());
+    await planLibrary(input, { structured: r.fn });
+    expect(r.calls[0].maxTokens).toBe(planMaxTokens(input.items.length));
   });
 
   it("registra a duração de cada tentativa — é o que faltava para ver o aperto", async () => {
@@ -1071,5 +1080,31 @@ describe("planner — o lote que funciona hoje não muda", () => {
     expect(result.accepted).toBe(true);
     expect(result.indexBudget.truncated).toBe(false);
     expect(result.plan.issues.some((i) => i.kind === "index_truncated")).toBe(false);
+  });
+});
+
+describe("planMaxTokens — o teto de saída acompanha o lote", () => {
+  it("dá mais espaço para lote maior", () => {
+    expect(planMaxTokens(20)).toBeGreaterThan(planMaxTokens(11));
+  });
+
+  it("cabe o plano de 11 documentos, que já ocupava quase os 16k fixos", () => {
+    // O piloto da Ativa: 6 templates com slotBlocks literais e 7 cláusulas
+    // inteiras chegaram perto de estourar o teto que era constante.
+    expect(planMaxTokens(11)).toBeGreaterThan(16_000);
+  });
+
+  it("cabe o plano de 20, que estourou com o teto fixo", () => {
+    expect(planMaxTokens(20)).toBeGreaterThan(30_000);
+  });
+
+  it("tem teto duro — acima dele o certo é dividir o lote, não pedir mais tokens", () => {
+    expect(planMaxTokens(500)).toBe(planMaxTokens(1000));
+    expect(planMaxTokens(1000)).toBeLessThanOrEqual(48_000);
+  });
+
+  it("lote vazio ou absurdo não produz teto inválido", () => {
+    expect(planMaxTokens(0)).toBeGreaterThan(0);
+    expect(planMaxTokens(-3)).toBeGreaterThan(0);
   });
 });

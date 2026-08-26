@@ -140,6 +140,8 @@ interface StructuredResponseBody {
   content?: Array<{ type: string; text?: string }>;
   /** Presente quando a API já entrega o JSON validado contra o schema. */
   parsed_output?: unknown;
+  /** `"max_tokens"` quando a geração foi CORTADA por bater no teto de saída. */
+  stop_reason?: string | null;
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
@@ -167,12 +169,35 @@ function toSystemBlocks(
 }
 
 /**
+ * Geração cortada no teto de saída. Subclasse porque quem só quer saber "não
+ * consegui JSON" continua pegando pelo tipo base, e quem sabe reagir ao tamanho
+ * do lote (o planner) distingue.
+ */
+export class StructuredOutputTruncatedError extends StructuredOutputError {
+  constructor(message: string) {
+    super(message);
+    this.name = "StructuredOutputTruncatedError";
+  }
+}
+
+/**
  * Extrai o JSON da resposta. `parsed_output` é o caminho feliz; o fallback é o
  * primeiro bloco de texto, porque structured outputs também devolve o JSON ali
  * e uma resposta sem `parsed_output` (modelo mais antigo, campo renomeado) não
  * pode derrubar o run inteiro.
  */
 function extractJson(body: StructuredResponseBody): unknown {
+  // ANTES de tentar parsear. Resposta cortada no teto de saída é JSON inválido
+  // por consequência, não por causa: dizer "não é JSON válido" manda quem lê
+  // procurar defeito de formato quando o que falta é espaço. Foi o que
+  // aconteceu no lote de 20 documentos da Ativa, cujo plano não coube nos
+  // 16.000 tokens que bastavam para 11.
+  if (body.stop_reason === "max_tokens") {
+    throw new StructuredOutputTruncatedError(
+      "A resposta do modelo foi cortada no limite de tokens de saída — o " +
+        "resultado não coube. Reduza o lote ou aumente `maxTokens`."
+    );
+  }
   if (body.parsed_output != null) return body.parsed_output;
 
   const text = (body.content ?? [])
