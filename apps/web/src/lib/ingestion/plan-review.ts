@@ -62,11 +62,21 @@ export function templateKey(template: { sourceItemId: string }): string {
  * é o conjunto de tags — não o título, que o operador pode reescrever — que as
  * separa no acervo. Mesma chave que `ReviewedLibraryPlan.clauses` carrega.
  */
+/**
+ * Separador das chaves compostas: U+001F (unit separator), não U+0000 (NUL).
+ *
+ * NUL é o separador idiomático em memória justamente porque nunca aparece em
+ * texto real — mas o Postgres RECUSA NUL em `text`/`jsonb` (erro 22P05), e
+ * esta chave viaja dentro do relatório do run. Um separador que quebra a
+ * gravação não serve como separador. U+001F tem a mesma propriedade e passa.
+ */
+export const KEY_SEP = String.fromCharCode(31);
+
 export function clauseKey(clause: {
   sourceItemId: string;
   tags: readonly string[];
 }): string {
-  return `${clause.sourceItemId}\u0000${canonicalTags(clause.tags).join("|")}`;
+  return `${clause.sourceItemId}${KEY_SEP}${canonicalTags(clause.tags).join("|")}`;
 }
 
 // ────────────────────────────────────────────────────────────────────────────

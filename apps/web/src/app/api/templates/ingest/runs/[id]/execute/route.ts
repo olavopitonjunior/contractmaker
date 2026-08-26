@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
+import { stripNulDeep } from "@/lib/ingestion/pg-text";
 import { requireCronAuth } from "@/lib/security/cron-auth";
 import { chainExecute, requestOrigin } from "@/lib/ingestion/chain";
 import { executePlanSlice } from "@/lib/ingestion/plan-executor";
@@ -103,7 +104,7 @@ export async function POST(
     const started = await prisma.ingestionRun.updateMany({
       where: { id: params.id, ...(orgId ? { orgId } : {}), status: "awaiting_review" },
       data: {
-        planReviewed: reviewed as unknown as object,
+        planReviewed: stripNulDeep(reviewed) as unknown as object,
         status: "executing",
         error: null,
         startedAt: null,

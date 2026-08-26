@@ -66,6 +66,7 @@
  */
 
 import { prisma } from "@/lib/db/prisma";
+import { stripNulDeep, stripNulString } from "@/lib/ingestion/pg-text";
 import { extractDocx } from "@/lib/extraction/docx";
 import { extractPlainText } from "@/lib/ai/ocr";
 import { classifyKnowledgeUpload } from "@/lib/knowledge/upload-classifier";
@@ -747,7 +748,7 @@ async function extractItem(run: RunRow, item: ItemRow): Promise<number> {
         status: "extracted",
         fileKind: kind,
         sourceHash: computeSourceHash(buffer),
-        text: text.slice(0, MAX_TEXT_CHARS),
+        text: stripNulString(text.slice(0, MAX_TEXT_CHARS)),
         error: null,
       },
     });
@@ -891,9 +892,11 @@ async function persistReport(
   report: Record<string, unknown>,
   extra: Record<string, unknown> = {}
 ): Promise<Record<string, unknown>> {
+  // Borda de escrita: NUL vindo de documento de terceiro derruba a gravação
+  // inteira no Postgres (22P05). Ver lib/ingestion/pg-text.ts.
   await prisma.ingestionRun.updateMany({
     where: { id: runId },
-    data: { ...extra, report: report as object },
+    data: { ...extra, report: stripNulDeep(report) as object },
   });
   return report;
 }
@@ -1113,7 +1116,7 @@ async function persistPlan(args: {
       planning,
       timings: withTiming(report, "plan", addCall(readTiming(report, "plan"), durationMs)),
     },
-    pending ? {} : { libraryPlan: result.plan as object }
+    pending ? {} : { libraryPlan: stripNulDeep(result.plan) as object }
   );
   return { report, pending };
 }
