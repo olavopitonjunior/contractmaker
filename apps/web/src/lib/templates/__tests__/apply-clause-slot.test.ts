@@ -11,6 +11,8 @@ import {
   applyClauseSlotToDoc,
   countOccurrences,
   MIN_SLOT_BLOCK_CHARS,
+  normalizeForSlotMatch,
+  resolveBlockLiteral,
 } from "../apply-clause-slot";
 
 const CLAUSULA_A =
@@ -306,5 +308,81 @@ describe("applyClauseSlotToDoc", () => {
       paragraphs: [longo],
     });
     expect(report.issues[0].paragraph).toHaveLength(200);
+  });
+});
+
+/**
+ * O planner transcreve o parágrafo em vez de recortá-lo, e transcrição colapsa
+ * espaço duplo. O guardrail do plano aceita (valida por `toParagraphs`, que
+ * normaliza); o `replaceAllText` recusaria (é literal). Foi o defeito que deixou
+ * o modelo de seguro-fiança da RE/MAX Ativa com a Tokio Marine chumbada, num
+ * template que existe justamente para servir quatro seguradoras.
+ */
+describe("resolveBlockLiteral — a transcrição do planner vs. o texto do doc", () => {
+  const COM_ESPACO_DUPLO =
+    "8.1. Para garantir as obrigações assumidas neste contrato,  o FIADOR assume responsabilidade solidária,  com renúncia ao benefício de ordem.";
+  const lines = (d: string) => d.split(String.fromCharCode(10));
+  const TRANSCRITO = normalizeForSlotMatch(COM_ESPACO_DUPLO);
+
+  it("prefere o literal quando ele existe tal e qual", () => {
+    const doc = docWith(CLAUSULA_A, CLAUSULA_B);
+    expect(resolveBlockLiteral(doc, lines(doc), CLAUSULA_A)).toEqual({
+      ok: true,
+      literal: CLAUSULA_A,
+    });
+  });
+
+  it("resolve para o parágrafo REAL quando só o espaçamento difere", () => {
+    const doc = docWith(COM_ESPACO_DUPLO);
+    expect(TRANSCRITO).not.toBe(COM_ESPACO_DUPLO); // a premissa do defeito
+    expect(doc.includes(TRANSCRITO)).toBe(false);
+    expect(resolveBlockLiteral(doc, lines(doc), TRANSCRITO)).toEqual({
+      ok: true,
+      literal: COM_ESPACO_DUPLO,
+    });
+  });
+
+  it("normalizar não afrouxa a trava de unicidade", () => {
+    const doc = docWith(COM_ESPACO_DUPLO, CLAUSULA_B, COM_ESPACO_DUPLO);
+    expect(resolveBlockLiteral(doc, lines(doc), TRANSCRITO)).toEqual({
+      ok: false,
+      reason: "ambiguous",
+    });
+  });
+
+  it("parágrafo que não está no doc continua sendo not-found", () => {
+    const doc = docWith(CLAUSULA_A);
+    expect(resolveBlockLiteral(doc, lines(doc), CLAUSULA_B)).toEqual({
+      ok: false,
+      reason: "not-found",
+    });
+  });
+
+  it("normalizar não faz dois parágrafos DIFERENTES casarem", () => {
+    const doc = docWith(CLAUSULA_A, CLAUSULA_B);
+    const quase = CLAUSULA_A.replace("solidária", "subsidiária");
+    expect(resolveBlockLiteral(doc, lines(doc), quase)).toEqual({
+      ok: false,
+      reason: "not-found",
+    });
+  });
+
+  it("aplica de ponta a ponta usando o texto do doc, não o do plano", async () => {
+    const doc = docWith(COM_ESPACO_DUPLO);
+    batchUpdateDocMock.mockResolvedValue(batchOk(1));
+    docBeforeAndAfter(doc, docWith("{{slot_garantia}}"));
+
+    const report = await applyClauseSlotToDoc({
+      docId: "doc1",
+      slot: "garantia",
+      paragraphs: [TRANSCRITO],
+    });
+
+    expect(report.applied).toBe(true);
+    // O que foi para o Google Docs é o parágrafo COM espaço duplo — o único que
+    // o `replaceAllText` conseguiria casar.
+    expect(requestsOf()[0].replaceAllText.containsText.text).toBe(
+      COM_ESPACO_DUPLO
+    );
   });
 });

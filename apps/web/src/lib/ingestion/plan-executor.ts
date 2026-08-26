@@ -637,13 +637,51 @@ async function applyTemplate(args: {
   }
 }
 
+/**
+ * Por que o espaço não abriu, em português de operador.
+ *
+ * O motivo sempre existiu em `ApplyClauseSlotReport.issues`, mas morria no
+ * `draftReport` do template: o relatório do run dizia apenas "não abriu", e
+ * "não abriu" não diz a quem lê se o que falta é reenviar o documento, corrigir
+ * o plano ou nada (uma instabilidade do Drive). São reações diferentes.
+ */
+const SLOT_FAILURE_HINT: Record<string, string> = {
+  "not-found":
+    "o trecho não foi encontrado no documento — o plano descreveu um parágrafo que não existe lá",
+  ambiguous:
+    "o trecho aparece mais de uma vez no documento e trocá-lo mexeria em todas",
+  "too-short": "o trecho é curto demais para ser localizado com segurança",
+  "doc-unreadable": "não consegui ler o documento no Drive",
+  "batch-failed": "a edição no Google Docs falhou",
+  "replace-noop":
+    "o Google Docs não encontrou o trecho na estrutura do documento, embora ele apareça no texto",
+  "over-matched":
+    "a troca atingiu mais lugares do que os examinados (provavelmente cabeçalho ou rodapé)",
+  "verify-failed": "a conferência depois da edição não confirmou o resultado",
+  "verify-unavailable":
+    "não consegui conferir o resultado — o Drive não respondeu",
+  "token-missing": "o espaço sumiu do documento depois de aberto",
+};
+
 /** Uma frase sobre os slots que NÃO abriram — o resto o operador vê na revisão. */
 function describeSlotOutcome(
-  slots: Array<{ slot: string; applied: boolean }>
+  slots: Array<{
+    slot: string;
+    applied: boolean;
+    issues?: Array<{ reason: string }>;
+  }>
 ): string | undefined {
-  const failed = slots.filter((s) => !s.applied).map((s) => s.slot);
+  const failed = slots.filter((s) => !s.applied);
   if (failed.length === 0) return undefined;
-  return `O espaço de ${failed.join(", ")} não abriu — o modelo ficou com a cláusula fixa.`;
+  const parts = failed.map((s) => {
+    // Tudo-ou-nada: os motivos de um mesmo slot costumam ser o mesmo, e listar
+    // um por parágrafo encheria o relatório sem informar mais.
+    const reasons = Array.from(
+      new Set((s.issues ?? []).map((i) => SLOT_FAILURE_HINT[i.reason] ?? i.reason))
+    );
+    return reasons.length > 0 ? `${s.slot} (${reasons.join("; ")})` : s.slot;
+  });
+  return `O espaço de ${parts.join(", ")} não abriu — o modelo ficou com a cláusula fixa.`;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
