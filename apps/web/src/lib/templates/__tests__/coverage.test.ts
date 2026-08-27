@@ -238,6 +238,33 @@ describe("computeGarantiaCoverage", () => {
     expect(row.cells.find((c) => c.garantia === "seguro_fianca")!.state).toBe("missing");
   });
 
+  it("com duas variantes ATIVAS da mesma garantia, a célula mostra o padrão", () => {
+    // Caso real da Ativa: fiador adm/não-adm são dois templates da célula
+    // "fiador" — o nome ao lado da ★ tem de ser o do isDefault.
+    const report = computeGarantiaCoverage({
+      modules: ["locacao"],
+      templates: [
+        tpl({
+          id: "nao-adm",
+          name: "Fiador (Não Administrado)",
+          matchCriteria: { garantia: "fiador" },
+          engine: "google_docs",
+        }),
+        tpl({
+          id: "adm",
+          name: "Fiador (Administrado)",
+          matchCriteria: { garantia: "fiador" },
+          isDefault: true,
+          engine: "google_docs",
+        }),
+      ],
+    });
+    const cell = report.rows
+      .find((r) => r.modalidade === "locacao")!
+      .cells.find((c) => c.garantia === "fiador")!;
+    expect(cell.templateName).toBe("Fiador (Administrado)");
+  });
+
   it("arquivado não cobre célula nenhuma", () => {
     const report = computeGarantiaCoverage({
       modules: ["locacao"],

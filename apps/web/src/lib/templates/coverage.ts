@@ -268,10 +268,14 @@ export function computeGarantiaCoverage(input: {
         const matches = mine.filter(
           (t) => parseMatchCriteria(t.matchCriteria)?.garantia === garantia
         );
-        // Ativo vence rascunho: o que a geração usa hoje é a informação mais
-        // útil na célula.
+        // Ativo vence rascunho, e entre ativos o PADRÃO vence: com duas
+        // variantes da mesma garantia (fiador adm/não-adm), mostrar "um
+        // qualquer" ao lado da ★ nomeava um template que não é o padrão.
         const chosen =
-          matches.find((t) => t.status === "active") ?? matches[0] ?? null;
+          matches.find((t) => t.status === "active" && t.isDefault === true) ??
+          matches.find((t) => t.status === "active") ??
+          matches[0] ??
+          null;
         return {
           garantia,
           label: GARANTIA_LABELS[garantia],
