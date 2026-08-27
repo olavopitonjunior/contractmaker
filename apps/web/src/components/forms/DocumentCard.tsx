@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { FileText, Loader2, AlertCircle, X, CheckCircle2, RefreshCw, ExternalLink, Download, Sparkles, Wand2, FileSignature, Eye, AlertTriangle } from "lucide-react";
 import { ExtractedDataDialog, type WritePreviewEntry } from "@/components/forms/ExtractedDataDialog";
 import { collectExtractionIssues } from "@/lib/forms/extracted-to-form";
@@ -15,6 +15,11 @@ import {
 import { cn } from "@/lib/utils";
 import type { Assignment } from "@/lib/forms/extracted-to-form";
 import { documentLabel } from "@/lib/forms/extracted-to-form";
+import {
+  expectedFieldsFor,
+  calcularCobertura,
+  normalizarParaFormulario,
+} from "@/lib/forms/expected-fields";
 
 export type DocumentCardStatus =
   | "uploading"
@@ -32,6 +37,8 @@ export interface DocumentCardData {
   category: string | null;
   fields: Record<string, unknown> | null;
   confidence: number | null;
+  /** Vocabulário das chaves de `fields`. Ausente = OCR (histórico). */
+  vocab?: "ocr" | "form";
   error?: string | null;
   assignment: Assignment;
   /**
@@ -124,6 +131,30 @@ export function DocumentCard({
   const fieldEntries = doc.fields
     ? Object.entries(doc.fields).filter(([, v]) => v !== null && v !== "")
     : [];
+
+  /**
+   * "7 de 8 campos" no lugar de "100% confiança".
+   *
+   * O número antigo era o modelo se auto-avaliando: o prompt pede "estime de 0
+   * a 1 com base em quantos campos você conseguiu extrair com segurança", e ele
+   * respondia. Todos os documentos apareciam com 100% — enquanto o shadow mode,
+   * rodando dois modelos no mesmo papel, acusava 27% de campos divergentes
+   * entre eles, e não em campos acessórios: CPF, RG, registro da CNH.
+   *
+   * Este é derivado: quantos dos campos que ESTE documento pode dar para ESTE
+   * destino de fato vieram. Cai no número antigo quando não há base para
+   * calcular — sem destino escolhido, categoria fora do catálogo — porque aí
+   * inventar um denominador seria repetir o problema.
+   */
+  const cobertura = useMemo(() => {
+    if (doc.status !== "ready" || !doc.fields) return null;
+    const guia = expectedFieldsFor(doc.assignment, doc.category);
+    if (!guia.guiado) return null;
+    return calcularCobertura(
+      guia.campos,
+      normalizarParaFormulario(doc.fields, doc.vocab)
+    );
+  }, [doc.status, doc.fields, doc.assignment, doc.category]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [writePreview, setWritePreview] = useState<WritePreviewEntry[] | null>(null);
   /** Calcula o preview UMA vez, no clique, e abre. */
@@ -183,10 +214,24 @@ export function DocumentCard({
                   {documentLabel(doc.category, doc.fields)}
                 </Badge>
               )}
-              {doc.confidence !== null && doc.confidence !== undefined && (
-                <span className="text-[10px] text-muted-foreground">
-                  {Math.round(doc.confidence * 100)}% confiança
+              {cobertura ? (
+                <span
+                  className="text-[10px] text-muted-foreground"
+                  title={
+                    cobertura.faltantes.length
+                      ? `Não veio: ${cobertura.faltantes.join(", ")}`
+                      : "Todos os campos que este documento pode preencher vieram"
+                  }
+                >
+                  {cobertura.preenchidos} de {cobertura.esperados} campos
                 </span>
+              ) : (
+                doc.confidence !== null &&
+                doc.confidence !== undefined && (
+                  <span className="text-[10px] text-muted-foreground">
+                    {Math.round(doc.confidence * 100)}% confiança
+                  </span>
+                )
               )}
               {doc.status !== "ready" && (
                 <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">

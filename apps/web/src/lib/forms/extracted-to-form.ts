@@ -223,7 +223,7 @@ export const FIELD_MAP_PERSON: Record<string, string> = {
   cep: "cep",
 };
 
-const FIELD_MAP_IMOVEL: Record<string, string> = {
+export const FIELD_MAP_IMOVEL: Record<string, string> = {
   matricula_numero: "matricula",
   cartorio: "cartorio",
   bairro: "bairro",

@@ -32,7 +32,12 @@
  * Então: campos que o destino precisa ∩ campos que este tipo de documento tem.
  */
 
-import { resolveBasePath, type Assignment } from "./extracted-to-form";
+import {
+  resolveBasePath,
+  FIELD_MAP_PERSON,
+  FIELD_MAP_IMOVEL,
+  type Assignment,
+} from "./extracted-to-form";
 import { describeFormPath } from "./field-labels";
 
 /**
@@ -203,6 +208,39 @@ export function calcularCobertura(
     else faltantes.push(campo);
   }
   return { esperados: esperados.length, preenchidos, faltantes };
+}
+
+/**
+ * Traz os campos para o vocabulário do formulário, venham de onde vierem.
+ *
+ * Sem isto a cobertura mentiria para baixo nos documentos já extraídos: eles
+ * estão gravados com as chaves do OCR (`cpf_numero`), e procurar por `cpf`
+ * acharia zero — o card mostraria "0 de 8" num documento que preencheu tudo.
+ *
+ * Usa o MESMO dicionário que a aplicação usa, então o que se conta é o que de
+ * fato chega ao formulário. Chave sem tradução simplesmente não entra, que é
+ * exatamente o que acontece na aplicação real.
+ */
+export function normalizarParaFormulario(
+  fields: Record<string, unknown>,
+  vocab: "ocr" | "form" | undefined
+): Record<string, unknown> {
+  if (vocab === "form") return fields;
+
+  const out: Record<string, unknown> = {};
+  for (const [chave, valor] of Object.entries(fields)) {
+    const destino = FIELD_MAP_PERSON[chave] ?? FIELD_MAP_IMOVEL[chave];
+    if (destino) {
+      // Primeira tradução vence: `nome_completo` e `titular_nome` apontam para
+      // `nome`, e sobrescrever faria a contagem depender da ordem das chaves.
+      if (!(destino in out)) out[destino] = valor;
+      continue;
+    }
+    // Chave que já é do formulário passa direto — cobre o payload misto, em que
+    // parte veio guiada e parte não.
+    out[chave] = valor;
+  }
+  return out;
 }
 
 /** Mesmas sentinelas que `coerce` já filtra na ponte para o formulário. */

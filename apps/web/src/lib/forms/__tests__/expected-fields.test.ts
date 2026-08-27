@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   expectedFieldsFor,
   calcularCobertura,
+  normalizarParaFormulario,
   CATEGORIAS_SEM_GUIA,
 } from "../expected-fields";
 import type { Assignment } from "../extracted-to-form";
@@ -163,5 +164,62 @@ describe("calcularCobertura", () => {
     const c = calcularCobertura(esperados, { nome: "A", cpf: "B", rg: "C" });
     expect(c.preenchidos).toBe(3);
     expect(c.faltantes).toEqual([]);
+  });
+});
+
+describe("normalizarParaFormulario", () => {
+  /**
+   * Sem isto o card mostraria "0 de 8" nos 188 documentos já extraídos: eles
+   * estão gravados com as chaves do OCR, e a cobertura procura pelas do
+   * formulário. Um documento que preencheu tudo pareceria não ter preenchido
+   * nada — pior que o "100% confiança" que este número substitui.
+   */
+  it("traduz vocabulário de OCR para o do formulário", () => {
+    const r = normalizarParaFormulario(
+      { nome_completo: "Joao", cpf_numero: "529", filiacao_mae: "Maria" },
+      undefined
+    );
+    expect(r.nome).toBe("Joao");
+    expect(r.cpf).toBe("529");
+    expect(r.nome_mae).toBe("Maria");
+  });
+
+  it("vocabulário do formulário passa intacto, sem cópia", () => {
+    const campos = { nome: "Joao", cpf: "529", mobile_phone: "11999" };
+    expect(normalizarParaFormulario(campos, "form")).toBe(campos);
+  });
+
+  /**
+   * `nome_completo` e `titular_nome` apontam os dois para `nome`. Sem a regra
+   * de "primeira vence", a contagem dependeria da ordem das chaves no JSON.
+   */
+  it("primeira tradução vence, para a contagem não depender da ordem", () => {
+    const r = normalizarParaFormulario(
+      { nome_completo: "Primeiro", titular_nome: "Segundo" },
+      "ocr"
+    );
+    expect(r.nome).toBe("Primeiro");
+  });
+
+  it("campos de imóvel também traduzem", () => {
+    const r = normalizarParaFormulario(
+      { matricula_numero: "55301", descricao_imovel: "Apto" },
+      "ocr"
+    );
+    expect(r.matricula).toBe("55301");
+    expect(r.descricao).toBe("Apto");
+  });
+
+  /**
+   * Payload misto: parte veio guiada, parte não. Acontece quando o modelo
+   * recusa o schema e responde livre, mantendo o prompt guiado.
+   */
+  it("chave que já é do formulário passa direto", () => {
+    const r = normalizarParaFormulario(
+      { nome_completo: "Joao", mobile_phone: "11999" },
+      "ocr"
+    );
+    expect(r.nome).toBe("Joao");
+    expect(r.mobile_phone).toBe("11999");
   });
 });
