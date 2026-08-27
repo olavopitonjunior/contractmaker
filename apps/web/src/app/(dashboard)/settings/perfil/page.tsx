@@ -47,7 +47,9 @@ export default async function PerfilImobiliariaPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      {/* `id` é o alvo do passo `branding` do onboarding (`stepUrl`) — sem ele
+          o CTA cairia no topo da página, longe do bloco do logo. */}
+      <Card id="identidade-visual" className="scroll-mt-20">
         <CardHeader>
           <CardTitle>Identidade visual</CardTitle>
         </CardHeader>

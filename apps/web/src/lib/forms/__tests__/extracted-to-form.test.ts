@@ -219,11 +219,17 @@ describe("mapExtractedToForm — procuração", () => {
 
 describe("pickSpouseFromCertidao (D1)", () => {
   const fields = CERTIDAO.fields;
+  // O retorno passou a carregar a qualificação do nubente (profissão,
+  // nacionalidade, nascimento) além de nome/CPF — a certidão traz esses dados e
+  // o form os pede. Nesta fixture eles não existem, então saem null.
 
   it("titular = conjuge1 (por CPF) → cônjuge é conjuge2", () => {
     expect(pickSpouseFromCertidao(fields, { cpf: "555.666.777-88" })).toEqual({
       nome: "Ana Cônjuge",
       cpf: "11122233344",
+      profissao: null,
+      nacionalidade: null,
+      dataNascimento: null,
     });
   });
 
@@ -231,6 +237,9 @@ describe("pickSpouseFromCertidao (D1)", () => {
     expect(pickSpouseFromCertidao(fields, { cpf: "11122233344" })).toEqual({
       nome: "João Vendedor",
       cpf: "55566677788",
+      profissao: null,
+      nacionalidade: null,
+      dataNascimento: null,
     });
   });
 
@@ -238,6 +247,9 @@ describe("pickSpouseFromCertidao (D1)", () => {
     expect(pickSpouseFromCertidao(fields, { nome: "ana conjuge" })).toEqual({
       nome: "João Vendedor",
       cpf: "55566677788",
+      profissao: null,
+      nacionalidade: null,
+      dataNascimento: null,
     });
   });
 
@@ -245,10 +257,16 @@ describe("pickSpouseFromCertidao (D1)", () => {
     expect(pickSpouseFromCertidao(fields, null)).toEqual({
       nome: "Ana Cônjuge",
       cpf: "11122233344",
+      profissao: null,
+      nacionalidade: null,
+      dataNascimento: null,
     });
     expect(pickSpouseFromCertidao(fields, { nome: "Outra Pessoa" })).toEqual({
       nome: "Ana Cônjuge",
       cpf: "11122233344",
+      profissao: null,
+      nacionalidade: null,
+      dataNascimento: null,
     });
   });
 });

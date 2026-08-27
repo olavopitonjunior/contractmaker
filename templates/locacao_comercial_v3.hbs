@@ -6,7 +6,9 @@
 
 <h2>1. IMÓVEL</h2>
 <p>1.1. A PARTE LOCADORA, proprietária do(a) {{#if (existe imovel.tipo_texto)}}{{imovel.tipo_texto}}{{else}}{{imovel.kind}}{{/if}}{{#if (existe imovel.complemento)}} {{imovel.complemento}}{{/if}}{{#if (existe imovel.condominio_nome)}}, do {{imovel.condominio_nome}}{{/if}}{{#if (existe imovel.rua)}}, localizado(a) na {{imovel.rua}}{{#if (existe imovel.numero)}}, nº {{imovel.numero}}{{/if}}{{/if}}{{#if imovel.bairro}}, {{imovel.bairro}}{{/if}}{{#if (existe imovel.cep)}}, CEP {{cep imovel.cep}}{{/if}}{{#if (existe imovel.cidade)}}, {{imovel.cidade}}{{#if (existe imovel.uf)}}/{{imovel.uf}}{{/if}}{{/if}}{{#if (gt imovel.area 0)}}, com área de {{numero imovel.area}} m²{{/if}}{{#if (gt imovel.vagas_garagem 0)}}, com {{imovel.vagas_garagem}} ({{numeroExtenso imovel.vagas_garagem "f"}}) vaga(s) de garagem{{/if}}{{#if imovel.inscricao_iptu}}, regularmente cadastrado na Prefeitura Municipal de {{imovel.cidade}} pelo contribuinte nº {{imovel.inscricao_iptu}}{{/if}}{{#if imovel.matricula}}, objeto da matrícula nº {{imovel.matricula}}{{#if imovel.cartorio}} do {{imovel.cartorio}}{{/if}}{{/if}}, pelo presente e na melhor forma de direito, loca-o à PARTE LOCATÁRIA, mediante as cláusulas e condições seguintes.</p>
+{{#if (existe imovel.descricao)}}
 <p>1.2. Descrição do imóvel: {{imovel.descricao}}</p>
+{{/if}}
 
 <h2>2. PRAZO</h2>
 <p>2.1. O prazo de locação é de {{aluguel.vigencia_meses}} ({{numeroExtenso aluguel.vigencia_meses}}) meses{{#if (existe config.vigencia_inicio_texto)}}, a contar de {{config.vigencia_inicio_texto}}{{/if}}{{#if (existe config.vigencia_fim_texto)}} e com término fixado em {{config.vigencia_fim_texto}}{{/if}}, data em que a PARTE LOCATÁRIA se compromete a devolver o imóvel completamente livre e desocupado de coisas e pessoas.</p>

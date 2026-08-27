@@ -653,6 +653,59 @@ function buildLocacaoConsolidatedSummary(
   pushIf(cfgRows, "Data de assinatura", dateBR(assinatura.data));
   if (cfgRows.length > 0) sections.push({ title: "Configuração contratual", rows: cfgRows });
 
+  // ---- Comissão ----
+  // Faltava: venda já trazia "Comissionados" e "Intermediação", e o resumo de
+  // locação chegava à imobiliária sem dizer quanto ela ia receber nem quem
+  // captou o imóvel.
+  const comissaoRows: SummaryRow[] = [];
+  const comissao = obj(data.comissao);
+  const formaTaxa =
+    comissao.forma_taxa_locacao === "valor_fixo" ? "valor_fixo" : "percentual";
+  if (formaTaxa === "valor_fixo") {
+    const valorTaxa = Number(comissao.taxa_locacao_valor);
+    if (Number.isFinite(valorTaxa) && valorTaxa > 0) {
+      comissaoRows.push({
+        label: "Taxa de intermediação",
+        value: `${brl(valorTaxa)} (valor fixo)`,
+      });
+    }
+  } else {
+    const percentTaxa = Number(comissao.taxa_locacao_percent);
+    if (Number.isFinite(percentTaxa) && percentTaxa > 0) {
+      const aluguelValor = Number(obj(data.aluguel).valor);
+      const emReais =
+        Number.isFinite(aluguelValor) && aluguelValor > 0
+          ? ` — ${brl((aluguelValor * percentTaxa) / 100)}`
+          : "";
+      comissaoRows.push({
+        label: "Taxa de intermediação",
+        value: `${percentTaxa}% do 1º aluguel${emReais}`,
+      });
+    }
+  }
+  for (const [i, raw] of arr(comissao.angariadores).entries()) {
+    const a = obj(raw);
+    const nome = str(a.nome) || `Angariador ${i + 1}`;
+    const valorFixo = Number(a.valor_fixo);
+    const percentual = Number(a.percentual);
+    const quanto =
+      a.forma_comissao === "valor_fixo"
+        ? Number.isFinite(valorFixo) && valorFixo > 0
+          ? `${brl(valorFixo)}/mês`
+          : ""
+        : Number.isFinite(percentual) && percentual > 0
+          ? `${percentual}% do aluguel`
+          : "";
+    const meses = Number(a.meses_comissao);
+    const duracao =
+      Number.isFinite(meses) && meses > 0 ? ` por ${meses} mês(es)` : " (todo o contrato)";
+    comissaoRows.push({
+      label: `Angariador — ${nome}`,
+      value: quanto ? `${quanto}${duracao}` : "—",
+    });
+  }
+  if (comissaoRows.length > 0) sections.push({ title: "Comissão", rows: comissaoRows });
+
   // ---- Observações gerais ----
   const observacoes = str(data.observacoes);
   if (observacoes) {

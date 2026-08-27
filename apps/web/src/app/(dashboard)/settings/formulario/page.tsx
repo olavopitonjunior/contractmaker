@@ -4,7 +4,10 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
-import { resolveOrgContractDefaults } from "@/lib/contracts/default-config";
+import {
+  resolveOrgContractDefaults,
+  resolveOrgLocacaoComissao,
+} from "@/lib/contracts/default-config";
 import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
 import { MODULE } from "@/lib/modules/catalog";
 import { FormSettingsClient } from "./FormSettingsClient";
@@ -38,6 +41,7 @@ export default async function FormularioSettingsPage() {
     MODULE.LOCACAO
   );
   const defaults = resolveOrgContractDefaults(settings.contractDefaultsJson);
+  const comissaoLocacao = resolveOrgLocacaoComissao(settings.contractDefaultsJson);
 
   // Categorias de terceiro (links por parte com campos customizáveis).
   const participantCategories = await listOrgParticipantCategories(org.id);
@@ -94,6 +98,7 @@ export default async function FormularioSettingsPage() {
       <ContractDefaultsCard
         initial={defaults.venda}
         initialLocacao={defaults.locacao}
+        initialComissaoLocacao={comissaoLocacao}
         locacaoEnabled={locacaoEnabled}
       />
     </div>

@@ -208,6 +208,19 @@ export const FIELD_MAP_PERSON: Record<string, string> = {
   cidade: "cidade",
   uf: "uf",
   cep: "cep",
+  // Qualificação. O prompt só devolve estas chaves cruas em `ficha_resumo` e em
+  // documentos fora do catálogo ("outro"); as certidões e procurações usam
+  // chaves prefixadas e têm ramo próprio abaixo. Mapear aqui garante que nada
+  // extraído seja descartado em silêncio — que era a queixa "não puxou CPF,
+  // endereço e profissão" da sessão de 2026-08-25.
+  profissao: "profissao",
+  nacionalidade: "nacionalidade",
+  estado_civil: "estado_civil",
+  email: "email",
+  telefone: "mobile_phone",
+  mobile_phone: "mobile_phone",
+  numero: "numero",
+  complemento: "complemento",
 };
 
 const FIELD_MAP_IMOVEL: Record<string, string> = {
@@ -249,13 +262,47 @@ export function sanitizeUf(s: unknown): string | null {
   return /^[A-Z]{2}$/.test(upper) ? upper : null;
 }
 
+/**
+ * Um CEP nunca é número de porta.
+ *
+ * O prompt do `comprovante_residencia` pede `endereco_completo` E `cep`
+ * separados, mas o modelo repete o CEP dentro do endereço ("Rua das Flores -
+ * Centro - CEP 01310-100"). Como o `\d+` do regex de endereço não tem teto de
+ * dígitos e o `.+?` é preguiçoso, o primeiro grupo numérico que ele achava era
+ * o CEP — e um endereço SEM número de porta gravava `numero = "01310"` (ou
+ * `"13010000"` no CEP sem hífen), engolindo o bairro dentro de `rua`.
+ *
+ * Reportado na sessão com a corretora em 2026-08-25 ("o CEP veio trocado com o
+ * número do imóvel").
+ *
+ * Regras: 8 dígitos é CEP sem máscara; 5 dígitos seguidos de `-###` é a
+ * primeira metade de um CEP mascarado. Número de porta real com 5 dígitos
+ * existe (99999), então só recusamos os 5 dígitos quando o sufixo de CEP vem
+ * logo atrás.
+ */
+function pareceCep(numero: string, resto: string): boolean {
+  if (numero.length === 8) return true;
+  if (numero.length === 5 && /^-?\s*\d{3}(?!\d)/.test(resto.trim())) return true;
+  return false;
+}
+
 export function parseEndereco(value: unknown): { rua?: string; numero?: string } {
   if (typeof value !== "string" || !value.trim()) return {};
-  const match = value.match(/^(.+?),?\s*(\d+[A-Za-z]?)(?:\s*[-,]\s*(.*))?$/);
-  if (match) {
-    return { rua: match[1].trim(), numero: match[2].trim() };
+  const texto = value.trim();
+  const match = texto.match(/^(.+?),?\s*(\d+[A-Za-z]?)(?:\s*[-,]\s*(.*))?$/);
+  if (!match) return { rua: texto };
+
+  const numero = match[2].trim();
+  const resto = match[3] ?? "";
+  // A palavra "CEP" logo antes do grupo numérico é o sinal mais barato de todos.
+  const rotuladoCep = /(^|[^a-z])cep[\s:.-]*$/i.test(match[1]);
+  if (rotuladoCep || pareceCep(numero.replace(/\D/g, ""), resto)) {
+    // Devolver a string inteira como `rua` é melhor que inventar um número: o
+    // `skipIfDirty` do apply deixa o usuário corrigir, e nada errado é gravado
+    // no campo `numero`.
+    return { rua: texto };
   }
-  return { rua: value.trim() };
+  return { rua: match[1].trim(), numero };
 }
 
 /**
@@ -542,6 +589,9 @@ function normalizeName(value: unknown): string | null {
 export interface CertidaoSpouse {
   nome: string | null;
   cpf: string | null;
+  profissao: string | null;
+  nacionalidade: string | null;
+  dataNascimento: string | null;
 }
 
 /**
@@ -553,16 +603,40 @@ export interface CertidaoSpouse {
  * etapa 0) cai em conjuge2 — mesma convenção do ramo embutido histórico, que
  * assume titular = conjuge1.
  */
+/**
+ * Qual dos dois nubentes é a PARTE (o titular do slot). O cônjuge é o outro.
+ * Sem match — parte ainda em branco na etapa 0 — assume 1, mesma convenção
+ * histórica do ramo embutido ("titular = conjuge1").
+ */
+export function titularSideInCertidao(
+  fields: Record<string, unknown>,
+  parent: { nome?: unknown; cpf?: unknown } | null | undefined
+): 1 | 2 {
+  const parentCpf = sanitizeCpf(parent?.cpf);
+  if (parentCpf) {
+    if (sanitizeCpf(fields.conjuge1_cpf) === parentCpf) return 1;
+    if (sanitizeCpf(fields.conjuge2_cpf) === parentCpf) return 2;
+  }
+  const parentNome = normalizeName(parent?.nome);
+  if (parentNome) {
+    if (normalizeName(fields.conjuge1_nome) === parentNome) return 1;
+    if (normalizeName(fields.conjuge2_nome) === parentNome) return 2;
+  }
+  return 1;
+}
+
 export function pickSpouseFromCertidao(
   fields: Record<string, unknown>,
   parent: { nome?: unknown; cpf?: unknown } | null | undefined
 ): CertidaoSpouse {
+  const texto = (v: unknown): string | null =>
+    typeof v === "string" && v.trim() ? v.trim() : null;
   const spouse = (n: 1 | 2): CertidaoSpouse => ({
-    nome:
-      typeof fields[`conjuge${n}_nome`] === "string"
-        ? (fields[`conjuge${n}_nome`] as string).trim()
-        : null,
+    nome: texto(fields[`conjuge${n}_nome`]),
     cpf: sanitizeCpf(fields[`conjuge${n}_cpf`]),
+    profissao: texto(fields[`conjuge${n}_profissao`]),
+    nacionalidade: texto(fields[`conjuge${n}_nacionalidade`]),
+    dataNascimento: texto(fields[`conjuge${n}_data_nascimento`]),
   });
 
   const parentCpf = sanitizeCpf(parent?.cpf);
@@ -675,6 +749,22 @@ export function mapExtractedToForm(
       const estadoCivil = inferEstadoCivilFromRegime(regime);
       if (estadoCivil) applyField("estado_civil", estadoCivil);
 
+      // A certidão qualifica os DOIS nubentes (profissão, nacionalidade,
+      // nascimento). `pickSpouseFromCertidao` diz qual lado é o cônjuge; o
+      // titular é o outro. Antes disto a qualificação da própria parte era
+      // extraída e jogada fora — profissão só chegava ao form pela
+      // ficha-resumo.
+      const titularSide = titularSideInCertidao(fields, {
+        nome: form.getValues(`${basePath}.nome`),
+        cpf: form.getValues(`${basePath}.cpf`),
+      });
+      applyField("profissao", fields[`conjuge${titularSide}_profissao`]);
+      applyField("nacionalidade", fields[`conjuge${titularSide}_nacionalidade`]);
+      applyField(
+        "data_nascimento",
+        fields[`conjuge${titularSide}_data_nascimento`]
+      );
+
       // The primary person on this form slot is conjuge1; conjuge2 becomes
       // the "conjuge" sub-object. We only fill if the slot's conjuge is empty.
       const conjuge2Nome = fields.conjuge2_nome;
@@ -758,6 +848,10 @@ export function mapExtractedToForm(
       const spouse = pickSpouseFromCertidao(fields, parent);
       if (spouse.nome) applyField("nome", spouse.nome);
       if (spouse.cpf) applyField("cpf", spouse.cpf);
+      if (spouse.profissao) applyField("profissao", spouse.profissao);
+      if (spouse.nacionalidade) applyField("nacionalidade", spouse.nacionalidade);
+      if (spouse.dataNascimento)
+        applyField("data_nascimento", spouse.dataNascimento);
     }
 
     // D2 — estado civil colateral do PAI. Atribuir um doc ao cônjuge é
@@ -794,10 +888,20 @@ export function mapExtractedToForm(
       if (isProcurador || isRepresentante) {
         applyField("nome", fields.outorgado_nome);
         applyField("cpf", fields.outorgado_cpf);
+        applyField("rg", fields.outorgado_rg);
       } else if (isTitular) {
-        // D5 — procuração atribuída à própria parte: o outorgante É ela.
+        // D5 — procuração atribuída à própria parte: o outorgante É ela. A
+        // procuração é uma das poucas fontes documentais da qualificação
+        // completa (nacionalidade, estado civil, profissão, endereço).
         applyField("nome", fields.outorgante_nome);
         applyField("cpf", fields.outorgante_cpf);
+        applyField("rg", fields.outorgante_rg);
+        applyField("nacionalidade", fields.outorgante_nacionalidade);
+        applyField("estado_civil", fields.outorgante_estado_civil);
+        applyField("profissao", fields.outorgante_profissao);
+        const parsedOutorgante = parseEndereco(fields.outorgante_endereco_completo);
+        if (parsedOutorgante.rua) applyField("endereco", parsedOutorgante.rua);
+        if (parsedOutorgante.numero) applyField("numero", parsedOutorgante.numero);
       }
     }
 
@@ -973,7 +1077,7 @@ interface FichaResumoParte {
   cnpj?: string;
 }
 
-const FICHA_PAPEIS: ReadonlySet<DocumentKind> = new Set<DocumentKind>([
+const FICHA_PAPEIS_VENDA: ReadonlySet<DocumentKind> = new Set<DocumentKind>([
   "vendedor",
   "comprador",
   "conjuge_vendedor",
@@ -984,13 +1088,39 @@ const FICHA_PAPEIS: ReadonlySet<DocumentKind> = new Set<DocumentKind>([
   "procurador_comprador",
 ]);
 
+const FICHA_PAPEIS_LOCACAO: ReadonlySet<DocumentKind> = new Set<DocumentKind>([
+  "locador",
+  "locatario",
+  "fiador",
+  "conjuge_locador",
+  "conjuge_locatario",
+  "conjuge_fiador",
+  "representante_locador",
+  "representante_locatario",
+]);
+
+/**
+ * Papéis que a ficha-resumo pode declarar, por esteira. A ficha de locação
+ * (o "dossiê" que a imobiliária já monta hoje em PDF) caía inteira em "outro"
+ * porque só os papéis de venda eram aceitos — o documento era classificado,
+ * extraído e descartado.
+ */
+const FICHA_PAPEIS: ReadonlySet<DocumentKind> = new Set<DocumentKind>([
+  ...FICHA_PAPEIS_VENDA,
+  ...FICHA_PAPEIS_LOCACAO,
+]);
+
+export { FICHA_PAPEIS_VENDA, FICHA_PAPEIS_LOCACAO };
+
 /**
  * Procura match contra a lista `partes[]` de uma ficha-resumo (Fase E).
  * Retorna o papel + índice de referência conforme declarado pelo escritório.
  */
-function matchFichaResumo(
+export function matchFichaResumo(
   fields: Record<string, unknown>,
-  siblings: ProcessedDocHint[]
+  siblings: ProcessedDocHint[],
+  /** Restringe aos papéis de UMA esteira; omitido, aceita os dois. */
+  allowed: ReadonlySet<DocumentKind> = FICHA_PAPEIS
 ): { kind: DocumentKind; index: number } | null {
   const fichaSibling = siblings.find(
     (s) => s.category === "ficha_resumo" && s.fields
@@ -1015,7 +1145,7 @@ function matchFichaResumo(
       !cpfMatch && extractedNome && pNome && extractedNome === pNome;
     if (!cpfMatch && !nomeMatch) continue;
     const papel = (p.papel ?? "").toString() as DocumentKind;
-    if (!FICHA_PAPEIS.has(papel)) continue;
+    if (!allowed.has(papel)) continue;
     const idx =
       typeof p.indice_referencia === "number" && p.indice_referencia >= 0
         ? p.indice_referencia

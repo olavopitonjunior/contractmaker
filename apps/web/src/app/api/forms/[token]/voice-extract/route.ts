@@ -6,6 +6,7 @@ import {
   SUPPORTED_VOICE_MIMES,
 } from "@/lib/ai/voice-extract";
 import { RateLimits } from "@/lib/security/ratelimit";
+import { isLocacaoSchemaType } from "@/lib/forms/validation-locacao";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -19,6 +20,11 @@ const MAX_BYTES = 5 * 1024 * 1024; // 5MB ≈ 5min de webm/opus 64kbps
  * e retorna `{ fields: { "vendedores.0.nome": "...", ... } }` pra o
  * cliente aplicar via `form.setValue` path a path.
  *
+ * Serve as DUAS esteiras: o token de locação também é um `SalesForm.token`
+ * (mesma coisa que as rotas de anexos e de comissionados já fazem). A esteira
+ * sai do `schemaType` do próprio form — o cliente não escolhe, senão um link de
+ * venda poderia pedir o vocabulário de locação e vice-versa.
+ *
  * Público (sem auth) — endpoint do form principal. Rate-limit por token
  * pra evitar abuse e estouro de custo Gemini.
  */
@@ -28,7 +34,14 @@ export async function POST(
 ) {
   const form = await prisma.salesForm.findUnique({
     where: { token: params.token },
-    select: { id: true, orgId: true, status: true, completedAt: true, reopenedAt: true },
+    select: {
+      id: true,
+      orgId: true,
+      schemaType: true,
+      status: true,
+      completedAt: true,
+      reopenedAt: true,
+    },
   });
   if (!form) {
     return NextResponse.json({ error: "Form não encontrado" }, { status: 404 });
@@ -116,6 +129,7 @@ export async function POST(
     stepIndex,
     { orgId: form.orgId },
     pathScope,
+    isLocacaoSchemaType(form.schemaType) ? "locacao" : "venda",
   );
 
   return NextResponse.json({

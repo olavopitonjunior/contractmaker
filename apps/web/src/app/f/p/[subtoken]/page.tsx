@@ -12,6 +12,7 @@ import { listGarantiaOptions } from "@/lib/forms/garantia-option-repo";
 import { isLocacaoSchemaType } from "@/lib/forms/validation-locacao";
 import { FormClosedNotice } from "@/components/forms/FormClosedNotice";
 import { SubtokenFormClient } from "./form-client";
+import { getOrgBrand } from "@/lib/tenant/branding";
 import { TerceiroFormClient } from "./terceiro-client";
 
 export default async function PublicParticipantFormPage({
@@ -78,6 +79,10 @@ export default async function PublicParticipantFormPage({
     ? await listGarantiaOptions(participant.form.orgId, { activeOnly: true })
     : undefined;
 
+  // Branding do tenant — mesmo motivo do form principal: quem abre o link é o
+  // cliente da imobiliária, não do produto.
+  const brand = await getOrgBrand(participant.form.orgId).catch(() => null);
+
   return (
     <SubtokenFormClient
       subtoken={params.subtoken}
@@ -92,6 +97,8 @@ export default async function PublicParticipantFormPage({
       formTitle={participant.form.title}
       completedAt={participant.completedAt?.toISOString() ?? null}
       locked={Boolean(participant.form.lockedAt)}
+      brandLogoUrl={brand?.logoUrl ?? null}
+      brandDisplayName={brand?.displayName ?? null}
     />
   );
 }

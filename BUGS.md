@@ -15,6 +15,35 @@
 
 ## Bugs Ativos
 
+### [ALTA] CPF/CNPJ MASCARADO gravado no formulario ao selecionar corretor cadastrado (locacao)
+- **Status:** corrigido no codigo (pendente deploy) — branch feat/form-fixes-ativa
+- **Encontrado em:** 2026-08-27 (auditoria do form apos a sessao com a corretora da RE/MAX Ativa em 25/08)
+- **Descricao:** O picker "Selecionar cadastrado" da etapa Comissao de LOCACAO (`ComissaoLocacaoStep.tsx`) gravava `cpf`/`cnpj` com o valor que o endpoint token-scoped devolve — que e MASCARADO de proposito (`maskDoc` em `api/forms/[token]/commissioners`, ex. "390***05", anti-scraping de CPF no form publico). A esteira de VENDA ja tinha sido corrigida (`ComissaoConfigStep.tsx`, grava string vazia e vincula por `splitRecipientId`); a etapa de locacao nasceu de uma copia anterior ao fix.
+- **Impacto:** ALTO e silencioso, em cadeia: (1) `dataJson.comissao.angariadores[i].cpf = "390***05"` (o schema aceita string livre); (2) salvar o cadastro devolvia 400 "CPF/CNPJ invalido", porque o Zod da rota exige 11/14 digitos — o corretor vindo do proprio picker nao podia ser salvo; (3) `normalizeDoc` reduzia a 5 digitos e o dedupe por documento era PULADO, caindo no match fraco por nome (duplicatas); (4) `materialize-parties.ts` usava o valor como chave de upsert e criava `PropertyOwner` com `cpfCnpj = "390***05"`.
+- **Solucao:** mesmo fix da venda — `cpf: ""`, `cnpj: ""`, vinculo real pelo `splitRecipientId`. No mesmo passe, `materialize-parties.ts` deixou de hardcodar `tipoPessoa: "fisica"` (angariador PJ nascia como pessoa fisica com CNPJ em campo de CPF).
+
+### [ALTA] Lookup de corretores estourava o rate limit e aparecia como "nenhum corretor cadastrado"
+- **Status:** corrigido no codigo (pendente deploy) — branch feat/form-fixes-ativa
+- **Encontrado em:** 2026-08-27
+- **Descricao:** `CorretorCombobox` tem `fetchOptions` nas dependencias do seu `useEffect` de busca. Os dois call-sites (`ComissaoConfigStep.tsx` e `forms/new/page.tsx`) declaravam a funcao solta no corpo do componente, sem `useCallback` — identidade nova a cada render, efeito re-rodando, novo debounce de 300ms, novo fetch. Cerca de 1 request a cada 300ms contra o teto de 30/min da rota: o limite estourava em ~9s e todo 429 seguinte era engolido por um `catch(() => setOptions([]))`, virando "Nenhum corretor encontrado".
+- **Impacto:** ALTO — a listagem de corretores cadastrados simplesmente nao aparecia (queixa direta do usuario), sem nenhum sinal de erro. Atingia inclusive o corretor logado.
+- **Solucao:** `useCallback` nos dois call-sites; o fetch agora lanca em HTTP != 2xx com `console.warn`, e o combobox tem estado de falha proprio ("Nao foi possivel carregar os corretores") em vez de se disfarcar de lista vazia.
+
+### [MEDIA] OCR gravava o CEP no campo "numero" do endereco
+- **Status:** corrigido no codigo (pendente deploy) — branch feat/form-fixes-ativa
+- **Encontrado em:** 2026-08-25 (sessao de preenchimento real com a corretora: "o CEP veio trocado com o numero do imovel")
+- **Descricao:** `parseEndereco` (`lib/forms/extracted-to-form.ts`) usava `/^(.+?),?\s*(\d+[A-Za-z]?)...$/` — `\d+` sem teto de digitos e `.+?` preguicoso. O prompt do `comprovante_residencia` pede `endereco_completo` E `cep` separados, mas o modelo repete o CEP dentro do endereco; num endereco SEM numero de porta, o primeiro grupo numerico encontrado era o proprio CEP. "Rua das Flores - Centro - CEP 01310-100" gravava `numero = "01310"`, e "Jardim ABC - 13010000" gravava `numero = "13010000"` — engolindo ainda o bairro dentro de `rua`. O sentido inverso ja estava protegido (`coerce("cep")` exige 8 digitos) e tinha teste; `parseEndereco` tinha cobertura ZERO.
+- **Impacto:** MEDIO — endereco errado na qualificacao das partes e no contrato gerado; o usuario corrigia a mao sem saber a causa.
+- **Solucao:** guard de CEP no grupo `numero` (8 digitos; 5 digitos seguidos de `-###`; rotulo "CEP" logo antes). Reconhecido como CEP, a string inteira volta como `rua` em vez de inventar um numero. Bateria de 10 testes em `lib/forms/__tests__/parse-endereco.test.ts`.
+
+### [BAIXA] Campos decimais recusavam a virgula do teclado brasileiro
+- **Status:** corrigido no codigo (pendente deploy) — branch feat/form-fixes-ativa
+- **Encontrado em:** 2026-07-28 (relatado como "formatacao decimal de valores")
+- **Descricao:** Os campos de dinheiro ja usavam `MoneyInput` (mascara pt-BR), mas sobraram `<input type="number">` com `valueAsNumber` em campos DECIMAIS: `imovel.area`, `aluguel.taxa_admin_percent`, `comissao.taxa_locacao_percent` e o `percentual` do angariador. Em `type="number"` o navegador recusa a virgula: digitar "45,5" deixa o `value` vazio e o RHF grava `NaN` — o campo se apagava sozinho.
+- **Impacto:** BAIXO/MEDIO — valor perdido em silencio na taxa de administracao, na taxa de locacao e na area do imovel.
+- **Solucao:** novo `DecimalInput` (irmao do `MoneyInput`, `type="text" inputMode="decimal"`, parsing via `parsePercentBR` — que trata ponto e virgula como decimal e nunca como milhar) + wrapper `DecimalField` em `_PartyFields.tsx`. Campo vazio volta a ser `undefined`, nao `0`.
+
+
 ### [CRITICA] Migration nao-idempotente trava TODOS os deploys de producao (P3009) — reincidente
 - **Status:** resolvido (PR #137 + `migrate resolve` em prod 2026-07-16); guarda-trilho pendente
 - **Encontrado em:** 2026-07-16 (prod ficou ~7h sem conseguir deployar, 14:37 → 21:40 UTC)

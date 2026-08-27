@@ -4,7 +4,15 @@ import { useCallback, useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Loader2, RefreshCw, Maximize2, Minimize2 } from "lucide-react";
+import {
+  ExternalLink,
+  FileText,
+  Loader2,
+  RefreshCw,
+  Maximize2,
+  Minimize2,
+} from "lucide-react";
+import { toast } from "sonner";
 import { stripActiveContent } from "@/lib/proposals/preview-html";
 
 /**
@@ -91,6 +99,12 @@ export function ProposalDocumentCard({
             </Button>
           )}
           {html && (
+            <Button variant="ghost" size="sm" onClick={() => abrirEmNovaGuia(html)}>
+              <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+              Nova guia
+            </Button>
+          )}
+          {html && (
             <Button variant="ghost" size="sm" onClick={() => setExpanded((e) => !e)}>
               {expanded ? (
                 <Minimize2 className="mr-1.5 h-3.5 w-3.5" />
@@ -122,6 +136,37 @@ export function ProposalDocumentCard({
       )}
     </Card>
   );
+}
+
+/**
+ * Abre a proposta numa guia própria — para ler, imprimir ou salvar em PDF pelo
+ * diálogo do navegador, sem o enquadramento do card.
+ *
+ * NÃO abre o HTML direto (nem por `blob:`, nem por `document.write` do
+ * conteúdo): as duas formas dariam ao documento a ORIGEM da aplicação e
+ * derrubariam a segunda camada de defesa descrita em `preview-html.ts` — o
+ * `stripActiveContent` é um filtro de superfície conhecida, não um sanitizador
+ * de propósito geral, e o `dataJson` vem de digitação humana e de OCR. A guia
+ * recebe só uma casca; o documento continua dentro de `<iframe sandbox="">`,
+ * exatamente como no card.
+ */
+function abrirEmNovaGuia(html: string): void {
+  const guia = window.open("", "_blank", "noopener,noreferrer");
+  if (!guia) {
+    toast.error("O navegador bloqueou a nova guia. Libere pop-ups para este site.");
+    return;
+  }
+  const doc = wrapDocument(html)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;");
+  guia.document.write(
+    `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">` +
+      `<title>Proposta</title>` +
+      `<style>html,body{margin:0;height:100%;background:#f4f4f5}` +
+      `iframe{border:0;width:100%;height:100%;background:#fff}</style>` +
+      `</head><body><iframe sandbox="" srcdoc="${doc}"></iframe></body></html>`
+  );
+  guia.document.close();
 }
 
 /** Envelope mínimo só quando o render não trouxe documento completo. */

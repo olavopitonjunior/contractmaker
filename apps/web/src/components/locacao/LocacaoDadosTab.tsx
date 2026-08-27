@@ -12,6 +12,7 @@ import {
 import { ComissaoLocacaoCard } from "@/components/locacao/ComissaoLocacaoCard";
 import type { ComissaoLocacaoValue } from "@/components/locacao/ComissaoLocacaoSection";
 import { formPublicPath } from "@/lib/forms/form-url";
+import { formatMoneyBR } from "@/lib/format/money";
 
 interface LocacaoDadosTabProps {
   dealId: string;
@@ -245,12 +246,18 @@ export function LocacaoDadosTab({
                     : null
                 }
               />
+              {/* A taxa pode ser % OU valor fixo desde 2026-08; ler só o
+                  percentual mostrava "—" para quem cobra valor fixo. */}
               <Field
                 label="Taxa de locação"
                 value={
-                  Number(comissao.taxa_locacao_percent || 0) > 0
-                    ? `${comissao.taxa_locacao_percent}%`
-                    : null
+                  comissao.forma_taxa_locacao === "valor_fixo"
+                    ? Number(comissao.taxa_locacao_valor || 0) > 0
+                      ? formatMoneyBR(comissao.taxa_locacao_valor)
+                      : null
+                    : Number(comissao.taxa_locacao_percent || 0) > 0
+                      ? `${comissao.taxa_locacao_percent}%`
+                      : null
                 }
               />
             </div>

@@ -27,25 +27,92 @@ describe("getOnboardingStatus (6 passos)", () => {
     dealCount.mockResolvedValue(0);
   });
 
-  it("org nova: 6 passos obrigatórios + clicksign opcional, nenhum feito, incompleto", async () => {
+  it("org nova: 6 passos obrigatórios + clicksign/branding opcionais, nenhum feito, incompleto", async () => {
     const s = await getOnboardingStatus("org1");
     expect(s.steps.map((x) => x.key)).toEqual([
       "google",
       "profile",
+      "branding",
       "templates",
       "clicksign",
       "form",
       "invite",
       "deal",
     ]);
-    // clicksign é opcional → não conta pro total obrigatório.
+    // clicksign e branding são opcionais → não contam pro total obrigatório.
     expect(s.requiredTotal).toBe(6);
     expect(s.requiredDone).toBe(0);
     expect(s.complete).toBe(false);
     expect(s.steps.find((x) => x.key === "clicksign")?.required).toBe(false);
+    expect(s.steps.find((x) => x.key === "branding")?.required).toBe(false);
     expect(
-      s.steps.filter((x) => x.key !== "clicksign").every((x) => x.required)
+      s.steps
+        .filter((x) => x.key !== "clicksign" && x.key !== "branding")
+        .every((x) => x.required)
     ).toBe(true);
+  });
+
+  /**
+   * O logo entrou no checklist porque a ausência dele era INVISÍVEL: o
+   * formulário, o PDF do resumo e os e-mails caem no nome da imobiliária em
+   * texto. Em 27/08/2026, 5 de 5 orgs em produção estavam sem logo — o buraco
+   * era ninguém ser levado até a tela.
+   *
+   * Opcional de propósito: uma imobiliária pode legitimamente não ter marca, e
+   * travar os 100% num item estético é pior que a ausência do passo.
+   */
+  describe("passo branding (logo)", () => {
+    const brandFind = prisma.brandingSettings
+      .findUnique as unknown as ReturnType<typeof vi.fn>;
+
+    it("linha existente com logoUrl VAZIO não fecha o passo", async () => {
+      // É o estado real: o resolver de branding cria a linha, o arquivo não.
+      brandFind.mockResolvedValue({ logoUrl: "" });
+      const s = await getOnboardingStatus("org1");
+      const passo = s.steps.find((x) => x.key === "branding");
+      expect(passo?.done).toBe(false);
+      expect(passo?.detail).toBe("documentos saem só com o nome em texto");
+    });
+
+    it("logoUrl só com espaços também não fecha", async () => {
+      brandFind.mockResolvedValue({ logoUrl: "   " });
+      expect(
+        (await getOnboardingStatus("org1")).steps.find((x) => x.key === "branding")?.done
+      ).toBe(false);
+    });
+
+    it("com o arquivo, fecha e o detail some", async () => {
+      brandFind.mockResolvedValue({ logoUrl: "https://blob/logo.png" });
+      const passo = (await getOnboardingStatus("org1")).steps.find(
+        (x) => x.key === "branding"
+      );
+      expect(passo?.done).toBe(true);
+      expect(passo?.detail).toBeUndefined();
+    });
+
+    it("pendente NÃO impede os 100% — é opcional", async () => {
+      orgFind.mockResolvedValue({
+        creci: "12345-J",
+        legalName: "Imobiliária X",
+        onboardingCompletedAt: null,
+      });
+      gAcc.mockResolvedValue({ status: "connected" });
+      tmplCount.mockResolvedValue(2);
+      formFind.mockResolvedValue({
+        preset: "essencial",
+        customRequiredPaths: [],
+        createdAt: T0,
+        updatedAt: T1,
+      });
+      inviteCount.mockResolvedValue(1);
+      dealCount.mockResolvedValue(1);
+      brandFind.mockResolvedValue({ logoUrl: null });
+
+      const s = await getOnboardingStatus("org1");
+      expect(s.steps.find((x) => x.key === "branding")?.done).toBe(false);
+      expect(s.complete).toBe(true);
+      expect(s.requiredDone).toBe(6);
+    });
   });
 
   it("tudo configurado → 6/6 e complete", async () => {

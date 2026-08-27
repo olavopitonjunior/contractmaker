@@ -2,6 +2,7 @@ import type { SelectGroup } from "@/components/forms/NativeSelect";
 import type { DocumentCardData } from "@/components/forms/DocumentCard";
 import type { DocumentKind } from "@/lib/forms/extracted-to-form";
 import {
+  applyFichaResumoLocacao,
   mapExtractedToLocacaoForm,
   suggestLocacaoAssignment,
   type LocacaoFormSnapshot,
@@ -129,7 +130,14 @@ export function buildLocacaoOptions(
     groups.push({ label: "Cônjuges", options: conjugeOptions });
   }
 
-  // Representantes: só pra partes PJ já cadastradas.
+  // Representantes: TODOS os pais, não só os já marcados como PJ.
+  //
+  // O gate `tipo_pessoa === "juridica"` escondia o grupo inteiro: a etapa 0 vem
+  // ANTES das etapas de parte, então `tipo_pessoa` ainda é o default "fisica" e
+  // o usuário nunca via onde atribuir a procuração/contrato social — o
+  // documento ia pra "outro" e o gate H.5 travava o "Aplicar aos campos". A
+  // venda removeu esse mesmo gate (ver buildSubKindOptions em
+  // build-assignment-options.ts); uma chave `.representante` num PF é inócua.
   const repOptions: Array<{ value: string; label: string }> = [];
   const pushReps = (
     kind: "representante_locador" | "representante_locatario",
@@ -138,7 +146,6 @@ export function buildLocacaoOptions(
   ) => {
     if (!Array.isArray(list)) return;
     for (let i = 0; i < list.length; i++) {
-      if (list[i]?.tipo_pessoa !== "juridica") continue;
       const razao = nameOf(list[i]);
       const base = `Representante de ${parentLabel} ${i + 1}`;
       repOptions.push({
@@ -188,6 +195,8 @@ export const locacaoDocAdapter: DocumentosStepAdapter = {
     return null;
   },
   kindLabel: (kind) => KIND_LABELS[kind] ?? kind,
+  // `garantia` entra porque o fiador (e o cônjuge dele) se qualificam lá dentro.
+  partyListKeys: ["locadores", "locatarios", "garantia"],
   topKeyForKind(kind) {
     switch (kind) {
       case "locador":
@@ -210,5 +219,6 @@ export const locacaoDocAdapter: DocumentosStepAdapter = {
         return null;
     }
   },
-  // Sem applyFicha: ficha-resumo declara papéis de venda; em locação cai em "outro".
+  applyFicha: (data, form, options) =>
+    applyFichaResumoLocacao(data, form, options),
 };

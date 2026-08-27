@@ -118,12 +118,23 @@ const imovelLocacaoSchema = z.object({
   cep: z.string().optional().default(""),
   matricula: z.string().optional().default(""),
   cartorio: z.string().optional().default(""),
+  // Situação da matrícula + vínculo com o FormAttachment escolhido, espelhando
+  // venda (`validation.ts`): quem preenche pode anexar/escolher a matrícula na
+  // PRÓPRIA etapa do imóvel e extrair número, cartório e descrição dali, em vez
+  // de voltar à etapa 0.
+  matricula_situacao: z.string().optional().default(""),
+  matricula_attachment_id: z.string().optional().default(""),
+  matricula_attachment_filename: z.string().optional().default(""),
   inscricao_iptu: z.string().optional().default(""),
   area: z.number().optional().default(0),
   // Detalhes do prédio/condomínio (cláusula DO IMÓVEL do template v3).
   vagas_garagem: z.number().int().min(0).optional(),
   condominio_nome: z.string().optional().default(""),
-  descricao: z.string().min(10, "Descreva o imóvel com ao menos 10 caracteres"),
+  // Opcional desde 2026-08: a corretora pediu que saísse do caminho crítico —
+  // o campo virava discussão de negociação ("mobiliado?", "aceita pet?") num
+  // formulário que só precisa identificar o imóvel. Quem quiser exigir liga
+  // pelo preset de obrigatoriedade da org.
+  descricao: z.string().optional().default(""),
 });
 
 // Reajuste e vigência.
@@ -318,7 +329,20 @@ export const angariadorLocacaoSchema = z.object({
 // Comissão da imobiliária — taxa de locação cobrada à vista (1º aluguel) +
 // angariadores. Base dos boletos de comissão (ver aba Cobrança do deal).
 export const comissaoLocacaoSchema = z.object({
+  /**
+   * Como a taxa de locação é cobrada. O angariador já tinha as duas formas
+   * desde sempre; a taxa da IMOBILIÁRIA só existia em percentual — e uma
+   * imobiliária que cobra "R$ 800 fixos pela intermediação" não tinha onde
+   * dizer isso.
+   */
+  forma_taxa_locacao: z
+    .enum(["percentual", "valor_fixo"])
+    .optional()
+    .default("percentual"),
+  /** % sobre o 1º aluguel (usado quando forma = percentual). */
   taxa_locacao_percent: z.number().min(0).max(100).optional().default(0),
+  /** R$ à vista (usado quando forma = valor_fixo). */
+  taxa_locacao_valor: z.number().min(0).optional(),
   angariadores: z.array(angariadorLocacaoSchema).optional().default([]),
 });
 

@@ -43,11 +43,16 @@ describe("renderFormSummaryHtml — branding do tenant", () => {
     const semCor = renderFormSummaryHtml([], META);
     expect(semCor).toContain("border-bottom: 2px solid #1a1a1a");
 
+    const payload = "red; } body { display: none";
     const corInvalida = renderFormSummaryHtml([], {
       ...META,
-      primaryColor: "red; } body { display: none",
+      primaryColor: payload,
     });
     expect(corInvalida).toContain("border-bottom: 2px solid #1a1a1a");
-    expect(corInvalida).not.toContain("display: none");
+    // Asserção sobre o PAYLOAD, não sobre um fragmento dele: `display: none`
+    // sozinho é CSS legítimo que o próprio <style> do resumo pode usar, e a
+    // versão anterior quebrava por isso sem que nada tivesse sido injetado.
+    expect(corInvalida).not.toContain(payload);
+    expect(corInvalida).not.toContain("body {");
   });
 });

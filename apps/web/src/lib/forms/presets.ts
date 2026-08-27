@@ -290,7 +290,7 @@ const LOCACAO_PRESET_ESSENCIAL: readonly (readonly string[])[] = [
     "locatarios.0.cidade",
     "locatarios.0.uf",
   ],
-  ["imovel.rua", "imovel.numero", "imovel.cidade", "imovel.uf", "imovel.descricao"],
+  ["imovel.rua", "imovel.numero", "imovel.cidade", "imovel.uf"],
   ["aluguel.valor", "aluguel.vigencia_inicio"],
   [],
 ] as const;
@@ -342,7 +342,6 @@ const LOCACAO_PRESET_COMPLETO: readonly (readonly string[])[] = [
     "imovel.uf",
     "imovel.cep",
     "imovel.matricula",
-    "imovel.descricao",
   ],
   ["aluguel.valor", "aluguel.vigencia_inicio", "aluguel.dia_vencimento"],
   [],

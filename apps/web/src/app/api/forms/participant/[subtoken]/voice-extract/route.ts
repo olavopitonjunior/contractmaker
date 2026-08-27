@@ -7,6 +7,7 @@ import {
 import { formClosedResponse } from "@/lib/forms/form-gate";
 import { resolveParticipantToken } from "@/lib/forms/participant-token";
 import { resolveParticipantScope } from "@/lib/forms/participant-scope";
+import { isLocacaoSchemaType } from "@/lib/forms/validation-locacao";
 import { RateLimits } from "@/lib/security/ratelimit";
 
 export const runtime = "nodejs";
@@ -34,7 +35,13 @@ export async function POST(
     where: { id: resolved.participant.id },
     include: {
       form: {
-        select: { orgId: true, status: true, completedAt: true, reopenedAt: true },
+        select: {
+          orgId: true,
+          schemaType: true,
+          status: true,
+          completedAt: true,
+          reopenedAt: true,
+        },
       },
     },
   });
@@ -114,6 +121,10 @@ export async function POST(
     stepIndex,
     { orgId: participant.form.orgId },
     pathScope,
+    // A esteira vem do form, não do cliente. Sem isto, o link do locador
+    // recebia o vocabulário de VENDA, o filtro por pathScope zerava (nenhuma
+    // spec tem `locadores`) e a rota devolvia `{}` — 200, em silêncio.
+    isLocacaoSchemaType(participant.form.schemaType) ? "locacao" : "venda",
   );
 
   return NextResponse.json({

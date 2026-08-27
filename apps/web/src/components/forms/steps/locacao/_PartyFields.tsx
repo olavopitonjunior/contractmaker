@@ -9,6 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { UFSelect } from "@/components/forms/UFSelect";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 import { MoneyInput } from "@/components/forms/MoneyInput";
+import { DecimalInput } from "@/components/forms/DecimalInput";
 import { FormField } from "@/components/forms/fields/FormField";
 import { ConjugeFields } from "@/components/forms/steps/ConjugeFields";
 import {
@@ -69,6 +70,60 @@ export function MoneyField({
           value={Number(field.value) || 0}
           onChange={(v) => field.onChange(v)}
           placeholder={placeholder}
+          id={id}
+          aria-invalid={ariaInvalid}
+          aria-required={ariaRequired}
+          aria-describedby={ariaDescribedBy}
+        />
+      )}
+    />
+  );
+}
+
+/**
+ * Campo decimal não-monetário (percentual, área). Irmão do MoneyField — existe
+ * porque `<input type="number">` recusa a vírgula do teclado brasileiro e o
+ * `valueAsNumber` gravava NaN, apagando o campo em silêncio.
+ */
+export function DecimalField({
+  form,
+  name,
+  suffix,
+  placeholder,
+  min,
+  max,
+  id,
+  "aria-invalid": ariaInvalid,
+  "aria-required": ariaRequired,
+  "aria-describedby": ariaDescribedBy,
+}: {
+  form: UseFormReturn<any>;
+  name: string;
+  suffix?: string;
+  placeholder?: string;
+  min?: number;
+  max?: number;
+  id?: string;
+  "aria-required"?: boolean;
+  "aria-describedby"?: string;
+  "aria-invalid"?: boolean;
+}) {
+  return (
+    <Controller
+      control={form.control}
+      name={name}
+      render={({ field }) => (
+        <DecimalInput
+          value={
+            field.value === null || field.value === undefined || field.value === ""
+              ? undefined
+              : Number(field.value)
+          }
+          onChange={(v) => field.onChange(v)}
+          suffix={suffix}
+          placeholder={placeholder}
+          min={min}
+          max={max}
           id={id}
           aria-invalid={ariaInvalid}
           aria-required={ariaRequired}

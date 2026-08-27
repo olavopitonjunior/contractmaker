@@ -8,12 +8,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/forms/NativeSelect";
+import { MoneyInput } from "@/components/forms/MoneyInput";
 import { UF_LIST } from "@/components/forms/UFSelect";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DEFAULT_CONTRACT_SETTINGS,
+  DEFAULT_LOCACAO_COMISSAO,
   DEFAULT_LOCACAO_SETTINGS,
   type ContractSettings,
+  type LocacaoComissaoDefaults,
   type LocacaoSettings,
 } from "@/lib/contracts/default-config";
 
@@ -37,10 +40,12 @@ import {
 export function ContractDefaultsCard({
   initial,
   initialLocacao,
+  initialComissaoLocacao,
   locacaoEnabled = false,
 }: {
   initial: ContractSettings;
   initialLocacao: LocacaoSettings;
+  initialComissaoLocacao: LocacaoComissaoDefaults;
   locacaoEnabled?: boolean;
 }) {
   if (!locacaoEnabled) return <VendaDefaults initial={initial} />;
@@ -64,7 +69,10 @@ export function ContractDefaultsCard({
             <VendaDefaults initial={initial} embedded />
           </TabsContent>
           <TabsContent value="locacao" className="mt-4">
-            <LocacaoDefaults initial={initialLocacao} />
+            <LocacaoDefaults
+              initial={initialLocacao}
+              initialComissao={initialComissaoLocacao}
+            />
           </TabsContent>
         </Tabs>
       </CardContent>
@@ -333,10 +341,23 @@ function VendaDefaults({
  * Padrão de locação. Vocabulário próprio (ver `locacaoSettingsSchema`): a
  * comarca é texto livre e a multa rescisória é contada em MESES de aluguel.
  */
-function LocacaoDefaults({ initial }: { initial: LocacaoSettings }) {
+function LocacaoDefaults({
+  initial,
+  initialComissao,
+}: {
+  initial: LocacaoSettings;
+  initialComissao: LocacaoComissaoDefaults;
+}) {
   const [values, setValues] = useState<LocacaoSettings>(initial);
+  const [comissao, setComissao] =
+    useState<LocacaoComissaoDefaults>(initialComissao);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+
+  function patchComissao(next: Partial<LocacaoComissaoDefaults>) {
+    setComissao((c) => ({ ...c, ...next }));
+    setDirty(true);
+  }
 
   function patchConfig(next: Partial<LocacaoSettings["config"]>) {
     setValues((v) => ({ ...v, config: { ...v.config, ...next } }));
@@ -359,7 +380,9 @@ function LocacaoDefaults({ initial }: { initial: LocacaoSettings }) {
         headers: { "Content-Type": "application/json" },
         // Só o branch de locação: o PATCH mescla por branch, então o padrão de
         // venda não é tocado.
-        body: JSON.stringify({ contractDefaults: { locacao: values } }),
+        body: JSON.stringify({
+          contractDefaults: { locacao: values, locacao_comissao: comissao },
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -490,6 +513,70 @@ function LocacaoDefaults({ initial }: { initial: LocacaoSettings }) {
         </div>
       </div>
 
+      {/* Comissão de intermediação. Fica aqui e não no formulário do cliente
+          porque é decisão comercial da imobiliária — o operador redigitava o
+          mesmo número a cada formulário novo. Preenchido, vira o valor inicial
+          da etapa Comissão; quem monta o negócio ainda pode mudar caso a caso. */}
+      <div className="space-y-4 rounded-md border border-border p-4">
+        <div>
+          <h4 className="text-sm font-medium">
+            Comissão de intermediação (1º aluguel)
+          </h4>
+          <p className="text-xs text-muted-foreground">
+            Padrão sugerido ao criar um formulário de locação. Zero = sem
+            sugestão (o campo nasce em branco, como antes).
+          </p>
+        </div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-sm text-muted-foreground">Cobrada como</Label>
+            <NativeSelect
+              value={comissao.forma}
+              onChange={(v) =>
+                patchComissao({ forma: v === "valor_fixo" ? "valor_fixo" : "percentual" })
+              }
+              options={[
+                { value: "percentual", label: "% do primeiro aluguel" },
+                { value: "valor_fixo", label: "Valor fixo (R$)" },
+              ]}
+            />
+          </div>
+          {comissao.forma === "valor_fixo" ? (
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-sm text-muted-foreground">
+                Valor fixo (R$)
+              </Label>
+              <MoneyInput
+                value={comissao.taxa_locacao_valor}
+                onChange={(v) => patchComissao({ taxa_locacao_valor: v })}
+                placeholder="Ex: 800,00"
+              />
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-sm text-muted-foreground">
+                Percentual (%)
+              </Label>
+              <Input
+                type="number"
+                step="0.5"
+                min={0}
+                max={100}
+                value={comissao.taxa_locacao_percent}
+                onChange={(e) =>
+                  patchComissao({
+                    taxa_locacao_percent: num(e.target.value, 0),
+                  })
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                100% = um aluguel inteiro, o mais comum no mercado.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="flex items-center gap-2 pt-2">
         <Button onClick={save} disabled={saving || !dirty}>
           {saving ? (
@@ -509,6 +596,7 @@ function LocacaoDefaults({ initial }: { initial: LocacaoSettings }) {
           size="sm"
           onClick={() => {
             setValues(DEFAULT_LOCACAO_SETTINGS);
+            setComissao(DEFAULT_LOCACAO_COMISSAO);
             setDirty(true);
           }}
           disabled={saving}
