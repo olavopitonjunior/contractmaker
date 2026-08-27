@@ -32,6 +32,42 @@ function stripAssignment(ed: unknown): Prisma.InputJsonValue | undefined {
   return rest as Prisma.InputJsonValue;
 }
 
+/** Um valor de campo corrigido à mão nunca precisa ser maior que isto. */
+const MAX_FIELD_LEN = 500;
+
+/**
+ * Correção humana dos campos que o OCR leu errado.
+ *
+ * O que chega aqui é entrada anônima (a rota é pública por token) e o resultado
+ * alimenta `mapExtractedToForm` — então a edição é DELIBERADAMENTE fechada:
+ *
+ *  - só chaves que o OCR já produziu para este anexo (nada de campo novo, nada
+ *    de sobrescrever `assignment`/`category`/`confidence`, que moram no mesmo
+ *    objeto e têm significado próprio);
+ *  - só string, com teto de comprimento;
+ *  - string vazia apaga o campo (é como o usuário descarta uma leitura errada).
+ *
+ * Devolve `null` quando o corpo não é um objeto de strings — o caller responde
+ * 400 em vez de gravar lixo.
+ */
+function sanitizeFieldEdits(
+  atuais: unknown,
+  edits: unknown
+): Record<string, unknown> | null {
+  if (!edits || typeof edits !== "object" || Array.isArray(edits)) return null;
+  if (!atuais || typeof atuais !== "object" || Array.isArray(atuais)) return null;
+  const base = { ...(atuais as Record<string, unknown>) };
+  for (const [k, v] of Object.entries(edits as Record<string, unknown>)) {
+    if (!(k in base)) continue;
+    if (typeof v !== "string") return null;
+    const trimmed = v.trim();
+    if (trimmed.length > MAX_FIELD_LEN) return null;
+    if (trimmed === "") delete base[k];
+    else base[k] = trimmed;
+  }
+  return base;
+}
+
 // ⚠️ Teto REAL aqui é ~4.5MB, não 10: este POST recebe o arquivo pelo CORPO da
 // função (`req.formData()`), e a Vercel corta o corpo de função serverless
 // nesse tamanho — um PDF de 6MB morre com 413 opaco da plataforma antes de
@@ -297,18 +333,26 @@ export async function PATCH(
   }
 
   const body = await req.json().catch(() => ({}));
+  const querFields = body?.fields !== undefined;
+  const querAssignment = body?.assignment !== undefined;
+  if (!querFields && !querAssignment) {
+    return NextResponse.json(
+      { error: "informe assignment e/ou fields" },
+      { status: 400 }
+    );
+  }
   // Sanitiza o assignment: kind ∈ conjunto conhecido, index inteiro [0,MAX].
   // Descarta qualquer prop extra injetada. O assignment é auto-aplicado no lado
   // do admin (Fix 3), então precisa ser tratado como entrada não-confiável.
-  const assignment = parseAssignment(body?.assignment);
-  if (!assignment) {
+  const assignment = querAssignment ? parseAssignment(body.assignment) : null;
+  if (querAssignment && !assignment) {
     return NextResponse.json({ error: "assignment inválido" }, { status: 400 });
   }
   // Subtoken só pode atribuir dentro do próprio papel — senão a parte forjaria
   // um slot de outra parte (`{kind:"vendedor"}` num link de comprador) que o
   // auto-apply gravaria em dados alheios sem revisão. `filterAssignmentOptions`
   // no cliente é só UX; esta é a invariante de verdade.
-  if (scope.participantId && scope.role) {
+  if (assignment && scope.participantId && scope.role) {
     // Escopo EFETIVO (config de visibilidade da org, não os defaults): uma
     // org que tirou uma etapa do link não pode seguir aceitando assignment
     // naquela seção só porque o default de código a incluía.
@@ -329,7 +373,15 @@ export async function PATCH(
   }
 
   const current = (attachment.extractedData as Record<string, unknown>) || {};
-  const next = { ...current, assignment };
+  const next: Record<string, unknown> = { ...current };
+  if (assignment) next.assignment = assignment;
+  if (querFields) {
+    const corrigidos = sanitizeFieldEdits(current.fields, body.fields);
+    if (!corrigidos) {
+      return NextResponse.json({ error: "fields inválido" }, { status: 400 });
+    }
+    next.fields = corrigidos;
+  }
 
   const updated = await prisma.formAttachment.update({
     where: { id },

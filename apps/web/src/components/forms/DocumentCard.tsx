@@ -79,6 +79,8 @@ interface DocumentCardProps {
    * de todo card seria trabalho jogado fora.
    */
   getWritePreview?: (id: string) => WritePreviewEntry[] | null;
+  /** Grava correções manuais nos campos extraídos (abre a edição no dialog). */
+  onFieldsEdit?: (id: string, fields: Record<string, string>) => Promise<void> | void;
 }
 
 function statusLabel(status: DocumentCardStatus): string {
@@ -103,6 +105,9 @@ function formatValue(v: unknown): string {
   return String(v);
 }
 
+/** Campos mostrados no card antes do "+N campos". O resto vem no dialog. */
+const CAMPOS_VISIVEIS = 6;
+
 function encodeAssignment(a: Assignment): string {
   return `${a.kind}:${a.index}`;
 }
@@ -119,12 +124,14 @@ export function DocumentCard({
   readOnly = false,
   busy = false,
   getWritePreview,
+  onFieldsEdit,
 }: DocumentCardProps) {
   const isImage = doc.mime.startsWith("image/");
   const fieldEntries = doc.fields
     ? Object.entries(doc.fields).filter(([, v]) => v !== null && v !== "")
     : [];
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [camposExpandidos, setCamposExpandidos] = useState(false);
   const [writePreview, setWritePreview] = useState<WritePreviewEntry[] | null>(null);
   /** Calcula o preview UMA vez, no clique, e abre. */
   const abrirDialog = () => {
@@ -311,7 +318,10 @@ export function DocumentCard({
 
         {fieldEntries.length > 0 && (
           <div className="grid grid-cols-1 gap-x-3 gap-y-0.5 sm:grid-cols-2">
-            {fieldEntries.slice(0, 6).map(([k, v]) => (
+            {(camposExpandidos
+              ? fieldEntries
+              : fieldEntries.slice(0, CAMPOS_VISIVEIS)
+            ).map(([k, v]) => (
               <div key={k} className="flex gap-1 truncate text-[11px]">
                 <span className="text-muted-foreground">{ocrFieldLabel(k)}:</span>
                 <span className="truncate text-foreground" title={formatValue(v)}>
@@ -319,6 +329,20 @@ export function DocumentCard({
                 </span>
               </div>
             ))}
+            {/* O corte fixo em 6 escondia o resto SEM dizer que existia — numa
+                matrícula com ~20 campos o revisor concluía que o OCR não tinha
+                lido justamente o que ele procurava. */}
+            {fieldEntries.length > CAMPOS_VISIVEIS && (
+              <button
+                type="button"
+                onClick={() => setCamposExpandidos((v) => !v)}
+                className="justify-self-start text-left text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              >
+                {camposExpandidos
+                  ? "Ver menos"
+                  : `+ ${fieldEntries.length - CAMPOS_VISIVEIS} campo(s)`}
+              </button>
+            )}
           </div>
         )}
 
@@ -335,10 +359,14 @@ export function DocumentCard({
           </button>
         )}
 
-        {!readOnly && doc.status === "ready" && onAssignmentChange && (
+        {/* O destino aparece desde o upload, não só quando a extração termina.
+            Antes o dropdown só existia em `ready`: quem subia o documento não
+            via onde ele iria parar, e a atribuição "só aparecia depois de
+            clicar fora e aplicar" (relato da corretora, 2026-08-25). */}
+        {!readOnly && doc.status !== "uploading" && onAssignmentChange && (
           <div className="mt-1 flex items-center gap-1.5">
             <span className="shrink-0 text-[11px] text-muted-foreground">
-              Mover para:
+              Atribuir a:
             </span>
             <NativeSelect
               value={encodeAssignment(doc.assignment)}
@@ -365,6 +393,32 @@ export function DocumentCard({
               >
                 <Eye className="h-3 w-3 mr-1" />
                 Ver dados
+              </Button>
+            )}
+            {/* Reanálise de um documento JÁ pronto. A rota `/retry` sempre
+                aceitou qualquer status — só a UI não oferecia o botão, e um
+                documento cujo OCR saiu errado só tinha saída removendo e
+                subindo de novo. */}
+            {!readOnly && onRetry && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  if (
+                    fieldEntries.length > 0 &&
+                    !window.confirm(
+                      "Reanalisar substitui os dados já extraídos deste documento. Continuar?"
+                    )
+                  ) {
+                    return;
+                  }
+                  onRetry(doc.id);
+                }}
+              >
+                <Sparkles className="h-3 w-3 mr-1" />
+                Reanalisar
               </Button>
             )}
             <Button
@@ -457,6 +511,11 @@ export function DocumentCard({
           fields={doc.fields}
           confidence={doc.confidence}
           writePreview={writePreview}
+          onSaveFields={
+            !readOnly && onFieldsEdit
+              ? (campos) => onFieldsEdit(doc.id, campos)
+              : undefined
+          }
         />
       )}
     </div>

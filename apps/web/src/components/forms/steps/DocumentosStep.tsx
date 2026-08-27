@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { UseFormReturn } from "react-hook-form";
+import { useWatch, type UseFormReturn } from "react-hook-form";
 import { Upload, Sparkles } from "lucide-react";
 import { upload } from "@vercel/blob/client";
 import { toast } from "sonner";
@@ -194,6 +194,76 @@ export function DocumentosStep({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [adapter, allowedKey]
   );
+
+  // Assinatura de IDENTIDADE das partes (nome + CPF/CNPJ de cada slot e dos
+  // sub-slots). Só ela — assinar o form inteiro repintaria a lista de cards a
+  // cada tecla digitada em qualquer etapa.
+  const partyValues = useWatch({
+    control: form.control,
+    name: adapter.partyListKeys as unknown as string[],
+  });
+  const identitySignature = useMemo(() => {
+    const partes: string[] = [];
+    const coletar = (v: unknown) => {
+      if (Array.isArray(v)) {
+        v.forEach(coletar);
+        return;
+      }
+      if (!v || typeof v !== "object") return;
+      const o = v as Record<string, unknown>;
+      const id = [o.nome, o.razao_social, o.cpf, o.cnpj]
+        .filter((x) => typeof x === "string" && x)
+        .join("|");
+      if (id) partes.push(id);
+      coletar(o.conjuge);
+      coletar(o.representante);
+      coletar(o.procurador);
+      coletar(o.fiador);
+    };
+    coletar(partyValues);
+    return partes.join("::");
+  }, [partyValues]);
+
+  // Re-sugere o destino dos documentos ainda em "outro" sempre que a identidade
+  // das partes muda. Sem isto, quem sobe os documentos ANTES de digitar os
+  // nomes fica com todos em "outro" — e o gate H.5 trava o "Aplicar aos campos"
+  // do formulário inteiro. Nunca toca em documento já atribuído: só promove
+  // "outro", nunca rebaixa nem move uma escolha que já foi feita.
+  useEffect(() => {
+    if (!hydrated || !identitySignature) return;
+    setDocs((prev) => {
+      const emOutro = prev.filter(
+        (d) =>
+          d.status === "ready" &&
+          d.fields &&
+          d.category &&
+          d.assignment.kind === "outro"
+      );
+      if (emOutro.length === 0) return prev;
+      const snapshot = form.getValues();
+      const siblings: ProcessedDocHint[] = prev
+        .filter((d) => d.status === "ready" && d.fields)
+        .map((d) => ({
+          category: d.category,
+          fields: d.fields,
+          assignment: d.assignment,
+        }));
+      let mudou = false;
+      const next = prev.map((d) => {
+        if (!emOutro.includes(d)) return d;
+        const sugerido = scopedSuggest(
+          d.category,
+          d.fields as Record<string, unknown>,
+          snapshot,
+          siblings
+        );
+        if (sugerido.kind === "outro") return d;
+        mudou = true;
+        return { ...d, assignment: sugerido };
+      });
+      return mudou ? next : prev;
+    });
+  }, [identitySignature, hydrated, form, scopedSuggest]);
 
   // Restore previously uploaded attachments. Documents without extractedData
   // are marked as "failed" (instead of the misleading "uploading") so the user
@@ -995,6 +1065,44 @@ export function DocumentosStep({
     [docs, runExtract]
   );
 
+  /**
+   * Correção manual dos campos que o OCR leu errado (dialog "Ver dados" ->
+   * "Corrigir"). Grava local e persiste; o servidor só aceita chaves que já
+   * existem no anexo, e string vazia como remoção.
+   *
+   * Reabre o documento para aplicação: o valor mudou, então o que já foi
+   * escrito no formulário está desatualizado.
+   */
+  const handleFieldsEdit = useCallback(
+    async (id: string, edits: Record<string, string>) => {
+      const alvo = docs.find((d) => d.id === id);
+      if (!alvo?.fields) return;
+      const merged: Record<string, unknown> = { ...alvo.fields };
+      for (const [k, v] of Object.entries(edits)) {
+        const t = v.trim();
+        if (t === "") delete merged[k];
+        else merged[k] = t;
+      }
+      updateDoc(id, { fields: merged, applied: false });
+      autoAppliedRef.current.delete(id);
+      if (id.startsWith("tmp-")) return;
+      try {
+        const res = await fetch(`/api/forms/${token}/attachments?id=${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fields: edits }),
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        toast.success("Correções salvas");
+      } catch {
+        toast.error(
+          "Não foi possível salvar as correções — elas valem só nesta aba."
+        );
+      }
+    },
+    [docs, token, updateDoc]
+  );
+
   const handleApply = useCallback(async () => {
     const readyDocs = docs.filter(
       (d) => d.status === "ready" && d.fields && d.assignment.kind !== "outro"
@@ -1034,6 +1142,45 @@ export function DocumentosStep({
     allowedTopKeys,
     adapter.topKeyForKind
   );
+  // Agrupamento por DESTINO. A lista era um grid plano: com 8-10 documentos de
+  // 4 partes diferentes, achar "os documentos do locatario 2" virava leitura
+  // card a card. A aba Documentos do negócio já agrupa assim; aqui o rótulo sai
+  // do próprio dropdown, então a pasta e a opção nunca divergem.
+  const optionLabels = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const g of assignmentOptions) {
+      for (const o of g.options) m.set(o.value, o.label);
+    }
+    return m;
+  }, [assignmentOptions]);
+
+  const docGroups = useMemo(() => {
+    const ordem: string[] = [];
+    const buckets = new Map<string, DocumentCardData[]>();
+    for (const d of docs) {
+      const chave = `${d.assignment.kind}:${d.assignment.index}`;
+      if (!buckets.has(chave)) {
+        buckets.set(chave, []);
+        ordem.push(chave);
+      }
+      buckets.get(chave)!.push(d);
+    }
+    // "Outros" por último: é a fila do que ainda precisa de decisão, e encolhe
+    // conforme o usuário (ou o re-suggest) atribui.
+    ordem.sort((a, b) => {
+      const aOutro = a.startsWith("outro:") ? 1 : 0;
+      const bOutro = b.startsWith("outro:") ? 1 : 0;
+      return aOutro - bOutro;
+    });
+    return ordem.map((chave) => ({
+      chave,
+      label:
+        optionLabels.get(chave) ??
+        (chave.startsWith("outro:") ? "Sem destino definido" : chave),
+      docs: buckets.get(chave)!,
+    }));
+  }, [docs, optionLabels]);
+
   const readyCount = docs.filter((d) => d.status === "ready").length;
   // Only block "Aplicar aos campos" while files are still UPLOADING. Extractions
   // can take up to 60s per file (Gemini) and one failed extraction should not
@@ -1159,8 +1306,23 @@ export function DocumentosStep({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            {docs.map((doc) => (
+          <div className="space-y-4">
+            {docGroups.map((grupo) => (
+              <div key={grupo.chave} className="space-y-2">
+                {/* Pasta única (tudo no mesmo destino) dispensa cabeçalho. */}
+                {docGroups.length > 1 && (
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {grupo.label}
+                    </h4>
+                    <span className="text-[11px] text-muted-foreground">
+                      ({grupo.docs.length})
+                    </span>
+                    <div className="h-px flex-1 bg-border" />
+                  </div>
+                )}
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  {grupo.docs.map((doc) => (
               <DocumentCard
                 key={doc.id}
                 doc={doc}
@@ -1176,8 +1338,12 @@ export function DocumentosStep({
                 }
                 onRetry={handleRetry}
                 onExtract={handleRetry}
+                onFieldsEdit={handleFieldsEdit}
                 getWritePreview={getWritePreview}
               />
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         </div>

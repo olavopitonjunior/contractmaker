@@ -195,6 +195,8 @@ export const locacaoDocAdapter: DocumentosStepAdapter = {
     return null;
   },
   kindLabel: (kind) => KIND_LABELS[kind] ?? kind,
+  // `garantia` entra porque o fiador (e o cônjuge dele) se qualificam lá dentro.
+  partyListKeys: ["locadores", "locatarios", "garantia"],
   topKeyForKind(kind) {
     switch (kind) {
       case "locador":
