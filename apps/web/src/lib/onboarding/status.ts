@@ -40,7 +40,7 @@ const MODALIDADES_BY_MODULE: Record<ModuleKey, string[]> = {
 };
 
 export async function getOnboardingStatus(orgId: string): Promise<OnboardingStatus> {
-  const [org, googleAccount, clicksignAccount, modules] = await Promise.all([
+  const [org, googleAccount, clicksignAccount, branding, modules] = await Promise.all([
     prisma.organization.findUnique({
       where: { id: orgId },
       select: { creci: true, legalName: true, onboardingCompletedAt: true },
@@ -52,6 +52,10 @@ export async function getOnboardingStatus(orgId: string): Promise<OnboardingStat
     prisma.clickSignAccount.findUnique({
       where: { orgId },
       select: { status: true },
+    }),
+    prisma.brandingSettings.findUnique({
+      where: { orgId },
+      select: { logoUrl: true },
     }),
     getOrgModules(orgId),
   ]);
@@ -118,6 +122,17 @@ export async function getOnboardingStatus(orgId: string): Promise<OnboardingStat
     ? `${missingProfile.join(" + ")} em falta`
     : undefined;
 
+  // --- branding (passo OPCIONAL — não bloqueia os 100%) ---
+  //
+  // A linha de BrandingSettings costuma EXISTIR com `logoUrl` vazio (é criada
+  // pelo resolver de branding), então "tem linha" não diz nada — o fato é o
+  // arquivo. Opcional porque uma imobiliária pode legitimamente não ter logo, e
+  // passo obrigatório que trava o onboarding num item estético é pior que a
+  // ausência dele. Mas fica VISÍVEL e pendente, que é o ponto: em agosto de
+  // 2026, 5 de 5 orgs em produção estavam sem logo — o buraco era ninguém ser
+  // levado até a tela, não o cliente ter decidido não ter marca.
+  const brandingDone = Boolean(branding?.logoUrl?.trim());
+
   // --- templates ---
   const templatesDone = activeTemplates > 0;
 
@@ -169,6 +184,7 @@ export async function getOnboardingStatus(orgId: string): Promise<OnboardingStat
   const doneByKey: Record<OnboardingStepKey, boolean> = {
     google: googleDone,
     profile: profileDone,
+    branding: brandingDone,
     templates: templatesDone,
     clicksign: clicksignDone,
     form: formDone,
@@ -178,6 +194,7 @@ export async function getOnboardingStatus(orgId: string): Promise<OnboardingStat
   };
   const detailByKey: Partial<Record<OnboardingStepKey, string>> = {
     profile: profileDetail,
+    branding: !brandingDone ? "documentos saem só com o nome em texto" : undefined,
     templates: !templatesDone ? "nenhum modelo ativo ainda" : undefined,
     clicksign: !clicksignDone
       ? "necessário para enviar assinaturas"
@@ -188,11 +205,14 @@ export async function getOnboardingStatus(orgId: string): Promise<OnboardingStat
   // clicksign e max sao OPCIONAIS (nao bloqueiam os 100%). Os demais sao
   // obrigatorios.
   //
+  // O `branding` e opcional porque uma imobiliaria pode legitimamente nao ter
+  // logo — mas aparece pendente ate subir, que e o que faltava.
+  //
   // O `max` e opcional por dois motivos: o canal e compartilhado e nem toda org
   // o tem disponivel, e metade do passo depende de opt-in PESSOAL de outra
   // pessoa (LGPD — o dono nao liga WhatsApp por ninguem). Passo obrigatorio que
   // o dono nao consegue fechar sozinho e onboarding que nunca termina.
-  const OPTIONAL_STEPS: OnboardingStepKey[] = ["clicksign", "max"];
+  const OPTIONAL_STEPS: OnboardingStepKey[] = ["clicksign", "branding", "max"];
 
   // Org sem o canal disponivel nao ve o passo — nao adianta oferecer o que o
   // super_admin ainda nao liberou.
