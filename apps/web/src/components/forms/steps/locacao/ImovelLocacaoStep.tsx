@@ -10,6 +10,9 @@ import { NativeSelect } from "@/components/forms/NativeSelect";
 import { maskCEP } from "@/lib/forms/field-formats";
 import { FormField } from "@/components/forms/fields/FormField";
 import { DecimalField } from "./_PartyFields";
+import { MatriculaSituacaoField } from "@/components/forms/MatriculaSituacaoField";
+import { useFormAttachments } from "@/components/forms/use-form-attachments";
+import { mapExtractedToLocacaoForm } from "@/lib/forms/extracted-to-form-locacao";
 
 const KIND_OPTIONS = [
   { value: "apartamento", label: "Apartamento" },
@@ -28,10 +31,19 @@ const KIND_OPTIONS = [
 export function ImovelLocacaoStep({
   form,
   comercial = false,
+  attachmentsEndpoint,
 }: {
   form: UseFormReturn<any>;
   comercial?: boolean;
+  /**
+   * `GET` dos FormAttachments do formulário. Ausente (subtoken) esconde o
+   * seletor e orienta a anexar pelo link principal — mesmo contrato do
+   * `ImovelStep` de venda.
+   */
+  attachmentsEndpoint?: string;
 }) {
+  const { attachments, loadAttachments } = useFormAttachments(attachmentsEndpoint);
+
   return (
     <Card className="border border-border">
       <CardHeader className="pb-3">
@@ -94,6 +106,27 @@ export function ImovelLocacaoStep({
 
         <Separator />
         <p className="text-sm font-semibold text-foreground">Registro (opcional)</p>
+
+        {/* Escolher/anexar a matrícula AQUI e extrair número, cartório e
+            descrição na própria etapa. Venda já tinha; locação obrigava a
+            voltar à etapa 0 pra anexar e depois voltar pra conferir. */}
+        <MatriculaSituacaoField
+          form={form}
+          index={0}
+          basePath="imovel"
+          attachments={attachments}
+          attachmentsEndpoint={attachmentsEndpoint}
+          onRequestAttachments={loadAttachments}
+          applyExtraction={(extraction, f) =>
+            mapExtractedToLocacaoForm(
+              extraction,
+              { kind: "imovel", index: 0 },
+              f,
+              { skipIfDirty: true }
+            )
+          }
+        />
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormField form={form} name="imovel.matricula" label="Matrícula">
             <Input {...form.register("imovel.matricula")} placeholder="nº da matrícula" />
@@ -124,7 +157,12 @@ export function ImovelLocacaoStep({
           </FormField>
         </div>
 
-        <FormField form={form} name="imovel.descricao" label="Descrição do imóvel" required>
+        <FormField
+          form={form}
+          name="imovel.descricao"
+          label="Descrição do imóvel (opcional)"
+          hint="Só o que identifica o imóvel. Condições da negociação vão nas Observações Gerais."
+        >
           <Textarea
             {...form.register("imovel.descricao")}
             rows={3}

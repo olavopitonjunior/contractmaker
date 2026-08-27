@@ -1,6 +1,5 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
 import { useFieldArray, UseFormReturn } from "react-hook-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,6 +12,7 @@ import {
   type MatriculaAttachmentOption,
 } from "@/components/forms/MatriculaSituacaoField";
 import { maskCEP } from "@/lib/forms/field-formats";
+import { useFormAttachments } from "@/components/forms/use-form-attachments";
 
 interface ImovelStepProps {
   form: UseFormReturn<any>;
@@ -30,64 +30,9 @@ export function ImovelStep({ form, attachmentsEndpoint }: ImovelStepProps) {
     name: "imoveis",
   });
 
-  // Lista compartilhada por TODOS os imóveis: os anexos são do formulário, não
-  // do imóvel. `null` = ainda não carregada (o bloco mostra "Carregando…").
-  const [attachments, setAttachments] = useState<
-    MatriculaAttachmentOption[] | null
-  >(null);
-  // Dedup de chamadas concorrentes: montagem e a escolha de "possui" disparam
-  // quase juntos, e N imóveis pediriam o mesmo GET N vezes. Quem chega durante
-  // um fetch em andamento espera o MESMO resultado em vez de abrir outro.
-  const inflightRef = useRef<Promise<MatriculaAttachmentOption[] | null> | null>(
-    null
-  );
-  // Ordem de chegada não é ordem de saída. Sem este contador, um GET antigo de
-  // outro imóvel podia responder DEPOIS do GET forçado logo após um upload e
-  // sobrescrever a lista com dados anteriores ao anexo — o bloco então acusaria
-  // "anexo removido" para um arquivo que acabou de subir.
-  const seqRef = useRef(0);
-
-  const loadAttachments = useCallback(
-    async (force = false): Promise<MatriculaAttachmentOption[] | null> => {
-      if (!attachmentsEndpoint) return null;
-      // `force` existe para o polling do upload: reaproveitar um GET que saiu
-      // ANTES do anexo ser criado devolveria a lista velha e o polling nunca
-      // encontraria o próprio arquivo.
-      if (!force && inflightRef.current) return inflightRef.current;
-
-      const seq = ++seqRef.current;
-      const run = (async () => {
-        try {
-          const res = await fetch(attachmentsEndpoint);
-          if (!res.ok) return null;
-          const data = await res.json();
-          const list: MatriculaAttachmentOption[] = Array.isArray(data?.attachments)
-            ? data.attachments
-            : [];
-          // Resposta atrasada ainda serve a quem a pediu (o retorno), mas não
-          // pode virar o estado compartilhado por cima de uma mais nova.
-          if (seq === seqRef.current) setAttachments(list);
-          return list;
-        } catch {
-          // Falha de rede não pode derrubar a etapa — o operador ainda consegue
-          // digitar matrícula e cartório à mão.
-          return null;
-        }
-      })();
-
-      inflightRef.current = run;
-      try {
-        return await run;
-      } finally {
-        if (inflightRef.current === run) inflightRef.current = null;
-      }
-    },
-    [attachmentsEndpoint]
-  );
-
-  useEffect(() => {
-    void loadAttachments();
-  }, [loadAttachments]);
+  // Anexos do formulário (a matrícula é escolhida entre eles). O hook carrega a
+  // dedup/`force`/sequência que este bloco precisa — ver use-form-attachments.
+  const { attachments, loadAttachments } = useFormAttachments(attachmentsEndpoint);
 
   const addImovel = () => {
     append({

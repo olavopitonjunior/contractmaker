@@ -846,9 +846,13 @@ export function SalesFormWizard({
     <ImovelStep
       key="step-3"
       form={form}
-      attachmentsEndpoint={
-        finalizeMode === "main" ? `${autoSaveEndpoint}/attachments` : undefined
-      }
+      // Também no link por parte: as rotas de anexo resolvem subtoken via
+      // `resolveFormScope` (e o GET já filtra pros anexos DAQUELA parte). Antes
+      // o vendedor recebia o próprio link, via a etapa do imóvel e não tinha
+      // como anexar a matrícula ali — tinha que pedir o link principal.
+      // `autoSaveEndpoint` do subtoken é /api/forms/participant/<sub>, que não
+      // tem /attachments; o caminho certo é o token-scoped.
+      attachmentsEndpoint={`/api/forms/${token}/attachments`}
     />,
     <StatusDebitosStep key="step-4" form={form} />,
     <PagamentoStep key="step-5" form={form} readOnly={readOnly} />,

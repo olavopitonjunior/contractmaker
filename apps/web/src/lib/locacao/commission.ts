@@ -55,6 +55,34 @@ export function taxaLocacaoValor(
   return round2((aluguel * percent) / 100);
 }
 
+export interface ComissaoCalcInput {
+  forma_taxa_locacao?: unknown;
+  taxa_locacao_percent?: unknown;
+  taxa_locacao_valor?: unknown;
+}
+
+/** Forma da taxa de locação normalizada — default `percentual` (igual ao Zod). */
+export function formaTaxaLocacao(
+  c: ComissaoCalcInput | null | undefined
+): FormaComissaoAngariador {
+  return c?.forma_taxa_locacao === "valor_fixo" ? "valor_fixo" : "percentual";
+}
+
+/**
+ * Corretagem efetiva em R$, seja qual for a forma escolhida. Em `valor_fixo` o
+ * aluguel é irrelevante — é o que permite mostrar o valor da comissão antes de
+ * o cliente preencher o formulário.
+ */
+export function taxaLocacaoEfetiva(
+  valorAluguel: unknown,
+  comissao: ComissaoCalcInput | null | undefined
+): number {
+  if (formaTaxaLocacao(comissao) === "valor_fixo") {
+    return round2(positiveNumber(comissao?.taxa_locacao_valor));
+  }
+  return taxaLocacaoValor(valorAluguel, comissao?.taxa_locacao_percent);
+}
+
 /**
  * Quanto o angariador recebe POR MÊS. `percentual` incide sobre o aluguel;
  * `valor_fixo` é o valor cru. 0 quando não dá pra calcular.

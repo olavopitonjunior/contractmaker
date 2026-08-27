@@ -96,7 +96,9 @@ const PARTY_STEP: Record<number, { list: "locadores" | "locatarios"; label: stri
 // zodResolver). A validação completa roda no servidor no finalize
 // (schemaForLocacaoType) e retorna validationIssues.
 const STEP_REQUIRED: Record<number, string[]> = {
-  3: ["imovel.descricao"],
+  // A etapa do imóvel não trava mais na descrição (ver imovelLocacaoSchema): o
+  // endereço já identifica o imóvel, e a obrigatoriedade real vem do preset da
+  // org quando ela quiser.
   4: ["aluguel.valor"],
 };
 
@@ -450,12 +452,18 @@ export function LocacaoFormWizard({
     );
   }
 
+  // As rotas `api/forms/[token]/attachments/*` resolvem `SalesForm.token` — o
+  // MESMO token do formulário de locação (a rota de commissioners já é reusada
+  // assim). Aceitam subtoken via `resolveFormScope`, então a parte que recebe o
+  // próprio link também consegue anexar a matrícula na etapa do imóvel.
+  const attachmentsEndpoint = `/api/forms/${token}/attachments`;
+
   const steps = comercial
     ? [
         <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} allowedTopKeys={pathScope} selfAssignment={selfAssignment} viewerIsMember={viewerIsMember} />,
         <LocacaoParteStep key="s1" form={form} listKey="locadores" singular="Locador" />,
         <LocacaoParteStep key="s2" form={form} listKey="locatarios" singular="Locatário" />,
-        <ImovelLocacaoStep key="s3" form={form} comercial />,
+        <ImovelLocacaoStep key="s3" form={form} comercial attachmentsEndpoint={attachmentsEndpoint} />,
         <AluguelStep key="s4" form={form} />,
         <GarantiaStep key="s5" form={form} garantiaOptions={garantiaOptions} pathScope={pathScope} />,
         <ComissaoLocacaoStep key="s6" form={form} token={token} viewerIsMember={viewerIsMember} />,
@@ -464,7 +472,7 @@ export function LocacaoFormWizard({
         <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} allowedTopKeys={pathScope} selfAssignment={selfAssignment} viewerIsMember={viewerIsMember} />,
         <LocacaoParteStep key="s1" form={form} listKey="locadores" singular="Locador" />,
         <LocacaoParteStep key="s2" form={form} listKey="locatarios" singular="Locatário" />,
-        <ImovelLocacaoStep key="s3" form={form} />,
+        <ImovelLocacaoStep key="s3" form={form} attachmentsEndpoint={attachmentsEndpoint} />,
         <AluguelStep key="s4" form={form} />,
         <GarantiaStep key="s5" form={form} garantiaOptions={garantiaOptions} pathScope={pathScope} />,
         <ComissaoLocacaoStep key="s6" form={form} token={token} viewerIsMember={viewerIsMember} />,
