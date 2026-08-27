@@ -69,6 +69,8 @@ export interface CoverageRow {
   /** Template que satisfaz a linha (quando `state !== "missing"`). */
   templateId?: string;
   templateName?: string;
+  /** Engine do representante — o preview por linha precisa saber a fonte. */
+  templateEngine?: string;
   /**
    * Existe um template ativo `isDefault` nesta modalidade? Distingue "tem
    * modelos mas ninguém é o padrão" de "atribuído": a geração usa o padrão
@@ -156,6 +158,7 @@ export function computeTemplateCoverage(input: {
       state,
       templateId: chosen?.id,
       templateName: chosen?.name,
+      templateEngine: chosen?.engine,
       defaultAssigned: matches.some((t) => t.isDefault === true),
     };
   });
@@ -201,6 +204,8 @@ export interface GarantiaCoverageCell {
   state: GarantiaCoverageState;
   templateId?: string;
   templateName?: string;
+  /** Engine do template da célula — o preview por linha precisa da fonte. */
+  templateEngine?: string;
 }
 
 export interface GarantiaCoverageRow {
@@ -282,6 +287,7 @@ export function computeGarantiaCoverage(input: {
           state: chosen ? stateOf(chosen.status)! : "missing",
           templateId: chosen?.id,
           templateName: chosen?.name,
+          templateEngine: chosen?.engine,
         };
       });
 
@@ -374,4 +380,114 @@ export function computeGarantiaBoard(input: {
         fallbackName: fallback?.name ?? null,
       };
     });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Repositório de Modelos — seções por família e "atribuído"
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Seções do repositório (aba Modelos), na linguagem do dono. As propostas
+ * moram DENTRO da família (decisão do Olavo, 28/08): a Proposta de Compra é
+ * assunto de Vendas, a residencial é assunto de Locação residencial.
+ */
+export const TEMPLATE_SECTIONS = [
+  { key: "vendas", label: "Vendas" },
+  { key: "locacao_residencial", label: "Locação residencial" },
+  { key: "locacao_comercial", label: "Locação comercial" },
+  { key: "administracao", label: "Administração de locação" },
+  { key: "outros", label: "Outros" },
+] as const;
+export type TemplateSectionKey = (typeof TEMPLATE_SECTIONS)[number]["key"];
+
+const SECTION_BY_MODALIDADE: Record<string, TemplateSectionKey> = {
+  a_vista: "vendas",
+  financiamento: "vendas",
+  proposta_venda: "vendas",
+  locacao: "locacao_residencial",
+  proposta_locacao_residencial: "locacao_residencial",
+  locacao_comercial: "locacao_comercial",
+  proposta_locacao_comercial: "locacao_comercial",
+  administracao_locacao: "administracao",
+};
+
+/** Família de exibição de um template no repositório. Desconhecido → Outros. */
+export function sectionForModalidade(
+  modalidade: string | null | undefined
+): TemplateSectionKey {
+  return SECTION_BY_MODALIDADE[modalidade ?? ""] ?? "outros";
+}
+
+/**
+ * O conjunto de templates ATRIBUÍDOS como padrão do sistema — exatamente o que
+ * a aba Tipos exibe como `padrão`/`atribuído`. É a fonte única do contorno
+ * verde do repositório: verde lá ≡ linha atribuída aqui.
+ *
+ *  - Linhas de modalidade: entra o representante quando a linha tem padrão
+ *    (`defaultAssigned`) e não está faltante — é o modelo que a linha nomeia.
+ *  - Células de garantia: entra o template ATIVO da célula (o vinculante pela
+ *    escolha do formulário). Rascunho ("em revisão") não entra — a geração não
+ *    o enxerga, e verde prometeria o que não acontece.
+ */
+export function assignedTemplateIds(
+  coverage: CoverageReport,
+  board: GarantiaBoardRow[]
+): Set<string> {
+  const ids = new Set<string>();
+  for (const row of coverage.rows) {
+    if (row.state !== "missing" && row.defaultAssigned && row.templateId) {
+      ids.add(row.templateId);
+    }
+  }
+  for (const b of board) {
+    for (const cell of b.cells) {
+      if (cell.state === "active" && cell.templateId) ids.add(cell.templateId);
+    }
+  }
+  return ids;
+}
+
+/** Pendência de uma família mostrada no cabeçalho da seção do repositório. */
+export interface SectionGap {
+  /** Rótulo humano do que falta ("Caução", "Locação comercial"…). */
+  label: string;
+  /**
+   * Falta dura (vermelha): nenhum modelo ativo gera esse tipo. A falta de
+   * célula com fallback continua âmbar.
+   */
+  hard: boolean;
+}
+
+/**
+ * O QUE FALTA por seção do repositório — mesma régua da aba Tipos: linhas de
+ * modalidade faltantes + células de garantia sem template próprio (âmbar
+ * quando a modalidade tem fallback ativo, vermelha quando não tem nada).
+ */
+export function gapsBySection(
+  coverage: CoverageReport,
+  board: GarantiaBoardRow[]
+): Partial<Record<TemplateSectionKey, SectionGap[]>> {
+  const out: Partial<Record<TemplateSectionKey, SectionGap[]>> = {};
+  const push = (section: TemplateSectionKey, gap: SectionGap) => {
+    (out[section] ??= []).push(gap);
+  };
+  const boardModalidades = new Set(board.map((b) => b.modalidade));
+  for (const row of coverage.rows) {
+    // Modalidade decomposta em células: a falta é contada por garantia abaixo,
+    // não pela linha inteira.
+    if (boardModalidades.has(row.modalidade)) continue;
+    if (row.state === "missing") {
+      push(sectionForModalidade(row.modalidade), { label: row.label, hard: true });
+    }
+  }
+  for (const b of board) {
+    for (const cell of b.cells) {
+      if (cell.state !== "missing") continue;
+      push(sectionForModalidade(b.modalidade), {
+        label: cell.label,
+        hard: b.fallbackName == null,
+      });
+    }
+  }
+  return out;
 }

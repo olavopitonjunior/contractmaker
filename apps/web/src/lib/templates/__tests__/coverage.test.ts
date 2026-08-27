@@ -1,10 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
+  assignedTemplateIds,
   computeGarantiaBoard,
   computeGarantiaCoverage,
   computeTemplateCoverage,
+  gapsBySection,
   isOwnTemplate,
   REQUIRED_KIT_MODALIDADES,
+  sectionForModalidade,
   type CoverageTemplateLite,
 } from "../coverage";
 
@@ -431,5 +434,122 @@ describe("computeGarantiaBoard", () => {
     const row = board.find((b) => b.modalidade === "locacao")!;
     expect(row.fallbackName).toBeNull();
     expect(row.defaultGarantia).toBeNull();
+  });
+});
+
+describe("sectionForModalidade — seções do repositório", () => {
+  it("propostas moram DENTRO da família", () => {
+    expect(sectionForModalidade("a_vista")).toBe("vendas");
+    expect(sectionForModalidade("financiamento")).toBe("vendas");
+    expect(sectionForModalidade("proposta_venda")).toBe("vendas");
+    expect(sectionForModalidade("locacao")).toBe("locacao_residencial");
+    expect(sectionForModalidade("proposta_locacao_residencial")).toBe(
+      "locacao_residencial"
+    );
+    expect(sectionForModalidade("locacao_comercial")).toBe("locacao_comercial");
+    expect(sectionForModalidade("proposta_locacao_comercial")).toBe(
+      "locacao_comercial"
+    );
+    expect(sectionForModalidade("administracao_locacao")).toBe("administracao");
+  });
+
+  it("temporada e modalidade nula caem em Outros", () => {
+    expect(sectionForModalidade("temporada")).toBe("outros");
+    expect(sectionForModalidade(null)).toBe("outros");
+    expect(sectionForModalidade(undefined)).toBe("outros");
+  });
+});
+
+describe("assignedTemplateIds — fonte única do verde do repositório", () => {
+  const input = (templates: CoverageTemplateLite[]) => ({
+    modules: ["vendas", "locacao"] as const,
+    templates,
+  });
+  const compute = (templates: CoverageTemplateLite[]) => {
+    const args = input(templates);
+    return assignedTemplateIds(
+      computeTemplateCoverage(args),
+      computeGarantiaBoard(args)
+    );
+  };
+
+  it("isDefault ativo de modalidade entra; célula de garantia ATIVA entra", () => {
+    const ids = compute([
+      tpl({ id: "venda-def", modalidade: "a_vista", name: "CCV", isDefault: true }),
+      tpl({
+        id: "fiador",
+        name: "Locação — Fiador",
+        matchCriteria: { garantia: "fiador" },
+        isDefault: true,
+        engine: "google_docs",
+      }),
+      tpl({
+        id: "sf",
+        name: "Locação — SF",
+        matchCriteria: { garantia: "seguro_fianca" },
+        engine: "google_docs",
+      }),
+    ]);
+    expect(ids.has("venda-def")).toBe(true);
+    expect(ids.has("fiador")).toBe(true);
+    expect(ids.has("sf")).toBe(true);
+  });
+
+  it("draft (em revisão) e arquivado NÃO entram — a geração não os enxerga", () => {
+    const ids = compute([
+      tpl({
+        id: "draft",
+        name: "Rascunho",
+        status: "draft",
+        matchCriteria: { garantia: "caucao" },
+        engine: "google_docs",
+      }),
+      tpl({
+        id: "arch",
+        name: "Velho",
+        status: "archived",
+        isDefault: true,
+        engine: "google_docs",
+      }),
+    ]);
+    expect(ids.has("draft")).toBe(false);
+    expect(ids.has("arch")).toBe(false);
+  });
+
+  it("ativo genérico SEM isDefault não entra (a aba Tipos o marca 'sem padrão')", () => {
+    const ids = compute([
+      tpl({ id: "solto", name: "Contrato solto", engine: "google_docs" }),
+    ]);
+    expect(ids.has("solto")).toBe(false);
+  });
+});
+
+describe("gapsBySection — o que falta no cabeçalho da seção", () => {
+  it("célula faltante com fallback é âmbar; modalidade sem nada é dura", () => {
+    const args = {
+      modules: ["vendas", "locacao"] as const,
+      templates: [
+        tpl({
+          id: "fiador",
+          name: "Locação — Fiador",
+          matchCriteria: { garantia: "fiador" },
+          isDefault: true,
+          engine: "google_docs",
+        }),
+      ],
+    };
+    const gaps = gapsBySection(
+      computeTemplateCoverage(args),
+      computeGarantiaBoard(args)
+    );
+    // Residencial: 6 células faltantes, todas com fallback (o fiador default).
+    const res = gaps.locacao_residencial ?? [];
+    expect(res.filter((g) => !g.hard).map((g) => g.label)).toContain("Caução");
+    // Vendas sem nenhum template: faltas duras por modalidade.
+    const vendas = gaps.vendas ?? [];
+    expect(vendas.some((g) => g.hard)).toBe(true);
+    // Comercial sem nenhum ativo: células duras.
+    const com = gaps.locacao_comercial ?? [];
+    expect(com.length > 0 && com.every((g) => g.hard)).toBe(true);
   });
 });

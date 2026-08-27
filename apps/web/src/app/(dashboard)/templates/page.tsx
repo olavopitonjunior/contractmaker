@@ -11,8 +11,10 @@ import { StartIngestionRunButton } from "@/components/templates/StartIngestionRu
 import { getOrgModules } from "@/lib/modules/read";
 import { MODULE_CATALOG, type ModuleKey } from "@/lib/modules/catalog";
 import {
+  assignedTemplateIds,
   computeGarantiaBoard,
   computeTemplateCoverage,
+  gapsBySection,
 } from "@/lib/templates/coverage";
 import {
   providersByGarantiaFromTags,
@@ -106,6 +108,10 @@ export default async function TemplatesPage({
     templates: notArchived,
   });
   const providersByGarantia = providersByGarantiaFromTags(slotClauses);
+  // Fonte única do "verde" do repositório: os mesmos ids que a aba Tipos
+  // exibe como padrão/atribuído.
+  const assigned = assignedTemplateIds(coverage, board);
+  const sectionGaps = gapsBySection(coverage, board);
 
   const templates = repoTab
     ? await prisma.contractTemplate.findMany({
@@ -236,6 +242,8 @@ export default async function TemplatesPage({
             showArchived={showArchived}
             archivedCount={archivedCount}
             modalidadeFilter={modalidadeFilter}
+            assignedIds={[...assigned]}
+            gaps={sectionGaps}
           />
         </>
       )}
