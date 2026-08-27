@@ -1,5 +1,15 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
-import { Check, CircleAlert, Sparkles, Star, TriangleAlert } from "lucide-react";
+import {
+  Check,
+  CircleAlert,
+  Eye,
+  Sparkles,
+  Star,
+  TriangleAlert,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type {
   CoverageReport,
@@ -8,6 +18,15 @@ import type {
   GarantiaCoverageCell,
 } from "@/lib/templates/coverage";
 import type { GarantiaTipo } from "@/lib/contracts/template-category";
+import { TemplatePreview } from "@/components/templates/TemplatePreview";
+
+/** O que o diálogo de preview precisa saber do template da linha. */
+interface PreviewTarget {
+  id: string;
+  name: string;
+  modalidade: string | null;
+  engine: string;
+}
 
 /**
  * Aba "Tipos de contrato" — a tela principal de /templates.
@@ -44,6 +63,7 @@ export function ContractTypesPanel({
 }) {
   const byModalidade = new Map(report.rows.map((r) => [r.modalidade as string, r]));
   const boardByModalidade = new Map(board.map((b) => [b.modalidade, b]));
+  const [preview, setPreview] = useState<PreviewTarget | null>(null);
 
   // Rótulos de venda na linguagem do dono — locais do painel, de propósito:
   // o resto da UI segue MODALIDADE_LABELS.
@@ -95,7 +115,12 @@ export function ContractTypesPanel({
           <SectionStrip title="Vendas" />
           <div className="divide-y">
             {vendas.map(({ row, label }) => (
-              <TypeLine key={row.modalidade} row={row} labelOverride={label} />
+              <TypeLine
+                key={row.modalidade}
+                row={row}
+                labelOverride={label}
+                onPreview={setPreview}
+              />
             ))}
           </div>
         </>
@@ -107,6 +132,7 @@ export function ContractTypesPanel({
           row={row}
           board={b}
           providersByGarantia={providersByGarantia}
+          onPreview={setPreview}
         />
       ))}
 
@@ -117,7 +143,7 @@ export function ContractTypesPanel({
             optional={!administracao.required}
           />
           <div className="divide-y">
-            <TypeLine row={administracao} />
+            <TypeLine row={administracao} onPreview={setPreview} />
           </div>
         </>
       )}
@@ -127,10 +153,21 @@ export function ContractTypesPanel({
           <SectionStrip title="Propostas de locação" />
           <div className="divide-y">
             {propostas.map((row) => (
-              <TypeLine key={row.modalidade} row={row} />
+              <TypeLine key={row.modalidade} row={row} onPreview={setPreview} />
             ))}
           </div>
         </>
+      )}
+
+      {preview && (
+        <TemplatePreview
+          templateId={preview.id}
+          templateName={preview.name}
+          templateModalidade={preview.modalidade}
+          templateEngine={preview.engine}
+          open
+          onOpenChange={(open) => !open && setPreview(null)}
+        />
       )}
     </section>
   );
@@ -146,10 +183,12 @@ function LocacaoSection({
   row,
   board,
   providersByGarantia,
+  onPreview,
 }: {
   row: CoverageRow;
   board: GarantiaBoardRow;
   providersByGarantia: Partial<Record<GarantiaTipo, string[]>>;
+  onPreview: (t: PreviewTarget) => void;
 }) {
   const genericDefault =
     row.defaultAssigned && !board.defaultGarantia ? board.fallbackName : null;
@@ -195,6 +234,7 @@ function LocacaoSection({
             cell={cell}
             board={board}
             providers={providersByGarantia[cell.garantia]}
+            onPreview={onPreview}
           />
         ))}
       </div>
@@ -207,10 +247,12 @@ function GarantiaLine({
   cell,
   board,
   providers,
+  onPreview,
 }: {
   cell: GarantiaCoverageCell;
   board: GarantiaBoardRow;
   providers?: string[];
+  onPreview: (t: PreviewTarget) => void;
 }) {
   const isStar =
     cell.state === "active" && board.defaultGarantia === cell.garantia;
@@ -238,7 +280,24 @@ function GarantiaLine({
             <span className="text-foreground">{board.fallbackName}</span>
           </span>
         )}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-1">
+          {cell.state !== "missing" && cell.templateId && (
+            <Button
+              size="sm"
+              variant="ghost"
+              title="Ver preview do modelo"
+              onClick={() =>
+                onPreview({
+                  id: cell.templateId!,
+                  name: cell.templateName ?? cell.label,
+                  modalidade: board.modalidade,
+                  engine: cell.templateEngine ?? "handlebars",
+                })
+              }
+            >
+              <Eye className="h-3.5 w-3.5" />
+            </Button>
+          )}
           {cell.state === "missing" ? (
             <Button size="sm" variant="outline" asChild>
               <Link href="/templates?tab=modelos&ingest=1">Enviar modelo</Link>
@@ -323,7 +382,9 @@ function SectionStrip({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2 border-t bg-muted/30 px-4 py-1.5 first:border-t-0">
-      <span className="text-xs font-medium text-muted-foreground">{title}</span>
+      <span className="text-xs font-semibold uppercase tracking-wide text-foreground/70">
+        {title}
+      </span>
       {optional && (
         <span className="rounded-full border px-1.5 py-px text-[10px] text-muted-foreground">
           Opcional
@@ -337,9 +398,11 @@ function SectionStrip({
 function TypeLine({
   row,
   labelOverride,
+  onPreview,
 }: {
   row: CoverageRow;
   labelOverride?: string;
+  onPreview: (t: PreviewTarget) => void;
 }) {
   const assigned = row.state !== "missing" && row.defaultAssigned;
   return (
@@ -353,7 +416,24 @@ function TypeLine({
           </span>
         )}
         {assigned && <OriginBadge own={row.state === "own"} />}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-1">
+          {assigned && row.templateId && (
+            <Button
+              size="sm"
+              variant="ghost"
+              title="Ver preview do modelo"
+              onClick={() =>
+                onPreview({
+                  id: row.templateId!,
+                  name: row.templateName ?? row.label,
+                  modalidade: row.modalidade,
+                  engine: row.templateEngine ?? "handlebars",
+                })
+              }
+            >
+              <Eye className="h-3.5 w-3.5" />
+            </Button>
+          )}
           {row.state === "missing" ? (
             <Button size="sm" asChild>
               <Link href="/templates?tab=modelos&ingest=1">Enviar modelo</Link>
