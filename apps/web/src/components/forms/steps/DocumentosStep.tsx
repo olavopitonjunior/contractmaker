@@ -374,8 +374,9 @@ export function DocumentosStep({
   // ficha. Idempotente via appliedFichasRef.
   useEffect(() => {
     if (!hydrated) return;
-    // Ficha-resumo declara papéis específicos da esteira; adapter sem
-    // applyFicha (locação) não tem o recurso — docs ficam em "outro".
+    // Ficha-resumo declara papéis específicos da esteira. Venda e locação têm
+    // implementação própria (applyFichaResumo / applyFichaResumoLocacao); um
+    // adapter futuro sem ela simplesmente não ganha o recurso.
     if (!adapter.applyFicha) return;
     const fichaDoc = docs.find(
       (d) =>
