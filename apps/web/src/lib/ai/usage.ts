@@ -31,6 +31,17 @@ export const PRICING: Record<string, ModelPricing> = {
   "claude-opus-4-6": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
   "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   "claude-haiku-4-5-20251001": { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
+  // Anthropic — modelos usados SÓ no caminho de ingestão de acervo (que não
+  // manda sampling param e por isso não esbarra no 400 da família 4.7+). Ver
+  // INGEST_*_MODEL em lib/ai/shared/models.ts. Preço de tabela em 2026-08-25.
+  //
+  // Opus 4.8 e Opus 5 custam IGUAL — é por isso que a escalação do planner sobe
+  // o `effort` no 4.8 antes de trocar de modelo: mesma fatura, mais raciocínio.
+  "claude-opus-5": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  "claude-opus-4-8": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  // Alias sem sufixo de data do mesmo Haiku 4.5 da linha acima — a API atual
+  // aceita os dois IDs, e a coluna `model` do AIUsage grava o que foi enviado.
+  "claude-haiku-4-5": { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
   // Anthropic — aposentados/deprecados (mantidos pra custo de AIUsage histórico)
   "claude-opus-4-20250514": { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
   "claude-sonnet-4-20250514": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
@@ -234,6 +245,14 @@ export type AIOperation =
   // Ingestão da base de conhecimento — desempate template/cláusulas/acervo
   // quando a heurística determinística fica incerta (lib/knowledge/upload-classifier).
   | "knowledge_upload_classification"
+  // Ingestão de acervo em LOTE (Fase A2) — os dois pontos de julgamento por
+  // LLM. Separados porque respondem perguntas diferentes e escalam diferente:
+  // `ingest_classify` é uma chamada por documento (Haiku) e `ingest_plan` é uma
+  // por run (Sonnet 5, com escalação pro Opus 5). Somados, o painel não
+  // conseguiria dizer se o custo de um tenant veio do tamanho do acervo ou de
+  // um plano que precisou ser refeito.
+  | "ingest_classify"
+  | "ingest_plan"
   // Agente externo (Max, LangGraph fora deste repo) reportando o próprio turn
   // por `POST /api/agents/usage`. O custo dele roda em infra nossa e some do
   // painel se não voltar por aqui.

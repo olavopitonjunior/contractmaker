@@ -19,6 +19,8 @@ export const DEAD_SEGMENT_HREFS: ReadonlySet<string> = new Set([
   "/relatorios",
   "/settings/pagamentos",
   "/settings/seguranca/audit-log/users",
+  // Só existe /templates/ingestion/<runId> — a conferência é sempre de UM lote.
+  "/templates/ingestion",
 ]);
 
 /**

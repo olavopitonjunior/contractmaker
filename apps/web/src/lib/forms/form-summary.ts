@@ -17,7 +17,7 @@ import {
   type SummarySection,
   type SummaryRow,
 } from "@/lib/forms/negotiation-summary";
-import { GARANTIA_LABELS } from "@/lib/contracts/template-category";
+import { GARANTIA_LABELS, normalizeGarantiaTipo } from "@/lib/contracts/template-category";
 import { LOCACAO_SCHEMA_TYPES } from "@/lib/forms/validation-locacao";
 
 type AnyObj = Record<string, unknown>;
@@ -597,9 +597,10 @@ function buildLocacaoConsolidatedSummary(
   if (tipoGarantia) {
     garantiaRows.push({
       label: "Modalidade",
-      value:
-        GARANTIA_LABELS[tipoGarantia as keyof typeof GARANTIA_LABELS] ??
-        tipoGarantia,
+      value: (() => {
+        const canonico = normalizeGarantiaTipo(tipoGarantia);
+        return canonico ? GARANTIA_LABELS[canonico] : tipoGarantia;
+      })(),
     });
   }
   pushIf(garantiaRows, "Seguradora / provedora", str(garantia.provider));

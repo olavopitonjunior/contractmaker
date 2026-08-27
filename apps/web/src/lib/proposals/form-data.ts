@@ -17,8 +17,8 @@
 
 import { parseMoneyBR } from "@/lib/format/money";
 import {
-  GARANTIA_TIPOS,
   GARANTIA_LABELS,
+  normalizeGarantiaTipo,
   type GarantiaTipo,
 } from "@/lib/contracts/template-category";
 import { OBSERVACOES_MAX } from "@/lib/forms/validation";
@@ -260,10 +260,6 @@ export function formatAmountInput(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n) || n === 0) return "";
   const [int, dec] = Math.abs(n).toFixed(2).split(".");
   return `${n < 0 ? "-" : ""}${int.replace(/\B(?=(\d{3})+(?!\d))/g, ".")},${dec}`;
-}
-
-function isGarantiaTipo(v: unknown): v is GarantiaTipo {
-  return (GARANTIA_TIPOS as readonly string[]).includes(v as string);
 }
 
 /**
@@ -646,7 +642,9 @@ export function parseProposalForm(input: {
 
   const g = (d.garantia ?? {}) as Record<string, unknown>;
   const garantia: GarantiaInput = {
-    tipo: isGarantiaTipo(g.tipo) ? g.tipo : "caucao",
+    // Normaliza o legado: sem isso uma proposta gravada com `garantia_digital`
+    // reabria no form como "Caução" — troca silenciosa da modalidade.
+    tipo: normalizeGarantiaTipo(g.tipo) ?? "caucao",
     provider: typeof g.provider === "string" ? g.provider : "",
     caucaoMeses: g.caucao_meses != null ? String(g.caucao_meses) : "",
     fiador: g.fiador ? partyFromData(g.fiador) : emptyParty(),

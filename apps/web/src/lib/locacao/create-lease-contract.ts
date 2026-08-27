@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db/prisma";
+import { normalizeGarantiaTipo } from "@/lib/contracts/template-category";
 import { nextReadjustmentDate } from "@/lib/locacao/readjustment-calculator";
 
 // Materializa/atualiza o LeaseContract a partir do dataJson do formulário público
@@ -126,7 +127,11 @@ export async function createLeaseContractFromDataJson(args: {
   });
 
   // Guarantee (1:1) quando há modalidade definida ≠ sem_garantia.
-  const gtipo = typeof garantia.tipo === "string" ? (garantia.tipo as string) : null;
+  // Canonicaliza na ESCRITA: um dataJson legado não pode criar Guarantee nova
+  // com o valor renomeado (`garantia_digital`).
+  const gtipo =
+    normalizeGarantiaTipo(garantia.tipo) ??
+    (typeof garantia.tipo === "string" ? (garantia.tipo as string) : null);
   if (gtipo && gtipo !== "sem_garantia") {
     await prisma.guarantee.create({
       data: {

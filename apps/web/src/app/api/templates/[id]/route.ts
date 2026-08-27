@@ -9,6 +9,10 @@ import {
   schemaTypeForModalidade,
   templateFamilyForModalidade,
 } from "@/lib/contracts/template-category";
+import {
+  checkSlotClauseReadiness,
+  slotClauseGapMessage,
+} from "@/lib/templates/slot-readiness";
 
 /**
  * Escopo multitenant deny-by-default.
@@ -110,6 +114,30 @@ export async function PATCH(
     typeof body.isDefault === "boolean" ? body.isDefault : template.isDefault;
   const nextSource = body.handlebarsSource ?? template.handlebarsSource;
   const sourceChanged = nextSource !== template.handlebarsSource;
+
+  // ─── TRAVA DA ATIVAÇÃO: slot aberto sem cláusula aprovada ─────────────────
+  // No servidor, e não só na tela, porque é aqui que TODOS os caminhos de
+  // ativação passam (a página de revisão, a listagem e qualquer chamada
+  // futura). Enquanto o modelo é draft o slot é inofensivo — a geração só
+  // enxerga `active` —, então a checagem custa uma consulta apenas na
+  // transição para ativo. Ver lib/templates/slot-readiness.ts.
+  if (body.status === "active" && template.status !== "active" && !body.forceActivate) {
+    const readiness = await checkSlotClauseReadiness({
+      orgId,
+      handlebarsSource: nextSource,
+      matchCriteria: nextMatchCriteria === Prisma.DbNull ? null : nextMatchCriteria,
+    });
+    if (!readiness.ready) {
+      return NextResponse.json(
+        {
+          error: slotClauseGapMessage(readiness.gaps),
+          code: "SLOT_CLAUSE_MISSING",
+          gaps: readiness.gaps,
+        },
+        { status: 409 }
+      );
+    }
+  }
 
   if (nextIsDefault) {
     await prisma.contractTemplate.updateMany({

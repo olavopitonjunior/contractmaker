@@ -13,6 +13,7 @@ import {
   eligibleModalidadesForDealKind,
   matchCriteriaSchema,
   matchCriteriaSummary,
+  normalizeGarantiaTipo,
   parseMatchCriteria,
   resolveTemplateId,
   resolveTemplateOverride,
@@ -364,6 +365,47 @@ describe("deriveTemplateFacts", () => {
     expect(deriveTemplateFacts({})).toEqual(vazio);
     expect(deriveTemplateFacts(null)).toEqual(vazio);
     expect(deriveTemplateFacts({ garantia: { tipo: "chutando" } })).toEqual(vazio);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// Rename `garantia_digital` → `garantia_onerosa` (decisão de produto,
+// 2026-08-25). O rótulo antigo nomeava o FORNECEDOR, não a modalidade.
+// ──────────────────────────────────────────────────────────────────────────
+describe("normalizeGarantiaTipo (compat de leitura do rename)", () => {
+  it("mapeia o legado, preserva o canônico e rejeita o resto", () => {
+    expect(normalizeGarantiaTipo("garantia_digital")).toBe("garantia_onerosa");
+    expect(normalizeGarantiaTipo("garantia_onerosa")).toBe("garantia_onerosa");
+    expect(normalizeGarantiaTipo("fiador")).toBe("fiador");
+    expect(normalizeGarantiaTipo("credpago")).toBeNull();
+    expect(normalizeGarantiaTipo(undefined)).toBeNull();
+    expect(normalizeGarantiaTipo(42)).toBeNull();
+  });
+
+  it("REGRESSÃO: deal LEGADO ainda pontua a variante de garantia onerosa", () => {
+    // Sem o normalizador o fato viria `null`: o template marcado
+    // `garantia: garantia_onerosa` empataria com o genérico e o operador
+    // voltaria a trocar o modelo à mão.
+    const legado = deriveTemplateFacts({
+      garantia: { tipo: "garantia_digital", provider: "Almada" },
+      locatarios: [{ tipo_pessoa: "fisica" }],
+    });
+    expect(legado.garantia).toBe("garantia_onerosa");
+    expect(scoreTemplateAgainstFacts({ garantia: "garantia_onerosa" }, legado)).toBe(1);
+    expect(scoreTemplateAgainstFacts({ garantia: "seguro_fianca" }, legado)).toBe(-1);
+  });
+
+  it("matchCriteria gravado com o valor legado continua casando", () => {
+    expect(parseMatchCriteria({ garantia: "garantia_digital" })).toEqual({
+      garantia: "garantia_onerosa",
+    });
+    expect(matchCriteriaSummary({ garantia: "garantia_digital" })).toEqual([
+      "Garantia onerosa",
+    ]);
+    // E o schema da fronteira (tela de edição de modelo) aceita e canoniza.
+    const parsed = matchCriteriaSchema.safeParse({ garantia: "garantia_digital" });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data?.garantia).toBe("garantia_onerosa");
   });
 });
 

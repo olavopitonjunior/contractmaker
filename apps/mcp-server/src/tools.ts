@@ -2674,7 +2674,7 @@ export const tools: Tool[] = [
   {
     name: "create_lease_guarantee",
     description:
-      "Cria garantia locatícia (Guarantee). tipo='seguro_fianca'/'garantia_digital'/'titulo_capitalizacao' exigem provider; tipo='fiador' exige objeto fiador; tipo='caucao' exige subtipo/valor em extra. Pra fiança consolidada SegurosJá+Alpop preferir record_insurance_quote (ramo fianca).",
+      "Cria garantia locatícia (Guarantee). tipo='seguro_fianca'/'garantia_onerosa'/'titulo_capitalizacao' exigem provider; tipo='fiador' exige objeto fiador; tipo='caucao' exige subtipo/valor em extra. Pra fiança consolidada SegurosJá+Alpop preferir record_insurance_quote (ramo fianca).",
     inputSchema: {
       type: "object",
       properties: {
@@ -2685,7 +2685,7 @@ export const tools: Tool[] = [
             "seguro_fianca",
             "titulo_capitalizacao",
             "caucao",
-            "garantia_digital",
+            "garantia_onerosa",
             "cessao_fiduciaria",
           ],
         },

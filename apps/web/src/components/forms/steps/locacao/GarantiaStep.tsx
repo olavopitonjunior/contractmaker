@@ -22,7 +22,7 @@ import {
   type GarantiaOptionLike,
 } from "@/lib/forms/garantia-catalog";
 
-// Seguro-fiança e garantia digital: quem paga a apólice e por quanto tempo ela
+// Seguro-fiança e garantia onerosa: quem paga a apólice e por quanto tempo ela
 // vale. Sem opção pré-selecionada — o padrão varia por seguradora/imobiliária,
 // então quem preenche escolhe (o schema deixa os dois opcionais).
 const TOMADOR_OPTIONS = [
@@ -38,7 +38,7 @@ const VIGENCIA_OPTIONS = [
 /**
  * Garantia locatícia (garantiaSchema, art. 37 Lei 8.245/91). Campos condicionais
  * por tipo: caução → nº de aluguéis (≤3, art. 38 §2º); fiador → dados do fiador;
- * seguro/garantia digital → tomador e vigência da apólice.
+ * seguro/garantia onerosa → tomador e vigência da apólice.
  *
  * A modalidade e o GARANTIDOR viraram uma escolha só ("Seguro-fiança — Porto
  * Seguro") em 2026-07-30, alimentada pelo catálogo da imobiliária
@@ -140,7 +140,7 @@ export function GarantiaStep({
           </div>
         )}
 
-        {(tipo === "seguro_fianca" || tipo === "garantia_digital") && (
+        {(tipo === "seguro_fianca" || tipo === "garantia_onerosa") && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Seguradora saiu daqui: é a própria escolha da modalidade. */}
             <FormField form={form} name="garantia.cobertura_meses" label="Cobertura (meses)">

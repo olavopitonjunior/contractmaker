@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  computeGarantiaCoverage,
   computeTemplateCoverage,
   isOwnTemplate,
   REQUIRED_KIT_MODALIDADES,
@@ -123,5 +124,89 @@ describe("computeTemplateCoverage", () => {
     const report = computeTemplateCoverage({ modules: [], templates: [] });
     expect(report.rows).toHaveLength(0);
     expect(report.kitComplete).toBe(true);
+  });
+});
+
+describe("computeGarantiaCoverage", () => {
+  it("só entram as modalidades em que a garantia decide o modelo", () => {
+    const report = computeGarantiaCoverage({
+      modules: ["vendas", "locacao"],
+      templates: [],
+    });
+    const modalidades = report.rows.map((r) => r.modalidade);
+    expect(modalidades).toContain("locacao");
+    expect(modalidades).toContain("locacao_comercial");
+    expect(modalidades).toContain("proposta_locacao_residencial");
+    // Venda não tem garantia locatícia — a matriz não inventa buraco lá.
+    expect(modalidades).not.toContain("a_vista");
+    expect(modalidades).not.toContain("proposta_venda");
+  });
+
+  it("distingue o modelo ativo do rascunho recém-ingerido", () => {
+    const report = computeGarantiaCoverage({
+      modules: ["locacao"],
+      templates: [
+        tpl({
+          id: "ativo",
+          modalidade: "locacao",
+          status: "active",
+          matchCriteria: { garantia: "fiador" },
+        }),
+        tpl({
+          id: "rascunho",
+          modalidade: "locacao",
+          status: "draft",
+          matchCriteria: { garantia: "caucao" },
+        }),
+      ],
+    });
+    const row = report.rows.find((r) => r.modalidade === "locacao")!;
+    expect(row.cells.find((c) => c.garantia === "fiador")!.state).toBe("active");
+    expect(row.cells.find((c) => c.garantia === "caucao")!.state).toBe("draft");
+    expect(row.cells.find((c) => c.garantia === "seguro_fianca")!.state).toBe("missing");
+  });
+
+  it("arquivado não cobre célula nenhuma", () => {
+    const report = computeGarantiaCoverage({
+      modules: ["locacao"],
+      templates: [
+        tpl({
+          id: "velho",
+          modalidade: "locacao",
+          status: "archived",
+          matchCriteria: { garantia: "fiador" },
+        }),
+      ],
+    });
+    const row = report.rows.find((r) => r.modalidade === "locacao")!;
+    expect(row.cells.every((c) => c.state === "missing")).toBe(true);
+  });
+
+  it("modelo sem critério de garantia não finge cobrir as sete opções", () => {
+    const report = computeGarantiaCoverage({
+      modules: ["locacao"],
+      templates: [tpl({ id: "generico", modalidade: "locacao", matchCriteria: null })],
+    });
+    const row = report.rows.find((r) => r.modalidade === "locacao")!;
+    expect(row.genericState).toBe("active");
+    expect(row.cells.every((c) => c.state === "missing")).toBe(true);
+  });
+
+  it("buraco só é buraco onde a imobiliária já opera", () => {
+    const vazio = computeGarantiaCoverage({ modules: ["locacao"], templates: [] });
+    expect(vazio.gaps).toHaveLength(0);
+
+    const comeco = computeGarantiaCoverage({
+      modules: ["locacao"],
+      templates: [
+        tpl({
+          id: "t1",
+          modalidade: "locacao",
+          matchCriteria: { garantia: "fiador" },
+        }),
+      ],
+    });
+    expect(comeco.gaps.length).toBe(vazio.garantias.length - 1);
+    expect(comeco.gaps.every((g) => g.modalidade === "locacao")).toBe(true);
   });
 });

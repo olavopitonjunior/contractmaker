@@ -95,8 +95,8 @@ const GARANTIA_HBS = `{{#if (eq garantia.tipo "titulo_capitalizacao")}}
 <p>8.1. Para garantir as obrigações assumidas neste contrato, a PARTE LOCATÁRIA dá neste ato, a título de caução, o equivalente a {{garantia.caucao_meses}} ({{numeroExtenso garantia.caucao_meses}}) aluguéis, nos termos do art. 38 da Lei nº 8.245/91, a ser restituído ao final da locação, deduzidos eventuais débitos e danos apurados em vistoria.</p>
 {{else if (eq garantia.tipo "seguro_fianca")}}
 <p>8.1. Para garantir as obrigações assumidas neste contrato, a locação é garantida por seguro de fiança locatícia{{#if garantia.provider}} contratado junto a {{garantia.provider}}{{/if}}, cujas condições e apólice integram este contrato.</p>
-{{else if (eq garantia.tipo "garantia_digital")}}
-<p>8.1. Para garantir as obrigações assumidas neste contrato, a locação é garantida por garantia locatícia{{#if garantia.provider}} prestada por {{garantia.provider}}{{/if}}, na forma do respectivo termo de adesão, que integra este contrato.</p>
+{{else if (eq garantia.tipo "garantia_onerosa")}}
+<p>8.1. Para garantir as obrigações assumidas neste contrato, a locação é garantida por garantia locatícia onerosa{{#if garantia.provider}} prestada por {{garantia.provider}}{{/if}}, na forma do respectivo termo de adesão, que integra este contrato.</p>
 {{else if (eq garantia.tipo "sem_garantia")}}
 <p>8.1. As partes ajustam a presente locação sem modalidade de garantia, nos termos do art. 37 da Lei nº 8.245/91.</p>
 {{else}}

@@ -5,6 +5,7 @@ import {
 } from "@/lib/forms/field-formats";
 import { isMarried } from "@/lib/forms/estado-civil";
 import { OBSERVACOES_MAX } from "@/lib/forms/validation";
+import { normalizeGarantiaTipo } from "@/lib/contracts/template-category";
 
 // ============================================================================
 // Locação — schema Zod (schemaType "locacao_residencial_v1").
@@ -217,22 +218,29 @@ export function seedOutrosEncargos(
 
 // Garantia locatícia (art. 37 Lei 8.245). Fiador só quando tipo="fiador".
 const garantiaSchema = z.object({
-  tipo: z
-    .enum([
-      "fiador",
-      "caucao",
-      "seguro_fianca",
-      "garantia_digital",
-      "titulo_capitalizacao",
-      "propria",
-      "sem_garantia",
-    ])
-    .optional()
-    .default("caucao"),
-  // Subscritora do título / seguradora / provedora da garantia digital.
+  // LÊ o legado, GRAVA o canônico: `garantia_digital` foi renomeado pra
+  // `garantia_onerosa` e um rascunho salvo antes disso ainda chega aqui com o
+  // valor antigo — sem o preprocess ele seria rejeitado pelo enum e o form
+  // inteiro ficaria inválido. Ver `normalizeGarantiaTipo`.
+  tipo: z.preprocess(
+    (v) => (typeof v === "string" ? (normalizeGarantiaTipo(v) ?? v) : v),
+    z
+      .enum([
+        "fiador",
+        "caucao",
+        "seguro_fianca",
+        "garantia_onerosa",
+        "titulo_capitalizacao",
+        "propria",
+        "sem_garantia",
+      ])
+      .optional()
+      .default("caucao")
+  ),
+  // Subscritora do título / seguradora / provedora da garantia onerosa.
   provider: z.string().optional().default(""),
   cobertura_meses: z.number().optional().default(0),
-  // Seguro-fiança / garantia digital: quem contrata a apólice e por quanto
+  // Seguro-fiança / garantia onerosa: quem contrata a apólice e por quanto
   // tempo ela vale. Sem `.default()` de propósito — o padrão de mercado varia
   // por seguradora e por imobiliária, então quem preenche escolhe; ausente, o
   // enrich não deriva texto nenhum e a cláusula segue genérica.

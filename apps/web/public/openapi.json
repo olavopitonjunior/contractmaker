@@ -3576,7 +3576,7 @@
         }
       },
       "post": {
-        "description": "Cria garantia (discriminated union por tipo: fiador | seguro_fianca | titulo_capitalizacao | caucao | garantia_digital | cessao_fiduciaria). RBAC GUARANTEE_MANAGE.",
+        "description": "Cria garantia (discriminated union por tipo: fiador | seguro_fianca | titulo_capitalizacao | caucao | garantia_onerosa | cessao_fiduciaria). RBAC GUARANTEE_MANAGE.",
         "tags": [
           "Locacao"
         ],

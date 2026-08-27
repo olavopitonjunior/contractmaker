@@ -413,7 +413,7 @@ describe("enrichLocacaoData — seguro-fiança: tomador e vigência (D4)", () =>
     ).toBe("com renovação anual obrigatória enquanto durar a locação");
     expect(
       cfg({
-        garantia: { tipo: "garantia_digital", seguro_vigencia: "prazo_contrato" },
+        garantia: { tipo: "garantia_onerosa", seguro_vigencia: "prazo_contrato" },
       }).seguro_vigencia_texto
     ).toBe("pelo prazo integral da locação");
   });
@@ -435,6 +435,32 @@ describe("enrichLocacaoData — seguro-fiança: tomador e vigência (D4)", () =>
         config: { seguro_tomador_texto: "a IMOBILIÁRIA" },
       }).seguro_tomador_texto
     ).toBe("a IMOBILIÁRIA");
+  });
+});
+
+describe("enrichLocacaoData — rename garantia_digital → garantia_onerosa", () => {
+  it("REGRESSÃO: dataJson legado chega ao template com o tipo canônico", () => {
+    // O contrato decide a cláusula por `(eq garantia.tipo "…")`. Sem esta
+    // canonicalização, um Contract.dataJson congelado antes do rename (que a
+    // migration NÃO toca, por ser snapshot) cairia no `{{else}}` genérico.
+    const out = enrichLocacaoData({
+      garantia: { tipo: "garantia_digital", provider: "Almada" },
+    });
+    const garantia = out.garantia as Record<string, unknown>;
+    expect(garantia.tipo).toBe("garantia_onerosa");
+    expect(garantia.provider).toBe("Almada");
+  });
+
+  it("não inventa nem apaga: valor canônico e desconhecido passam intactos", () => {
+    expect(
+      (enrichLocacaoData({ garantia: { tipo: "garantia_onerosa" } })
+        .garantia as Record<string, unknown>).tipo
+    ).toBe("garantia_onerosa");
+    expect(
+      (enrichLocacaoData({ garantia: { tipo: "aval_bancario" } })
+        .garantia as Record<string, unknown>).tipo
+    ).toBe("aval_bancario");
+    expect(enrichLocacaoData({}).garantia).toBeUndefined();
   });
 });
 

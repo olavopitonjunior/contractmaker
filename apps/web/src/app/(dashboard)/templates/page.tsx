@@ -7,9 +7,11 @@ import { PageHeader } from "@/components/layout/page-header";
 import { TemplatesListClient } from "@/components/templates/TemplatesListClient";
 import { DocumentIngestionDialog } from "@/components/templates/DocumentIngestionDialog";
 import { SystemTemplatesPanel } from "@/components/templates/SystemTemplatesPanel";
+import { StartIngestionRunButton } from "@/components/templates/StartIngestionRunButton";
 import { getOrgModules } from "@/lib/modules/read";
 import { MODULE_CATALOG, type ModuleKey } from "@/lib/modules/catalog";
 import { computeTemplateCoverage } from "@/lib/templates/coverage";
+import { isIngestionEnabled } from "@/lib/ingestion/guard";
 
 export default async function TemplatesPage({
   searchParams,
@@ -37,7 +39,7 @@ export default async function TemplatesPage({
     ],
   });
 
-  const [archivedCount, modules, activeForCoverage] = await Promise.all([
+  const [archivedCount, modules, activeForCoverage, openRun] = await Promise.all([
     prisma.contractTemplate.count({
       where: { orgId: org.id, status: "archived" },
     }),
@@ -55,11 +57,19 @@ export default async function TemplatesPage({
         sourceHash: true,
       },
     }),
+    // Lote em andamento: sem esta faixa, quem fecha a aba durante a ingestão
+    // perde a URL da conferência e o lote fica esperando para sempre.
+    prisma.ingestionRun.findFirst({
+      where: { orgId: org.id, status: { notIn: ["done", "failed", "cancelled"] } },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, status: true, itemsTotal: true, itemsDone: true },
+    }),
   ]);
 
   const enabledModules = MODULE_CATALOG.map((m) => m.key).filter(
     (m: ModuleKey) => modules.enabled[m]
   );
+  const ingestionEnabled = await isIngestionEnabled(org.id);
   const coverage = computeTemplateCoverage({
     modules: enabledModules,
     templates: activeForCoverage,
@@ -71,6 +81,12 @@ export default async function TemplatesPage({
         title="Templates de Contrato"
         description="Mande os documentos da sua imobiliária — contratos, propostas e cláusulas, de uma vez. Nós lemos, dizemos o que cada um é e você confirma; modelos parecidos viram um só."
       >
+        {/* O lote é o caminho para quem já tem acervo: quem só onboardou via
+            wizard tinha o botão lá, e a imobiliária que chega depois com a pasta
+            inteira ficava sem por onde começar. */}
+        {ingestionEnabled && (
+          <StartIngestionRunButton orgId={org.id} label="Enviar acervo de uma vez" />
+        )}
         <DocumentIngestionDialog
           autoOpen={searchParams?.ingest === "1"}
           enabledModules={enabledModules}
@@ -94,6 +110,21 @@ export default async function TemplatesPage({
           </Link>
         </Button>
       </PageHeader>
+
+      {openRun && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-violet-300 bg-violet-50/50 p-3 text-sm dark:border-violet-900 dark:bg-violet-950/20">
+          <span className="min-w-0 flex-1">
+            {openRun.status === "awaiting_review"
+              ? "Um envio está esperando a sua conferência — nada entra na biblioteca antes de você confirmar."
+              : `Estamos lendo os arquivos do seu último envio (${openRun.itemsDone} de ${openRun.itemsTotal}).`}
+          </span>
+          <Button size="sm" variant="outline" asChild>
+            <Link href={`/templates/ingestion/${openRun.id}`}>
+              {openRun.status === "awaiting_review" ? "Conferir agora" : "Acompanhar"}
+            </Link>
+          </Button>
+        </div>
+      )}
 
       <SystemTemplatesPanel report={coverage} />
 
