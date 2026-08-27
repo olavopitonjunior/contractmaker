@@ -502,19 +502,35 @@ export async function advanceRun(
         continue;
       }
 
-      for (const item of slice) {
-        if (Date.now() >= deadline) break;
-        if (status === "extracting") {
+      if (status === "extracting") {
+        for (const item of slice) {
+          if (Date.now() >= deadline) break;
           processed += await extractItem(run, item);
-        } else if (status === "classifying") {
-          const startedAt = Date.now();
-          processed += await classifyItem(run, item, classifier);
-          const durationMs = Date.now() - startedAt;
-          classifyTiming = addCall(
-            classifyTiming ?? readTiming(report, "classify"),
-            durationMs
+        }
+      } else if (status === "classifying") {
+        // Em PARALELO, em levas: 4,1 s por documento em série era mais da
+        // metade do tempo visível do lote de 20 (57 s). Cada item grava o
+        // próprio resultado, então a leva não compartilha estado — o único
+        // cuidado é o cronômetro, que soma durações individuais depois.
+        for (let i = 0; i < slice.length; i += CLASSIFY_CONCURRENCY) {
+          if (Date.now() >= deadline) break;
+          const chunk = slice.slice(i, i + CLASSIFY_CONCURRENCY);
+          const results = await Promise.all(
+            chunk.map(async (item) => {
+              const startedAt = Date.now();
+              const done = await classifyItem(run, item, classifier);
+              const durationMs = Date.now() - startedAt;
+              warnIfSlow(`a classificação de ${item.id}`, durationMs, budgetMs);
+              return { done, durationMs };
+            })
           );
-          warnIfSlow(`a classificação de ${item.id}`, durationMs, budgetMs);
+          for (const r of results) {
+            processed += r.done;
+            classifyTiming = addCall(
+              classifyTiming ?? readTiming(report, "classify"),
+              r.durationMs
+            );
+          }
         }
       }
     }
@@ -771,6 +787,12 @@ async function failItem(item: ItemRow, message: string): Promise<number> {
 // ────────────────────────────────────────────────────────────────────────────
 // Estágio: classify
 // ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Classificações simultâneas por leva. Haiku aguenta bem mais; o limite aqui é
+ * não disputar conexões de banco com o resto da fatia.
+ */
+const CLASSIFY_CONCURRENCY = 5;
 
 async function classifyItem(
   run: RunRow,

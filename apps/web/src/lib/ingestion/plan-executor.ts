@@ -266,7 +266,9 @@ export async function executePlanSlice(
     const itemById = new Map(items.map((i) => [i.id, i]));
     const providerLabels = knownProviderLabels(plan, items);
 
-    report = readExecutionReport(run.report) ?? initialReport(plan, reviewed, selection, now);
+    report =
+      readExecutionReport(run.report) ??
+      initialReport(plan, reviewed, selection, now, items);
 
     let clausesCreated = 0;
     let templatesCreated = 0;
@@ -740,11 +742,38 @@ function describeSlotOutcome(
 // Relatório
 // ────────────────────────────────────────────────────────────────────────────
 
+/**
+ * As linhas de descarte de ENTRADA: itens que o dedup por `sourceHash` barrou
+ * antes do planner (o motivo está em `classification.via = "intake"`). Vão no
+ * relatório porque o operador subiu N arquivos e o plano fala de N-k — sem
+ * isto, o buraco fica sem explicação na tela.
+ */
+function intakeDiscardLines(
+  items: readonly ItemRow[]
+): Array<{ itemId: string; filename: string; detail: string }> {
+  const lines: Array<{ itemId: string; filename: string; detail: string }> = [];
+  for (const item of items) {
+    if (item.status !== "discarded") continue;
+    const c = item.classification as { via?: unknown; reason?: unknown } | null;
+    if (c?.via !== "intake") continue;
+    lines.push({
+      itemId: item.id,
+      filename: item.filename,
+      detail:
+        typeof c.reason === "string" && c.reason.trim()
+          ? c.reason
+          : "Este arquivo já era um modelo da biblioteca.",
+    });
+  }
+  return lines;
+}
+
 function initialReport(
   plan: LibraryPlan,
   reviewed: ReviewedLibraryPlan,
   selection: ReturnType<typeof selectApproved>,
-  now: Date
+  now: Date,
+  items: readonly ItemRow[] = []
 ): ExecutionReport {
   const rejectedDiscards = new Set(
     reviewed.discards.filter((d) => !d.approved).map((d) => d.itemId)
@@ -769,6 +798,7 @@ function initialReport(
       })),
       discards: Array.from(rejectedDiscards),
     },
+    intakeDiscards: intakeDiscardLines(items),
     // Descartes com que o operador concordou entram no relatório; os recusados
     // ficam em `rejected.discards` — o arquivo não virou nada, mas o relatório
     // não pode afirmar que ele foi descartado por decisão de ninguém.

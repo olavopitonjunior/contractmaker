@@ -82,6 +82,13 @@ export interface ExecutionReport {
     discards: string[];
   };
   discards: PlanDiscard[];
+  /**
+   * Arquivos barrados NA ENTRADA (dedup por `sourceHash` — já eram um modelo da
+   * biblioteca). O planner nunca os vê, então eles não aparecem em `discards`;
+   * sem esta lista o operador sobe 20 arquivos e o relatório fala de 14 sem
+   * explicar o buraco.
+   */
+  intakeDiscards?: Array<{ itemId: string; filename: string; detail: string }>;
   issues: PlanIssue[];
   counts: {
     templatesCreated: number;
