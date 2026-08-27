@@ -146,6 +146,24 @@ export function providerLabelFromSlug(slug: string): string {
 export function providersByGarantiaFromTags(
   items: Array<{ tags: string[] | null }>
 ): Partial<Record<GarantiaTipo, string[]>> {
+  return mapProvidersByGarantia(items, providerLabelFromSlug);
+}
+
+/**
+ * Variante em SLUG (`porto_seguro`) — pra casar com `slugifyProviderTag` do
+ * provider cadastrado no catálogo (o estado "cláusula própria × genérica" das
+ * configurações).
+ */
+export function providerSlugsByGarantiaFromTags(
+  items: Array<{ tags: string[] | null }>
+): Partial<Record<GarantiaTipo, string[]>> {
+  return mapProvidersByGarantia(items, (slug) => slug);
+}
+
+function mapProvidersByGarantia(
+  items: Array<{ tags: string[] | null }>,
+  toLabel: (slug: string) => string
+): Partial<Record<GarantiaTipo, string[]>> {
   const acc = new Map<GarantiaTipo, Set<string>>();
   for (const item of items) {
     const tags = item.tags ?? [];
@@ -160,7 +178,7 @@ export function providersByGarantiaFromTags(
       );
     for (const g of garantias) {
       const set = acc.get(g) ?? new Set<string>();
-      for (const p of providers) set.add(providerLabelFromSlug(p));
+      for (const p of providers) set.add(toLabel(p));
       acc.set(g, set);
     }
   }

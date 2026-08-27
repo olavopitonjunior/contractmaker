@@ -8,6 +8,7 @@ import { EDITABLE_STATUSES } from "@/lib/proposals/status-sets";
 import { ProposalForm } from "@/components/proposals/ProposalForm";
 import { parseProposalFormFromRow, PROPOSAL_SCHEMA_OPTIONS } from "@/lib/proposals/form-data";
 import { getIListConnection } from "@/lib/ilist/connection";
+import { listGarantiaOptions } from "@/lib/forms/garantia-option-repo";
 
 export const dynamic = "force-dynamic";
 
@@ -73,6 +74,11 @@ export default async function EditarPropostaPage({
     validUntil: proposal.validUntil?.toISOString() ?? null,
   });
 
+  const garantiaOptions =
+    tipo === "locacao"
+      ? await listGarantiaOptions(proposal.orgId, { activeOnly: true })
+      : [];
+
   return (
     <ProposalForm
       mode="edit"
@@ -80,6 +86,7 @@ export default async function EditarPropostaPage({
       initial={initial}
       schemaOptions={PROPOSAL_SCHEMA_OPTIONS[tipo]}
       hasIList={hasIList}
+      garantiaOptions={garantiaOptions}
     />
   );
 }

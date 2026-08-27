@@ -17,6 +17,8 @@ import {
   selectTemplateForDeal,
   selectLocacaoTemplate,
   selectAdministracaoTemplate,
+  normalizeGarantiaTipo,
+  GARANTIA_LABELS,
 } from "@/lib/contracts/template-category";
 import { resolveClauseSlots } from "@/lib/templates/clause-slots";
 import { getPipelineByKind } from "@/lib/modules/resolve";
@@ -53,6 +55,12 @@ interface GenerateResult {
   contractId: string;
   version: number;
   googleDocUrl?: string;
+  /**
+   * D16 — aviso de fallback de garantia. Presente quando o formulário declarou
+   * uma garantia SEM template próprio e a geração caiu no padrão/genérico da
+   * modalidade. Nunca bloqueia: a rota devolve junto do 201 e o client exibe.
+   */
+  templateNotice?: string;
 }
 
 /**
@@ -1253,6 +1261,7 @@ export async function generateLocacaoContractForDeal(
   // `opts.template` é a escolha MANUAL do operador, já validada na rota (org,
   // status, modalidade compatível com o kind) — quando vem, o matcher nem roda.
   let template = opts?.template;
+  let templateNotice: string | undefined;
   if (!template) {
     const selection = await selectLocacaoTemplate(orgId, schemaType, dataJson);
     if (!selection) {
@@ -1261,6 +1270,20 @@ export async function generateLocacaoContractForDeal(
       );
     }
     template = selection.template;
+    // D16: garantia sem modelo próprio gera com o padrão — avisando, nunca
+    // bloqueando (a aba Tipos já acusa o buraco; aqui morre o silêncio).
+    if (!selection.garantiaMatched) {
+      const garantiaTipo = normalizeGarantiaTipo(
+        (dataJson as { garantia?: { tipo?: unknown } })?.garantia?.tipo
+      );
+      const garantiaLabel = garantiaTipo
+        ? GARANTIA_LABELS[garantiaTipo]
+        : "a garantia escolhida";
+      templateNotice =
+        `Sem modelo próprio de ${garantiaLabel} — o contrato foi gerado com ` +
+        `o padrão "${template.name}". Envie o modelo em Templates para os ` +
+        `próximos saírem com ele.`;
+    }
   }
 
   // Administradora nomeada na cláusula de pagamento. O gate é a RAZÃO SOCIAL
@@ -1530,7 +1553,12 @@ export async function generateLocacaoContractForDeal(
   // Sem notificação de "contrato pronto" (paridade com vendas — ver
   // generateContractForDeal).
 
-  return { contractId: contract.id, version: contract.version, googleDocUrl };
+  return {
+    contractId: contract.id,
+    version: contract.version,
+    googleDocUrl,
+    templateNotice,
+  };
 }
 
 /**

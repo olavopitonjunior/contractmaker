@@ -42,8 +42,8 @@ const toOption = (row: Row): GarantiaOptionLike => ({
  * Tokio Marine / Porto Seguro / Pottencial / Too) — as orgs que existiam antes
  * da tabela não ficam com um formulário pior do que tinham. Uma vez que o admin
  * cadastra qualquer coisa, o catálogo dela manda (inclusive quando ela desativa
- * tudo: aí sobram só as modalidades sem garantidor, que o
- * `buildGarantiaChoices` sempre oferece).
+ * tudo: aí os tipos com prestadora ficam só com o texto livre — os TIPOS em si
+ * são fixos do sistema e o formulário sempre oferece os 7).
  */
 export async function listGarantiaOptions(
   orgId: string,

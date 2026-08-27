@@ -582,6 +582,14 @@ export function DealDetail({
     const data = await res.json();
     setGenerating(false);
     if (res.ok) {
+      // D16: aviso persistente (só fecha no X) — o toast sobrevive à navegação
+      // client-side pro contrato.
+      if (data.templateNotice) {
+        toast.warning(data.templateNotice, {
+          duration: Infinity,
+          closeButton: true,
+        });
+      }
       router.push(`/contracts/${data.contractId}`);
     } else {
       toast.error(data.error || "Erro ao gerar contrato");
