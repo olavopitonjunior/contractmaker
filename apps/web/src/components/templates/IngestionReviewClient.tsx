@@ -425,7 +425,7 @@ function PlanReview({
       groups.set(t.modalidade, list);
     }
     return [...groups.entries()];
-  }, [plan.templates]);
+  }, [plan]);
 
   const outOfAnalysis = useMemo(
     () =>
