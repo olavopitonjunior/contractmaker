@@ -16,13 +16,16 @@
  * garantia errada. Foi essa a correção do commit a5e96583 na Central de
  * ingestão, e aqui vale igual.
  *
- * ## Uma invocação, UM template
+ * ## Uma invocação, UMA LEVA de templates
  *
- * Cada template copia um Doc no Drive, abre os slots e roda o pass de IA de
- * placeholders. Dois deles não cabem com folga no `maxDuration` da rota, e uma
- * fatia interrompida pelo timeout deixaria o claim preso até a janela de stale.
- * As cláusulas, ao contrário, são transação de banco: vão todas na primeira
- * fatia.
+ * Cada template copia um Doc no Drive, abre os slots, neutraliza fornecedor e
+ * roda o pass de IA de placeholders (~40–60 s). Em SÉRIE, dois já não cabiam
+ * com folga no `maxDuration` — por isso a fatia foi de 1 por invocação até o
+ * fanout. Em PARALELO, a leva de 3 custa o tempo de 1: cabe na fatia com a
+ * mesma folga, e a execução de 10 templates cai de ~8 para ~3 minutos. Uma
+ * fatia interrompida pelo timeout continua deixando o claim para a janela de
+ * stale — o tamanho da leva existe para isso seguir raro. As cláusulas, ao
+ * contrário, são transação de banco: vão todas na primeira fatia.
  *
  * ## Idempotência
  *
@@ -102,8 +105,8 @@ import {
 import { MODULE_CATALOG, type ModuleKey } from "@/lib/modules/catalog";
 import { getOrgModules } from "@/lib/modules/read";
 
-/** Templates por invocação. Ver "Uma invocação, UM template" no cabeçalho. */
-const TEMPLATES_PER_SLICE = 1;
+/** Templates por invocação. Ver "Uma invocação, UMA LEVA" no cabeçalho. */
+const TEMPLATES_PER_SLICE = 3;
 
 /** Mesmo orçamento do `/advance`: para em 240s dos 300s de `maxDuration`. */
 const SLICE_BUDGET_MS = Number(process.env.INGESTION_SLICE_BUDGET_MS ?? "240000");
@@ -325,25 +328,38 @@ export async function executePlanSlice(
     // passo caro. O re-encadeamento pega o próximo.
     const slice = ranClauses ? [] : pendingTemplates.slice(0, budget);
 
-    for (const planned of slice) {
+    // Em levas paralelas: cada template custa ~40-60 s (conversão no Drive +
+    // slot + neutralização + pass de IA), e em série 10 templates eram ~8 min
+    // de execução. Cada applyTemplate é independente (Doc próprio, linha
+    // própria no relatório); o Drive aguenta 3 conversões simultâneas.
+    for (let i = 0; i < slice.length; i += TEMPLATES_CONCURRENCY) {
       if (Date.now() >= deadline) break;
-      const line = await applyTemplate({
-        orgId: run.orgId,
-        template: planned,
-        item: itemById.get(planned.sourceItemId) ?? null,
-        neutralizeProviders: providerLabels,
-      });
-      report.templates.push(line);
-      if (line.status === "created") templatesCreated += 1;
-      if (line.status === "failed") {
-        report.issues.push({
-          itemId: planned.sourceItemId,
-          kind: "acervo_incompleto",
-          detail: `Falha ao criar o modelo "${planned.name}": ${line.detail ?? "erro desconhecido"}.`,
-        });
-      }
-      if (line.status !== "failed") {
-        await markItem(run.id, planned.sourceItemId, "executed");
+      const chunk = slice.slice(i, i + TEMPLATES_CONCURRENCY);
+      const lines = await Promise.all(
+        chunk.map((planned) =>
+          applyTemplate({
+            orgId: run.orgId,
+            template: planned,
+            item: itemById.get(planned.sourceItemId) ?? null,
+            neutralizeProviders: providerLabels,
+          }).then((line) => ({ planned, line }))
+        )
+      );
+      // Escritas em ordem estável DEPOIS da leva — o relatório não pode
+      // depender de qual Promise resolveu primeiro.
+      for (const { planned, line } of lines) {
+        report.templates.push(line);
+        if (line.status === "created") templatesCreated += 1;
+        if (line.status === "failed") {
+          report.issues.push({
+            itemId: planned.sourceItemId,
+            kind: "acervo_incompleto",
+            detail: `Falha ao criar o modelo "${planned.name}": ${line.detail ?? "erro desconhecido"}.`,
+          });
+        }
+        if (line.status !== "failed") {
+          await markItem(run.id, planned.sourceItemId, "executed");
+        }
       }
     }
 
@@ -580,6 +596,9 @@ export function knownProviderLabels(
   }
   return [...labels];
 }
+
+/** Conversões de template simultâneas por leva — ver o laço da fase 2. */
+const TEMPLATES_CONCURRENCY = 3;
 
 /** Sniff de magic header — mesmo critério de `run-executor.ts`. */
 function isDocx(buffer: Buffer): boolean {
