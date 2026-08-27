@@ -11,9 +11,13 @@ import { StartIngestionRunButton } from "@/components/templates/StartIngestionRu
 import { getOrgModules } from "@/lib/modules/read";
 import { MODULE_CATALOG, type ModuleKey } from "@/lib/modules/catalog";
 import {
-  computeGarantiaCoverage,
+  computeGarantiaBoard,
   computeTemplateCoverage,
 } from "@/lib/templates/coverage";
+import {
+  providersByGarantiaFromTags,
+  slotTag,
+} from "@/lib/templates/clause-slots";
 import { modalidadeLabel } from "@/lib/contracts/template-category";
 import { isIngestionEnabled } from "@/lib/ingestion/guard";
 
@@ -51,7 +55,7 @@ export default async function TemplatesPage({
     searchParams?.tab === "modelos" || autoIngest || showArchived;
   const modalidadeFilter = searchParams?.modalidade || null;
 
-  const [modules, notArchived, openRun] = await Promise.all([
+  const [modules, notArchived, slotClauses, openRun] = await Promise.all([
     getOrgModules(org.id),
     // Alimenta as DUAS coberturas da aba Tipos: o painel (que filtra ativos
     // internamente) e a matriz de garantias (que enxerga rascunho de propósito
@@ -68,6 +72,17 @@ export default async function TemplatesPage({
         sourceHash: true,
         matchCriteria: true,
       },
+    }),
+    // Sublinha "Seguradoras no acervo" das linhas de garantia: cláusulas
+    // aprovadas do slot, agrupadas por tipo depois (função pura).
+    prisma.knowledgeItem.findMany({
+      where: {
+        orgId: org.id,
+        category: "clause",
+        status: "approved",
+        tags: { hasSome: [slotTag("garantia")] },
+      },
+      select: { tags: true },
     }),
     // Lote em andamento: sem esta faixa, quem fecha a aba durante a ingestão
     // perde a URL da conferência e o lote fica esperando para sempre.
@@ -86,10 +101,11 @@ export default async function TemplatesPage({
     modules: enabledModules,
     templates: notArchived,
   });
-  const garantias = computeGarantiaCoverage({
+  const board = computeGarantiaBoard({
     modules: enabledModules,
     templates: notArchived,
   });
+  const providersByGarantia = providersByGarantiaFromTags(slotClauses);
 
   const templates = repoTab
     ? await prisma.contractTemplate.findMany({
@@ -149,7 +165,11 @@ export default async function TemplatesPage({
       </nav>
 
       {!repoTab ? (
-        <ContractTypesPanel report={coverage} garantias={garantias} />
+        <ContractTypesPanel
+          report={coverage}
+          board={board}
+          providersByGarantia={providersByGarantia}
+        />
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-2">

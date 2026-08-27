@@ -4,6 +4,39 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-27 - Formulário: o que a RE/MAX Ativa achou no uso real
+
+Cinco frentes a partir do uso real do primeiro tenant com corretores de verdade
+(demo de onboarding em 28/07 e sessão prática de preenchimento de uma locação
+real em 25/08).
+
+### Corrigido
+
+- **O picker de corretor de LOCAÇÃO gravava o CPF/CNPJ MASCARADO no formulário.** O endpoint token-scoped devolve o documento como `390***05` de propósito (anti-scraping no form público) e a etapa de Comissão de locação persistia isso em `dataJson`. Venda já tinha o fix; locação nasceu de uma cópia anterior a ele. Em cadeia: salvar o cadastro devolvia 400 "CPF/CNPJ inválido" para um corretor vindo do próprio picker, o dedupe por documento era pulado (`normalizeDoc` via 5 dígitos) e o `materialize-parties` criava `PropertyOwner` com documento falso. O vínculo real sempre foi o `splitRecipientId`.
+- **A listagem de corretores cadastrados não aparecia.** `CorretorCombobox` tem `fetchOptions` nas dependências do efeito de busca, e os dois call-sites declaravam a função sem `useCallback`: identidade nova a cada render, ~1 request a cada 300ms contra um teto de 30/min, 429 em ~9 segundos — e o `catch(() => setOptions([]))` transformava tudo em "Nenhum corretor encontrado". O fetch agora lança em HTTP != 2xx e o combobox tem estado de falha visível, para que um 429 ou 403 futuro não volte a se disfarçar de lista vazia.
+- **`parseEndereco` gravava o CEP no campo `numero`.** `\d+` sem teto de dígitos e `.+?` preguiçoso: um endereço SEM número de porta ("Rua das Flores - Centro - CEP 01310-100") entregava `numero = "01310"`, e o bairro era engolido dentro de `rua`. O caminho mais comum é o comprovante de residência, cujo prompt pede endereço e CEP separados mas cujo modelo repete o CEP dentro do endereço. O sentido inverso já estava protegido e tinha teste; `parseEndereco` tinha cobertura ZERO.
+- **Campos decimais recusavam a vírgula do teclado brasileiro.** Sobraram `<input type="number">` com `valueAsNumber` em área do imóvel, taxa de administração, taxa de locação e percentual do angariador: digitar "45,5" deixava o value vazio e o RHF gravava `NaN` — o campo se apagava sozinho.
+- **O resumo em PDF saía com a diagramação de um contrato.** Gerado com `style = null`, herdava a tipografia de contrato do exporter — h1/h2 centralizados, em CAIXA ALTA, dourados, com o ornamento do `h2::after` — e as margens de encadernação (35mm à esquerda, 25mm à direita), com o rodapé de numeração num recuo que não batia com o corpo. Sobre uma sequência de tabelas label/valor. Agora tem perfil de página próprio.
+- **A etapa "Garantia e Observações" tinha o card da cláusula rescisória torto.** Rótulo de 68 caracteres num grid de 2 colunas quebrava em 3 linhas enquanto o vizinho ocupava 1; como o `FormField` é `flex-col` sem altura mínima no label, o select descia ~30px em relação ao input, e escolher "Não" desmontava o campo vizinho deixando meia linha vazia.
+
+### Adicionado
+
+- **Reanálise de um documento já processado**, e **correção manual dos campos extraídos** antes de aplicar. A rota `/retry` sempre aceitou qualquer status — só a UI não oferecia o botão, e um documento cujo OCR saiu errado só tinha saída sendo removido e subido de novo. A edição entra por uma rota anônima e alimenta o autofill, então é fechada: só chaves que o OCR já produziu para aquele anexo, só string, teto de 500 caracteres, string vazia como remoção.
+- **A etapa 0 agrupa os documentos por parte**, o destino aparece desde o upload (era só depois da extração, rotulado "Mover para:") e o card mostra todos os campos extraídos (cortava em 6 sem dizer que havia mais).
+- **Re-sugestão reativa do destino.** O assignment era calculado uma única vez, no upload ou no restore; como a sugestão é um match de CPF/nome contra o formulário, um documento enviado ANTES de a pessoa digitar os nomes ficava em "outro" para sempre e o gate H.5 travava o "Aplicar aos campos" do formulário inteiro.
+- **Ficha-resumo em PDF passa a funcionar em locação.** Os papéis de locação não existiam em `FICHA_PAPEIS`, o prompt instruía só venda e o adapter não implementava `applyFicha`: a ficha caía em "outro" e preenchia zero campos.
+- **A extração deixa de descartar a qualificação das partes.** O prompt não pedia profissão, nacionalidade nem estado civil de documentos que os contêm (certidão de casamento e procuração qualificam as partes), e o mapa de locação não conhecia seis campos que o schema tem.
+- **Comissão do 1º aluguel em valor fixo ou percentual**, com padrão por imobiliária (Configurações → Formulário → Locação) semeado na criação do formulário. A taxa da imobiliária só existia em percentual, e o valor era redigitado a cada formulário novo.
+- **Seleção/anexo da matrícula na própria etapa do imóvel de locação** (venda já tinha), inclusive nos links por parte.
+- **Preenchimento por áudio em locação e nos links das partes.** O schema de voz era um mapa único com paths de venda, e os índices de step colidem entre esteiras — em locação o filtro por escopo zerava e o prompt virava literalmente "Retorne {} — nada a preencher", com resposta 200 e silenciosa.
+- **Logo da imobiliária nas páginas públicas do formulário** (mostravam a marca do produto hardcoded) e **seção de Comissão no resumo de locação** (venda já trazia a dela).
+- **Proposta em nova guia** (pedido da demo de 28/07) — o card só oferecia "Ampliar/Reduzir" dentro do iframe. Não abre o HTML direto (nem por `blob:`, nem por `document.write` do conteúdo): as duas formas dariam ao documento a origem da aplicação e derrubariam a segunda camada de defesa de `preview-html.ts` — o `stripActiveContent` é um filtro de superfície conhecida, não um sanitizador, e o `dataJson` da proposta vem de digitação e de OCR. A guia recebe só uma casca; o documento continua dentro de `<iframe sandbox="">`.
+- **Aviso quando a imobiliária não tem logo**, na tela de Perfil, e **passo `branding` no checklist de onboarding** (opcional, não bloqueia os 100%). Consulta ao banco de produção em 27/08: as 5 imobiliárias têm linha de `BrandingSettings` e **todas com `logoUrl` vazio**. Cinco de cinco não é esquecimento de um cliente — a ausência era invisível dos dois lados, porque o formulário, o PDF do resumo, a cobrança e os e-mails caem no NOME da imobiliária em texto, um fallback silencioso e plausível. Foi assim que "o resumo saiu sem o logo" virou suspeita de bug no PDF com o código de branding correto desde 18/08. O fato consultado é o ARQUIVO, não a linha.
+
+### Alterado
+
+- **"Descrição do imóvel" deixou de ser obrigatória no formulário de locação**, a pedido da corretora: o campo virava discussão de negociação num formulário que só precisa identificar o imóvel. Quem quiser exigir liga pelo preset de obrigatoriedade da org.
+
 ## [Unreleased] - 2026-08-22 - Precisão da linha medido × estimado
 
 ### Corrigido

@@ -73,6 +73,17 @@ export interface DocumentosStepAdapter {
    */
   topKeyForKind(kind: DocumentKind): string | null;
   /**
+   * Caminhos do `dataJson` que carregam a IDENTIDADE das partes (nome/CPF).
+   *
+   * A sugestão de destino de um documento é um match contra esses valores —
+   * então ela precisa ser refeita quando eles mudam. Um documento enviado ANTES
+   * de a pessoa digitar os nomes ficava preso em "outro" para sempre, porque o
+   * assignment era calculado uma única vez (no upload/restore) e nada o
+   * recalculava. Era o "a classificação só aparece depois de clicar fora e
+   * aplicar" relatado em 2026-08-25.
+   */
+  partyListKeys: readonly string[];
+  /**
    * Aplica uma ficha-resumo no form (mestra de classificação, Fase E).
    * Ausente = esteira sem suporte a ficha (locação) — docs ficam em "outro".
    */
@@ -126,6 +137,7 @@ export function createVendaAdapter(
     },
     kindLabel: (kind) => VENDA_KIND_LABELS[kind] ?? kind,
     topKeyForKind: vendaTopKeyForKind,
+    partyListKeys: ["vendedores", "compradores"],
     applyFicha: (fields, form, options) =>
       applyFichaResumo(fields, form as never, options),
   };

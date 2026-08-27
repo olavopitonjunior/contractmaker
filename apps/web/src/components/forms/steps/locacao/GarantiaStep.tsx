@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { UseFormReturn } from "react-hook-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -16,11 +16,15 @@ import {
 } from "./_PartyFields";
 
 import {
-  buildGarantiaChoices,
-  findGarantiaChoice,
-  selectedGarantiaChoiceValue,
+  DEFAULT_GARANTIA_OPTIONS,
+  providersForTipo,
+  tipoTemGarantidor,
   type GarantiaOptionLike,
 } from "@/lib/forms/garantia-catalog";
+import {
+  GARANTIA_LABELS,
+  GARANTIA_TIPOS,
+} from "@/lib/contracts/template-category";
 
 // Seguro-fiança e garantia onerosa: quem paga a apólice e por quanto tempo ela
 // vale. Sem opção pré-selecionada — o padrão varia por seguradora/imobiliária,
@@ -40,12 +44,19 @@ const VIGENCIA_OPTIONS = [
  * por tipo: caução → nº de aluguéis (≤3, art. 38 §2º); fiador → dados do fiador;
  * seguro/garantia onerosa → tomador e vigência da apólice.
  *
- * A modalidade e o GARANTIDOR viraram uma escolha só ("Seguro-fiança — Porto
- * Seguro") em 2026-07-30, alimentada pelo catálogo da imobiliária
- * (`garantiaOptions`, que desce server-side pela page do form — ele é anônimo).
- * Escolher preenche `garantia.tipo` + `garantia.provider` de uma vez; é o
- * `provider` normalizado que casa com a cláusula da seguradora. "Outro
- * garantidor…" mantém o texto livre como escape hatch.
+ * Tipo e prestadora são DOIS campos separados (decisão do dono, 28/08 — o par
+ * combinado "Seguro-fiança — Porto Seguro" durou de 2026-07-30 até aqui):
+ *
+ *   1. "Tipo de garantia" — select FIXO do sistema (as 7 de GARANTIA_TIPOS).
+ *      É esta escolha que seleciona o TEMPLATE do contrato, de forma
+ *      vinculante (`matchCriteria.garantia`).
+ *   2. "Seguradora / prestadora" — só nos tipos com garantidor; opções do
+ *      catálogo da org (`garantiaOptions`, que desce server-side pela page —
+ *      o form é anônimo) + "Outra…" com texto livre. É o `provider`
+ *      normalizado que casa a CLÁUSULA da seguradora no acervo; prestadora
+ *      fora do catálogo cai na cláusula genérica do tipo.
+ *
+ * O shape gravado não mudou: `garantia.tipo` + `garantia.provider`.
  */
 export function GarantiaStep({
   form,
@@ -64,208 +75,277 @@ export function GarantiaStep({
 }) {
   const canConfig = !pathScope || pathScope.includes("config");
   const canObservacoes = !pathScope || pathScope.includes("observacoes");
+  const temClausula = form.watch("config.clausula_rescisoria") !== false;
   const tipo = form.watch("garantia.tipo") || "caucao";
   const provider = form.watch("garantia.provider") || "";
   const fiadorTipoPessoa = form.watch("garantia.fiador.tipo_pessoa");
   const tomador = form.watch("garantia.seguro_tomador");
   const vigencia = form.watch("garantia.seguro_vigencia");
 
-  const choices = useMemo(
-    () => buildGarantiaChoices(garantiaOptions),
-    [garantiaOptions],
+  const catalog = garantiaOptions ?? DEFAULT_GARANTIA_OPTIONS;
+  const providers = useMemo(
+    () => providersForTipo(catalog, tipo),
+    [catalog, tipo],
   );
-  const selectedValue = selectedGarantiaChoiceValue(choices, tipo, provider);
-  const selected = findGarantiaChoice(choices, selectedValue);
-  // Texto livre só no escape hatch — nas demais o garantidor vem do catálogo.
-  const showProviderInput = Boolean(selected?.isOutro);
+  // "Outra…" é escolha do usuário, não estado do dado — mas um provider
+  // gravado que não está (ou não está mais) no catálogo também é "outra":
+  // desativar uma seguradora não pode apagar o que o form já tinha.
+  const [outraEscolhida, setOutraEscolhida] = useState(false);
+  const temGarantidor = tipoTemGarantidor(tipo);
+  const isCatalogProvider = providers.includes(provider);
+  const showProviderInput =
+    temGarantidor &&
+    (providers.length === 0 ||
+      outraEscolhida ||
+      (provider !== "" && !isCatalogProvider));
+  const OUTRA = "__outra__";
+  const providerSelectValue = isCatalogProvider
+    ? provider
+    : showProviderInput
+      ? OUTRA
+      : "";
 
-  const onChoiceChange = (value: string) => {
-    const choice = findGarantiaChoice(choices, value);
-    if (!choice) return;
-    form.setValue("garantia.tipo", choice.tipo, { shouldDirty: true });
-    // "Outro garantidor…" zera o campo pra quem preenche digitar — trocar de
-    // Porto Seguro pra "outro" não pode deixar "Porto Seguro" pendurado.
-    form.setValue("garantia.provider", choice.isOutro ? "" : choice.provider, {
-      shouldDirty: true,
-    });
+  const onTipoChange = (value: string) => {
+    form.setValue("garantia.tipo", value, { shouldDirty: true });
+    // Trocar o tipo zera a prestadora — a Porto Seguro do seguro-fiança não
+    // pode ficar pendurada num título de capitalização.
+    form.setValue("garantia.provider", "", { shouldDirty: true });
+    setOutraEscolhida(false);
+  };
+
+  const onProviderSelect = (value: string) => {
+    if (value === OUTRA) {
+      setOutraEscolhida(true);
+      form.setValue("garantia.provider", "", { shouldDirty: true });
+      return;
+    }
+    setOutraEscolhida(false);
+    form.setValue("garantia.provider", value, { shouldDirty: true });
   };
 
   return (
     <div className="space-y-4">
-    <Card className="border border-border">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base font-semibold">Garantia locatícia</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4 pt-0">
-        <FormField form={form} name="garantia.tipo" label="Modalidade de garantia">
-          <NativeSelect
-            value={selectedValue}
-            onChange={onChoiceChange}
-            options={choices.map((c) => ({ value: c.value, label: c.label }))}
-          />
-        </FormField>
-
-        {showProviderInput && (
-          <FormField form={form} name="garantia.provider" label="Garantidor / seguradora">
-            <Input
-              {...form.register("garantia.provider")}
-              placeholder="Nome da seguradora ou garantidora"
+      <Card className="border border-border">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base font-semibold">Garantia locatícia</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 pt-0">
+          <FormField form={form} name="garantia.tipo" label="Tipo de garantia">
+            <NativeSelect
+              value={tipo}
+              onChange={onTipoChange}
+              options={GARANTIA_TIPOS.map((t) => ({
+                value: t,
+                label: GARANTIA_LABELS[t],
+              }))}
             />
           </FormField>
-        )}
 
-        {tipo === "caucao" && (
-          <FormField form={form} name="garantia.caucao_meses" label="Caução: nº de aluguéis (máx. 3)">
-            <Input
-              {...form.register("garantia.caucao_meses", { valueAsNumber: true })}
-              type="number"
-              min={0}
-              max={3}
-              inputMode="numeric"
-              placeholder="3"
-            />
-          </FormField>
-        )}
-
-        {tipo === "titulo_capitalizacao" && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Subscritora saiu daqui: vem da escolha do catálogo (ou do campo
-                "Outro garantidor…" acima). */}
-            <FormField form={form} name="garantia.titulo_valor" label="Valor nominal do título (R$)">
-              <MoneyField form={form} name="garantia.titulo_valor" placeholder="Ex: 15.000,00" />
+          {temGarantidor && providers.length > 0 && (
+            <FormField
+              form={form}
+              name="garantia.provider"
+              label="Seguradora / prestadora"
+            >
+              <NativeSelect
+                value={providerSelectValue}
+                onChange={onProviderSelect}
+                placeholder="Selecione"
+                options={[
+                  ...providers.map((p) => ({ value: p, label: p })),
+                  { value: OUTRA, label: "Outra…" },
+                ]}
+              />
             </FormField>
-            <FormField form={form} name="garantia.titulo_proposta" label="Nº da proposta/formulário">
-              <Input {...form.register("garantia.titulo_proposta")} placeholder="Ex.: 1234567-001" />
-            </FormField>
-          </div>
-        )}
+          )}
 
-        {(tipo === "seguro_fianca" || tipo === "garantia_onerosa") && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Seguradora saiu daqui: é a própria escolha da modalidade. */}
-            <FormField form={form} name="garantia.cobertura_meses" label="Cobertura (meses)">
+          {showProviderInput && (
+            <FormField
+              form={form}
+              name="garantia.provider"
+              label={
+                providers.length > 0
+                  ? "Qual seguradora / prestadora?"
+                  : "Seguradora / prestadora"
+              }
+            >
               <Input
-                {...form.register("garantia.cobertura_meses", { valueAsNumber: true })}
-                type="number"
-                inputMode="numeric"
-                placeholder="30"
+                {...form.register("garantia.provider")}
+                placeholder="Nome da seguradora ou garantidora"
               />
             </FormField>
-            <FormField form={form} name="garantia.seguro_tomador" label="Quem contrata o seguro?">
-              <NativeSelect
-                value={tomador ?? ""}
-                onChange={(v) =>
-                  form.setValue("garantia.seguro_tomador", v, { shouldDirty: true })
-                }
-                placeholder="Selecione"
-                options={TOMADOR_OPTIONS}
-              />
-            </FormField>
-            <FormField form={form} name="garantia.seguro_vigencia" label="Vigência da apólice">
-              <NativeSelect
-                value={vigencia ?? ""}
-                onChange={(v) =>
-                  form.setValue("garantia.seguro_vigencia", v, { shouldDirty: true })
-                }
-                placeholder="Selecione"
-                options={VIGENCIA_OPTIONS}
-              />
-            </FormField>
-          </div>
-        )}
+          )}
 
-        {tipo === "fiador" && (
-          <>
-            <Separator />
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold text-foreground">Dados do fiador</p>
-              <div className="flex rounded-md border border-input overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => form.setValue("garantia.fiador.tipo_pessoa", "fisica", { shouldDirty: true })}
-                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                    fiadorTipoPessoa !== "juridica"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-transparent text-muted-foreground hover:bg-muted"
-                  }`}
-                >
-                  Pessoa Física
-                </button>
-                <button
-                  type="button"
-                  onClick={() => form.setValue("garantia.fiador.tipo_pessoa", "juridica", { shouldDirty: true })}
-                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                    fiadorTipoPessoa === "juridica"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-transparent text-muted-foreground hover:bg-muted"
-                  }`}
-                >
-                  Pessoa Jurídica
-                </button>
-              </div>
+          {tipo === "caucao" && (
+            <FormField form={form} name="garantia.caucao_meses" label="Caução: nº de aluguéis (máx. 3)">
+              <Input
+                {...form.register("garantia.caucao_meses", { valueAsNumber: true })}
+                type="number"
+                min={0}
+                max={3}
+                inputMode="numeric"
+                placeholder="3"
+              />
+            </FormField>
+          )}
+
+          {tipo === "titulo_capitalizacao" && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Subscritora saiu daqui: vem da escolha do catálogo (ou do campo
+                  "Outro garantidor…" acima). */}
+              <FormField form={form} name="garantia.titulo_valor" label="Valor nominal do título (R$)">
+                <MoneyField form={form} name="garantia.titulo_valor" placeholder="Ex: 15.000,00" />
+              </FormField>
+              <FormField form={form} name="garantia.titulo_proposta" label="Nº da proposta/formulário">
+                <Input {...form.register("garantia.titulo_proposta")} placeholder="Ex.: 1234567-001" />
+              </FormField>
             </div>
-            {fiadorTipoPessoa === "juridica" ? (
-              <PessoaJuridicaLocacaoFields form={form} prefix="garantia.fiador" />
-            ) : (
-              <PessoaFisicaLocacaoFields form={form} prefix="garantia.fiador" />
-            )}
-            {/* Erro do BLOCO fiador (não de um campo): o FormField cobre
-                campo a campo, este é o refine do objeto inteiro. */}
-            {typeof (form.formState.errors?.garantia as any)?.fiador?.message === "string" && (
-              <p className="mt-1 text-xs text-destructive">
-                {(form.formState.errors?.garantia as any).fiador.message}
-              </p>
-            )}
-          </>
-        )}
-      </CardContent>
-    </Card>
+          )}
+
+          {(tipo === "seguro_fianca" || tipo === "garantia_onerosa") && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Seguradora saiu daqui: é a própria escolha da modalidade. */}
+              <FormField form={form} name="garantia.cobertura_meses" label="Cobertura (meses)">
+                <Input
+                  {...form.register("garantia.cobertura_meses", { valueAsNumber: true })}
+                  type="number"
+                  inputMode="numeric"
+                  placeholder="30"
+                />
+              </FormField>
+              <FormField form={form} name="garantia.seguro_tomador" label="Quem contrata o seguro?">
+                <NativeSelect
+                  value={tomador ?? ""}
+                  onChange={(v) =>
+                    form.setValue("garantia.seguro_tomador", v, { shouldDirty: true })
+                  }
+                  placeholder="Selecione"
+                  options={TOMADOR_OPTIONS}
+                />
+              </FormField>
+              <FormField form={form} name="garantia.seguro_vigencia" label="Vigência da apólice">
+                <NativeSelect
+                  value={vigencia ?? ""}
+                  onChange={(v) =>
+                    form.setValue("garantia.seguro_vigencia", v, { shouldDirty: true })
+                  }
+                  placeholder="Selecione"
+                  options={VIGENCIA_OPTIONS}
+                />
+              </FormField>
+            </div>
+          )}
+
+          {tipo === "fiador" && (
+            <>
+              <Separator />
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Dados do fiador</p>
+                <div className="flex rounded-md border border-input overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => form.setValue("garantia.fiador.tipo_pessoa", "fisica", { shouldDirty: true })}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                      fiadorTipoPessoa !== "juridica"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-transparent text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    Pessoa Física
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => form.setValue("garantia.fiador.tipo_pessoa", "juridica", { shouldDirty: true })}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                      fiadorTipoPessoa === "juridica"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-transparent text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    Pessoa Jurídica
+                  </button>
+                </div>
+              </div>
+              {fiadorTipoPessoa === "juridica" ? (
+                <PessoaJuridicaLocacaoFields form={form} prefix="garantia.fiador" />
+              ) : (
+                <PessoaFisicaLocacaoFields form={form} prefix="garantia.fiador" />
+              )}
+              {/* Erro do BLOCO fiador (não de um campo): o FormField cobre
+                  campo a campo, este é o refine do objeto inteiro. */}
+              {typeof (form.formState.errors?.garantia as any)?.fiador?.message === "string" && (
+                <p className="mt-1 text-xs text-destructive">
+                  {(form.formState.errors?.garantia as any).fiador.message}
+                </p>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Cláusula rescisória — "Não" tira do contrato a cláusula de multa por
           rescisão antecipada (condicional no template v3 via
           config.clausula_rescisoria). Default true = comportamento histórico.
           Só no token principal: `config` nunca entra no escopo de subtoken. */}
       {canConfig && (
-      <Card className="border border-border">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base font-semibold">Cláusula rescisória</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField form={form} name="config.clausula_rescisoria" label="O contrato terá cláusula rescisória (multa por rescisão antecipada)?">
-              <NativeSelect
-                value={form.watch("config.clausula_rescisoria") === false ? "nao" : "sim"}
-                onChange={(v) =>
-                  form.setValue("config.clausula_rescisoria", v !== "nao", {
-                    shouldDirty: true,
-                  })
-                }
-                options={[
-                  { value: "sim", label: "Sim" },
-                  { value: "nao", label: "Não" },
-                ]}
-              />
-            </FormField>
-            {form.watch("config.clausula_rescisoria") !== false && (
-              <FormField form={form} name="config.multa_rescisoria_meses" label="Multa rescisória (nº de aluguéis)">
+        <Card className="border border-border">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-semibold">
+              Cláusula rescisória
+            </CardTitle>
+          </CardHeader>
+          {/* Grid com a coluna do numero FIXA em 11rem, e nao 50%.
+              Com `md:grid-cols-2` o rotulo de 68 caracteres quebrava em 2-3
+              linhas enquanto o vizinho ocupava 1 — e como o FormField e
+              `flex-col` sem altura minima no Label, o select descia ~30px em
+              relacao ao input. Escolher "Nao" ainda deixava meia linha vazia.
+              Agora o texto longo vira `hint` (abaixo do campo, fora do fluxo do
+              grid) e o campo de meses tem largura de campo numerico. */}
+          <CardContent className="space-y-4 pt-0">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,1fr)_11rem]">
+              <FormField
+                form={form}
+                name="config.clausula_rescisoria"
+                label="Multa por rescisão antecipada"
+                hint="Cobra do inquilino que devolve o imóvel antes do fim do prazo, proporcional ao tempo restante (art. 4º da Lei 8.245/91)."
+              >
+                <NativeSelect
+                  value={temClausula ? "sim" : "nao"}
+                  onChange={(v) =>
+                    form.setValue("config.clausula_rescisoria", v !== "nao", {
+                      shouldDirty: true,
+                    })
+                  }
+                  options={[
+                    { value: "sim", label: "O contrato terá" },
+                    { value: "nao", label: "O contrato não terá" },
+                  ]}
+                />
+              </FormField>
+              {/* Sempre MONTADO, desabilitado quando "não": some-lo fazia a
+                  linha do grid encolher e o card inteiro pular de altura a cada
+                  troca do select. */}
+              <FormField
+                form={form}
+                name="config.multa_rescisoria_meses"
+                label="Nº de aluguéis"
+                hint={temClausula ? undefined : "Sem cláusula, não se aplica."}
+              >
                 <Input
-                  {...form.register("config.multa_rescisoria_meses", { valueAsNumber: true })}
+                  {...form.register("config.multa_rescisoria_meses", {
+                    valueAsNumber: true,
+                  })}
                   type="number"
                   inputMode="numeric"
                   min={0}
                   max={12}
                   placeholder="3"
+                  disabled={!temClausula}
                 />
               </FormField>
-            )}
-          </div>
-          {form.watch("config.clausula_rescisoria") === false && (
-            <p className="text-xs text-muted-foreground">
-              O contrato sairá sem a cláusula de multa por rescisão antecipada.
-            </p>
-          )}
-        </CardContent>
-      </Card>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Observações gerais — paridade com venda (ComissaoConfigStep). Vai pro
@@ -278,7 +358,7 @@ export function GarantiaStep({
             Observações Gerais
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4 pt-0">
           <FormField form={form} name="observacoes" label="Algo mais que a imobiliária precise saber? (opcional)">
             <Textarea
               {...form.register("observacoes")}

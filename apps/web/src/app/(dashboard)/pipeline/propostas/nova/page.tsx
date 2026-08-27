@@ -16,6 +16,7 @@ import {
   type ProposalFormValues,
 } from "@/lib/proposals/form-data";
 import { getIListConnection } from "@/lib/ilist/connection";
+import { listGarantiaOptions } from "@/lib/forms/garantia-option-repo";
 import { resolveRecreationAssignee } from "@/lib/proposals/recreate-assignee";
 
 export const dynamic = "force-dynamic";
@@ -158,11 +159,17 @@ export default async function NovaPropostaPage({
     initialResponsibleName = assignee.responsibleName;
   }
 
+  // Prestadoras da garantia (só locação tem a etapa) — mesmo catálogo do
+  // formulário público, filtrado às ativas.
+  const garantiaOptions =
+    tipo === "locacao" ? await listGarantiaOptions(orgId, { activeOnly: true }) : [];
+
   return (
     <ProposalForm
       mode="create"
       initial={initial}
       schemaOptions={schemaOptions}
+      garantiaOptions={garantiaOptions}
       members={members}
       canAssign={canAssign}
       hasIList={hasIList}

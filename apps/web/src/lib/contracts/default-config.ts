@@ -160,10 +160,46 @@ export const DEFAULT_LOCACAO_SETTINGS: LocacaoSettings = {
   },
 };
 
+/**
+ * Padrão COMERCIAL da locação — a comissão que a imobiliária cobra pela
+ * intermediação do 1º aluguel.
+ *
+ * Chave irmã de `locacao`, e não um campo dentro dela, de propósito:
+ * `locacaoSettingsSchema` é `.strict()` e descreve as CLÁUSULAS do contrato
+ * (foro, multas, juros) — é o que `api/contracts/[id]/settings` valida por
+ * contrato e o que o `ContractSettingsPanel` edita. Enfiar comissão ali faria
+ * aquele PATCH exigir um campo que o painel não envia, e passaria a decisão
+ * comercial pelo painel jurídico.
+ */
+export const locacaoComissaoDefaultsSchema = z
+  .object({
+    forma: z.enum(["percentual", "valor_fixo"]),
+    /** % do 1º aluguel (forma = percentual). */
+    taxa_locacao_percent: z.number().min(0).max(100),
+    /** R$ à vista (forma = valor_fixo). */
+    taxa_locacao_valor: z.number().min(0),
+  })
+  .strict();
+
+export type LocacaoComissaoDefaults = z.infer<
+  typeof locacaoComissaoDefaultsSchema
+>;
+
+/**
+ * Zero em tudo = "a imobiliária ainda não configurou". O formulário nasce vazio
+ * como sempre nasceu; quem preencher o padrão passa a ver o campo pré-populado.
+ */
+export const DEFAULT_LOCACAO_COMISSAO: LocacaoComissaoDefaults = {
+  forma: "percentual",
+  taxa_locacao_percent: 0,
+  taxa_locacao_valor: 0,
+};
+
 /** Shape de `OrgFormSettings.contractDefaultsJson`. */
 export const orgContractDefaultsSchema = z.object({
   venda: contractSettingsSchema.deepPartial().optional(),
   locacao: locacaoSettingsSchema.deepPartial().optional(),
+  locacao_comissao: locacaoComissaoDefaultsSchema.deepPartial().optional(),
 });
 
 export type OrgContractDefaults = z.infer<typeof orgContractDefaultsSchema>;
@@ -295,6 +331,23 @@ export function resolveOrgLocacaoDefaults(
         d.config.honorarios_advocaticios_percent
       ),
     },
+  };
+}
+
+/**
+ * Branch comercial da locação. Mesmo tratamento defensivo dos outros: JSON livre
+ * no banco, chave desconhecida cai no default em vez de explodir a criação do
+ * formulário.
+ */
+export function resolveOrgLocacaoComissao(
+  contractDefaultsJson: unknown
+): LocacaoComissaoDefaults {
+  const c = obj(obj(contractDefaultsJson).locacao_comissao);
+  const d = DEFAULT_LOCACAO_COMISSAO;
+  return {
+    forma: c.forma === "valor_fixo" ? "valor_fixo" : d.forma,
+    taxa_locacao_percent: num(c.taxa_locacao_percent, d.taxa_locacao_percent),
+    taxa_locacao_valor: num(c.taxa_locacao_valor, d.taxa_locacao_valor),
   };
 }
 

@@ -149,13 +149,26 @@ describe("dadosLocacaoSchema", () => {
     ).toBe(false);
   });
 
-  it("exige descrição do imóvel com >= 10 caracteres", () => {
+  // A descrição era obrigatória (>= 10 caracteres) e travava a etapa do imóvel.
+  // A corretora pediu que saísse do caminho crítico: virava discussão de
+  // negociação num formulário que só precisa identificar o imóvel. O endereço
+  // segue obrigatório; quem quiser exigir a descrição liga pelo preset da org.
+  it("aceita imóvel sem descrição", () => {
+    const parsed = dadosLocacaoSchema.safeParse({
+      ...baseValid,
+      imovel: { ...baseValid.imovel, descricao: undefined },
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.imovel.descricao).toBe("");
+  });
+
+  it("aceita descrição curta — o mínimo de 10 caracteres saiu", () => {
     expect(
       dadosLocacaoSchema.safeParse({
         ...baseValid,
-        imovel: { descricao: "curto" },
+        imovel: { ...baseValid.imovel, descricao: "curto" },
       }).success
-    ).toBe(false);
+    ).toBe(true);
   });
 });
 

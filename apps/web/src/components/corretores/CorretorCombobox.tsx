@@ -62,6 +62,10 @@ export function CorretorCombobox({
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState<CorretorComboboxOption[]>([]);
   const [loading, setLoading] = useState(false);
+  // Falha de rede/HTTP tem estado próprio: engolir num `setOptions([])` fazia um
+  // 429 (ou um 403 de form vinculado) se disfarçar de "Nenhum corretor
+  // encontrado", e o usuário concluía que o roster estava vazio.
+  const [failed, setFailed] = useState(false);
   const requestId = useRef(0);
 
   useEffect(() => {
@@ -75,10 +79,16 @@ export function CorretorCombobox({
     const timer = setTimeout(() => {
       fetchOptions(q)
         .then((results) => {
-          if (requestId.current === id) setOptions(results);
+          if (requestId.current === id) {
+            setOptions(results);
+            setFailed(false);
+          }
         })
         .catch(() => {
-          if (requestId.current === id) setOptions([]);
+          if (requestId.current === id) {
+            setOptions([]);
+            setFailed(true);
+          }
         })
         .finally(() => {
           if (requestId.current === id) setLoading(false);
@@ -92,6 +102,7 @@ export function CorretorCombobox({
     setOpen(false);
     setQuery("");
     setOptions([]);
+    setFailed(false);
   }
 
   return (
@@ -120,13 +131,19 @@ export function CorretorCombobox({
             {loading && (
               <div className="py-6 text-center text-sm text-muted-foreground">Buscando...</div>
             )}
-            {!loading && options.length === 0 && (
+            {!loading && failed && (
+              <div className="px-3 py-6 text-center text-sm text-destructive">
+                Não foi possível carregar os corretores. Verifique a conexão e
+                digite de novo para tentar outra vez.
+              </div>
+            )}
+            {!loading && !failed && options.length === 0 && (
               <CommandEmpty>
                 Nenhum corretor encontrado.
                 {allowCreate ? " Use o botão de cadastrar abaixo." : ""}
               </CommandEmpty>
             )}
-            {!loading && options.length > 0 && (
+            {!loading && !failed && options.length > 0 && (
               <CommandGroup>
                 {options.map((o) => (
                   <CommandItem key={o.id} value={o.id} onSelect={() => handleSelect(o)}>

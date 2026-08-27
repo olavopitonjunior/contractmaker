@@ -2,15 +2,20 @@ import type { UseFormReturn } from "react-hook-form";
 import {
   PERSON_CATEGORIES,
   PROPERTY_CATEGORIES,
+  FICHA_PAPEIS_LOCACAO,
   coerce,
+  matchFichaResumo,
   inferEstadoCivilFromRegime,
   isUncatalogedPersonDoc,
   parseEndereco,
   pickSpouseFromCertidao,
+  titularSideInCertidao,
   sanitizeCpf,
+  sanitizeUf,
   type Assignment,
   type DocumentKind,
   type ExtractedDoc,
+  type FichaResumoData,
   type ProcessedDocHint,
 } from "./extracted-to-form";
 
@@ -44,12 +49,25 @@ const ADDRESS_FIELDS = new Set([
 
 // parteLocacaoSchema não tem naturalidade/sexo/nome_mae — mapeia só o que o
 // schema conhece pra não injetar chaves órfãs no dataJson.
+//
+// A qualificação (nacionalidade, estado civil, profissão) e o contato
+// (e-mail, celular) ESTÃO no parteLocacaoSchema e estavam sendo descartados:
+// o OCR extraía e o mapa não conhecia a chave. Era a queixa "não puxou CPF,
+// endereço e profissão dos locatários" de 2026-08-25.
 const FIELD_MAP_PERSON_LOCACAO: Record<string, string> = {
   nome_completo: "nome",
   titular_nome: "nome",
   rg_numero: "rg",
   cpf_numero: "cpf",
   data_nascimento: "data_nascimento",
+  nacionalidade: "nacionalidade",
+  estado_civil: "estado_civil",
+  profissao: "profissao",
+  email: "email",
+  telefone: "mobile_phone",
+  mobile_phone: "mobile_phone",
+  numero: "numero",
+  complemento: "complemento",
   bairro: "bairro",
   cidade: "cidade",
   uf: "uf",
@@ -79,6 +97,13 @@ export type LocacaoPartyKind =
  * Kinds de LOCAÇÃO cujo basePath é uma pessoa (parte, fiador, representante ou
  * cônjuge).
  */
+/** Partes de verdade (não sub-slots): o doc atribuído a elas qualifica ELAS. */
+const TITULAR_KINDS_LOCACAO = new Set<DocumentKind>([
+  "locador",
+  "locatario",
+  "fiador",
+]);
+
 const PERSON_KINDS_LOCACAO = new Set<DocumentKind>([
   "locador",
   "locatario",
@@ -162,6 +187,7 @@ export function mapExtractedToLocacaoForm(
   const isProperty = PROPERTY_CATEGORIES.has(category);
   const isConjuge = CONJUGE_KINDS_LOCACAO.has(assignment.kind);
   const isRepresentante = REPRESENTANTE_KINDS_LOCACAO.has(assignment.kind);
+  const isTitular = TITULAR_KINDS_LOCACAO.has(assignment.kind);
   let filled = 0;
 
   // Espelha a venda: com "endereço igual ao do titular" ligado (default true) o
@@ -209,6 +235,64 @@ export function mapExtractedToLocacaoForm(
       if (parsed.numero) applyField("numero", parsed.numero);
     }
 
+    // Certidão de casamento atribuída à PRÓPRIA parte. Locação não tinha este
+    // ramo: uma certidão anexada ao locatário não inferia o estado civil, não
+    // preenchia o cônjuge e jogava fora a qualificação (profissão,
+    // nacionalidade, nascimento) dos dois nubentes. Espelha a venda.
+    if (isTitular && category === "certidao_casamento") {
+      const estadoCivil = inferEstadoCivilFromRegime(fields.regime_bens);
+      if (estadoCivil) applyField("estado_civil", estadoCivil);
+
+      const parent = {
+        nome: form.getValues(`${basePath}.nome`),
+        cpf: form.getValues(`${basePath}.cpf`),
+      };
+      const side = titularSideInCertidao(fields, parent);
+      applyField("profissao", fields[`conjuge${side}_profissao`]);
+      applyField("nacionalidade", fields[`conjuge${side}_nacionalidade`]);
+      applyField("data_nascimento", fields[`conjuge${side}_data_nascimento`]);
+
+      const spouse = pickSpouseFromCertidao(fields, parent);
+      const setConjuge = (campo: string, valor: string | null) => {
+        if (!valor) return;
+        const path = `${basePath}.conjuge.${campo}`;
+        if (form.getValues(path)) return;
+        form.setValue(path, valor as never, {
+          shouldDirty: true,
+          shouldTouch: true,
+        });
+        filled += 1;
+      };
+      setConjuge("nome", spouse.nome);
+      setConjuge("cpf", spouse.cpf);
+      setConjuge("profissao", spouse.profissao);
+      setConjuge("nacionalidade", spouse.nacionalidade);
+      setConjuge("data_nascimento", spouse.dataNascimento);
+    }
+
+    // Procuração. Antes deste ramo ela preenchia ZERO campos em locação: o
+    // mapa não conhece `outorgante_*`/`outorgado_*`. Mesma divisão da venda —
+    // outorgante é a parte, outorgado é o representante.
+    if (category === "procuracao") {
+      if (isRepresentante) {
+        applyField("nome", fields.outorgado_nome);
+        applyField("cpf", fields.outorgado_cpf);
+      } else if (isTitular) {
+        applyField("nome", fields.outorgante_nome);
+        applyField("cpf", fields.outorgante_cpf);
+        applyField("rg", fields.outorgante_rg);
+        applyField("nacionalidade", fields.outorgante_nacionalidade);
+        applyField("estado_civil", fields.outorgante_estado_civil);
+        applyField("profissao", fields.outorgante_profissao);
+        const parsedOutorgante = parseEndereco(
+          fields.outorgante_endereco_completo
+        );
+        if (parsedOutorgante.rua) applyField("endereco", parsedOutorgante.rua);
+        if (parsedOutorgante.numero)
+          applyField("numero", parsedOutorgante.numero);
+      }
+    }
+
     // Certidão de casamento atribuída ao cônjuge: escolhe qual dos dois
     // nubentes é o cônjuge do slot comparando com o titular pai (D1, helper
     // compartilhado com a venda).
@@ -223,6 +307,10 @@ export function mapExtractedToLocacaoForm(
       const spouse = pickSpouseFromCertidao(fields, parent);
       if (spouse.nome) applyField("nome", spouse.nome);
       if (spouse.cpf) applyField("cpf", spouse.cpf);
+      if (spouse.profissao) applyField("profissao", spouse.profissao);
+      if (spouse.nacionalidade) applyField("nacionalidade", spouse.nacionalidade);
+      if (spouse.dataNascimento)
+        applyField("data_nascimento", spouse.dataNascimento);
     }
 
     // D2 — estado civil colateral do pai (só se vazio). Sem isso os campos
@@ -421,12 +509,39 @@ export function suggestLocacaoAssignment(
     return { kind: "imovel", index: 0 };
   }
 
+  // A própria ficha-resumo não é de ninguém: ela DECLARA os papéis dos outros
+  // (o efeito da etapa 0 chama `applyFicha` quando ela fica pronta).
+  if (category === "ficha_resumo") return { kind: "outro", index: 0 };
+
   // Categoria de pessoa OU doc fora do catálogo com evidência de identidade
   // (ex.: carteira da OAB classificada como "outro").
   if (
     !PERSON_CATEGORIES.has(category) &&
     !isUncatalogedPersonDoc(category, fields)
   ) {
+    return { kind: "outro", index: 0 };
+  }
+
+  // 1. Papel declarado numa ficha-resumo desta sessão tem prioridade máxima —
+  // é a única fonte que sabe QUEM é quem antes de o form estar preenchido.
+  const fichaMatch = matchFichaResumo(fields, siblings, FICHA_PAPEIS_LOCACAO);
+  if (fichaMatch) return fichaMatch;
+
+  // 2. Procuração: o outorgante é a PARTE, o outorgado é o representante.
+  // Antes disto ela caía sempre em "outro" (o match é feito sobre
+  // `nome_completo`/`cpf_numero`, chaves que a procuração não devolve) e o
+  // gate H.5 travava o "Aplicar aos campos" do formulário inteiro.
+  if (category === "procuracao") {
+    const outorgante = {
+      nome_completo: fields.outorgante_nome,
+      cpf_numero: fields.outorgante_cpf,
+    };
+    const locadorOutorgante = matchPersonIndex(snapshot.locadores, outorgante);
+    if (locadorOutorgante !== null)
+      return { kind: "representante_locador", index: locadorOutorgante };
+    const locatarioOutorgante = matchPersonIndex(snapshot.locatarios, outorgante);
+    if (locatarioOutorgante !== null)
+      return { kind: "representante_locatario", index: locatarioOutorgante };
     return { kind: "outro", index: 0 };
   }
 
@@ -506,4 +621,166 @@ export function locacaoSlotLabel(
     default:
       return "Outros";
   }
+}
+
+/**
+ * Aplica uma ficha-resumo (dossiê consolidado da imobiliária) num formulário de
+ * LOCAÇÃO — espelho de `applyFichaResumo` da venda.
+ *
+ * Sem isto, a ficha em PDF era classificada, extraída e **descartada**: os
+ * papéis de locação não existiam em `FICHA_PAPEIS`, o `locacaoDocAdapter` não
+ * implementava `applyFicha` e o documento caía em "outro", preenchendo zero
+ * campos (e ainda travando o botão "Aplicar" pelo gate H.5). Foi o teste que a
+ * corretora ficou de fazer na sessão de 2026-08-25.
+ *
+ * Diferenças estruturais em relação à venda:
+ *  - `imovel` é objeto SINGULAR (um imóvel por contrato), não array;
+ *  - o fiador mora em `garantia.fiador`, fora de qualquer array;
+ *  - não há procurador em locação (o schema não tem o sub-objeto).
+ */
+export function applyFichaResumoLocacao(
+  data: FichaResumoData,
+  form: UseFormReturn<Record<string, unknown>>,
+  options: { skipIfDirty?: boolean } = {}
+): number {
+  const { skipIfDirty = true } = options;
+  let filled = 0;
+
+  const setIfEmpty = (path: string, value: unknown) => {
+    if (value === undefined || value === null || value === "") return;
+    const formField = path.slice(path.lastIndexOf(".") + 1);
+    const coerced = coerce(formField, value);
+    if (coerced === undefined || coerced === null || coerced === "") return;
+    if (skipIfDirty) {
+      const current = form.getValues(path);
+      if (current !== undefined && current !== null && current !== "") return;
+    }
+    form.setValue(path, coerced as never, { shouldDirty: true, shouldTouch: true });
+    filled += 1;
+  };
+
+  const ensureSlot = (
+    listKey: "locadores" | "locatarios",
+    index: number,
+    template: Record<string, unknown>
+  ) => {
+    const current = (form.getValues(listKey) as unknown[] | undefined) ?? [];
+    if (current.length > index) return;
+    const next = [...current];
+    while (next.length <= index) next.push({ ...template });
+    form.setValue(listKey, next as never, { shouldDirty: true });
+  };
+
+  if (Array.isArray(data.partes)) {
+    for (const p of data.partes) {
+      if (!p || typeof p !== "object") continue;
+      const papel = p.papel as DocumentKind | undefined;
+      if (!papel || !FICHA_PAPEIS_LOCACAO.has(papel)) continue;
+      const idx =
+        typeof p.indice_referencia === "number" && p.indice_referencia >= 0
+          ? p.indice_referencia
+          : 0;
+
+      const isConjuge = CONJUGE_KINDS_LOCACAO.has(papel);
+      const isRep = REPRESENTANTE_KINDS_LOCACAO.has(papel);
+      const isPj = !!p.cnpj || !!p.razao_social;
+
+      // O fiador não é array: vive em `garantia.fiador`, e declarar um na ficha
+      // é afirmação de que a garantia é fiança.
+      let parentPrefix: string;
+      if (papel === "fiador" || papel === "conjuge_fiador") {
+        parentPrefix = "garantia.fiador";
+        const tipoAtual = form.getValues("garantia.tipo");
+        if (tipoAtual !== "fiador") {
+          form.setValue("garantia.tipo", "fiador" as never, {
+            shouldDirty: true,
+            shouldTouch: true,
+          });
+          filled += 1;
+        }
+      } else {
+        const listKey: "locadores" | "locatarios" =
+          papel === "locador" ||
+          papel === "conjuge_locador" ||
+          papel === "representante_locador"
+            ? "locadores"
+            : "locatarios";
+        ensureSlot(
+          listKey,
+          idx,
+          isPj ? { tipo_pessoa: "juridica" } : { tipo_pessoa: "fisica" }
+        );
+        parentPrefix = `${listKey}.${idx}`;
+      }
+
+      let prefix = parentPrefix;
+      if (isConjuge) prefix = `${prefix}.conjuge`;
+      else if (isRep) prefix = `${prefix}.representante`;
+
+      // O representante de locação é o sub-objeto mais pobre do schema
+      // (nome/cpf/email/mobile_phone) — escrever fora dele criaria chave órfã.
+      if (isRep) {
+        setIfEmpty(`${prefix}.nome`, p.nome);
+        const repCpf = sanitizeCpf(p.cpf);
+        if (repCpf) setIfEmpty(`${prefix}.cpf`, repCpf);
+        setIfEmpty(`${prefix}.email`, p.email);
+        continue;
+      }
+
+      if (!isConjuge) {
+        if (isPj) {
+          setIfEmpty(`${prefix}.tipo_pessoa`, "juridica");
+          setIfEmpty(`${prefix}.razao_social`, p.razao_social);
+          setIfEmpty(`${prefix}.cnpj`, p.cnpj);
+        } else {
+          setIfEmpty(`${prefix}.tipo_pessoa`, "fisica");
+        }
+      }
+
+      setIfEmpty(`${prefix}.nome`, p.nome);
+      const cpfClean = sanitizeCpf(p.cpf);
+      if (cpfClean) setIfEmpty(`${prefix}.cpf`, cpfClean);
+      setIfEmpty(`${prefix}.rg`, p.rg);
+      setIfEmpty(`${prefix}.data_nascimento`, p.data_nascimento);
+      setIfEmpty(`${prefix}.profissao`, p.profissao);
+      setIfEmpty(`${prefix}.nacionalidade`, p.nacionalidade);
+      setIfEmpty(`${prefix}.email`, p.email);
+      if (!isConjuge) setIfEmpty(`${prefix}.estado_civil`, p.estado_civil);
+
+      // Cônjuge só recebe endereço quando marcou que tem endereço próprio.
+      const skipAddress = isConjuge
+        ? form.getValues(`${prefix}.endereco_igual_ao_titular`) !== false
+        : false;
+      if (!skipAddress) {
+        setIfEmpty(`${prefix}.endereco`, p.endereco);
+        setIfEmpty(`${prefix}.numero`, p.numero);
+        setIfEmpty(`${prefix}.complemento`, p.complemento);
+        setIfEmpty(`${prefix}.bairro`, p.bairro);
+        setIfEmpty(`${prefix}.cidade`, p.cidade);
+        const uf = sanitizeUf(p.uf);
+        if (uf) setIfEmpty(`${prefix}.uf`, uf);
+        setIfEmpty(`${prefix}.cep`, p.cep);
+      }
+    }
+  }
+
+  // Locação tem UM imóvel: a ficha pode listar vários, mas só o primeiro entra.
+  if (Array.isArray(data.imoveis) && data.imoveis.length > 0) {
+    const im = data.imoveis[0];
+    if (im && typeof im === "object") {
+      setIfEmpty("imovel.rua", im.rua);
+      setIfEmpty("imovel.numero", im.numero);
+      setIfEmpty("imovel.bairro", im.bairro);
+      setIfEmpty("imovel.cidade", im.cidade);
+      const uf = sanitizeUf(im.uf);
+      if (uf) setIfEmpty("imovel.uf", uf);
+      setIfEmpty("imovel.cep", im.cep);
+      setIfEmpty("imovel.matricula", im.matricula);
+      setIfEmpty("imovel.cartorio", im.cartorio);
+      setIfEmpty("imovel.inscricao_iptu", im.inscricao_iptu);
+      setIfEmpty("imovel.descricao", im.descricao);
+    }
+  }
+
+  return filled;
 }

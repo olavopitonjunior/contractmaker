@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -7,7 +8,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, EyeOff } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { AlertTriangle, EyeOff, Loader2, Pencil } from "lucide-react";
 import {
   collectExtractionIssues,
   documentLabel,
@@ -30,6 +33,15 @@ interface Props {
    * `null` quando o caller não consegue calcular (ex.: doc ainda sem destino).
    */
   writePreview?: WritePreviewEntry[] | null;
+  /**
+   * Grava as correções do usuário nos campos extraídos. Ausente = dialog
+   * somente-leitura (modo readOnly e telas que só exibem).
+   *
+   * Existe porque a alternativa era o que a corretora fez na sessão de
+   * 2026-08-25: ver o CPF errado no card, não poder corrigir ali, e redigitar
+   * tudo à mão nos campos do formulário.
+   */
+  onSaveFields?: (fields: Record<string, string>) => Promise<void> | void;
 }
 
 export interface WritePreviewEntry {
@@ -77,10 +89,48 @@ export function ExtractedDataDialog({
   fields,
   confidence,
   writePreview,
+  onSaveFields,
 }: Props) {
-  const entries = fields
-    ? Object.entries(fields).filter(([, v]) => v !== null && v !== "")
-    : [];
+  const entries = useMemo(
+    () =>
+      fields
+        ? Object.entries(fields).filter(([, v]) => v !== null && v !== "")
+        : [],
+    [fields]
+  );
+  const [editando, setEditando] = useState(false);
+  const [rascunho, setRascunho] = useState<Record<string, string>>({});
+  const [salvando, setSalvando] = useState(false);
+
+  // Fechar descarta a edição: reabrir não pode ressuscitar rascunho cancelado.
+  useEffect(() => {
+    if (!open) {
+      setEditando(false);
+      setSalvando(false);
+    }
+  }, [open]);
+
+  const comecarEdicao = () => {
+    setRascunho(Object.fromEntries(entries.map(([k, v]) => [k, formatValue(v)])));
+    setEditando(true);
+  };
+
+  const salvar = async () => {
+    if (!onSaveFields) return;
+    // Só o que mudou — assim o servidor não reescreve campo que ninguém tocou.
+    const alterados: Record<string, string> = {};
+    for (const [k, v] of entries) {
+      const novo = rascunho[k] ?? "";
+      if (novo !== formatValue(v)) alterados[k] = novo;
+    }
+    setSalvando(true);
+    try {
+      if (Object.keys(alterados).length > 0) await onSaveFields(alterados);
+      setEditando(false);
+    } finally {
+      setSalvando(false);
+    }
+  };
   const issues: ExtractionIssue[] = collectExtractionIssues(fields);
   const issuesByKey = new Map(issues.map((i) => [i.ocrKey, i]));
   const criticos = issues.filter((i) => isCritico(i.reason));
@@ -141,9 +191,54 @@ export function ExtractedDataDialog({
           )}
 
           <section className="mb-4">
-            <h3 className="mb-1.5 text-xs font-medium text-muted-foreground">
-              Dados extraídos
-            </h3>
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <h3 className="text-xs font-medium text-muted-foreground">
+                Dados extraídos
+              </h3>
+              {onSaveFields && entries.length > 0 && !editando && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 px-2 text-[11px]"
+                  onClick={comecarEdicao}
+                >
+                  <Pencil className="h-3 w-3 mr-1" />
+                  Corrigir
+                </Button>
+              )}
+              {editando && (
+                <div className="flex gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() => setEditando(false)}
+                    disabled={salvando}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={salvar}
+                    disabled={salvando}
+                  >
+                    {salvando && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+                    Salvar correções
+                  </Button>
+                </div>
+              )}
+            </div>
+            {editando && (
+              <p className="mb-2 text-[11px] text-muted-foreground">
+                Corrija o que o documento realmente diz. Deixe em branco para
+                descartar um campo lido errado. Isto não altera o arquivo — só o
+                que será aplicado ao formulário.
+              </p>
+            )}
             {entries.length === 0 ? (
               <p className="text-xs text-muted-foreground">
                 Nenhum campo foi extraído deste documento.
@@ -155,6 +250,23 @@ export function ExtractedDataDialog({
                   return (
                     <div key={k} className="min-w-0 text-xs">
                       <dt className="text-muted-foreground">{ocrFieldLabel(k)}</dt>
+                      {editando ? (
+                        <dd>
+                          <Input
+                            value={rascunho[k] ?? ""}
+                            onChange={(e) =>
+                              setRascunho((prev) => ({ ...prev, [k]: e.target.value }))
+                            }
+                            maxLength={500}
+                            className={
+                              issue && isCritico(issue.reason)
+                                ? "h-7 text-xs border-destructive"
+                                : "h-7 text-xs"
+                            }
+                          />
+                        </dd>
+                      ) : (
+                        <>
                       {/* Tachado significa DESCARTADO. `cpf_invalido` não é
                           descartado — é gravado no formulário — então tachá-lo
                           diria ao revisor exatamente o contrário do que este
@@ -183,6 +295,8 @@ export function ExtractedDataDialog({
                         >
                           {MOTIVO_LABEL[issue.reason]}
                         </dd>
+                      )}
+                        </>
                       )}
                     </div>
                   );

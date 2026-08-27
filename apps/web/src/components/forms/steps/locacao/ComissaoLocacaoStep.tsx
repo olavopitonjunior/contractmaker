@@ -8,7 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Plus, Trash2, UserPlus, Building2, Search } from "lucide-react";
 import { NativeSelect } from "@/components/forms/NativeSelect";
-import { MoneyField } from "./_PartyFields";
+import { DecimalField, MoneyField } from "./_PartyFields";
+import { taxaLocacaoValor } from "@/lib/locacao/commission";
+import { formatMoneyBR } from "@/lib/format/money";
 import { FormField } from "@/components/forms/fields/FormField";
 import { maskCPF, maskCNPJ, maskTelefone } from "@/lib/forms/field-formats";
 import { CadastroRecebimento } from "../CadastroRecebimento";
@@ -86,6 +88,17 @@ export function ComissaoLocacaoStep({
     name: "comissao.angariadores",
   });
 
+  // A taxa da imobiliária ganhou as duas formas (a do angariador já tinha):
+  // "R$ 800 pela intermediação" não tinha onde ser dito.
+  const formaTaxa =
+    form.watch("comissao.forma_taxa_locacao") === "valor_fixo"
+      ? "valor_fixo"
+      : "percentual";
+  const previewTaxa = taxaLocacaoValor(
+    form.watch("aluguel.valor"),
+    form.watch("comissao.taxa_locacao_percent")
+  );
+
   const somaPercentuais = angariadorFields.reduce((acc, _f, i) => {
     if (form.watch(`comissao.angariadores.${i}.forma_comissao`) === "valor_fixo") return acc;
     const v = Number(form.watch(`comissao.angariadores.${i}.percentual`));
@@ -101,17 +114,59 @@ export function ComissaoLocacaoStep({
         </CardHeader>
         <CardContent className="space-y-4 pt-0">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField form={form} name="comissao.taxa_locacao_percent" label="Taxa de locação (% sobre o 1º aluguel)">
-              <Input
-                {...form.register("comissao.taxa_locacao_percent", { valueAsNumber: true })}
-                type="number"
-                inputMode="decimal"
-                min={0}
-                max={100}
-                step="0.5"
-                placeholder="Ex: 100"
+            <FormField
+              form={form}
+              name="comissao.forma_taxa_locacao"
+              label="Taxa de intermediação (1º aluguel)"
+              hint="Devida uma única vez à imobiliária pela intermediação da locação."
+            >
+              <NativeSelect
+                value={formaTaxa}
+                onChange={(v) =>
+                  form.setValue("comissao.forma_taxa_locacao", v, {
+                    shouldDirty: true,
+                  })
+                }
+                options={FORMA_COMISSAO_OPTIONS.map((o) =>
+                  o.value === "percentual"
+                    ? { ...o, label: "% do primeiro aluguel" }
+                    : { ...o, label: "Valor fixo (R$)" }
+                )}
               />
             </FormField>
+            {formaTaxa === "valor_fixo" ? (
+              <FormField
+                form={form}
+                name="comissao.taxa_locacao_valor"
+                label="Valor da taxa (R$)"
+              >
+                <MoneyField
+                  form={form}
+                  name="comissao.taxa_locacao_valor"
+                  placeholder="Ex: 800,00"
+                />
+              </FormField>
+            ) : (
+              <FormField
+                form={form}
+                name="comissao.taxa_locacao_percent"
+                label="Percentual (%)"
+                hint={
+                  previewTaxa > 0
+                    ? `Equivale a ${formatMoneyBR(previewTaxa)} sobre o aluguel informado.`
+                    : "100% = um aluguel inteiro, o mais comum no mercado."
+                }
+              >
+                <DecimalField
+                  form={form}
+                  name="comissao.taxa_locacao_percent"
+                  suffix="%"
+                  min={0}
+                  max={100}
+                  placeholder="Ex: 100"
+                />
+              </FormField>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2 pt-1">
@@ -194,8 +249,16 @@ export function ComissaoLocacaoStep({
                           splitRecipientId: r.id,
                           nome: r.label,
                           tipo_pessoa: isPF ? "fisica" : "juridica",
-                          cpf: isPF ? (r.doc ?? "") : "",
-                          cnpj: !isPF ? (r.doc ?? "") : "",
+                          // O endpoint token-scoped devolve o doc MASCARADO
+                          // (anti-scraping, ex. "390***05") — persistir isso em
+                          // dataJson envenenaria ClickSign/DIMOB/qualificação,
+                          // furava o dedupe por documento (normalizeDoc via 5
+                          // dígitos) e criava PropertyOwner com doc falso no
+                          // materialize-parties. O vínculo real é
+                          // splitRecipientId; o doc fica vazio pra quem
+                          // preenche completar (ou o finalize resolver).
+                          cpf: "",
+                          cnpj: "",
                           creci: r.creci ?? "",
                           email: r.email ?? "",
                           mobile_phone: r.phone ?? "",
@@ -327,13 +390,12 @@ export function ComissaoLocacaoStep({
                     </FormField>
                   ) : (
                     <FormField form={form} name={`${base}.percentual`} label="Percentual do aluguel (%)">
-                      <Input
-                        {...form.register(`${base}.percentual`, { valueAsNumber: true })}
-                        type="number"
-                        inputMode="decimal"
+                      <DecimalField
+                        form={form}
+                        name={`${base}.percentual`}
+                        suffix="%"
                         min={0}
                         max={100}
-                        step="0.5"
                         placeholder="Ex: 5"
                       />
                     </FormField>

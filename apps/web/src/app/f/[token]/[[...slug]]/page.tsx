@@ -6,6 +6,7 @@ import { listGarantiaOptions } from "@/lib/forms/garantia-option-repo";
 import { isLocacaoSchemaType } from "@/lib/forms/validation-locacao";
 import { FormClosedNotice } from "@/components/forms/FormClosedNotice";
 import { FormPageClient } from "../form-client";
+import { getOrgBrand } from "@/lib/tenant/branding";
 
 export default async function PublicFormPage({
   params,
@@ -62,6 +63,10 @@ export default async function PublicFormPage({
   // apagava documento de qualquer parte, sem deixar rastro). Nos dois casos o
   // servidor faz a MESMA checagem — esconder sem barrar seria só cosmético.
   const viewerIsMember = await viewerIsOrgMember(form.orgId);
+  // Branding do tenant: o cliente da imobiliária via a marca do PRODUTO
+  // ("imobpro.ai") no topo do formulário dela. Mesmo resolver de /pay, /s e do
+  // dashboard. Best-effort — falha aqui não pode derrubar o formulário.
+  const brand = await getOrgBrand(form.orgId).catch(() => null);
 
   return (
     <FormPageClient
@@ -74,6 +79,8 @@ export default async function PublicFormPage({
       proposalAttachmentUrl={proposalAttachmentUrl}
       locked={Boolean(form.lockedAt)}
       viewerIsMember={viewerIsMember}
+      brandLogoUrl={brand?.logoUrl ?? null}
+      brandDisplayName={brand?.displayName ?? null}
     />
   );
 }

@@ -17,6 +17,7 @@ import {
 } from "@/lib/forms/presets";
 import {
   contractSettingsSchema,
+  locacaoComissaoDefaultsSchema,
   locacaoSettingsSchema,
 } from "@/lib/contracts/default-config";
 import { parseParticipantVisibilityJson } from "@/lib/forms/participant-visibility";
@@ -80,6 +81,10 @@ const formSettingsPatchSchema = z.object({
     .object({
       venda: contractSettingsSchema.optional(),
       locacao: locacaoSettingsSchema.optional(),
+      // Branch COMERCIAL da locação (comissão do 1º aluguel). Separado do
+      // `locacao` porque aquele descreve cláusulas e é validado por contrato em
+      // `api/contracts/[id]/settings` — ver o comentário no schema.
+      locacao_comissao: locacaoComissaoDefaultsSchema.optional(),
     })
     .optional(),
   /**

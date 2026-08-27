@@ -210,6 +210,15 @@ export function LocacaoDealHeaderActions({
           ? `Nova versão v${data.version} gerada`
           : "Contrato de locação gerado"
       );
+      // D16: garantia sem modelo próprio → o contrato saiu com o padrão da
+      // modalidade. Persistente de propósito: o operador precisa LER antes de
+      // seguir — some só no X.
+      if (data.templateNotice) {
+        toast.warning(data.templateNotice, {
+          duration: Infinity,
+          closeButton: true,
+        });
+      }
       router.refresh();
     } catch {
       toast.error("Erro de conexão");

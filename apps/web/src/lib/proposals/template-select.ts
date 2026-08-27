@@ -1,5 +1,9 @@
 import type { ContractTemplate } from "@prisma/client";
-import { deriveTemplateFacts, pickTemplateByFacts } from "@/lib/contracts/template-category";
+import {
+  deriveTemplateFacts,
+  garantiaMatchedForFacts,
+  pickTemplateByFacts,
+} from "@/lib/contracts/template-category";
 
 /**
  * Modalidade do template de proposta por schemaType. São três, deliberadamente
@@ -37,7 +41,7 @@ export async function selectPropostaTemplate(
   orgId: string,
   schemaType: string,
   dataJson?: unknown
-): Promise<{ template: ContractTemplate } | null> {
+): Promise<{ template: ContractTemplate; garantiaMatched: boolean } | null> {
   const modalidade = propostaModalidadeForSchema(schemaType);
   if (!modalidade) return null;
   const { prisma } = await import("@/lib/db/prisma");
@@ -45,5 +49,12 @@ export async function selectPropostaTemplate(
     where: { orgId, status: "active", modalidade },
   });
   if (exact.length === 0) return null;
-  return { template: pickTemplateByFacts(exact, deriveTemplateFacts(dataJson)) };
+  const facts = deriveTemplateFacts(dataJson);
+  const template = pickTemplateByFacts(exact, facts);
+  return {
+    template,
+    // D16: o fallback pra outra garantia deixa de ser silencioso — o caller
+    // decide se avisa (nunca bloqueia).
+    garantiaMatched: garantiaMatchedForFacts(template.matchCriteria, facts),
+  };
 }

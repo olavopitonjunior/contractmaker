@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { toast } from "sonner";
-import { ImageUp, Info, Loader2, Trash2 } from "lucide-react";
+import { AlertTriangle, ImageUp, Info, Loader2, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -85,8 +85,9 @@ export function BrandingForm({ initial }: { initial: OrgBranding }) {
       <div className="flex gap-2.5 rounded-xl border border-info/30 bg-info/10 p-3.5 text-sm">
         <Info className="mt-0.5 h-4 w-4 flex-none text-info" />
         <span>
-          É o que o <b className="text-info">cliente final</b> vê: a página de pagamento, os
-          e-mails de cobrança e a barra lateral do sistema.
+          É o que o <b className="text-info">cliente final</b> vê: o formulário que
+          ele preenche, o PDF do resumo, a página de pagamento, os e-mails de
+          cobrança e a barra lateral do sistema.
         </span>
       </div>
 
@@ -134,6 +135,23 @@ export function BrandingForm({ initial }: { initial: OrgBranding }) {
           </div>
         </div>
         <p className="text-xs text-muted-foreground">PNG, JPG, WEBP ou SVG — até 2 MB.</p>
+
+        {/* Some assim que o logo sobe — não é cobrança recorrente.
+            Existe porque a ausência era INVISÍVEL: o formulário e o PDF caem no
+            nome da imobiliária em texto e ninguém percebe que o logo nunca foi
+            configurado. Em 27/08, TODAS as 5 imobiliárias em produção estavam
+            assim — o que aponta para o onboarding, não para o cliente. */}
+        {!logoUrl && (
+          <div className="flex gap-2.5 rounded-xl border border-warning/40 bg-warning/10 p-3 text-sm">
+            <AlertTriangle className="mt-0.5 h-4 w-4 flex-none text-warning" />
+            <span>
+              Sua imobiliária ainda não tem logo.{" "}
+              <b>Os documentos e formulários saem só com o nome em texto</b> — o
+              cliente não vê a sua marca em nenhum deles. Subir o arquivo aqui
+              resolve para todas as telas de uma vez.
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

@@ -18,6 +18,11 @@ import {
   comissaoLocacaoSchema,
 } from "@/lib/forms/validation-locacao";
 import { resolveRequiredPresetSnapshot } from "@/lib/forms/required-snapshot";
+import { resolveOrgLocacaoComissao } from "@/lib/contracts/default-config";
+import {
+  aplicarPadraoComissao,
+  taxaFoiInformada,
+} from "@/lib/locacao/commission";
 
 // Janela do soft-block de título repetido (recriação manual de card).
 const DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
@@ -142,6 +147,24 @@ export async function POST(req: NextRequest) {
       // trocar a config depois não muda as exigências deste link.
       const requiredPreset = await resolveRequiredPresetSnapshot(ctx.orgId, schemaType);
 
+      // Padrão comercial da imobiliária (Configurações → Formulário → Locação).
+      //
+      // O gatilho é a taxa ZERADA, não a AUSÊNCIA de `comissao`: o diálogo do
+      // operador sempre manda o objeto (com `taxa_locacao_percent: 0` quando
+      // ninguém digitou nada), então checar só `!d.comissao` fazia o padrão da
+      // casa nunca ser aplicado. Taxa preenchida no negócio sempre vence.
+      let comissaoSeed = d.comissao;
+      if (!taxaFoiInformada(d.comissao)) {
+        const formSettings = await prisma.orgFormSettings.findUnique({
+          where: { orgId: ctx.orgId },
+          select: { contractDefaultsJson: true },
+        });
+        comissaoSeed = aplicarPadraoComissao(
+          d.comissao,
+          resolveOrgLocacaoComissao(formSettings?.contractDefaultsJson)
+        );
+      }
+
       // Título gravado TRIMADO — o dup-check compara contra o armazenado.
       const result = await prisma.$transaction(async (tx) => {
         const form = await tx.salesForm.create({
@@ -156,7 +179,7 @@ export async function POST(req: NextRequest) {
             dataJson: {
               finalidade: d.finalidade,
               ...(d.fiscal ? { fiscal: d.fiscal } : {}),
-              ...(d.comissao ? { comissao: d.comissao } : {}),
+              ...(comissaoSeed ? { comissao: comissaoSeed } : {}),
             } as object,
           },
         });

@@ -313,12 +313,12 @@ export async function classifyDocument(
   return valid.includes(text) ? text : "outro";
 }
 
-const FICHA_RESUMO_INSTRUCTIONS = `- ficha_resumo: documento mestre/dossie/ficha cadastral consolidando dados das partes de um negocio imobiliario. Reconheca pelo formato: tabela ou lista declarando explicitamente o papel de cada pessoa ("Vendedor 1", "Comprador 2", "Conjuge do vendedor", "Representante legal", etc), nomes, CPF/CNPJ, e dados pessoais. NAO confunda com escritura ou procuracao (que descrevem um ato juridico). Estrutura esperada:
+const FICHA_RESUMO_INSTRUCTIONS = `- ficha_resumo: documento mestre/dossie/ficha cadastral consolidando dados das partes de um negocio imobiliario. Reconheca pelo formato: tabela ou lista declarando explicitamente o papel de cada pessoa ("Vendedor 1", "Comprador 2", "Locador", "Locatario 2", "Fiador", "Conjuge do vendedor", "Representante legal", etc). Fichas de LOCACAO usam os papeis locador/locatario/fiador; fichas de VENDA usam vendedor/comprador, nomes, CPF/CNPJ, e dados pessoais. NAO confunda com escritura ou procuracao (que descrevem um ato juridico). Estrutura esperada:
   {
     "partes": [
       {
-        "papel": "vendedor" | "comprador" | "conjuge_vendedor" | "conjuge_comprador" | "representante_vendedor" | "representante_comprador" | "procurador_vendedor" | "procurador_comprador",
-        "indice_referencia": 0 (0 para "Vendedor 1", 1 para "Vendedor 2", etc),
+        "papel": "vendedor" | "comprador" | "conjuge_vendedor" | "conjuge_comprador" | "representante_vendedor" | "representante_comprador" | "procurador_vendedor" | "procurador_comprador" | "locador" | "locatario" | "fiador" | "conjuge_locador" | "conjuge_locatario" | "conjuge_fiador" | "representante_locador" | "representante_locatario",
+        "indice_referencia": 0 (0 para "Vendedor 1"/"Locador 1", 1 para "Vendedor 2"/"Locatario 2", etc),
         "nome": "...",
         "cpf": "...11 digitos",
         "rg": "...",
@@ -341,7 +341,7 @@ const FICHA_RESUMO_INSTRUCTIONS = `- ficha_resumo: documento mestre/dossie/ficha
       }
     ],
     "imoveis": [
-      { "rua": "...", "numero": "...", "bairro": "...", "cidade": "...", "uf": "...", "cep": "...", "matricula": "...", "cartorio": "...", "inscricao_iptu": "...", "inscricao_municipal": "...", "sql": "...", "descricao": "..." }
+      { "rua": "...", "numero": "...", "complemento": "...", "bairro": "...", "cidade": "...", "uf": "...", "cep": "...", "matricula": "...", "cartorio": "...", "inscricao_iptu": "...", "inscricao_municipal": "...", "sql": "...", "area": "...", "vagas_garagem": "...", "condominio_nome": "...", "descricao": "..." }
     ]
   }`;
 
@@ -351,15 +351,15 @@ export const COMBINED_PROMPT = `Voce e um especialista em documentos brasileiros
 Categorias validas: "rg", "cpf", "cnh", "matricula", "iptu", "escritura", "procuracao", "comprovante_residencia", "certidao_casamento", "ficha_resumo", "outro".
 
 Campos esperados por categoria:
-- rg: nome_completo, rg_numero, orgao_expedidor, data_nascimento (YYYY-MM-DD), sexo ("M" ou "F", se aparecer), naturalidade, filiacao_mae, filiacao_pai, conjuge_nome (opcional, se aparecer no documento como qualificacao "casado(a) com X" ou em averbacao), conjuge_cpf (opcional)
+- rg: nome_completo, rg_numero, orgao_expedidor, cpf_numero (11 digitos — o RG novo traz o CPF impresso), data_emissao, data_nascimento (YYYY-MM-DD), sexo ("M" ou "F", se aparecer), naturalidade, filiacao_mae, filiacao_pai, conjuge_nome (opcional, se aparecer no documento como qualificacao "casado(a) com X" ou em averbacao), conjuge_cpf (opcional)
 - cpf: nome_completo, cpf_numero (11 digitos), data_nascimento, situacao_cadastral
 - cnh: nome_completo, cpf_numero (11 digitos), rg_numero, data_nascimento (YYYY-MM-DD), sexo ("M" ou "F", se aparecer), naturalidade, filiacao_mae, filiacao_pai, categoria, data_emissao, data_validade, registro_cnh, conjuge_nome (opcional, se aparecer), conjuge_cpf (opcional)
 - matricula: matricula_numero, cartorio, endereco_completo, bairro, cidade, uf, cep, proprietario_nome, area_total, onus_existentes, descricao_imovel
 - iptu: inscricao_iptu, inscricao_municipal, sql (Setor-Quadra-Lote, SP), endereco, bairro, cidade, uf, valor_venal, ano_referencia, debitos_pendentes
 - escritura: vendedor_nome, comprador_nome, valor_transacao, data_lavratura, cartorio, endereco_imovel, matricula_referenciada
-- procuracao: outorgante_nome, outorgante_cpf, outorgado_nome, outorgado_cpf, poderes_resumo, data_lavratura, prazo_validade
-- comprovante_residencia: titular_nome, endereco_completo, bairro, cidade, uf, cep, emissor (ex: concessionaria de energia, agua, telefone)
-- certidao_casamento: conjuge1_nome, conjuge1_cpf, conjuge2_nome, conjuge2_cpf, data_casamento, regime_bens (literal, ex: "Comunhao parcial de bens"), cartorio, data_lavratura
+- procuracao: outorgante_nome, outorgante_cpf, outorgante_rg, outorgante_nacionalidade, outorgante_estado_civil, outorgante_profissao, outorgante_endereco_completo, outorgado_nome, outorgado_cpf, outorgado_rg, poderes_resumo, data_lavratura, prazo_validade
+- comprovante_residencia: titular_nome, endereco_completo (SEM o CEP e SEM o bairro/cidade — so logradouro e numero), numero, complemento (apto/bloco, se houver), bairro, cidade, uf, cep, emissor (ex: concessionaria de energia, agua, telefone)
+- certidao_casamento: conjuge1_nome, conjuge1_cpf, conjuge1_profissao, conjuge1_nacionalidade, conjuge1_data_nascimento, conjuge2_nome, conjuge2_cpf, conjuge2_profissao, conjuge2_nacionalidade, conjuge2_data_nascimento, data_casamento, regime_bens (literal, ex: "Comunhao parcial de bens"), cartorio, data_lavratura
 ${FICHA_RESUMO_INSTRUCTIONS}
 - outro: inclua todos os dados relevantes encontrados (nomes, cpf, cnpj, enderecos, valores, datas)
 
@@ -550,11 +550,23 @@ const CAMPOS_POR_CATEGORIA: Record<string, readonly string[]> = {
          "uf", "valor_venal", "ano_referencia", "debitos_pendentes"],
   escritura: ["vendedor_nome", "comprador_nome", "valor_transacao", "data_lavratura",
               "cartorio", "endereco_imovel", "matricula_referenciada"],
-  procuracao: ["outorgante_nome", "outorgante_cpf", "outorgado_nome", "outorgado_cpf",
+  // A procuracao QUALIFICA o outorgante (nacionalidade, estado civil, profissao,
+  // endereco) — e era a unica fonte desses campos fora da ficha-resumo.
+  procuracao: ["outorgante_nome", "outorgante_cpf", "outorgante_rg",
+               "outorgante_nacionalidade", "outorgante_estado_civil",
+               "outorgante_profissao", "outorgante_endereco_completo",
+               "outorgado_nome", "outorgado_cpf", "outorgado_rg",
                "poderes_resumo", "data_lavratura", "prazo_validade"],
-  comprovante_residencia: ["titular_nome", "endereco_completo", "bairro", "cidade",
-                           "uf", "cep", "emissor"],
-  certidao_casamento: ["conjuge1_nome", "conjuge1_cpf", "conjuge2_nome", "conjuge2_cpf",
+  // `numero`/`complemento` explicitos: sem eles o modelo empacotava tudo (CEP
+  // inclusive) em `endereco_completo` e o parse acertava o numero por sorte.
+  comprovante_residencia: ["titular_nome", "endereco_completo", "numero", "complemento",
+                           "bairro", "cidade", "uf", "cep", "emissor"],
+  // A certidao de casamento qualifica os dois conjuges (profissao,
+  // nacionalidade, nascimento) — dado que o form pede e ninguem coletava.
+  certidao_casamento: ["conjuge1_nome", "conjuge1_cpf", "conjuge1_profissao",
+                       "conjuge1_nacionalidade", "conjuge1_data_nascimento",
+                       "conjuge2_nome", "conjuge2_cpf", "conjuge2_profissao",
+                       "conjuge2_nacionalidade", "conjuge2_data_nascimento",
                        "data_casamento", "regime_bens", "cartorio", "data_lavratura"],
 };
 

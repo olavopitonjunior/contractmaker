@@ -809,3 +809,61 @@ describe("previewFixturesForModalidade", () => {
     ]);
   });
 });
+
+describe("selectLocacaoTemplate — garantiaMatched (D16: fim do fallback silencioso)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const tpl = (
+    id: string,
+    matchCriteria: unknown = null,
+    isDefault = false,
+    modalidade = "locacao"
+  ) => ({ id, modalidade, isDefault, status: "active", matchCriteria }) as never;
+
+  it("match exato da garantia → garantiaMatched true", async () => {
+    mockFindMany.mockResolvedValueOnce([
+      tpl("generico", null, true),
+      tpl("fiador", { garantia: "fiador" }),
+    ]);
+    const result = await selectLocacaoTemplate("org-1", "locacao_residencial_v1", {
+      garantia: { tipo: "fiador" },
+    });
+    expect(result?.template.id).toBe("fiador");
+    expect(result?.garantiaMatched).toBe(true);
+  });
+
+  it("garantia sem template próprio cai no genérico → garantiaMatched false", async () => {
+    mockFindMany.mockResolvedValueOnce([
+      tpl("generico", null, true),
+      tpl("fiador", { garantia: "fiador" }),
+    ]);
+    const result = await selectLocacaoTemplate("org-1", "locacao_residencial_v1", {
+      garantia: { tipo: "seguro_fianca" },
+    });
+    expect(result?.template.id).toBe("generico");
+    expect(result?.garantiaMatched).toBe(false);
+  });
+
+  it("todos desclassificados → pool inteiro (isDefault) e garantiaMatched false", async () => {
+    mockFindMany.mockResolvedValueOnce([
+      tpl("fiador", { garantia: "fiador" }, true),
+      tpl("caucao", { garantia: "caucao" }),
+    ]);
+    const result = await selectLocacaoTemplate("org-1", "locacao_residencial_v1", {
+      garantia: { tipo: "seguro_fianca" },
+    });
+    expect(result?.template.id).toBe("fiador");
+    expect(result?.garantiaMatched).toBe(false);
+  });
+
+  it("form sem garantia declarada → nada a casar, garantiaMatched true", async () => {
+    mockFindMany.mockResolvedValueOnce([
+      tpl("generico", null, true),
+      tpl("fiador", { garantia: "fiador" }),
+    ]);
+    const result = await selectLocacaoTemplate("org-1", "locacao_residencial_v1", {});
+    expect(result?.garantiaMatched).toBe(true);
+  });
+});

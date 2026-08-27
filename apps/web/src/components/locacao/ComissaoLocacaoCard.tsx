@@ -50,7 +50,13 @@ export function ComissaoLocacaoCard({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          // Cherry-pick explícito (não `...value`): o schema da rota é o
+          // contrato, e mandar o objeto inteiro deixaria passar chave nova sem
+          // ninguém decidir. Por isso a forma/valor precisam entrar AQUI —
+          // omiti-las fazia a comissão em valor fixo virar 0% ao salvar.
+          forma_taxa_locacao: value.forma_taxa_locacao ?? "percentual",
           taxa_locacao_percent: value.taxa_locacao_percent ?? 0,
+          taxa_locacao_valor: value.taxa_locacao_valor,
           angariadores: value.angariadores ?? [],
         }),
       });

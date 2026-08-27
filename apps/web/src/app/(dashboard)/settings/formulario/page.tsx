@@ -4,7 +4,10 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
-import { resolveOrgContractDefaults } from "@/lib/contracts/default-config";
+import {
+  resolveOrgContractDefaults,
+  resolveOrgLocacaoComissao,
+} from "@/lib/contracts/default-config";
 import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
 import { MODULE } from "@/lib/modules/catalog";
 import { FormSettingsClient } from "./FormSettingsClient";
@@ -14,6 +17,10 @@ import { ParticipantVisibilityCard } from "./ParticipantVisibilityCard";
 import { GarantiaOptionsCard } from "./GarantiaOptionsCard";
 import { listOrgParticipantCategories } from "@/lib/forms/participant-category-repo";
 import { listGarantiaOptions } from "@/lib/forms/garantia-option-repo";
+import {
+  providerSlugsByGarantiaFromTags,
+  slotTag,
+} from "@/lib/templates/clause-slots";
 
 export default async function FormularioSettingsPage() {
   const session = await auth();
@@ -38,6 +45,7 @@ export default async function FormularioSettingsPage() {
     MODULE.LOCACAO
   );
   const defaults = resolveOrgContractDefaults(settings.contractDefaultsJson);
+  const comissaoLocacao = resolveOrgLocacaoComissao(settings.contractDefaultsJson);
 
   // Categorias de terceiro (links por parte com campos customizáveis).
   const participantCategories = await listOrgParticipantCategories(org.id);
@@ -45,6 +53,22 @@ export default async function FormularioSettingsPage() {
   // Catálogo de garantias — só faz sentido pra quem tem locação. Org sem row
   // nenhuma recebe os defaults (sem `id`), que a tela mostra como "Sugerida".
   const garantiaOptions = locacaoEnabled ? await listGarantiaOptions(org.id) : [];
+
+  // Estado "cláusula própria × genérica" por prestadora: cláusulas aprovadas
+  // do slot de garantia, reduzidas a slugs de provider por tipo.
+  const clauseSlugsByTipo = locacaoEnabled
+    ? providerSlugsByGarantiaFromTags(
+        await prisma.knowledgeItem.findMany({
+          where: {
+            orgId: org.id,
+            category: "clause",
+            status: "approved",
+            tags: { hasSome: [slotTag("garantia")] },
+          },
+          select: { tags: true },
+        })
+      )
+    : {};
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -89,11 +113,17 @@ export default async function FormularioSettingsPage() {
         locacaoEnabled={locacaoEnabled}
       />
 
-      {locacaoEnabled && <GarantiaOptionsCard initial={garantiaOptions} />}
+      {locacaoEnabled && (
+        <GarantiaOptionsCard
+          initial={garantiaOptions}
+          clauseSlugsByTipo={clauseSlugsByTipo}
+        />
+      )}
 
       <ContractDefaultsCard
         initial={defaults.venda}
         initialLocacao={defaults.locacao}
+        initialComissaoLocacao={comissaoLocacao}
         locacaoEnabled={locacaoEnabled}
       />
     </div>

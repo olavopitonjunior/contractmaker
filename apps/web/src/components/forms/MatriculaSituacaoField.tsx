@@ -55,8 +55,26 @@ function hasMatriculaExtraction(att: MatriculaAttachmentOption | null): boolean 
 interface MatriculaSituacaoFieldProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   form: UseFormReturn<any>;
-  /** Índice do imóvel no field array — vira `imoveis.${index}.*`. */
+  /**
+   * Índice do imóvel no field array de VENDA — vira `imoveis.${index}.*`.
+   * Ignorado quando `basePath` é passado (locação, onde o imóvel é objeto
+   * singular e o caminho é só `imovel`).
+   */
   index: number;
+  /**
+   * Raiz do imóvel no formulário. Default `imoveis.${index}` (venda). Locação
+   * passa `"imovel"` — um imóvel por contrato, sem array.
+   */
+  basePath?: string;
+  /**
+   * Mapeador da esteira: venda usa `mapExtractedToForm`, locação usa
+   * `mapExtractedToLocacaoForm` (mesmo contrato, mapas de campo diferentes —
+   * `area_total` vira `area` numérica em locação, e não há `sql`).
+   */
+  applyExtraction?: (
+    extraction: { category: string; fields: Record<string, unknown>; confidence?: number },
+    form: UseFormReturn<Record<string, unknown>>
+  ) => number;
   /**
    * Anexos já carregados pelo pai. `null` = ainda buscando (ou nunca buscado);
    * `[]` = o formulário não tem nenhum anexo.
@@ -94,12 +112,14 @@ const POLL_TRIES = 20;
 export function MatriculaSituacaoField({
   form,
   index,
+  basePath,
+  applyExtraction,
   attachments,
   attachmentsEndpoint,
   onRequestAttachments,
 }: MatriculaSituacaoFieldProps) {
   const canListAttachments = !!attachmentsEndpoint;
-  const prefix = `imoveis.${index}`;
+  const prefix = basePath ?? `imoveis.${index}`;
   const situacao: string = form.watch(`${prefix}.matricula_situacao`) ?? "";
   const attachmentId: string = form.watch(`${prefix}.matricula_attachment_id`) ?? "";
   const attachmentFilename: string =
@@ -287,16 +307,19 @@ export function MatriculaSituacaoField({
 
   const handleApply = () => {
     if (!selected) return;
-    const filled = mapExtractedToForm(
-      {
-        category: "matricula",
-        fields: selected.extractedData?.fields ?? {},
-        confidence: selected.extractedData?.confidence ?? undefined,
-      },
-      { kind: "imovel", index },
-      form as UseFormReturn<Record<string, unknown>>,
-      { skipIfDirty: true }
-    );
+    const extraction = {
+      category: "matricula",
+      fields: selected.extractedData?.fields ?? {},
+      confidence: selected.extractedData?.confidence ?? undefined,
+    };
+    const filled = applyExtraction
+      ? applyExtraction(extraction, form as UseFormReturn<Record<string, unknown>>)
+      : mapExtractedToForm(
+          extraction,
+          { kind: "imovel", index },
+          form as UseFormReturn<Record<string, unknown>>,
+          { skipIfDirty: true }
+        );
     if (filled > 0) {
       toast.success(`${filled} campos preenchidos`);
     } else {
