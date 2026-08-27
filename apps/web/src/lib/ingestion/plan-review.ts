@@ -309,6 +309,7 @@ export const DISCARD_REASON_LABELS: Record<PlanDiscardReason, string> = {
   unreadable: "Não deu para ler o arquivo",
   out_of_scope: "Fora do escopo da biblioteca",
   pii_unrecoverable: "Dados pessoais que não dá para limpar",
+  already_covered: "A biblioteca já cobre este papel",
 };
 
 export const ISSUE_KIND_LABELS: Record<PlanIssueKind, string> = {

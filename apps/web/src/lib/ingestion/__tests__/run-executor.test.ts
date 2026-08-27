@@ -1026,6 +1026,138 @@ describe("advanceRun — a escada do planner, um degrau por invocação", () => 
     expect(planning()?.accepted).toBe(false);
   });
 
+  it("FANOUT: famílias diferentes viram escadas paralelas e o merge deduplica cláusula", async () => {
+    seedPlanning();
+    items[0].classification = {
+      familyKey: "contrato_locacao:locacao:seguro_fianca",
+      modalidade: "locacao",
+    };
+    items[1].classification = {
+      familyKey: "contrato_locacao:locacao_comercial:seguro_fianca",
+      modalidade: "locacao_comercial",
+    };
+
+    const clausePorto = (content: string, title: string) => ({
+      slot: "garantia" as const,
+      value: "seguro_fianca",
+      provider: "Porto Seguro",
+      title,
+      content,
+      sourceItemId: items[0].id,
+      tags: ["slot:garantia", "garantia:seguro_fianca", "provider:porto_seguro"],
+      rationale: "",
+    });
+
+    const inputs: Array<{ itemIds: string[] }> = [];
+    const planner: LibraryPlanner = vi.fn(async (input) => {
+      inputs.push({ itemIds: input.items.map((i) => i.id) });
+      const comercial = input.items.some(
+        (i) => i.classification?.modalidade === "locacao_comercial"
+      );
+      return {
+        plan: emptyPlan(comercial ? 0.8 : 0.95),
+        accepted: true,
+        escalated: false,
+        attempts: [],
+        indexBudget: {
+          limit: 100,
+          indexed: 1,
+          dropped: 0,
+          truncated: false,
+          families: [],
+          droppedItemIds: [],
+        },
+        nextLadder: null,
+      };
+    });
+    // Injeta uma cláusula igual nos dois planos via wrapper.
+    const withClauses: LibraryPlanner = vi.fn(async (input, options) => {
+      const result = await planner(input, options);
+      const comercial = input.items.some(
+        (i) => i.classification?.modalidade === "locacao_comercial"
+      );
+      return {
+        ...result,
+        plan: {
+          ...result.plan,
+          clauses: [
+            comercial
+              ? clausePorto("Curta.", "Porto (comercial)")
+              : clausePorto("Redação bem mais completa e longa.", "Porto Seguro"),
+          ],
+        },
+      };
+    });
+
+    const result = await advanceRun({ runId: "run-1", orgId: "org-1", planner: withClauses });
+
+    // As DUAS famílias rodaram na MESMA invocação (em paralelo).
+    expect(withClauses).toHaveBeenCalledTimes(2);
+    expect(inputs.map((i) => i.itemIds.length)).toEqual([1, 1]);
+    expect(result.status).toBe("awaiting_review");
+
+    const plan = runs[0].libraryPlan as LibraryPlan;
+    // Merge deduplicou: a cláusula da Porto é UMA, a de redação mais longa.
+    expect(plan.clauses).toHaveLength(1);
+    expect(plan.clauses[0].content).toContain("mais completa");
+    // A confiança agregada é a MÍNIMA das famílias.
+    expect(plan.confidence).toBe(0.8);
+    expect(planning()?.families).toBeDefined();
+    expect(Object.keys(planning()!.families!)).toEqual([
+      "locacao",
+      "locacao_comercial",
+    ]);
+  });
+
+  it("FANOUT: a família que termina primeiro NÃO é chamada de novo na invocação seguinte", async () => {
+    seedPlanning();
+    items[0].classification = {
+      familyKey: "contrato_locacao:locacao:fiador",
+      modalidade: "locacao",
+    };
+    items[1].classification = {
+      familyKey: "contrato_locacao:locacao_comercial:fiador",
+      modalidade: "locacao_comercial",
+    };
+
+    const calls: string[] = [];
+    const planner: LibraryPlanner = vi.fn(async (input, options) => {
+      const comercial = input.items.some(
+        (i) => i.classification?.modalidade === "locacao_comercial"
+      );
+      calls.push(comercial ? "comercial" : "residencial");
+      const ladder = options.ladder ?? { stepIndex: 0, attempts: [] };
+      // comercial precisa de 2 degraus; residencial aceita de primeira
+      const accepted = !comercial || ladder.stepIndex > 0;
+      return {
+        plan: emptyPlan(accepted ? 0.9 : 0.5),
+        accepted,
+        escalated: false,
+        attempts: [],
+        indexBudget: {
+          limit: 100,
+          indexed: 1,
+          dropped: 0,
+          truncated: false,
+          families: [],
+          droppedItemIds: [],
+        },
+        nextLadder: accepted ? null : { stepIndex: 1, attempts: [] },
+      };
+    });
+
+    const primeira = await advanceRun({ runId: "run-1", orgId: "org-1", planner });
+    expect(primeira.hasMore).toBe(true);
+    expect(calls.sort()).toEqual(["comercial", "residencial"]);
+
+    calls.length = 0;
+    runs[0].startedAt = null;
+    const segunda = await advanceRun({ runId: "run-1", orgId: "org-1", planner });
+    // Só a família pendente volta ao modelo — a aceita não paga de novo.
+    expect(calls).toEqual(["comercial"]);
+    expect(segunda.status).toBe("awaiting_review");
+  });
+
   it("a invocação seguinte usa as violações do degrau anterior", async () => {
     seedPlanning();
     const planner = ladderPlanner([
@@ -1159,7 +1291,11 @@ describe("advanceRun — teto de degraus de planejamento", () => {
     expect(planning()?.maxSteps).toBe(MAX_PLAN_STEPS);
   });
 
-  it("esgotados os degraus o run vai a failed em vez de repetir a chamada paga", async () => {
+  it("família que esgota os degraus é finalizada SEM nova chamada paga — e revisável", async () => {
+    // Antes do fanout, esgotar derrubava o run inteiro (PlanStepLimitError).
+    // Agora a família é finalizada com plano vazio + issue: as demais famílias
+    // e a revisão humana continuam — e a garantia central é a mesma: nenhuma
+    // chamada paga a mais.
     seedPlanning();
     const planner: LibraryPlanner = vi.fn(async () => {
       throw new Error("a função morreu antes da resposta");
@@ -1175,12 +1311,16 @@ describe("advanceRun — teto de degraus de planejamento", () => {
     resumeAfterDeath();
     const result = await advanceRun({ runId: "run-1", orgId: "org-1", planner });
 
-    expect(result.status).toBe("failed");
-    expect(runs[0].status).toBe("failed");
     // A volta seguinte não gasta chamada nenhuma.
     expect(planner).toHaveBeenCalledTimes(MAX_PLAN_STEPS);
-    expect(runs[0].error).toContain("não coube no tempo");
-    expect(runs[0].error).toContain("lotes menores");
+    expect(result.status).toBe("awaiting_review");
+    const plan = runs[0].libraryPlan as {
+      issues: Array<{ kind: string; detail: string }>;
+      templates: unknown[];
+    };
+    expect(plan.templates).toEqual([]);
+    expect(plan.issues.some((i) => i.kind === "plan_invalid")).toBe(true);
+    expect(plan.issues[0].detail).toContain("degraus");
     // Parada controlada: o claim é liberado e nada do lote se perde.
     expect(runs[0].startedAt).toBeNull();
     expect(items.every((i) => i.status === "classified")).toBe(true);
@@ -1226,15 +1366,31 @@ describe("advanceRun — teto de degraus de planejamento", () => {
         escalated: false,
         confidence: 0,
         indexBudget: null,
+        families: {
+          lote: {
+            stepsStarted: MAX_PLAN_STEPS,
+            nextStepIndex: 0,
+            attempts: [],
+            accepted: false,
+            escalated: false,
+            confidence: 0,
+            durationMs: 0,
+            indexBudget: null,
+            itemCount: 2,
+            plan: null,
+          },
+        },
       } satisfies PlanningReport,
     };
     const planner = plannerReturning({ plan: emptyPlan(), accepted: true });
 
     const result = await advanceRun({ runId: "run-1", orgId: "org-1", planner });
 
-    expect(result.status).toBe("failed");
+    // O contador veio do report: a família já gastou tudo, nenhuma chamada.
     expect(planner).not.toHaveBeenCalled();
-    expect(runs[0].libraryPlan).toBeNull();
+    expect(result.status).toBe("awaiting_review");
+    const plan = runs[0].libraryPlan as { issues: Array<{ kind: string }> };
+    expect(plan.issues.some((i) => i.kind === "plan_invalid")).toBe(true);
   });
 });
 

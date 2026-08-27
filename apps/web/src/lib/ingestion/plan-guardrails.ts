@@ -50,6 +50,7 @@ import {
   LIBRARY_PLAN_VERSION,
   type LibraryPlan,
   type PlannedClause,
+  type PlannedMatchCriteria,
   type PlannedTemplate,
 } from "@/lib/ingestion/library-plan";
 import {
@@ -91,7 +92,16 @@ export type PlanViolationKind =
   | "duplicate_clause_tags"
   /** Cláusula com PII bloqueante: virar embedding é irreversível. */
   | "clause_pii"
-  | "empty_clause_content";
+  | "empty_clause_content"
+  /**
+   * Template com o MESMO modalidade×matchCriteria de um que já existe na
+   * biblioteca (active/draft). Dois candidatos iguais deixam
+   * `pickTemplateByFacts` sem critério — foi assim que o lote de staging criou
+   * os pares "(2)". A saída para o planner é descartar como `already_covered`
+   * ou explicar por que a base nova substitui a antiga (aí o operador arquiva a
+   * antiga antes de ativar).
+   */
+  | "library_collision";
 
 export interface PlanViolation {
   kind: PlanViolationKind;
@@ -116,6 +126,38 @@ export interface PlanGuardItem {
 export interface PlanValidationInput {
   plan: LibraryPlan;
   items: readonly PlanGuardItem[];
+  /** Biblioteca existente do tenant; ausente = valida sem a régua de colisão. */
+  library?: LibrarySnapshotLike;
+}
+
+/**
+ * O que o guardrail precisa da biblioteca — estruturalmente compatível com
+ * `LibrarySnapshot` sem importar o loader (que puxa Prisma para dentro de um
+ * módulo puro).
+ */
+export interface LibrarySnapshotLike {
+  templates: ReadonlyArray<{
+    name: string;
+    modalidade: string;
+    matchCriteria: PlannedMatchCriteria;
+  }>;
+}
+
+/**
+ * Identidade de seleção de um template: modalidade + eixos definidos do
+ * matchCriteria, em ordem estável. Dois templates com a mesma chave disputam a
+ * MESMA escolha do formulário.
+ */
+export function criteriaKey(
+  modalidade: string,
+  criteria: PlannedMatchCriteria | null | undefined
+): string {
+  const c = criteria ?? {};
+  const parts = Object.entries(c)
+    .filter(([, v]) => v !== undefined && v !== null)
+    .map(([k, v]) => `${k}=${String(v)}`)
+    .sort();
+  return `${modalidade}::${parts.join(",")}`;
 }
 
 export interface PlanValidationResult {
@@ -427,9 +469,59 @@ export function validateLibraryPlan(
   }
 
   const defaultsByModalidade = new Map<string, number>();
+  // A régua de colisão: chaves de seleção que a biblioteca já ocupa.
+  const occupied = new Map<string, string>();
+  for (const t of input.library?.templates ?? []) {
+    occupied.set(criteriaKey(t.modalidade, t.matchCriteria), t.name);
+  }
+  const proposedKeys = new Map<string, number>();
   const templates = plan.templates ?? [];
   templates.forEach((template, index) => {
     checkTemplate(template, index, items, discarded, violations);
+    const key = criteriaKey(template.modalidade, template.matchCriteria);
+    // Sem eixo nenhum não há "escolha" a disputar: famílias cujo resolver
+    // ignora matchCriteria (administração, venda) convivem com vários drafts e
+    // só o isDefault decide — e `multiple_defaults` já vigia esse. A régua de
+    // colisão vale para quem declara critério.
+    const hasCriteria = Object.values(template.matchCriteria ?? {}).some(
+      (v) => v !== undefined && v !== null
+    );
+    if (!hasCriteria) {
+      if (template.isDefaultSuggested) {
+        const n = (defaultsByModalidade.get(template.modalidade) ?? 0) + 1;
+        defaultsByModalidade.set(template.modalidade, n);
+      }
+      return;
+    }
+    // Colisão DENTRO do próprio plano: dois modelos propostos disputando a
+    // mesma escolha é tão inválido quanto colidir com a biblioteca.
+    const twin = proposedKeys.get(key);
+    if (twin !== undefined) {
+      violations.push(
+        violation(
+          "library_collision",
+          template.sourceItemId,
+          `Os modelos "${templates[twin].name}" e "${template.name}" têm o mesmo ` +
+            `critério de escolha (${template.modalidade}). Só um deles pode existir.`
+        )
+      );
+    } else {
+      proposedKeys.set(key, index);
+    }
+    const existing = occupied.get(key);
+    if (existing !== undefined) {
+      violations.push(
+        violation(
+          "library_collision",
+          template.sourceItemId,
+          `O modelo "${template.name?.trim() || `#${index + 1}`}" tem o mesmo ` +
+            `critério de escolha do modelo existente "${existing}" ` +
+            `(${template.modalidade}). O formulário não saberia escolher entre os ` +
+            `dois — descarte o arquivo como already_covered ou explique por que a ` +
+            `base nova substitui a antiga.`
+        )
+      );
+    }
     if (template.isDefaultSuggested) {
       const n = (defaultsByModalidade.get(template.modalidade) ?? 0) + 1;
       defaultsByModalidade.set(template.modalidade, n);

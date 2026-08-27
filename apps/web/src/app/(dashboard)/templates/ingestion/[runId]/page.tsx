@@ -51,6 +51,7 @@ export default async function IngestionRunPage({
       planReviewed: true,
       report: true,
       error: true,
+      aiCostUsd: true,
       items: {
         orderBy: { createdAt: "asc" },
         select: {
@@ -59,11 +60,19 @@ export default async function IngestionRunPage({
           fileKind: true,
           status: true,
           error: true,
+          blobUrl: true,
+          classification: true,
         },
       },
     },
   });
   if (!run) notFound();
+
+  // `Decimal` do Prisma não atravessa a fronteira server→client component.
+  const snapshot = {
+    ...run,
+    aiCostUsd: run.aiCostUsd === null ? null : Number(run.aiCostUsd),
+  };
 
   return (
     <div className="space-y-6">
@@ -79,7 +88,7 @@ export default async function IngestionRunPage({
         </Button>
       </PageHeader>
 
-      <IngestionReviewClient initialRun={run} />
+      <IngestionReviewClient initialRun={snapshot} orgId={org.id} />
     </div>
   );
 }

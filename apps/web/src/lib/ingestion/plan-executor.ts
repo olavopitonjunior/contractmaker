@@ -16,13 +16,16 @@
  * garantia errada. Foi essa a correção do commit a5e96583 na Central de
  * ingestão, e aqui vale igual.
  *
- * ## Uma invocação, UM template
+ * ## Uma invocação, UMA LEVA de templates
  *
- * Cada template copia um Doc no Drive, abre os slots e roda o pass de IA de
- * placeholders. Dois deles não cabem com folga no `maxDuration` da rota, e uma
- * fatia interrompida pelo timeout deixaria o claim preso até a janela de stale.
- * As cláusulas, ao contrário, são transação de banco: vão todas na primeira
- * fatia.
+ * Cada template copia um Doc no Drive, abre os slots, neutraliza fornecedor e
+ * roda o pass de IA de placeholders (~40–60 s). Em SÉRIE, dois já não cabiam
+ * com folga no `maxDuration` — por isso a fatia foi de 1 por invocação até o
+ * fanout. Em PARALELO, a leva de 3 custa o tempo de 1: cabe na fatia com a
+ * mesma folga, e a execução de 10 templates cai de ~8 para ~3 minutos. Uma
+ * fatia interrompida pelo timeout continua deixando o claim para a janela de
+ * stale — o tamanho da leva existe para isso seguir raro. As cláusulas, ao
+ * contrário, são transação de banco: vão todas na primeira fatia.
  *
  * ## Idempotência
  *
@@ -102,8 +105,8 @@ import {
 import { MODULE_CATALOG, type ModuleKey } from "@/lib/modules/catalog";
 import { getOrgModules } from "@/lib/modules/read";
 
-/** Templates por invocação. Ver "Uma invocação, UM template" no cabeçalho. */
-const TEMPLATES_PER_SLICE = 1;
+/** Templates por invocação. Ver "Uma invocação, UMA LEVA" no cabeçalho. */
+const TEMPLATES_PER_SLICE = 3;
 
 /** Mesmo orçamento do `/advance`: para em 240s dos 300s de `maxDuration`. */
 const SLICE_BUDGET_MS = Number(process.env.INGESTION_SLICE_BUDGET_MS ?? "240000");
@@ -175,6 +178,8 @@ interface ItemRow {
   text: string | null;
   /** `ItemPiiReport` cru; ver o gate de PII em {@link applyClause}. */
   piiReport: unknown;
+  /** `ItemClassification` cru — fonte dos rótulos de fornecedor conhecidos. */
+  classification: unknown;
 }
 
 /** O que `countSettled` precisa saber de um item — nem texto, nem PII. */
@@ -258,11 +263,15 @@ export async function executePlanSlice(
         status: true,
         text: true,
         piiReport: true,
+        classification: true,
       },
     })) as ItemRow[];
     const itemById = new Map(items.map((i) => [i.id, i]));
+    const providerLabels = knownProviderLabels(plan, items);
 
-    report = readExecutionReport(run.report) ?? initialReport(plan, reviewed, selection, now);
+    report =
+      readExecutionReport(run.report) ??
+      initialReport(plan, reviewed, selection, now, items);
 
     let clausesCreated = 0;
     let templatesCreated = 0;
@@ -319,24 +328,38 @@ export async function executePlanSlice(
     // passo caro. O re-encadeamento pega o próximo.
     const slice = ranClauses ? [] : pendingTemplates.slice(0, budget);
 
-    for (const planned of slice) {
+    // Em levas paralelas: cada template custa ~40-60 s (conversão no Drive +
+    // slot + neutralização + pass de IA), e em série 10 templates eram ~8 min
+    // de execução. Cada applyTemplate é independente (Doc próprio, linha
+    // própria no relatório); o Drive aguenta 3 conversões simultâneas.
+    for (let i = 0; i < slice.length; i += TEMPLATES_CONCURRENCY) {
       if (Date.now() >= deadline) break;
-      const line = await applyTemplate({
-        orgId: run.orgId,
-        template: planned,
-        item: itemById.get(planned.sourceItemId) ?? null,
-      });
-      report.templates.push(line);
-      if (line.status === "created") templatesCreated += 1;
-      if (line.status === "failed") {
-        report.issues.push({
-          itemId: planned.sourceItemId,
-          kind: "acervo_incompleto",
-          detail: `Falha ao criar o modelo "${planned.name}": ${line.detail ?? "erro desconhecido"}.`,
-        });
-      }
-      if (line.status !== "failed") {
-        await markItem(run.id, planned.sourceItemId, "executed");
+      const chunk = slice.slice(i, i + TEMPLATES_CONCURRENCY);
+      const lines = await Promise.all(
+        chunk.map((planned) =>
+          applyTemplate({
+            orgId: run.orgId,
+            template: planned,
+            item: itemById.get(planned.sourceItemId) ?? null,
+            neutralizeProviders: providerLabels,
+          }).then((line) => ({ planned, line }))
+        )
+      );
+      // Escritas em ordem estável DEPOIS da leva — o relatório não pode
+      // depender de qual Promise resolveu primeiro.
+      for (const { planned, line } of lines) {
+        report.templates.push(line);
+        if (line.status === "created") templatesCreated += 1;
+        if (line.status === "failed") {
+          report.issues.push({
+            itemId: planned.sourceItemId,
+            kind: "acervo_incompleto",
+            detail: `Falha ao criar o modelo "${planned.name}": ${line.detail ?? "erro desconhecido"}.`,
+          });
+        }
+        if (line.status !== "failed") {
+          await markItem(run.id, planned.sourceItemId, "executed");
+        }
       }
     }
 
@@ -554,6 +577,29 @@ async function applyClause(args: {
 // Templates
 // ────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Rótulos de fornecedor conhecidos NESTE run: os das cláusulas do plano (é o
+ * caminho normal) mais os que a classificação enxergou nos itens. É esta lista
+ * que a neutralização usa — nomes conhecidos, nunca heurística.
+ */
+export function knownProviderLabels(
+  plan: Pick<LibraryPlan, "clauses">,
+  items: ReadonlyArray<{ classification: unknown }>
+): string[] {
+  const labels = new Set<string>();
+  for (const c of plan.clauses ?? []) {
+    if (c.provider) labels.add(c.provider);
+  }
+  for (const item of items) {
+    const provider = (item.classification as { provider?: unknown } | null)?.provider;
+    if (typeof provider === "string" && provider.trim()) labels.add(provider.trim());
+  }
+  return [...labels];
+}
+
+/** Conversões de template simultâneas por leva — ver o laço da fase 2. */
+const TEMPLATES_CONCURRENCY = 3;
+
 /** Sniff de magic header — mesmo critério de `run-executor.ts`. */
 function isDocx(buffer: Buffer): boolean {
   return (
@@ -569,6 +615,8 @@ async function applyTemplate(args: {
   orgId: string;
   template: PlannedTemplate;
   item: ItemRow | null;
+  /** Rótulos p/ neutralizar no corpo — ver {@link knownProviderLabels}. */
+  neutralizeProviders: readonly string[];
 }): Promise<ExecutedTemplate> {
   const { template, item, orgId } = args;
   const base: ExecutedTemplate = {
@@ -610,6 +658,7 @@ async function applyTemplate(args: {
         unknown
       > | null,
       slotBlocks: template.slotBlocks,
+      neutralizeProviders: args.neutralizeProviders,
     });
 
     return {
@@ -619,7 +668,10 @@ async function applyTemplate(args: {
       name: created.name,
       webViewLink: created.webViewLink,
       slotsApplied: created.slots.filter((s) => s.applied).map((s) => s.slot),
-      detail: describeSlotOutcome(created.slots),
+      detail:
+        [describeSlotOutcome(created.slots), describeNeutralization(created.neutralization)]
+          .filter(Boolean)
+          .join(" ") || undefined,
     };
   } catch (err) {
     if (err instanceof DuplicateTemplateError) {
@@ -663,6 +715,27 @@ const SLOT_FAILURE_HINT: Record<string, string> = {
   "token-missing": "o espaço sumiu do documento depois de aberto",
 };
 
+/** Uma frase sobre a neutralização de fornecedor no corpo, quando ela rodou. */
+function describeNeutralization(
+  n: { replaced: Array<{ provider: string; occurrences: number }>; leftover: string[] } | null
+): string | undefined {
+  if (!n) return undefined;
+  const parts: string[] = [];
+  if (n.replaced.length > 0) {
+    const total = n.replaced.reduce((sum, r) => sum + r.occurrences, 0);
+    parts.push(
+      `Fornecedor neutralizado no corpo (${n.replaced.map((r) => r.provider).join(", ")}, ` +
+        `${total} menção(ões)).`
+    );
+  }
+  if (n.leftover.length > 0) {
+    parts.push(
+      `Ainda há menção a ${n.leftover.join(", ")} no corpo — revise antes de ativar.`
+    );
+  }
+  return parts.join(" ") || undefined;
+}
+
 /** Uma frase sobre os slots que NÃO abriram — o resto o operador vê na revisão. */
 function describeSlotOutcome(
   slots: Array<{
@@ -688,11 +761,38 @@ function describeSlotOutcome(
 // Relatório
 // ────────────────────────────────────────────────────────────────────────────
 
+/**
+ * As linhas de descarte de ENTRADA: itens que o dedup por `sourceHash` barrou
+ * antes do planner (o motivo está em `classification.via = "intake"`). Vão no
+ * relatório porque o operador subiu N arquivos e o plano fala de N-k — sem
+ * isto, o buraco fica sem explicação na tela.
+ */
+function intakeDiscardLines(
+  items: readonly ItemRow[]
+): Array<{ itemId: string; filename: string; detail: string }> {
+  const lines: Array<{ itemId: string; filename: string; detail: string }> = [];
+  for (const item of items) {
+    if (item.status !== "discarded") continue;
+    const c = item.classification as { via?: unknown; reason?: unknown } | null;
+    if (c?.via !== "intake") continue;
+    lines.push({
+      itemId: item.id,
+      filename: item.filename,
+      detail:
+        typeof c.reason === "string" && c.reason.trim()
+          ? c.reason
+          : "Este arquivo já era um modelo da biblioteca.",
+    });
+  }
+  return lines;
+}
+
 function initialReport(
   plan: LibraryPlan,
   reviewed: ReviewedLibraryPlan,
   selection: ReturnType<typeof selectApproved>,
-  now: Date
+  now: Date,
+  items: readonly ItemRow[] = []
 ): ExecutionReport {
   const rejectedDiscards = new Set(
     reviewed.discards.filter((d) => !d.approved).map((d) => d.itemId)
@@ -717,6 +817,7 @@ function initialReport(
       })),
       discards: Array.from(rejectedDiscards),
     },
+    intakeDiscards: intakeDiscardLines(items),
     // Descartes com que o operador concordou entram no relatório; os recusados
     // ficam em `rejected.discards` — o arquivo não virou nada, mas o relatório
     // não pode afirmar que ele foi descartado por decisão de ninguém.

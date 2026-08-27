@@ -72,6 +72,13 @@ import { extractPlainText } from "@/lib/ai/ocr";
 import { classifyKnowledgeUpload } from "@/lib/knowledge/upload-classifier";
 import { computeSourceHash } from "@/lib/templates/upload-dedup";
 import { detectPii } from "@/lib/ingestion/pii";
+import { loadLibrarySnapshot } from "@/lib/ingestion/library-snapshot";
+import {
+  mergeFamilyPlans,
+  splitBatchByFamily,
+  type FamilySplit,
+} from "@/lib/ingestion/plan-fanout";
+import type { LibraryPlan } from "@/lib/ingestion/library-plan";
 import {
   deterministicItemClassifier,
   parseItemPiiReport,
@@ -214,7 +221,36 @@ export type LibraryPlanner = (
  * todos do mesmo tipo de informação, e colunas custariam uma migração para dar
  * acesso indexado a números que nenhuma consulta filtra.
  */
+/**
+ * Estado da escada de UMA família do fanout — ver `plan-fanout.ts`. O `plan`
+ * fica aqui (e não só no `libraryPlan` final) porque as famílias terminam em
+ * invocações diferentes: o merge precisa dos planos das que já acabaram
+ * enquanto as demais ainda rodam.
+ */
+export interface FamilyPlanningState {
+  stepsStarted: number;
+  /** Próximo degrau da família, ou `null` quando a escada dela acabou. */
+  nextStepIndex: number | null;
+  attempts: PlanAttemptRecord[];
+  accepted: boolean;
+  escalated: boolean;
+  confidence: number;
+  durationMs: number;
+  indexBudget: IndexBudgetReport | null;
+  itemCount: number;
+  /** Plano final da família — presente quando a escada terminou. */
+  plan: LibraryPlan | null;
+}
+
 export interface PlanningReport {
+  /**
+   * Uma escada POR FAMÍLIA (fanout). Os campos de nível raiz viram agregados:
+   * `stepsStarted` soma, `confidence` é o mínimo, `accepted` exige todas.
+   * Ausente em runs anteriores ao fanout — esses são só leitura.
+   */
+  families?: Record<string, FamilyPlanningState>;
+  /** Cláusulas removidas no merge por conjunto de tags repetido entre famílias. */
+  dedupedClauses?: Array<{ kept: string; dropped: string }>;
   /** ISO do início do ÚLTIMO degrau. Gravado ANTES da chamada. */
   startedAt: string;
   /** Degraus INICIADOS, inclusive o que não voltou. Teto: {@link MAX_PLAN_STEPS}. */
@@ -501,19 +537,35 @@ export async function advanceRun(
         continue;
       }
 
-      for (const item of slice) {
-        if (Date.now() >= deadline) break;
-        if (status === "extracting") {
+      if (status === "extracting") {
+        for (const item of slice) {
+          if (Date.now() >= deadline) break;
           processed += await extractItem(run, item);
-        } else if (status === "classifying") {
-          const startedAt = Date.now();
-          processed += await classifyItem(run, item, classifier);
-          const durationMs = Date.now() - startedAt;
-          classifyTiming = addCall(
-            classifyTiming ?? readTiming(report, "classify"),
-            durationMs
+        }
+      } else if (status === "classifying") {
+        // Em PARALELO, em levas: 4,1 s por documento em série era mais da
+        // metade do tempo visível do lote de 20 (57 s). Cada item grava o
+        // próprio resultado, então a leva não compartilha estado — o único
+        // cuidado é o cronômetro, que soma durações individuais depois.
+        for (let i = 0; i < slice.length; i += CLASSIFY_CONCURRENCY) {
+          if (Date.now() >= deadline) break;
+          const chunk = slice.slice(i, i + CLASSIFY_CONCURRENCY);
+          const results = await Promise.all(
+            chunk.map(async (item) => {
+              const startedAt = Date.now();
+              const done = await classifyItem(run, item, classifier);
+              const durationMs = Date.now() - startedAt;
+              warnIfSlow(`a classificação de ${item.id}`, durationMs, budgetMs);
+              return { done, durationMs };
+            })
           );
-          warnIfSlow(`a classificação de ${item.id}`, durationMs, budgetMs);
+          for (const r of results) {
+            processed += r.done;
+            classifyTiming = addCall(
+              classifyTiming ?? readTiming(report, "classify"),
+              r.durationMs
+            );
+          }
         }
       }
     }
@@ -771,6 +823,12 @@ async function failItem(item: ItemRow, message: string): Promise<number> {
 // Estágio: classify
 // ────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Classificações simultâneas por leva. Haiku aguenta bem mais; o limite aqui é
+ * não disputar conexões de banco com o resto da fatia.
+ */
+const CLASSIFY_CONCURRENCY = 5;
+
 async function classifyItem(
   run: RunRow,
   item: ItemRow,
@@ -988,6 +1046,13 @@ async function runPlanner(
   }
 }
 
+/** Comentários do operador gravados pela rota `/replan`, se houver. */
+function readOperatorComments(report: Record<string, unknown>): string[] {
+  const raw = report.planningComments;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((c): c is string => typeof c === "string" && c.trim().length > 0);
+}
+
 /** O que o estágio `planning` já registrou no report, ou null. */
 function readPlanning(report: Record<string, unknown>): PlanningReport | null {
   const raw = report.planning;
@@ -995,6 +1060,14 @@ function readPlanning(report: Record<string, unknown>): PlanningReport | null {
   const value = raw as Partial<PlanningReport>;
   if (typeof value.stepsStarted !== "number") return null;
   return {
+    // Sem o passthrough das famílias a retomada recomeçaria TODAS as escadas a
+    // cada invocação — pagando de novo o que já voltou.
+    ...(value.families && typeof value.families === "object" && !Array.isArray(value.families)
+      ? { families: value.families as Record<string, FamilyPlanningState> }
+      : {}),
+    ...(Array.isArray(value.dedupedClauses)
+      ? { dedupedClauses: value.dedupedClauses }
+      : {}),
     startedAt: value.startedAt ?? "",
     stepsStarted: Math.max(0, Math.floor(value.stepsStarted)),
     maxSteps: value.maxSteps ?? MAX_PLAN_STEPS,
@@ -1054,15 +1127,34 @@ async function persistPlan(args: {
   }
 
   const previous = readPlanning(report);
-  const spent = previous?.stepsStarted ?? 0;
-  // Sem degrau nenhum de volta e sem orçamento: não há plano para revisar, e
-  // repetir é comprar de novo a chamada que não chega. Ver {@link MAX_PLAN_STEPS}.
-  if (spent >= MAX_PLAN_STEPS) throw new PlanStepLimitError(spent);
-
-  const ladder: PlanLadderState = {
-    stepIndex: previous?.nextStepIndex ?? 0,
-    attempts: previous?.attempts ?? [],
+  // Estado por família. Run começado ANTES do fanout não tem `families`: as
+  // escadas recomeçam do zero (o custo teórico é de runs em voo na troca de
+  // versão — não havia nenhum quando o fanout entrou).
+  const families: Record<string, FamilyPlanningState> = {
+    ...(previous?.families ?? {}),
   };
+
+  const splits = splitBatchByFamily(toPlannerItems(args.items), grouping);
+
+  // Família que esgotou os degraus NÃO derruba o run (era o comportamento do
+  // planner único, via PlanStepLimitError): ela é finalizada com um plano vazio
+  // e a issue que explica — as demais famílias e a revisão humana continuam.
+  for (const split of splits) {
+    const st = families[split.key];
+    const finished = st ? st.nextStepIndex === null : false;
+    if (!finished && (st?.stepsStarted ?? 0) >= MAX_PLAN_STEPS) {
+      families[split.key] = {
+        ...(st as FamilyPlanningState),
+        nextStepIndex: null,
+        accepted: false,
+        plan: exhaustedFamilyPlan(split.key, st?.stepsStarted ?? MAX_PLAN_STEPS),
+      };
+    }
+  }
+
+  const pendingSplits = splits.filter(
+    (split) => !families[split.key] || families[split.key].nextStepIndex !== null
+  );
 
   // O degrau é contado ANTES da chamada, e gravado antes de ela voltar.
   //
@@ -1072,43 +1164,117 @@ async function persistPlan(args: {
   // parado em zero e o sweeper repetiria a chamada (paga, e invisível ao
   // `aiCostUsd`) para sempre. O preço de contar antes é um degrau "gasto"
   // quando o banco cai logo depois — barato perto de um laço infinito.
-  const started: PlanningReport = {
-    startedAt: new Date().toISOString(),
-    stepsStarted: spent + 1,
-    maxSteps: MAX_PLAN_STEPS,
-    nextStepIndex: ladder.stepIndex,
-    attempts: ladder.attempts,
-    classifier: args.classifierName,
-    durationMs: previous?.durationMs ?? 0,
-    plannedAt: previous?.plannedAt ?? null,
-    accepted: false,
-    escalated: previous?.escalated ?? false,
-    confidence: previous?.confidence ?? 0,
-    indexBudget: previous?.indexBudget ?? null,
-  };
-  report = await persistReport(args.run.id, { ...report, planning: started });
+  for (const split of pendingSplits) {
+    const st = families[split.key];
+    families[split.key] = {
+      stepsStarted: (st?.stepsStarted ?? 0) + 1,
+      nextStepIndex: st?.nextStepIndex ?? 0,
+      attempts: st?.attempts ?? [],
+      accepted: false,
+      escalated: st?.escalated ?? false,
+      confidence: st?.confidence ?? 0,
+      durationMs: st?.durationMs ?? 0,
+      indexBudget: st?.indexBudget ?? null,
+      itemCount: split.items.length,
+      plan: null,
+    };
+  }
+  report = await persistReport(args.run.id, {
+    ...report,
+    planning: aggregatePlanning(previous, families, args, {
+      startedAtIso: new Date().toISOString(),
+    }),
+  });
 
+  // Comentários do replan (rota /replan) — instrução do operador PARA ESTA
+  // reanálise; a sanitização fina acontece no prompt (operatorCommentsBlock).
+  const operatorComments = readOperatorComments(report);
+
+  // A biblioteca ATUAL do tenant — o insumo que faltava (ver library-snapshot).
+  // Falhar aqui não pode custar os degraus já contados: sem snapshot, o planner
+  // decide como nos runs antigos (às cegas), que é degradação, não erro.
+  let library: Awaited<ReturnType<typeof loadLibrarySnapshot>> | undefined;
+  try {
+    library = await loadLibrarySnapshot(args.run.orgId);
+  } catch (err) {
+    console.error("[ingestion] snapshot da biblioteca falhou (sigo sem):", err);
+  }
+
+  // UMA escada por família, EM PARALELO — o tempo da invocação é o da família
+  // mais lenta, não a soma. `allSettled` porque uma família que falha não pode
+  // custar o estado (pago) das que terminaram: primeiro persiste-se tudo que
+  // voltou, depois o erro sobe e derruba o run com o resto preservado.
   const startedAt = Date.now();
-  const result = await runPlanner(
-    args.planner,
-    { items: toPlannerItems(args.items), grouping },
-    { meter: args.meter, ladder, stepBudget: MAX_PLAN_STEPS - spent }
+  const settled = await Promise.allSettled(
+    pendingSplits.map(async (split) => {
+      const st = families[split.key];
+      const wallStart = Date.now();
+      const result = await runPlanner(
+        args.planner,
+        {
+          items: split.items,
+          grouping: split.grouping,
+          library,
+          operatorComments,
+        },
+        {
+          meter: args.meter,
+          ladder: {
+            stepIndex: st.nextStepIndex ?? 0,
+            attempts: st.attempts,
+          },
+          stepBudget: MAX_PLAN_STEPS - (st.stepsStarted - 1),
+        }
+      );
+      return { result, wallMs: Date.now() - wallStart };
+    })
   );
   const durationMs = Date.now() - startedAt;
-  warnIfSlow("o degrau do planner", durationMs, PLAN_MIN_BUDGET_MS);
+  warnIfSlow("a leva de degraus do planner", durationMs, PLAN_MIN_BUDGET_MS);
 
-  const pending = result.nextLadder !== null;
-  const planning: PlanningReport = {
-    ...started,
-    nextStepIndex: result.nextLadder?.stepIndex ?? null,
-    attempts: result.attempts,
-    durationMs: started.durationMs + durationMs,
-    plannedAt: args.now.toISOString(),
-    accepted: result.accepted,
-    escalated: result.escalated,
-    confidence: result.plan.confidence,
-    indexBudget: result.indexBudget,
-  };
+  let firstFailure: unknown = null;
+  settled.forEach((outcome, i) => {
+    const split = pendingSplits[i];
+    if (outcome.status === "rejected") {
+      firstFailure = firstFailure ?? outcome.reason;
+      return;
+    }
+    const { result, wallMs } = outcome.value;
+    const st = families[split.key];
+    const finished = result.nextLadder === null;
+    families[split.key] = {
+      ...st,
+      nextStepIndex: result.nextLadder?.stepIndex ?? null,
+      attempts: result.attempts,
+      accepted: result.accepted,
+      escalated: result.escalated,
+      confidence: result.plan.confidence,
+      durationMs: st.durationMs + wallMs,
+      indexBudget: result.indexBudget,
+      plan: finished ? result.plan : null,
+    };
+  });
+
+  const allFinished =
+    firstFailure === null &&
+    splits.every((split) => families[split.key]?.nextStepIndex === null);
+
+  let merged: ReturnType<typeof mergeFamilyPlans> | null = null;
+  if (allFinished) {
+    merged = mergeFamilyPlans(
+      splits.map((split) => {
+        const st = families[split.key];
+        return { key: split.key, plan: st.plan as LibraryPlan, accepted: st.accepted };
+      })
+    );
+  }
+
+  const planning = aggregatePlanning(previous, families, args, {
+    plannedAtIso: args.now.toISOString(),
+    merged,
+  });
+  planning.durationMs += durationMs;
+
   report = await persistReport(
     args.run.id,
     {
@@ -1116,7 +1282,94 @@ async function persistPlan(args: {
       planning,
       timings: withTiming(report, "plan", addCall(readTiming(report, "plan"), durationMs)),
     },
-    pending ? {} : { libraryPlan: stripNulDeep(result.plan) as object }
+    merged ? { libraryPlan: stripNulDeep(merged.plan) as object } : {}
   );
-  return { report, pending };
+
+  // Persistido tudo que voltou — agora sim a falha (permanente ou não) sobe.
+  if (firstFailure !== null) throw firstFailure;
+
+  return { report, pending: !allFinished };
+}
+
+/** Plano vazio com a issue que explica por que a família parou. */
+function exhaustedFamilyPlan(familyKey: string, steps: number): LibraryPlan {
+  return {
+    version: 1,
+    templates: [],
+    clauses: [],
+    discards: [],
+    issues: [
+      {
+        itemId: null,
+        kind: "plan_invalid",
+        detail:
+          `A família "${familyKey}" tentou ${steps} degraus de planejamento sem ` +
+          `chegar a um plano aceito. Os documentos dela ficaram FORA desta ` +
+          `proposta — revise as tentativas ou reenvie a família em um lote menor.`,
+      },
+    ],
+    confidence: 0,
+  };
+}
+
+/** Os campos de nível raiz do PlanningReport como agregados das famílias. */
+function aggregatePlanning(
+  previous: PlanningReport | null,
+  families: Record<string, FamilyPlanningState>,
+  args: { classifierName: string },
+  extra: {
+    startedAtIso?: string;
+    plannedAtIso?: string;
+    merged?: {
+      accepted: boolean;
+      dedupedClauses: Array<{ kept: string; dropped: string }>;
+    } | null;
+  }
+): PlanningReport {
+  const list = Object.values(families);
+  const finished = list.filter((f) => f.nextStepIndex === null);
+  const confidences = finished.map((f) => f.confidence);
+  const merged = extra.merged ?? null;
+  return {
+    families,
+    ...(merged && merged.dedupedClauses.length > 0
+      ? { dedupedClauses: merged.dedupedClauses }
+      : {}),
+    startedAt: extra.startedAtIso ?? previous?.startedAt ?? new Date().toISOString(),
+    stepsStarted: list.reduce((sum, f) => sum + f.stepsStarted, 0),
+    maxSteps: MAX_PLAN_STEPS * Math.max(1, list.length),
+    // Com uma família só (o caso comum de lote pequeno) isto preserva a
+    // semântica antiga do campo; com várias, é o degrau da mais atrasada.
+    nextStepIndex: list.every((f) => f.nextStepIndex === null)
+      ? null
+      : Math.min(
+          ...list
+            .map((f) => f.nextStepIndex)
+            .filter((n): n is number => n !== null)
+        ),
+    attempts: list.flatMap((f) => f.attempts),
+    classifier: args.classifierName,
+    durationMs: previous?.durationMs ?? 0,
+    plannedAt: extra.plannedAtIso ?? previous?.plannedAt ?? null,
+    accepted: merged?.accepted ?? false,
+    escalated: list.some((f) => f.escalated),
+    confidence: confidences.length > 0 ? Math.min(...confidences) : 0,
+    indexBudget: mergeIndexBudgets(finished.map((f) => f.indexBudget)),
+  };
+}
+
+/** Soma os orçamentos de índice das famílias num relatório único. */
+function mergeIndexBudgets(
+  budgets: ReadonlyArray<IndexBudgetReport | null>
+): IndexBudgetReport | null {
+  const present = budgets.filter((b): b is IndexBudgetReport => b !== null);
+  if (present.length === 0) return null;
+  return {
+    limit: present.reduce((sum, b) => sum + b.limit, 0),
+    indexed: present.reduce((sum, b) => sum + b.indexed, 0),
+    dropped: present.reduce((sum, b) => sum + b.dropped, 0),
+    truncated: present.some((b) => b.truncated),
+    families: present.flatMap((b) => b.families),
+    droppedItemIds: present.flatMap((b) => b.droppedItemIds),
+  };
 }
