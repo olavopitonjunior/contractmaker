@@ -72,6 +72,7 @@ import { extractPlainText } from "@/lib/ai/ocr";
 import { classifyKnowledgeUpload } from "@/lib/knowledge/upload-classifier";
 import { computeSourceHash } from "@/lib/templates/upload-dedup";
 import { detectPii } from "@/lib/ingestion/pii";
+import { loadLibrarySnapshot } from "@/lib/ingestion/library-snapshot";
 import {
   deterministicItemClassifier,
   parseItemPiiReport,
@@ -1088,10 +1089,20 @@ async function persistPlan(args: {
   };
   report = await persistReport(args.run.id, { ...report, planning: started });
 
+  // A biblioteca ATUAL do tenant — o insumo que faltava (ver library-snapshot).
+  // Falhar aqui não pode custar o degrau que já foi contado: sem snapshot, o
+  // planner decide como nos runs antigos (às cegas), que é degradação, não erro.
+  let library: Awaited<ReturnType<typeof loadLibrarySnapshot>> | undefined;
+  try {
+    library = await loadLibrarySnapshot(args.run.orgId);
+  } catch (err) {
+    console.error("[ingestion] snapshot da biblioteca falhou (sigo sem):", err);
+  }
+
   const startedAt = Date.now();
   const result = await runPlanner(
     args.planner,
-    { items: toPlannerItems(args.items), grouping },
+    { items: toPlannerItems(args.items), grouping, library },
     { meter: args.meter, ladder, stepBudget: MAX_PLAN_STEPS - spent }
   );
   const durationMs = Date.now() - startedAt;

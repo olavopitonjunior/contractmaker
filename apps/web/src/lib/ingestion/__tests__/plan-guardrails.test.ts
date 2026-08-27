@@ -492,3 +492,89 @@ describe("guardrails — PII na cláusula", () => {
     expect(kinds(result)).toContain("empty_clause_content");
   });
 });
+
+describe("guardrails — colisão com a biblioteca existente", () => {
+  const library = {
+    templates: [
+      {
+        name: "Contrato de Locação Residencial — Seguro-Fiança",
+        modalidade: "locacao",
+        matchCriteria: { garantia: "seguro_fianca" as const },
+      },
+    ],
+  };
+
+  it("template com o MESMO modalidade×critério de um existente é rejeitado", () => {
+    // O defeito real do lote de staging: os pares "(2)" nasceram porque o
+    // planner não conhecia a biblioteca. `pickTemplateByFacts` não tem como
+    // escolher entre dois candidatos com o mesmo critério.
+    const result = validateLibraryPlan({ plan: plan(), items: items(), library });
+    expect(kinds(result)).toContain("library_collision");
+  });
+
+  it("critério DIFERENTE do existente passa", () => {
+    const p = plan({
+      templates: [template({ matchCriteria: { garantia: "fiador" } })],
+      clauses: [clause({ value: "fiador", provider: null, tags: ["slot:garantia", "garantia:fiador"], title: "Fiador" })],
+    });
+    const result = validateLibraryPlan({ plan: p, items: items(), library });
+    expect(kinds(result)).not.toContain("library_collision");
+  });
+
+  it("sem a biblioteca no input, valida como antes (compat)", () => {
+    const result = validateLibraryPlan({ plan: plan(), items: items() });
+    expect(result.ok).toBe(true);
+  });
+
+  it("dois templates do PRÓPRIO plano com o mesmo critério também colidem", () => {
+    const p = plan({
+      templates: [
+        template({ name: "A" }),
+        template({ name: "B", sourceItemId: "item-venda", modalidade: "locacao" }),
+      ],
+    });
+    const result = validateLibraryPlan({ plan: p, items: items() });
+    expect(kinds(result)).toContain("library_collision");
+  });
+
+  it("critério VAZIO não disputa escolha — administração convive com drafts", () => {
+    // O resolver de administração ignora matchCriteria; quem decide é o
+    // isDefault, e `multiple_defaults` já vigia esse. Barrar aqui impediria o
+    // par legítimo com/sem garantia de recebimento do acervo da Ativa.
+    const p = plan({
+      templates: [
+        template({
+          name: "Administração — Com Garantia",
+          modalidade: "administracao_locacao",
+          matchCriteria: {},
+        }),
+        template({
+          name: "Administração — Sem Garantia",
+          sourceItemId: "item-venda",
+          modalidade: "administracao_locacao",
+          matchCriteria: {},
+        }),
+      ],
+      clauses: [],
+    });
+    const result = validateLibraryPlan({ plan: p, items: items() });
+    expect(kinds(result)).not.toContain("library_collision");
+  });
+
+  it("descarte already_covered é aceito como razão válida", () => {
+    const p = plan({
+      templates: [],
+      clauses: [],
+      discards: [
+        {
+          itemId: "item-locacao",
+          reason: "already_covered",
+          detail: "Já coberto pelo modelo existente de seguro-fiança.",
+        },
+      ],
+    });
+    const result = validateLibraryPlan({ plan: p, items: items(), library });
+    expect(result.ok).toBe(true);
+  });
+});
+

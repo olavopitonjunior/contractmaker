@@ -99,7 +99,14 @@ export type PlanDiscardReason =
   | "filled_instance"
   | "unreadable"
   | "out_of_scope"
-  | "pii_unrecoverable";
+  | "pii_unrecoverable"
+  /**
+   * A biblioteca do tenant JÁ cobre o papel deste documento (mesmo
+   * modalidade×matchCriteria em template active/draft) e o material do lote não
+   * é melhor que a base existente. É o descarte que faz reingestões serem
+   * incrementais em vez de duplicarem o acervo — ver `library-snapshot.ts`.
+   */
+  | "already_covered";
 
 export interface PlanDiscard {
   itemId: string;

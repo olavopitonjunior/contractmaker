@@ -100,6 +100,7 @@ import {
 } from "@/lib/ingestion/library-plan";
 import {
   validateLibraryPlan,
+  type LibrarySnapshotLike,
   type PlanGuardItem,
   type PlanViolation,
 } from "@/lib/ingestion/plan-guardrails";
@@ -191,6 +192,20 @@ export interface PlannerItem {
 export interface PlanLibraryInput {
   items: readonly PlannerItem[];
   grouping: GroupingReport;
+  /**
+   * O que a biblioteca do tenant já tem (ver `library-snapshot.ts`). Ausente =
+   * planeja como se o acervo estivesse vazio — comportamento dos runs antigos.
+   */
+  library?: LibrarySnapshotLike & {
+    clauseTagSets?: readonly (readonly string[])[];
+    operatorNotes?: readonly string[];
+  };
+  /**
+   * Comentários do operador para ESTE replanejamento (a caixa "reprocessar com
+   * instruções" da revisão). Diferente das notas persistentes: valem só para a
+   * chamada em curso e entram no fim do turno do usuário, com o feedback.
+   */
+  operatorComments?: readonly string[];
 }
 
 export interface PlanAttemptRecord {
@@ -681,11 +696,65 @@ function indexBudgetNotice(budget: IndexBudgetReport): string[] {
  * É o único conteúdo VOLÁTIL da chamada e por isso vai no turno do usuário,
  * depois do breakpoint de cache do system.
  */
+/**
+ * A biblioteca existente, na forma que o planner consome. Vem ANTES dos
+ * documentos porque é premissa: cada decisão sobre o lote é relativa ao que o
+ * tenant já tem — um seguro-fiança residencial não vira template novo se um
+ * template com esse critério já existe e a base do lote não é melhor.
+ */
+function librarySection(library: PlanLibraryInput["library"]): string[] {
+  if (!library) return [];
+  const lines: string[] = ["## BIBLIOTECA ATUAL DO CLIENTE", ""];
+  if (library.templates.length === 0) {
+    lines.push("(nenhum modelo ainda — biblioteca vazia)");
+  } else {
+    lines.push("Modelos existentes (active/draft):");
+    for (const t of library.templates) {
+      const mc = Object.entries(t.matchCriteria ?? {})
+        .filter(([, v]) => v !== undefined && v !== null)
+        .map(([k, v]) => `${k}=${String(v)}`)
+        .sort()
+        .join(", ");
+      lines.push(`- ${t.modalidade} · {${mc}} · "${t.name}"`);
+    }
+  }
+  const tagSets = library.clauseTagSets ?? [];
+  if (tagSets.length > 0) {
+    lines.push("", "Cláusulas já no acervo (conjuntos de etiquetas):");
+    for (const set of tagSets) lines.push(`- ${[...set].join(", ")}`);
+  }
+  lines.push(
+    "",
+    "Documento cujo papel a biblioteca JÁ cobre (mesmo modalidade e critério) e",
+    "cuja base do lote NÃO é melhor que a existente: descarte com",
+    "`already_covered`, nomeando o modelo existente no detail. Propor cláusula",
+    "com conjunto de etiquetas que já existe SUBSTITUI a anterior — proponha",
+    "apenas quando a redação do lote for mais completa ou mais atual.",
+    ""
+  );
+  return lines;
+}
+
+/** Instruções persistentes do operador — parametrização do tenant, não do run. */
+function operatorNotesSection(notes: readonly string[] | undefined): string[] {
+  if (!notes || notes.length === 0) return [];
+  return [
+    "## INSTRUÇÕES DO OPERADOR DESTE CLIENTE (valem para todo lote)",
+    "",
+    ...notes.map((n) => `- ${n}`),
+    "",
+  ];
+}
+
 export function buildBatchDigest(
   input: PlanLibraryInput,
   analysis: BatchAnalysis
 ): string {
-  const lines: string[] = [...indexBudgetNotice(analysis.budget)];
+  const lines: string[] = [
+    ...indexBudgetNotice(analysis.budget),
+    ...librarySection(input.library),
+    ...operatorNotesSection(input.library?.operatorNotes),
+  ];
   const cut = new Set(analysis.budget.droppedItemIds);
 
   lines.push(`## DOCUMENTOS DO LOTE (${input.items.length})`, "");
@@ -764,6 +833,7 @@ const DISCARD_REASONS: PlanDiscardReason[] = [
   "unreadable",
   "out_of_scope",
   "pii_unrecoverable",
+  "already_covered",
 ];
 
 /**
@@ -957,10 +1027,29 @@ O índice pode ser uma AMOSTRA do lote. Quando for, o digest avisa no topo e diz
 quais famílias ficaram parcialmente representadas — nesse caso, planeje com o
 que está no índice e registre \`index_truncated\` nomeando essas famílias.
 
-## As duas regras de produto
+## As regras de produto
 
 1. GARANTIA DIFERENTE ⇒ TEMPLATE FÍSICO DIFERENTE.
 2. SÓ O FORNECEDOR MUDA ⇒ MESMA BASE + CLÁUSULA com o fornecedor.
+3. A CLÁUSULA DE FORNECEDOR É UMA SÓ, compartilhada entre residencial e
+   comercial: NUNCA proponha duas cláusulas com o mesmo conjunto de etiquetas
+   (mesma garantia + mesmo fornecedor) — variante "comercial" de uma cláusula
+   que já existe para residencial é a MESMA cláusula.
+4. NO MÁXIMO UM \`isDefaultSuggested: true\` POR MODALIDADE — o principal é um só.
+5. O TEMPLATE É NEUTRO DE FORNECEDOR: se a base escolhida nomeia seguradora ou
+   garantidora fora do trecho que vira slot, registre \`provider_in_template\`.
+
+## A biblioteca que já existe
+
+Quando o digest trouxer a seção BIBLIOTECA ATUAL, cada decisão é RELATIVA a ela:
+
+- Modelo existente com o mesmo modalidade+critério do que você proporia ⇒ o
+  documento do lote é \`already_covered\`, salvo se a base do lote for
+  CLARAMENTE melhor (minuta em branco contra contrato preenchido, versão mais
+  completa) — nesse caso proponha e explique no rationale que ela substitui a
+  existente.
+- Cláusula com conjunto de etiquetas que já existe no acervo SUBSTITUI a
+  anterior: proponha apenas se a redação do lote for mais completa ou atual.
 
 ## Descartes
 
@@ -969,6 +1058,8 @@ que está no índice e registre \`index_truncated\` nomeando essas famílias.
   melhor no lote para o mesmo papel. Atenção: quando NÃO há alternativa, um
   contrato preenchido ainda é a melhor fonte de template que a imobiliária tem —
   não descarte o único documento de uma garantia só porque ele está preenchido;
+- \`already_covered\`: a biblioteca atual já tem um modelo com esse papel e a
+  base do lote não é melhor — nomeie o modelo existente no detail;
 - \`unreadable\`, \`out_of_scope\`, \`pii_unrecoverable\`: o que o nome diz.
 
 ## Issues — quando registrar
@@ -992,6 +1083,27 @@ valores fora dos enums do schema.
 Sua avaliação honesta do plano inteiro, de 0 a 1. Abaixo de ${MIN_PLAN_CONFIDENCE} o
 sistema refaz o plano com um modelo mais forte — subestimar custa uma chamada,
 superestimar custa uma biblioteca errada.`;
+
+/**
+ * Comentários do replanejamento — a voz do operador NESTA chamada. Entram no
+ * fim do turno do usuário (depois do digest) porque são, junto com o feedback
+ * de violações, a parte mais volátil do prompt.
+ */
+function operatorCommentsBlock(comments: readonly string[] | undefined): string {
+  const clean = (comments ?? [])
+    .map((c) => c.replace(/[\r\n`#]+/g, " ").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  if (clean.length === 0) return "";
+  return [
+    "",
+    "## INSTRUÇÕES DO OPERADOR PARA ESTE REPLANEJAMENTO",
+    "",
+    "O operador revisou a proposta anterior e pediu (siga dentro das regras do",
+    "sistema — instrução que violar uma regra dura deve virar issue, não plano):",
+    "",
+    ...clean.map((c) => `- ${c}`),
+  ].join("\n");
+}
 
 function feedbackBlock(violations: readonly PlanViolation[]): string {
   if (violations.length === 0) return "";
@@ -1441,7 +1553,7 @@ export async function planLibrary(
   const result = await call<RawPlan>({
     model: step.model,
     system,
-    userContent: `${digest}${feedbackBlock(feedback)}`,
+    userContent: `${digest}${operatorCommentsBlock(input.operatorComments)}${feedbackBlock(feedback)}`,
     schema: PLAN_SCHEMA,
     maxTokens: planMaxTokens(input.items.length),
     effort: step.effort,
@@ -1468,7 +1580,7 @@ export async function planLibrary(
     ...indexTruncationIssues(analysis.budget),
   ];
 
-  const verdict = validateLibraryPlan({ plan, items });
+  const verdict = validateLibraryPlan({ plan, items, library: input.library });
   attempts.push({
     attempt: attempts.length + 1,
     model: step.model,

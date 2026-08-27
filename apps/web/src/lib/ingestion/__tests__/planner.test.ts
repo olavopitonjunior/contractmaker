@@ -190,6 +190,41 @@ describe("digest do lote", () => {
     expect(digest).toContain("## DOCUMENTOS QUE NÃO AGRUPARAM COM NINGUÉM");
   });
 
+  it("a biblioteca existente entra ANTES dos documentos, com a regra de uso", () => {
+    // O insumo que faltou nos dois runs de staging: sem isto o planner propôs
+    // os pares "(2)" com o mesmo matchCriteria dos modelos da véspera.
+    const digest = buildBatchDigest(
+      {
+        ...input,
+        library: {
+          templates: [
+            {
+              name: "Seguro-Fiança",
+              modalidade: "locacao",
+              matchCriteria: { garantia: "seguro_fianca" },
+            },
+          ],
+          clauseTagSets: [["garantia:seguro_fianca", "provider:porto_seguro", "slot:garantia"]],
+          operatorNotes: ["Nunca criar template amarrado a fornecedor."],
+        },
+      },
+      analysis
+    );
+    expect(digest).toContain("## BIBLIOTECA ATUAL DO CLIENTE");
+    expect(digest).toContain("locacao · {garantia=seguro_fianca} · \"Seguro-Fiança\"");
+    expect(digest).toContain("already_covered");
+    expect(digest).toContain("## INSTRUÇÕES DO OPERADOR DESTE CLIENTE");
+    expect(digest).toContain("Nunca criar template amarrado a fornecedor.");
+    expect(digest.indexOf("BIBLIOTECA ATUAL")).toBeLessThan(
+      digest.indexOf("## DOCUMENTOS DO LOTE")
+    );
+  });
+
+  it("sem biblioteca no input, o digest é o de sempre (compat)", () => {
+    const digest = buildBatchDigest(input, analysis);
+    expect(digest).not.toContain("BIBLIOTECA ATUAL");
+  });
+
   it("trunca cada célula da matriz — um lote de 20 docs tem de caber", () => {
     const digest = buildBatchDigest(input, analysis);
     const cells = digest.split("\n").filter((l) => /^\s+B\d+: /.test(l));
