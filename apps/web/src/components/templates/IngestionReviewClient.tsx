@@ -1,15 +1,48 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+/**
+ * Conferência de um lote de ingestão — a tela onde a proposta do planner vira
+ * (ou não) biblioteca da imobiliária.
+ *
+ * ## O desenho (revisto no lote de 20 da Ativa)
+ *
+ * A primeira versão despejava tudo aberto: 12 avisos no topo, 10 modelos com
+ * preview e justificativa expandidos, 6 cláusulas com texto — uma parede. O
+ * operador de onboarding precisa DECIDIR, não ler um relatório:
+ *
+ * - cards por MODALIDADE, recolhidos; o fechado mostra só o que decide (nome,
+ *   critérios, chips de slot/aviso);
+ * - aviso que pertence a um arquivo mora DENTRO do card dele; no topo ficam só
+ *   os globais e os bloqueantes;
+ * - erro de run vem TRADUZIDO (`run-error-humanize`) com um "Tentar de novo"
+ *   que reaproveita extração e classificação pagas — nunca payload cru, nunca
+ *   "envie tudo de novo";
+ * - a espera mostra o progresso POR FAMÍLIA do fanout, não uma barra genérica;
+ * - o operador pode comentar (por modelo ou geral) e REPROCESSAR com as
+ *   instruções, vendo o custo antes; pode marcar a instrução como permanente;
+ * - pode SUBSTITUIR o arquivo de um modelo (a minuta em branco no lugar do
+ *   contrato preenchido) sem jogar o lote fora;
+ * - os arquivos que ficaram fora da análise (dedup do intake, substituídos)
+ *   aparecem com o motivo — subir 20 e ver um plano de 14 sem explicação era
+ *   um buraco de confiança.
+ */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { upload } from "@vercel/blob/client";
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Download,
   FileText,
   Layers,
   Loader2,
+  MessageSquarePlus,
+  RefreshCcw,
   ShieldAlert,
   Sparkles,
   Trash2,
@@ -42,6 +75,9 @@ import {
   TEMPLATE_STATUS_LABELS,
   readExecutionReport,
 } from "@/lib/ingestion/execution-report";
+import { humanizeRunError } from "@/lib/ingestion/run-error-humanize";
+import { PLAN_FAMILY_LABELS } from "@/lib/ingestion/plan-fanout";
+import type { PlanIssue } from "@/lib/ingestion/library-plan";
 import type { GarantiaCoverageReport } from "@/lib/templates/coverage";
 
 export interface IngestionRunItem {
@@ -50,6 +86,8 @@ export interface IngestionRunItem {
   fileKind: string;
   status: string;
   error: string | null;
+  blobUrl?: string | null;
+  classification?: unknown;
 }
 
 export interface IngestionRunSnapshot {
@@ -62,6 +100,7 @@ export interface IngestionRunSnapshot {
   libraryPlan: unknown;
   planReviewed: unknown;
   report: unknown;
+  aiCostUsd?: number | string | null;
   items: IngestionRunItem[];
 }
 
@@ -90,24 +129,39 @@ const LIVE_STATUSES = [
 
 const POLL_MS = 4000;
 
+/** Estado mínimo de uma família do fanout, lido do report (client-safe). */
+interface FamilyProgressState {
+  nextStepIndex: number | null;
+  accepted: boolean;
+  itemCount: number;
+}
+
 export function IngestionReviewClient({
   initialRun,
+  orgId,
 }: {
   initialRun: IngestionRunSnapshot;
+  /** Prefixo do Blob — o token de upload só sai para `ingestion/<orgId>/…`. */
+  orgId: string;
 }) {
   const router = useRouter();
   const [run, setRun] = useState(initialRun);
   const [decisions, setDecisions] = useState<PlanDecisions | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [pollError, setPollError] = useState<string | null>(null);
+  const [comments, setComments] = useState<Record<string, string>>({});
 
   const plan = useMemo(() => parseLibraryPlan(run.libraryPlan), [run.libraryPlan]);
   const execution = useMemo(() => readExecutionReport(run.report), [run.report]);
 
+  const itemById = useMemo(
+    () => new Map(run.items.map((i) => [i.id, i])),
+    [run.items]
+  );
   const filenameOf = useCallback(
     (itemId: string | null) =>
-      run.items.find((i) => i.id === itemId)?.filename ?? "arquivo removido do lote",
-    [run.items]
+      itemById.get(itemId ?? "")?.filename ?? "arquivo removido do lote",
+    [itemById]
   );
 
   // As decisões nascem do plano (tudo marcado) e só são recriadas quando o
@@ -116,6 +170,15 @@ export function IngestionReviewClient({
     if (!plan) return;
     setDecisions((prev) => prev ?? defaultDecisions(plan));
   }, [plan]);
+
+  // Plano novo (replan/reanexo) = decisões novas.
+  const planRef = useRef(run.libraryPlan);
+  useEffect(() => {
+    if (planRef.current !== run.libraryPlan) {
+      planRef.current = run.libraryPlan;
+      setDecisions(plan ? defaultDecisions(plan) : null);
+    }
+  }, [run.libraryPlan, plan]);
 
   useEffect(() => {
     if (!LIVE_STATUSES.includes(run.status)) return;
@@ -150,8 +213,7 @@ export function IngestionReviewClient({
     if (!plan || !decisions) return;
     setSubmitting(true);
     try {
-      // `reviewedBy`/`reviewedAt` são carimbados pelo servidor; aqui só as
-      // decisões viajam.
+      // `reviewedBy`/`reviewedAt` são carimbados pelo servidor.
       const reviewed = buildReviewedPlan(plan, decisions, {
         reviewedBy: "",
         reviewedAt: "",
@@ -177,10 +239,28 @@ export function IngestionReviewClient({
     }
   }
 
+  async function replan(body: {
+    comments?: string[];
+    notes?: string[];
+  }): Promise<void> {
+    const res = await fetch(`/api/templates/ingest/runs/${run.id}/replan`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error ?? "Falha ao reprocessar");
+    setComments({});
+    setDecisions(null);
+    setRun((current) => ({ ...current, status: "planning", error: null }));
+  }
+
   const pct =
     run.itemsTotal > 0
       ? Math.min(100, Math.round((run.itemsDone / run.itemsTotal) * 100))
       : 0;
+
+  const humanError = humanizeRunError(run.error);
 
   return (
     <div className="space-y-5">
@@ -196,18 +276,41 @@ export function IngestionReviewClient({
             {LIVE_STATUSES.includes(run.status) && (
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             )}
+            <CostBadge aiCostUsd={run.aiCostUsd} />
           </div>
           <Progress value={pct} />
+          {run.status === "planning" && <FamilyProgress report={run.report} />}
           {pollError && (
             <p className="text-xs text-amber-700 dark:text-amber-300">
               Não consegui atualizar agora ({pollError}). O lote continua rodando no
               servidor — esta tela volta a acompanhar sozinha.
             </p>
           )}
-          {run.error && (
-            <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {run.error}
-            </p>
+          {run.status === "failed" && humanError && (
+            <div className="space-y-2 rounded-md bg-destructive/10 px-3 py-2.5">
+              <p className="text-sm font-medium text-destructive">
+                {humanError.message}
+              </p>
+              <p className="text-xs text-muted-foreground">{humanError.action}</p>
+              {humanError.retryable && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    void replan({}).then(
+                      () => toast.success("Reanalisando — nada precisou ser reenviado."),
+                      (err) =>
+                        toast.error(
+                          err instanceof Error ? err.message : "Falha ao reprocessar"
+                        )
+                    )
+                  }
+                >
+                  <RefreshCcw className="mr-1.5 h-3.5 w-3.5" />
+                  Tentar de novo
+                </Button>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>
@@ -220,189 +323,662 @@ export function IngestionReviewClient({
         <EmptyState
           icon={<Loader2 className="h-5 w-5 animate-spin" />}
           title="Aplicando o que você aprovou"
-          detail="As cláusulas entram primeiro no acervo e os modelos vêm depois, um por vez. Pode fechar esta tela — o servidor termina sozinho."
+          detail="As cláusulas entram primeiro no acervo e os modelos vêm depois, em levas. Pode fechar esta tela — o servidor termina sozinho."
         />
       ) : !plan ? (
         <EmptyState
           icon={<Sparkles className="h-5 w-5" />}
           title={
             run.status === "failed"
-              ? "Este lote não chegou a ter uma proposta"
+              ? "Este lote ainda não tem uma proposta"
               : "A proposta ainda está sendo montada"
           }
           detail={
             run.status === "failed"
-              ? "Nada foi criado na sua biblioteca. Envie os arquivos de novo para tentar outra vez."
+              ? "Nada foi criado na sua biblioteca. Use o “Tentar de novo” acima — os arquivos e a leitura já feita ficam guardados."
               : "Assim que terminarmos de ler e agrupar os arquivos, a proposta aparece aqui para você conferir."
           }
         />
       ) : (
-        <>
-          <IssueList plan={plan} filenameOf={filenameOf} />
-
-          <Section
-            title="Modelos propostos"
-            count={plan.templates.length}
-            icon={<FileText className="h-4 w-4" />}
-            hint="Cada modelo nasce como rascunho. Garantia diferente é modelo diferente — é o que faz o sistema escolher o certo a partir do formulário."
-          >
-            {plan.templates.map((t) => {
-              const key = templateKey(t);
-              const criteria = matchCriteriaSummary(t.matchCriteria);
-              const slots = Object.entries(t.slotBlocks ?? {}).filter(
-                ([, paragraphs]) => (paragraphs ?? []).length > 0
-              );
-              return (
-                <ReviewRow
-                  key={key}
-                  checked={decisions?.templates[key] ?? false}
-                  disabled={submitting || run.status !== "awaiting_review"}
-                  onChange={(v) =>
-                    setDecisions((prev) =>
-                      prev
-                        ? { ...prev, templates: { ...prev.templates, [key]: v } }
-                        : prev
-                    )
-                  }
-                  title={t.name}
-                  subtitle={`${modalidadeLabel(t.modalidade)} · ${filenameOf(t.sourceItemId)}`}
-                >
-                  {criteria.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {criteria.map((c) => (
-                        <Badge key={c} variant="outline" className="text-[11px]">
-                          {c}
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-[11px] text-muted-foreground">
-                      Sem critério de escolha — este modelo só é usado como padrão da
-                      modalidade.
-                    </p>
-                  )}
-                  {slots.map(([slot, paragraphs]) => (
-                    <div
-                      key={slot}
-                      className="rounded-md border border-violet-300 bg-violet-50/50 p-2 dark:border-violet-900 dark:bg-violet-950/20"
-                    >
-                      <p className="text-[11px] font-medium">
-                        Abre espaço reutilizável:{" "}
-                        {slotLabel(slot as ClauseSlotKey).toLowerCase()}
-                      </p>
-                      <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-                        Este trecho SAI do corpo do modelo e a cláusula certa entra na
-                        hora de gerar o contrato:
-                      </p>
-                      <p className="mt-1 rounded bg-background px-2 py-1.5 text-[11px] leading-snug">
-                        {preview((paragraphs ?? []).join(" "), 260)}
-                      </p>
-                    </div>
-                  ))}
-                  <Rationale text={t.rationale} />
-                </ReviewRow>
-              );
-            })}
-          </Section>
-
-          <Section
-            title="Cláusulas propostas"
-            count={plan.clauses.length}
-            icon={<Layers className="h-4 w-4" />}
-            hint="Vão para o acervo aguardando aprovação. É a redação de vocês que passa a entrar no lugar do espaço reutilizável do modelo."
-          >
-            {plan.clauses.map((c) => {
-              const key = clauseKey(c);
-              return (
-                <ReviewRow
-                  key={key}
-                  checked={decisions?.clauses[key] ?? false}
-                  disabled={submitting || run.status !== "awaiting_review"}
-                  onChange={(v) =>
-                    setDecisions((prev) =>
-                      prev ? { ...prev, clauses: { ...prev.clauses, [key]: v } } : prev
-                    )
-                  }
-                  title={c.title}
-                  subtitle={`${slotLabel(c.slot)} · ${c.value}${
-                    c.provider ? ` · ${c.provider}` : " · vale para qualquer fornecedor"
-                  } · ${filenameOf(c.sourceItemId)}`}
-                >
-                  <p className="rounded bg-muted/40 px-2 py-1.5 text-[11px] leading-snug">
-                    {preview(c.content, 320)}
-                  </p>
-                  <div className="flex flex-wrap gap-1">
-                    {c.tags.map((tag) => (
-                      <Badge key={tag} variant="outline" className="text-[11px]">
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                  <Rationale text={c.rationale} />
-                </ReviewRow>
-              );
-            })}
-          </Section>
-
-          <Section
-            title="Arquivos descartados"
-            count={plan.discards.length}
-            icon={<Trash2 className="h-4 w-4" />}
-            hint="Desmarque para registrar que você não concorda com o descarte — o arquivo não vira nada nesta rodada, mas o relatório guarda a discordância."
-          >
-            {plan.discards.map((d) => (
-              <ReviewRow
-                key={d.itemId}
-                checked={decisions?.discards[d.itemId] ?? true}
-                disabled={submitting || run.status !== "awaiting_review"}
-                onChange={(v) =>
-                  setDecisions((prev) =>
-                    prev ? { ...prev, discards: { ...prev.discards, [d.itemId]: v } } : prev
-                  )
-                }
-                title={filenameOf(d.itemId)}
-                subtitle={DISCARD_REASON_LABELS[d.reason] ?? d.reason}
-              >
-                <p className="text-[11px] text-muted-foreground">{d.detail}</p>
-              </ReviewRow>
-            ))}
-          </Section>
-
-          {run.status === "awaiting_review" && (
-            <div className="sticky bottom-0 flex flex-wrap items-center gap-2 border-t bg-background/95 py-3 backdrop-blur">
-              <Button
-                variant="outline"
-                disabled={submitting}
-                onClick={() => setDecisions(setAllDecisions(plan, true))}
-              >
-                Aprovar tudo
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={submitting}
-                onClick={() => setDecisions(setAllDecisions(plan, false))}
-              >
-                Desmarcar tudo
-              </Button>
-              <Button
-                className="ml-auto"
-                disabled={submitting || counts.total === 0}
-                onClick={() => void submit()}
-              >
-                {submitting && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-                Aplicar {counts.templates} modelo(s) e {counts.clauses} cláusula(s)
-              </Button>
-            </div>
-          )}
-        </>
+        <PlanReview
+          orgId={orgId}
+          run={run}
+          plan={plan}
+          decisions={decisions}
+          setDecisions={setDecisions}
+          submitting={submitting}
+          counts={counts}
+          comments={comments}
+          setComments={setComments}
+          filenameOf={filenameOf}
+          itemById={itemById}
+          onSubmit={() => void submit()}
+          onReplan={replan}
+          onReattached={() => {
+            setDecisions(null);
+            router.refresh();
+          }}
+        />
       )}
     </div>
   );
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Revisão do plano
+// ────────────────────────────────────────────────────────────────────────────
+
+function PlanReview({
+  orgId,
+  run,
+  plan,
+  decisions,
+  setDecisions,
+  submitting,
+  counts,
+  comments,
+  setComments,
+  filenameOf,
+  itemById,
+  onSubmit,
+  onReplan,
+  onReattached,
+}: {
+  orgId: string;
+  run: IngestionRunSnapshot;
+  plan: NonNullable<ReturnType<typeof parseLibraryPlan>>;
+  decisions: PlanDecisions | null;
+  setDecisions: React.Dispatch<React.SetStateAction<PlanDecisions | null>>;
+  submitting: boolean;
+  counts: { templates: number; clauses: number; total: number };
+  comments: Record<string, string>;
+  setComments: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  filenameOf: (id: string | null) => string;
+  itemById: Map<string, IngestionRunItem>;
+  onSubmit: () => void;
+  onReplan: (body: { comments?: string[]; notes?: string[] }) => Promise<void>;
+  onReattached: () => void;
+}) {
+  const reviewing = run.status === "awaiting_review";
+
+  // Avisos por arquivo moram no card do arquivo; no topo, só os globais e os
+  // bloqueantes — é a diferença entre "leia tudo" e "olhe onde importa".
+  const issuesByItem = useMemo(() => {
+    const map = new Map<string, PlanIssue[]>();
+    for (const issue of plan.issues) {
+      if (!issue.itemId || BLOCKING_ISSUE_KINDS.includes(issue.kind)) continue;
+      const list = map.get(issue.itemId) ?? [];
+      list.push(issue);
+      map.set(issue.itemId, list);
+    }
+    return map;
+  }, [plan.issues]);
+  const topIssues = plan.issues.filter(
+    (i) => !i.itemId || BLOCKING_ISSUE_KINDS.includes(i.kind)
+  );
+
+  const byModalidade = useMemo(() => {
+    const groups = new Map<string, typeof plan.templates>();
+    for (const t of plan.templates) {
+      const list = groups.get(t.modalidade) ?? [];
+      list.push(t);
+      groups.set(t.modalidade, list);
+    }
+    return [...groups.entries()];
+  }, [plan.templates]);
+
+  const outOfAnalysis = useMemo(
+    () =>
+      run.items
+        .filter((i) => i.status === "discarded")
+        .map((i) => {
+          const c = (i.classification ?? {}) as { via?: string; reason?: string };
+          return c.via === "intake" || c.via === "operator"
+            ? { item: i, reason: c.reason ?? "Fora desta análise." }
+            : null;
+        })
+        .filter((x): x is { item: IngestionRunItem; reason: string } => x !== null),
+    [run.items]
+  );
+
+  const setComment = (key: string, text: string) =>
+    setComments((prev) => ({ ...prev, [key]: text }));
+
+  return (
+    <>
+      <IssueList issues={topIssues} filenameOf={filenameOf} />
+
+      {byModalidade.map(([modalidade, templates]) => (
+        <Section
+          key={modalidade}
+          title={`Modelos — ${modalidadeLabel(modalidade)}`}
+          count={templates.length}
+          icon={<FileText className="h-4 w-4" />}
+          hint="Garantia diferente é modelo diferente — é o que faz o sistema escolher o certo a partir do formulário. Abra um card para ver os detalhes."
+        >
+          {templates.map((t) => {
+            const key = templateKey(t);
+            const item = itemById.get(t.sourceItemId);
+            const itemIssues = issuesByItem.get(t.sourceItemId) ?? [];
+            const criteria = matchCriteriaSummary(t.matchCriteria);
+            const slots = Object.entries(t.slotBlocks ?? {}).filter(
+              ([, paragraphs]) => (paragraphs ?? []).length > 0
+            );
+            return (
+              <CollapsibleCard
+                key={key}
+                checked={decisions?.templates[key] ?? false}
+                disabled={submitting || !reviewing}
+                onChange={(v) =>
+                  setDecisions((prev) =>
+                    prev
+                      ? { ...prev, templates: { ...prev.templates, [key]: v } }
+                      : prev
+                  )
+                }
+                title={t.name}
+                subtitle={filenameOf(t.sourceItemId)}
+                chips={
+                  <>
+                    {criteria.map((c) => (
+                      <Badge key={c} variant="outline" className="text-[11px]">
+                        {c}
+                      </Badge>
+                    ))}
+                    {slots.length > 0 && (
+                      <Badge
+                        variant="outline"
+                        className="border-violet-300 text-[11px] text-violet-700 dark:border-violet-800 dark:text-violet-300"
+                      >
+                        abre espaço de cláusula
+                      </Badge>
+                    )}
+                    {t.isDefaultSuggested && (
+                      <Badge variant="secondary" className="text-[11px]">
+                        sugerido como principal
+                      </Badge>
+                    )}
+                    {itemIssues.length > 0 && (
+                      <Badge
+                        variant="outline"
+                        className="border-amber-300 text-[11px] text-amber-700 dark:border-amber-800 dark:text-amber-300"
+                      >
+                        {itemIssues.length} aviso(s)
+                      </Badge>
+                    )}
+                  </>
+                }
+              >
+                {criteria.length === 0 && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Sem critério de escolha — este modelo só é usado como padrão da
+                    modalidade.
+                  </p>
+                )}
+                {slots.map(([slot, paragraphs]) => (
+                  <div
+                    key={slot}
+                    className="rounded-md border border-violet-300 bg-violet-50/50 p-2 dark:border-violet-900 dark:bg-violet-950/20"
+                  >
+                    <p className="text-[11px] font-medium">
+                      Abre espaço reutilizável:{" "}
+                      {slotLabel(slot as ClauseSlotKey).toLowerCase()}
+                    </p>
+                    <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+                      Este trecho SAI do corpo do modelo e a cláusula certa entra na
+                      hora de gerar o contrato:
+                    </p>
+                    <p className="mt-1 rounded bg-background px-2 py-1.5 text-[11px] leading-snug">
+                      {preview((paragraphs ?? []).join(" "), 260)}
+                    </p>
+                  </div>
+                ))}
+                {itemIssues.map((issue, i) => (
+                  <p
+                    key={i}
+                    className="flex items-start gap-1.5 rounded-md bg-amber-50 px-2 py-1.5 text-[11px] leading-snug dark:bg-amber-950/30"
+                  >
+                    <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-600" />
+                    <span>
+                      <strong>{ISSUE_KIND_LABELS[issue.kind] ?? issue.kind}:</strong>{" "}
+                      {issue.detail}
+                    </span>
+                  </p>
+                ))}
+                <Rationale text={t.rationale} />
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  {item?.blobUrl && (
+                    <Button asChild size="sm" variant="ghost" className="h-7 text-xs">
+                      <a href={item.blobUrl} target="_blank" rel="noreferrer">
+                        <Download className="mr-1 h-3 w-3" />
+                        Ver arquivo original
+                      </a>
+                    </Button>
+                  )}
+                  {reviewing && (
+                    <ReplaceFileButton
+                      runId={run.id}
+                      orgId={orgId}
+                      replaceItemId={t.sourceItemId}
+                      onDone={onReattached}
+                    />
+                  )}
+                </div>
+                {reviewing && (
+                  <CommentBox
+                    value={comments[key] ?? ""}
+                    onChange={(text) => setComment(key, text)}
+                    placeholder={`Instrução sobre "${t.name}" para a próxima análise…`}
+                  />
+                )}
+              </CollapsibleCard>
+            );
+          })}
+        </Section>
+      ))}
+
+      <Section
+        title="Cláusulas propostas"
+        count={plan.clauses.length}
+        icon={<Layers className="h-4 w-4" />}
+        hint="Vão para o acervo aguardando aprovação. É a redação de vocês que entra no lugar do espaço reutilizável do modelo — e a mesma cláusula serve residencial e comercial."
+      >
+        {plan.clauses.map((c) => {
+          const key = clauseKey(c);
+          return (
+            <CollapsibleCard
+              key={key}
+              checked={decisions?.clauses[key] ?? false}
+              disabled={submitting || !reviewing}
+              onChange={(v) =>
+                setDecisions((prev) =>
+                  prev ? { ...prev, clauses: { ...prev.clauses, [key]: v } } : prev
+                )
+              }
+              title={c.title}
+              subtitle={`${slotLabel(c.slot)} · ${c.value}${
+                c.provider ? ` · ${c.provider}` : " · vale para qualquer fornecedor"
+              }`}
+              chips={
+                <>
+                  {c.tags.map((tag) => (
+                    <Badge key={tag} variant="outline" className="text-[11px]">
+                      {tag}
+                    </Badge>
+                  ))}
+                </>
+              }
+            >
+              <p className="rounded bg-muted/40 px-2 py-1.5 text-[11px] leading-snug">
+                {preview(c.content, 480)}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                Fonte: {filenameOf(c.sourceItemId)}
+              </p>
+              <Rationale text={c.rationale} />
+            </CollapsibleCard>
+          );
+        })}
+      </Section>
+
+      <Section
+        title="Arquivos descartados"
+        count={plan.discards.length}
+        icon={<Trash2 className="h-4 w-4" />}
+        hint="Desmarque para registrar que você não concorda com o descarte — o arquivo não vira nada nesta rodada, mas o relatório guarda a discordância."
+      >
+        {plan.discards.map((d) => (
+          <CollapsibleCard
+            key={d.itemId}
+            checked={decisions?.discards[d.itemId] ?? true}
+            disabled={submitting || !reviewing}
+            onChange={(v) =>
+              setDecisions((prev) =>
+                prev
+                  ? { ...prev, discards: { ...prev.discards, [d.itemId]: v } }
+                  : prev
+              )
+            }
+            title={filenameOf(d.itemId)}
+            subtitle={DISCARD_REASON_LABELS[d.reason] ?? d.reason}
+          >
+            <p className="text-[11px] text-muted-foreground">{d.detail}</p>
+          </CollapsibleCard>
+        ))}
+      </Section>
+
+      {outOfAnalysis.length > 0 && (
+        <section className="space-y-2">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+            <h2 className="text-sm font-semibold">
+              Já estavam na biblioteca{" "}
+              <span className="text-muted-foreground">({outOfAnalysis.length})</span>
+            </h2>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Estes arquivos ficaram fora da análise — nada a fazer com eles.
+          </p>
+          <ul className="space-y-1 text-xs text-muted-foreground">
+            {outOfAnalysis.map(({ item, reason }) => (
+              <li key={item.id} className="rounded-md border border-dashed px-3 py-2">
+                <span className="font-medium text-foreground">{item.filename}</span> —{" "}
+                {reason}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {reviewing && (
+        <ReplanPanel
+          run={run}
+          plan={plan}
+          comments={comments}
+          setComments={setComments}
+          onReplan={onReplan}
+        />
+      )}
+
+      {reviewing && (
+        <div className="sticky bottom-0 flex flex-wrap items-center gap-2 border-t bg-background/95 py-3 backdrop-blur">
+          <Button
+            variant="outline"
+            disabled={submitting}
+            onClick={() => setDecisions(setAllDecisions(plan, true))}
+          >
+            Aprovar tudo
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={submitting}
+            onClick={() => setDecisions(setAllDecisions(plan, false))}
+          >
+            Desmarcar tudo
+          </Button>
+          <Button
+            className="ml-auto"
+            disabled={submitting || counts.total === 0}
+            onClick={onSubmit}
+          >
+            {submitting && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+            Aplicar {counts.templates} modelo(s) e {counts.clauses} cláusula(s)
+          </Button>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Reprocessar com instruções
+// ────────────────────────────────────────────────────────────────────────────
+
+function ReplanPanel({
+  run,
+  plan,
+  comments,
+  setComments,
+  onReplan,
+}: {
+  run: IngestionRunSnapshot;
+  plan: NonNullable<ReturnType<typeof parseLibraryPlan>>;
+  comments: Record<string, string>;
+  setComments: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  onReplan: (body: { comments?: string[]; notes?: string[] }) => Promise<void>;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [persist, setPersist] = useState(false);
+
+  // Comentários por card viram instrução nomeada; o geral entra como está.
+  const collected = useMemo(() => {
+    const list: string[] = [];
+    for (const t of plan.templates) {
+      const text = (comments[templateKey(t)] ?? "").trim();
+      if (text) list.push(`Sobre o modelo "${t.name}": ${text}`);
+    }
+    const general = (comments.__general ?? "").trim();
+    if (general) list.push(general);
+    return list;
+  }, [comments, plan.templates]);
+
+  async function go() {
+    setBusy(true);
+    try {
+      await onReplan({
+        comments: collected,
+        ...(persist && (comments.__general ?? "").trim()
+          ? { notes: [(comments.__general ?? "").trim()] }
+          : {}),
+      });
+      toast.success("Reanalisando com as suas instruções.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Falha ao reprocessar");
+    } finally {
+      setBusy(false);
+      setConfirming(false);
+    }
+  }
+
+  const spent = run.aiCostUsd === null || run.aiCostUsd === undefined
+    ? null
+    : Number(run.aiCostUsd);
+
+  return (
+    <section className="space-y-2 rounded-lg border p-3">
+      <div className="flex items-center gap-2">
+        <MessageSquarePlus className="h-4 w-4" />
+        <h2 className="text-sm font-semibold">Algo não ficou como devia?</h2>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Escreva a instrução (aqui ou dentro do card de um modelo) e reprocessa: os
+        arquivos não são reenviados — só a decisão é refeita, seguindo o que você
+        disser.
+      </p>
+      <textarea
+        className="w-full rounded-md border bg-background px-2.5 py-2 text-xs"
+        rows={2}
+        placeholder="Ex.: a caução comercial deve virar modelo próprio, não cláusula."
+        value={comments.__general ?? ""}
+        onChange={(e) =>
+          setComments((prev) => ({ ...prev, __general: e.target.value }))
+        }
+      />
+      <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={persist}
+          onChange={(e) => setPersist(e.target.checked)}
+        />
+        Lembrar desta instrução nos próximos lotes desta imobiliária
+      </label>
+      {!confirming ? (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={collected.length === 0}
+          onClick={() => setConfirming(true)}
+        >
+          <RefreshCcw className="mr-1.5 h-3.5 w-3.5" />
+          Reprocessar com instruções
+        </Button>
+      ) : (
+        <div className="space-y-2 rounded-md bg-muted/40 p-2.5">
+          <p className="text-xs">
+            A reanálise custa cerca de <strong>US$ 0,40–0,60 por tipo de
+            contrato</strong> do lote
+            {spent !== null && (
+              <>
+                {" "}
+                (este lote já gastou <strong>US$ {spent.toFixed(2)}</strong>)
+              </>
+            )}
+            . {collected.length} instrução(ões) serão consideradas.
+          </p>
+          <div className="flex gap-2">
+            <Button size="sm" disabled={busy} onClick={() => void go()}>
+              {busy && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+              Confirmar reanálise
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => setConfirming(false)}
+            >
+              Cancelar
+            </Button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Substituir arquivo de um modelo
+// ────────────────────────────────────────────────────────────────────────────
+
+function ReplaceFileButton({
+  runId,
+  orgId,
+  replaceItemId,
+  onDone,
+}: {
+  runId: string;
+  orgId: string;
+  replaceItemId: string;
+  onDone: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function handlePick(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setBusy(true);
+    try {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const blob = await upload(`ingestion/${orgId}/${Date.now()}-${safeName}`, file, {
+        access: "public",
+        handleUploadUrl: "/api/templates/ingest/runs/blob-upload",
+        contentType: file.type || "application/octet-stream",
+      });
+      const res = await fetch(`/api/templates/ingest/runs/${runId}/items`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          replaceItemId,
+          files: [
+            {
+              filename: file.name,
+              fileKind: /\.pdf$/i.test(file.name) ? "pdf" : "docx",
+              blobUrl: blob.url,
+              sourceHash: await sha256Hex(file),
+            },
+          ],
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Falha ao substituir o arquivo");
+      toast.success(
+        "Arquivo anexado — o lote está sendo reanalisado com ele no lugar."
+      );
+      onDone();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Falha ao substituir o arquivo");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".docx,.pdf"
+        className="hidden"
+        onChange={(e) => void handlePick(e)}
+      />
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-7 text-xs"
+        disabled={busy}
+        onClick={() => inputRef.current?.click()}
+      >
+        {busy ? (
+          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+        ) : (
+          <RefreshCcw className="mr-1 h-3 w-3" />
+        )}
+        Substituir arquivo
+      </Button>
+    </>
+  );
+}
+
+/** Mesmo hash do intake (`StartIngestionRunButton`): governa só a SUGESTÃO. */
+async function sha256Hex(file: File): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Blocos
 // ────────────────────────────────────────────────────────────────────────────
+
+/** Progresso por família do fanout, lido de `report.planning.families`. */
+function FamilyProgress({ report }: { report: unknown }) {
+  const families = useMemo(() => {
+    const planning = (report as { planning?: { families?: unknown } } | null)
+      ?.planning;
+    const raw = planning?.families;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+    return Object.entries(raw as Record<string, FamilyProgressState>).map(
+      ([key, st]) => ({
+        key,
+        label: PLAN_FAMILY_LABELS[key] ?? key,
+        done: st.nextStepIndex === null,
+        itemCount: st.itemCount ?? 0,
+      })
+    );
+  }, [report]);
+  if (families.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {families.map((f) => (
+        <span
+          key={f.key}
+          className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground"
+        >
+          {f.done ? (
+            <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+          ) : (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          )}
+          {f.label} ({f.itemCount})
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function CostBadge({ aiCostUsd }: { aiCostUsd: number | string | null | undefined }) {
+  if (aiCostUsd === null || aiCostUsd === undefined) return null;
+  const value = Number(aiCostUsd);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return (
+    <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+      análise: US$ {value.toFixed(2)}
+    </span>
+  );
+}
 
 function SuggestOnlyNotice() {
   return (
@@ -421,9 +997,8 @@ function SuggestOnlyNotice() {
 /**
  * A ordem NÃO é decorativa: o modelo com espaço de cláusula não carrega a
  * redação no corpo — quem a devolve na geração é o acervo, e só cláusula
- * aprovada conta. Ativar o modelo antes de aprovar a cláusula faria o contrato
- * sair com o texto padrão da plataforma no lugar do texto da imobiliária. A
- * ativação tem trava pra isso; o aviso existe pra ela nunca precisar aparecer.
+ * aprovada conta. A ativação tem trava pra isso; o aviso existe pra ela nunca
+ * precisar aparecer.
  */
 function ActivationOrder() {
   return (
@@ -445,16 +1020,16 @@ function ActivationOrder() {
 }
 
 function IssueList({
-  plan,
+  issues,
   filenameOf,
 }: {
-  plan: NonNullable<ReturnType<typeof parseLibraryPlan>>;
+  issues: PlanIssue[];
   filenameOf: (id: string | null) => string;
 }) {
-  if (plan.issues.length === 0) return null;
+  if (issues.length === 0) return null;
   return (
     <div className="space-y-2">
-      {plan.issues.map((issue, i) => {
+      {issues.map((issue, i) => {
         const blocking = BLOCKING_ISSUE_KINDS.includes(issue.kind);
         return (
           <div
@@ -517,12 +1092,18 @@ function Section({
   );
 }
 
-function ReviewRow({
+/**
+ * Card recolhido por padrão: fechado mostra o que DECIDE (checkbox, nome,
+ * chips); aberto mostra o resto. É o que transforma 10 modelos numa lista
+ * escaneável em vez de uma parede.
+ */
+function CollapsibleCard({
   checked,
   disabled,
   onChange,
   title,
   subtitle,
+  chips,
   children,
 }: {
   checked: boolean;
@@ -530,11 +1111,13 @@ function ReviewRow({
   onChange: (value: boolean) => void;
   title: string;
   subtitle: string;
+  chips?: React.ReactNode;
   children?: React.ReactNode;
 }) {
+  const [open, setOpen] = useState(false);
   return (
     <li className="rounded-lg border p-3">
-      <label className="flex items-start gap-2.5">
+      <div className="flex items-start gap-2.5">
         <input
           type="checkbox"
           className="mt-1"
@@ -542,13 +1125,45 @@ function ReviewRow({
           disabled={disabled}
           onChange={(e) => onChange(e.target.checked)}
         />
-        <span className="min-w-0 flex-1">
-          <span className="block text-sm font-medium">{title}</span>
+        <button
+          type="button"
+          className="min-w-0 flex-1 text-left"
+          onClick={() => setOpen((v) => !v)}
+        >
+          <span className="flex items-center gap-1.5">
+            <span className="block truncate text-sm font-medium">{title}</span>
+            {open ? (
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            )}
+          </span>
           <span className="block text-xs text-muted-foreground">{subtitle}</span>
-        </span>
-      </label>
-      {children && <div className="mt-2 space-y-1.5 pl-6">{children}</div>}
+        </button>
+      </div>
+      {chips && <div className="mt-1.5 flex flex-wrap gap-1 pl-6">{chips}</div>}
+      {open && children && <div className="mt-2 space-y-1.5 pl-6">{children}</div>}
     </li>
+  );
+}
+
+function CommentBox({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (text: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <textarea
+      className="w-full rounded-md border bg-background px-2.5 py-1.5 text-[11px]"
+      rows={1}
+      placeholder={placeholder}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
   );
 }
 
@@ -700,6 +1315,19 @@ function ExecutionReportView({
               <li key={id}>
                 Você não concordou em descartar {filenameOf(id)} — ele não virou nada
                 nesta rodada.
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {(report.intakeDiscards?.length ?? 0) > 0 && (
+        <section className="space-y-1">
+          <h2 className="text-sm font-semibold">Já estavam na biblioteca</h2>
+          <ul className="space-y-1 text-xs text-muted-foreground">
+            {report.intakeDiscards!.map((d) => (
+              <li key={d.itemId}>
+                {d.filename} — {d.detail}
               </li>
             ))}
           </ul>

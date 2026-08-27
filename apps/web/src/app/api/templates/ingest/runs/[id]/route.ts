@@ -33,6 +33,7 @@ export async function GET(
       planReviewed: true,
       report: true,
       error: true,
+      aiCostUsd: true,
       createdAt: true,
       updatedAt: true,
       items: {
@@ -43,6 +44,7 @@ export async function GET(
           fileKind: true,
           status: true,
           sourceHash: true,
+          blobUrl: true,
           classification: true,
           piiReport: true,
           error: true,
