@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { matriculaConditionalPaths } from "@/lib/forms/party-required";
+import {
+  matriculaConditionalPaths,
+  matriculaConditionalPathsLocacao,
+} from "@/lib/forms/party-required";
 import { dadosContratoSchema } from "@/lib/forms/validation";
 import {
   pendenciasDeMatricula,
@@ -209,5 +212,45 @@ describe("pendenciasNaoResolvidas — o que apaga o aviso", () => {
   it("sem anexo nenhum, todas as pendências ficam de pé", () => {
     const p = [pend("Rua A"), pend("Rua B")];
     expect(pendenciasNaoResolvidas(p, [])).toEqual(p);
+  });
+});
+
+/**
+ * Locação tem o MESMO rádio desde que o bloco da matrícula foi para a etapa do
+ * imóvel (2026-08), mas o imóvel é objeto singular. Sem esta variante, "deverá
+ * ser solicitada" prometia uma obrigatoriedade que nenhum consumidor aplicava.
+ */
+describe("matriculaConditionalPathsLocacao", () => {
+  const get = (data: Record<string, unknown>) => (path: string) => {
+    let cur: unknown = data;
+    for (const part of path.split(".")) {
+      if (cur == null || typeof cur !== "object") return undefined;
+      cur = (cur as Record<string, unknown>)[part];
+    }
+    return cur;
+  };
+
+  it("'solicitar' exige número e cartório — em path SINGULAR", () => {
+    expect(
+      matriculaConditionalPathsLocacao(get({ imovel: { matricula_situacao: "solicitar" } }))
+    ).toEqual(["imovel.matricula", "imovel.cartorio"]);
+  });
+
+  it("'possui', vazio e ausente não exigem nada", () => {
+    expect(
+      matriculaConditionalPathsLocacao(get({ imovel: { matricula_situacao: "possui" } }))
+    ).toEqual([]);
+    expect(
+      matriculaConditionalPathsLocacao(get({ imovel: { matricula_situacao: "" } }))
+    ).toEqual([]);
+    expect(matriculaConditionalPathsLocacao(get({}))).toEqual([]);
+  });
+
+  it("não confunde com o array de venda", () => {
+    expect(
+      matriculaConditionalPathsLocacao(
+        get({ imoveis: [{ matricula_situacao: "solicitar" }] })
+      )
+    ).toEqual([]);
   });
 });

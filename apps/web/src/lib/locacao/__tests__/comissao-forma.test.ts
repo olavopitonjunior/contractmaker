@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formaTaxaLocacao, taxaLocacaoEfetiva } from "../commission";
+import {
+  aplicarPadraoComissao,
+  formaTaxaLocacao,
+  taxaFoiInformada,
+  taxaLocacaoEfetiva,
+} from "../commission";
 import { comissaoLocacaoSchema } from "@/lib/forms/validation-locacao";
 import {
   DEFAULT_LOCACAO_COMISSAO,
@@ -120,5 +125,84 @@ describe("resolveOrgLocacaoComissao", () => {
     expect(
       resolveOrgLocacaoComissao({ locacao: { taxa_locacao_percent: 99 } })
     ).toEqual(DEFAULT_LOCACAO_COMISSAO);
+  });
+});
+
+/**
+ * O gatilho do padrão da casa. A primeira versão checava `!comissao` — e o
+ * diálogo do operador SEMPRE manda o objeto (com a taxa zerada quando ninguém
+ * digitou nada), então o padrão nunca era aplicado.
+ */
+describe("semeadura do padrão da imobiliária", () => {
+  const padraoPercent = {
+    forma: "percentual" as const,
+    taxa_locacao_percent: 100,
+    taxa_locacao_valor: 0,
+  };
+  const padraoFixo = {
+    forma: "valor_fixo" as const,
+    taxa_locacao_percent: 0,
+    taxa_locacao_valor: 800,
+  };
+  const semPadrao = {
+    forma: "percentual" as const,
+    taxa_locacao_percent: 0,
+    taxa_locacao_valor: 0,
+  };
+
+  it("objeto do diálogo com taxa ZERADA conta como não-informada", () => {
+    expect(taxaFoiInformada({ taxa_locacao_percent: 0, angariadores: [] })).toBe(false);
+    expect(
+      taxaFoiInformada({
+        forma_taxa_locacao: "valor_fixo",
+        taxa_locacao_valor: 0,
+        angariadores: [],
+      })
+    ).toBe(false);
+    expect(taxaFoiInformada(undefined)).toBe(false);
+  });
+
+  it("taxa digitada no negócio conta como informada", () => {
+    expect(taxaFoiInformada({ taxa_locacao_percent: 50 })).toBe(true);
+    expect(
+      taxaFoiInformada({ forma_taxa_locacao: "valor_fixo", taxa_locacao_valor: 800 })
+    ).toBe(true);
+  });
+
+  it("o percentual não conta quando a forma é valor fixo (e vice-versa)", () => {
+    expect(
+      taxaFoiInformada({ forma_taxa_locacao: "valor_fixo", taxa_locacao_percent: 100 })
+    ).toBe(false);
+    expect(
+      taxaFoiInformada({ forma_taxa_locacao: "percentual", taxa_locacao_valor: 800 })
+    ).toBe(false);
+  });
+
+  it("aplica o padrão preservando os angariadores do diálogo", () => {
+    const doDialogo = {
+      taxa_locacao_percent: 0,
+      angariadores: [{ nome: "Corretor" }],
+    };
+    expect(aplicarPadraoComissao(doDialogo, padraoFixo)).toEqual({
+      angariadores: [{ nome: "Corretor" }],
+      forma_taxa_locacao: "valor_fixo",
+      taxa_locacao_percent: 0,
+      taxa_locacao_valor: 800,
+    });
+  });
+
+  it("padrão percentual sobrepõe a forma também", () => {
+    const r = aplicarPadraoComissao(
+      { forma_taxa_locacao: "valor_fixo" as const, angariadores: [] },
+      padraoPercent
+    );
+    expect(r?.forma_taxa_locacao).toBe("percentual");
+    expect(r?.taxa_locacao_percent).toBe(100);
+  });
+
+  it("org sem padrão devolve a entrada intacta — formulário nasce em branco", () => {
+    const entrada = { taxa_locacao_percent: 0, angariadores: [] };
+    expect(aplicarPadraoComissao(entrada, semPadrao)).toBe(entrada);
+    expect(aplicarPadraoComissao(undefined, semPadrao)).toBeUndefined();
   });
 });

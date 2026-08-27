@@ -202,6 +202,22 @@ export function matriculaConditionalPaths(
 }
 
 /**
+ * Mesma regra para LOCAÇÃO, onde o imóvel é objeto singular (`imovel`) em vez
+ * de array.
+ *
+ * Existe porque o bloco da matrícula foi para a etapa do imóvel de locação
+ * (2026-08) e o rádio "deverá ser solicitada" prometia uma obrigatoriedade que
+ * nenhum consumidor aplicava: a versão de venda é indexada em `imoveis.${i}` e
+ * só o SalesFormWizard a somava.
+ */
+export function matriculaConditionalPathsLocacao(
+  getValue: (path: string) => unknown,
+): string[] {
+  if (getValue("imovel.matricula_situacao") !== "solicitar") return [];
+  return ["imovel.matricula", "imovel.cartorio"];
+}
+
+/**
  * Conveniência: paths efetivos que estão vazios no form. `getValue` lê o valor
  * atual de cada path.
  */

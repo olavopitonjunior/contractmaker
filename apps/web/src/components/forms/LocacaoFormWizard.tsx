@@ -22,6 +22,7 @@ import {
 import type { ParticipantRole } from "@/lib/forms/participant-token";
 import {
   effectiveRequiredPaths,
+  matriculaConditionalPathsLocacao,
   findSignatureRecommendations,
   getByPath,
   isValueEmpty,
@@ -211,8 +212,18 @@ export function LocacaoFormWizard({
   // conforme o cliente digita, não só quando ele tenta avançar.
   const currentRequiredRaw =
     requiredFieldsByStep?.[visibleStepIndexes[currentStep] ?? currentStep] ?? [];
+  // Condicional que não vem do preset: marcar "a matrícula deverá ser
+  // solicitada" torna número e cartório obrigatórios. Somado aos TRÊS
+  // consumidores da lista (gate, contagem e asterisco) — um que esqueça mostra
+  // uma verdade diferente dos outros.
+  const matriculaCondicional = matriculaConditionalPathsLocacao((path) =>
+    getByPath(watchedData, path),
+  );
+  const isStepImovel = (visibleStepIndexes[currentStep] ?? currentStep) === 3;
   const currentEffectiveRequired = effectiveRequiredPaths(
-    currentRequiredRaw,
+    isStepImovel
+      ? [...currentRequiredRaw, ...matriculaCondicional]
+      : currentRequiredRaw,
     (path) => getByPath(watchedData, path),
   );
   const currentMissingCount = currentEffectiveRequired.filter((p) =>
@@ -224,7 +235,7 @@ export function LocacaoFormWizard({
   // wizard barrava nele, e campos PF-only (RG, estado civil) apareciam
   // marcados numa ficha de empresa que nem os renderiza.
   const allRequiredPaths = effectiveRequiredPaths(
-    (requiredFieldsByStep ?? []).flat(),
+    [...(requiredFieldsByStep ?? []).flat(), ...matriculaCondicional],
     (path) => getByPath(watchedData, path),
   );
 
@@ -344,7 +355,10 @@ export function LocacaoFormWizard({
     }
 
     // (2) Obrigatoriedade configurada pela imobiliária.
-    const configured = requiredFieldsByStep?.[step] ?? [];
+    const configured = [
+      ...(requiredFieldsByStep?.[step] ?? []),
+      ...(step === 3 ? matriculaConditionalPathsLocacao(readValue) : []),
+    ];
     if (configured.length === 0) return true;
 
     const paths = effectiveRequiredPaths(configured, readValue);

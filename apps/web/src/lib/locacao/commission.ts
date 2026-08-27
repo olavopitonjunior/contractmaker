@@ -133,3 +133,58 @@ export function somaPercentuaisAngariadores(
   );
   return round2(total);
 }
+
+/**
+ * Shape mínimo da comissão vinda do diálogo do operador (o Zod completo mora em
+ * validation-locacao; aqui basta o que decide o padrão).
+ */
+export interface ComissaoSeedInput {
+  forma_taxa_locacao?: "percentual" | "valor_fixo";
+  taxa_locacao_percent?: number;
+  taxa_locacao_valor?: number;
+  angariadores?: unknown[];
+}
+
+/**
+ * O operador digitou uma taxa NESTE negócio?
+ *
+ * O gatilho do padrão da casa é a taxa ZERADA, não a AUSÊNCIA de `comissao`: o
+ * diálogo do operador sempre manda o objeto (com `taxa_locacao_percent: 0`
+ * quando ninguém digitou nada), então checar só `!comissao` faria o padrão
+ * nunca ser aplicado.
+ */
+export function taxaFoiInformada(
+  comissao: ComissaoSeedInput | null | undefined
+): boolean {
+  if (!comissao) return false;
+  return comissao.forma_taxa_locacao === "valor_fixo"
+    ? positiveNumber(comissao.taxa_locacao_valor) > 0
+    : positiveNumber(comissao.taxa_locacao_percent) > 0;
+}
+
+/**
+ * Sobrepõe o padrão comercial da org na taxa da imobiliária, PRESERVANDO os
+ * angariadores que o operador já tenha adicionado — o padrão da casa é só sobre
+ * a taxa. Padrão zerado ("não configurado") devolve a entrada intacta, e o
+ * formulário nasce em branco como sempre nasceu.
+ */
+export function aplicarPadraoComissao<T extends ComissaoSeedInput>(
+  comissao: T | undefined,
+  padrao: {
+    forma: "percentual" | "valor_fixo";
+    taxa_locacao_percent: number;
+    taxa_locacao_valor: number;
+  }
+): T | undefined {
+  const temPadrao =
+    padrao.forma === "valor_fixo"
+      ? padrao.taxa_locacao_valor > 0
+      : padrao.taxa_locacao_percent > 0;
+  if (!temPadrao) return comissao;
+  return {
+    ...((comissao ?? { angariadores: [] }) as T),
+    forma_taxa_locacao: padrao.forma,
+    taxa_locacao_percent: padrao.taxa_locacao_percent,
+    taxa_locacao_valor: padrao.taxa_locacao_valor,
+  };
+}

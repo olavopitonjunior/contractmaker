@@ -19,6 +19,10 @@ import {
 } from "@/lib/forms/validation-locacao";
 import { resolveRequiredPresetSnapshot } from "@/lib/forms/required-snapshot";
 import { resolveOrgLocacaoComissao } from "@/lib/contracts/default-config";
+import {
+  aplicarPadraoComissao,
+  taxaFoiInformada,
+} from "@/lib/locacao/commission";
 
 // Janela do soft-block de título repetido (recriação manual de card).
 const DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
@@ -144,29 +148,21 @@ export async function POST(req: NextRequest) {
       const requiredPreset = await resolveRequiredPresetSnapshot(ctx.orgId, schemaType);
 
       // Padrão comercial da imobiliária (Configurações → Formulário → Locação).
-      // Semeado APENAS quando o diálogo não mandou comissão: o que o operador
-      // digitou no negócio sempre vence o padrão da casa.
+      //
+      // O gatilho é a taxa ZERADA, não a AUSÊNCIA de `comissao`: o diálogo do
+      // operador sempre manda o objeto (com `taxa_locacao_percent: 0` quando
+      // ninguém digitou nada), então checar só `!d.comissao` fazia o padrão da
+      // casa nunca ser aplicado. Taxa preenchida no negócio sempre vence.
       let comissaoSeed = d.comissao;
-      if (!comissaoSeed) {
+      if (!taxaFoiInformada(d.comissao)) {
         const formSettings = await prisma.orgFormSettings.findUnique({
           where: { orgId: ctx.orgId },
           select: { contractDefaultsJson: true },
         });
-        const padrao = resolveOrgLocacaoComissao(
-          formSettings?.contractDefaultsJson
+        comissaoSeed = aplicarPadraoComissao(
+          d.comissao,
+          resolveOrgLocacaoComissao(formSettings?.contractDefaultsJson)
         );
-        const temPadrao =
-          padrao.forma === "valor_fixo"
-            ? padrao.taxa_locacao_valor > 0
-            : padrao.taxa_locacao_percent > 0;
-        if (temPadrao) {
-          comissaoSeed = {
-            forma_taxa_locacao: padrao.forma,
-            taxa_locacao_percent: padrao.taxa_locacao_percent,
-            taxa_locacao_valor: padrao.taxa_locacao_valor,
-            angariadores: [],
-          };
-        }
       }
 
       // Título gravado TRIMADO — o dup-check compara contra o armazenado.

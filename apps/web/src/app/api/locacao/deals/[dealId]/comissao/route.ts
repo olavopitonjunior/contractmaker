@@ -111,7 +111,9 @@ export async function PATCH(
       scope: "comissao",
       dealId: deal.id,
       angariadores: comissao.angariadores?.length ?? 0,
+      formaTaxaLocacao: comissao.forma_taxa_locacao ?? "percentual",
       taxaLocacaoPercent: comissao.taxa_locacao_percent ?? 0,
+      taxaLocacaoValor: comissao.taxa_locacao_valor ?? 0,
     },
   });
 
