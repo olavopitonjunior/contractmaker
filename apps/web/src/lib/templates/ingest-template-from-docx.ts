@@ -50,6 +50,11 @@ import {
   applyClauseSlotToDoc,
   type ApplyClauseSlotReport,
 } from "@/lib/templates/apply-clause-slot";
+import {
+  neutralReplacementFor,
+  neutralizeProvidersInDoc,
+  type NeutralizeProvidersReport,
+} from "@/lib/templates/neutralize-provider";
 
 const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -76,6 +81,11 @@ export interface IngestTemplateFromDocxInput {
   matchCriteria?: Record<string, unknown> | null;
   /** Blocos que a consolidação isolou: `{ garantia: ["parágrafo 1", …] }`. */
   slotBlocks?: Partial<Record<ClauseSlotKey, string[]>>;
+  /**
+   * Rótulos de fornecedores conhecidos a NEUTRALIZAR no corpo (fora do slot).
+   * Vazio/ausente pula o passo — comportamento dos chamadores antigos.
+   */
+  neutralizeProviders?: readonly string[];
 }
 
 export interface IngestTemplateFromDocxResult {
@@ -88,6 +98,8 @@ export interface IngestTemplateFromDocxResult {
   report: unknown;
   /** Um relatório por slot PEDIDO — inclusive os que não sobreviveram. */
   slots: ApplyClauseSlotReport[];
+  /** Neutralização de fornecedor no corpo; null quando o passo não rodou. */
+  neutralization: NeutralizeProvidersReport | null;
 }
 
 /** O arquivo já virou template nesta org. A rota devolve 409 DUPLICATE_TEMPLATE. */
@@ -226,6 +238,21 @@ export async function ingestTemplateFromDocx(
     );
   }
 
+  // Neutralização de fornecedor no corpo — DEPOIS do slot (o trecho da
+  // garantia já saiu; o que restou de menção é fora do slot por construção) e
+  // ANTES do pass de IA, que não deve gastar mapeamento em nome que vai sumir.
+  // Falha não bloqueia: o template segue com o aviso e inativável, como antes.
+  let neutralization: NeutralizeProvidersReport | null = null;
+  if ((input.neutralizeProviders?.length ?? 0) > 0) {
+    neutralization = await neutralizeProvidersInDoc({
+      docId: uploaded.docId,
+      providers: input.neutralizeProviders!,
+      replacement: neutralReplacementFor(
+        (input.matchCriteria?.garantia as string | undefined) ?? null
+      ),
+    });
+  }
+
   // Pass de IA best-effort: insere {{placeholders}} no doc. Falha não
   // bloqueia — o template fica draft e o operador faz manualmente na revisão.
   // (Não derruba a claim-row: o doc já existe e o template é utilizável.)
@@ -311,7 +338,7 @@ export async function ingestTemplateFromDocx(
   // O relatório é gravado FORA do try do pass de IA: os avisos de slot precisam
   // chegar à página de revisão mesmo quando a IA falha (antes, um erro na IA
   // engolia junto o motivo de o slot não ter aberto).
-  if (report || finalSlotReports.length > 0) {
+  if (report || finalSlotReports.length > 0 || neutralization) {
     try {
       await prisma.contractTemplate.update({
         where: { id: template.id },
@@ -319,6 +346,7 @@ export async function ingestTemplateFromDocx(
           draftReport: {
             ...((report ?? {}) as object),
             ...(finalSlotReports.length ? { slots: finalSlotReports } : {}),
+            ...(neutralization ? { neutralization } : {}),
           } as object,
         },
       });
@@ -335,5 +363,6 @@ export async function ingestTemplateFromDocx(
     embedLink: uploaded.embedLink,
     report,
     slots: slotReports,
+    neutralization,
   };
 }

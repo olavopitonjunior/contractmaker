@@ -175,6 +175,8 @@ interface ItemRow {
   text: string | null;
   /** `ItemPiiReport` cru; ver o gate de PII em {@link applyClause}. */
   piiReport: unknown;
+  /** `ItemClassification` cru — fonte dos rótulos de fornecedor conhecidos. */
+  classification: unknown;
 }
 
 /** O que `countSettled` precisa saber de um item — nem texto, nem PII. */
@@ -258,9 +260,11 @@ export async function executePlanSlice(
         status: true,
         text: true,
         piiReport: true,
+        classification: true,
       },
     })) as ItemRow[];
     const itemById = new Map(items.map((i) => [i.id, i]));
+    const providerLabels = knownProviderLabels(plan, items);
 
     report = readExecutionReport(run.report) ?? initialReport(plan, reviewed, selection, now);
 
@@ -325,6 +329,7 @@ export async function executePlanSlice(
         orgId: run.orgId,
         template: planned,
         item: itemById.get(planned.sourceItemId) ?? null,
+        neutralizeProviders: providerLabels,
       });
       report.templates.push(line);
       if (line.status === "created") templatesCreated += 1;
@@ -554,6 +559,26 @@ async function applyClause(args: {
 // Templates
 // ────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Rótulos de fornecedor conhecidos NESTE run: os das cláusulas do plano (é o
+ * caminho normal) mais os que a classificação enxergou nos itens. É esta lista
+ * que a neutralização usa — nomes conhecidos, nunca heurística.
+ */
+export function knownProviderLabels(
+  plan: Pick<LibraryPlan, "clauses">,
+  items: ReadonlyArray<{ classification: unknown }>
+): string[] {
+  const labels = new Set<string>();
+  for (const c of plan.clauses ?? []) {
+    if (c.provider) labels.add(c.provider);
+  }
+  for (const item of items) {
+    const provider = (item.classification as { provider?: unknown } | null)?.provider;
+    if (typeof provider === "string" && provider.trim()) labels.add(provider.trim());
+  }
+  return [...labels];
+}
+
 /** Sniff de magic header — mesmo critério de `run-executor.ts`. */
 function isDocx(buffer: Buffer): boolean {
   return (
@@ -569,6 +594,8 @@ async function applyTemplate(args: {
   orgId: string;
   template: PlannedTemplate;
   item: ItemRow | null;
+  /** Rótulos p/ neutralizar no corpo — ver {@link knownProviderLabels}. */
+  neutralizeProviders: readonly string[];
 }): Promise<ExecutedTemplate> {
   const { template, item, orgId } = args;
   const base: ExecutedTemplate = {
@@ -610,6 +637,7 @@ async function applyTemplate(args: {
         unknown
       > | null,
       slotBlocks: template.slotBlocks,
+      neutralizeProviders: args.neutralizeProviders,
     });
 
     return {
@@ -619,7 +647,10 @@ async function applyTemplate(args: {
       name: created.name,
       webViewLink: created.webViewLink,
       slotsApplied: created.slots.filter((s) => s.applied).map((s) => s.slot),
-      detail: describeSlotOutcome(created.slots),
+      detail:
+        [describeSlotOutcome(created.slots), describeNeutralization(created.neutralization)]
+          .filter(Boolean)
+          .join(" ") || undefined,
     };
   } catch (err) {
     if (err instanceof DuplicateTemplateError) {
@@ -662,6 +693,27 @@ const SLOT_FAILURE_HINT: Record<string, string> = {
     "não consegui conferir o resultado — o Drive não respondeu",
   "token-missing": "o espaço sumiu do documento depois de aberto",
 };
+
+/** Uma frase sobre a neutralização de fornecedor no corpo, quando ela rodou. */
+function describeNeutralization(
+  n: { replaced: Array<{ provider: string; occurrences: number }>; leftover: string[] } | null
+): string | undefined {
+  if (!n) return undefined;
+  const parts: string[] = [];
+  if (n.replaced.length > 0) {
+    const total = n.replaced.reduce((sum, r) => sum + r.occurrences, 0);
+    parts.push(
+      `Fornecedor neutralizado no corpo (${n.replaced.map((r) => r.provider).join(", ")}, ` +
+        `${total} menção(ões)).`
+    );
+  }
+  if (n.leftover.length > 0) {
+    parts.push(
+      `Ainda há menção a ${n.leftover.join(", ")} no corpo — revise antes de ativar.`
+    );
+  }
+  return parts.join(" ") || undefined;
+}
 
 /** Uma frase sobre os slots que NÃO abriram — o resto o operador vê na revisão. */
 function describeSlotOutcome(
