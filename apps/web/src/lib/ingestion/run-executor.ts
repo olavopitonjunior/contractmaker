@@ -1046,6 +1046,13 @@ async function runPlanner(
   }
 }
 
+/** Comentários do operador gravados pela rota `/replan`, se houver. */
+function readOperatorComments(report: Record<string, unknown>): string[] {
+  const raw = report.planningComments;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((c): c is string => typeof c === "string" && c.trim().length > 0);
+}
+
 /** O que o estágio `planning` já registrou no report, ou null. */
 function readPlanning(report: Record<string, unknown>): PlanningReport | null {
   const raw = report.planning;
@@ -1179,6 +1186,10 @@ async function persistPlan(args: {
     }),
   });
 
+  // Comentários do replan (rota /replan) — instrução do operador PARA ESTA
+  // reanálise; a sanitização fina acontece no prompt (operatorCommentsBlock).
+  const operatorComments = readOperatorComments(report);
+
   // A biblioteca ATUAL do tenant — o insumo que faltava (ver library-snapshot).
   // Falhar aqui não pode custar os degraus já contados: sem snapshot, o planner
   // decide como nos runs antigos (às cegas), que é degradação, não erro.
@@ -1200,7 +1211,12 @@ async function persistPlan(args: {
       const wallStart = Date.now();
       const result = await runPlanner(
         args.planner,
-        { items: split.items, grouping: split.grouping, library },
+        {
+          items: split.items,
+          grouping: split.grouping,
+          library,
+          operatorComments,
+        },
         {
           meter: args.meter,
           ladder: {

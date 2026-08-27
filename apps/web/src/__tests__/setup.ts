@@ -370,7 +370,9 @@ vi.mock("@/lib/db/prisma", () => {
     orgModule: {
       findMany: vi.fn().mockResolvedValue([]),
       count: vi.fn().mockResolvedValue(0),
+      findFirst: vi.fn().mockResolvedValue(null),
       findUnique: vi.fn().mockResolvedValue(null),
+      update: vi.fn().mockResolvedValue({}),
       upsert: vi.fn().mockResolvedValue({}),
       createMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
@@ -536,6 +538,7 @@ vi.mock("@/lib/db/prisma", () => {
     ingestionItem: {
       findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
+      count: vi.fn().mockResolvedValue(0),
       create: vi.fn(),
       createMany: vi.fn().mockResolvedValue({ count: 0 }),
       update: vi.fn().mockResolvedValue({}),
