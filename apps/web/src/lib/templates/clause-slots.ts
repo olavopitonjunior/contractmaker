@@ -43,6 +43,7 @@ import { renderContratoHTML } from "@/lib/render/handlebars";
 import {
   deriveTemplateFacts,
   GARANTIA_LABELS,
+  GARANTIA_TIPOS,
   type GarantiaTipo,
 } from "@/lib/contracts/template-category";
 
@@ -120,6 +121,54 @@ export function providerTagsOf(tags: string[] | null | undefined): string[] {
     .filter((t) => t.startsWith(PROVIDER_TAG_PREFIX))
     .map((t) => t.slice(PROVIDER_TAG_PREFIX.length))
     .filter(Boolean);
+}
+
+/**
+ * `"porto_seguro"` → `"Porto Seguro"`. Rótulo de exibição derivado do slug da
+ * tag — a tag é a fonte (o acervo não guarda o nome "bonito" da seguradora).
+ */
+export function providerLabelFromSlug(slug: string): string {
+  return slug
+    .split("_")
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+/**
+ * Agrupa, pelas tags das cláusulas aprovadas do acervo, quais SEGURADORAS têm
+ * cláusula própria em cada tipo de garantia. Alimenta a sublinha "Seguradoras
+ * no acervo" da aba Tipos e o estado por prestadora nas configurações.
+ *
+ * Cláusula sem `provider:*` é a GENÉRICA do tipo — não entra no mapa (o mapa
+ * responde "quem tem redação própria?", não "o tipo tem cláusula?").
+ */
+export function providersByGarantiaFromTags(
+  items: Array<{ tags: string[] | null }>
+): Partial<Record<GarantiaTipo, string[]>> {
+  const acc = new Map<GarantiaTipo, Set<string>>();
+  for (const item of items) {
+    const tags = item.tags ?? [];
+    if (!tags.includes(slotTag("garantia"))) continue;
+    const providers = providerTagsOf(tags);
+    if (providers.length === 0) continue;
+    const garantias = tags
+      .filter((t) => t.startsWith("garantia:"))
+      .map((t) => t.slice("garantia:".length))
+      .filter((v): v is GarantiaTipo =>
+        (GARANTIA_TIPOS as readonly string[]).includes(v)
+      );
+    for (const g of garantias) {
+      const set = acc.get(g) ?? new Set<string>();
+      for (const p of providers) set.add(providerLabelFromSlug(p));
+      acc.set(g, set);
+    }
+  }
+  const out: Partial<Record<GarantiaTipo, string[]>> = {};
+  for (const [g, set] of acc) {
+    out[g] = [...set].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  }
+  return out;
 }
 
 /** Token do slot dentro do template/Doc (`slot_garantia`). */

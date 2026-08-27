@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  computeGarantiaBoard,
   computeGarantiaCoverage,
   computeTemplateCoverage,
   isOwnTemplate,
@@ -279,5 +280,129 @@ describe("computeGarantiaCoverage", () => {
     });
     expect(comeco.gaps.length).toBe(vazio.garantias.length - 1);
     expect(comeco.gaps.every((g) => g.modalidade === "locacao")).toBe(true);
+  });
+});
+
+describe("computeGarantiaBoard", () => {
+  it("só modalidades de CONTRATO de locação viram quadro (propostas são linha única)", () => {
+    const board = computeGarantiaBoard({
+      modules: ["vendas", "locacao"],
+      templates: [],
+    });
+    expect(board.map((b) => b.modalidade)).toEqual(["locacao", "locacao_comercial"]);
+    expect(board.every((b) => b.cells.length === 7)).toBe(true);
+  });
+
+  it("células refletem atribuído/em revisão/faltante por garantia", () => {
+    const board = computeGarantiaBoard({
+      modules: ["locacao"],
+      templates: [
+        tpl({
+          id: "fiador",
+          name: "Locação — Fiador",
+          matchCriteria: { garantia: "fiador" },
+          engine: "google_docs",
+        }),
+        tpl({
+          id: "caucao",
+          name: "Locação — Caução",
+          status: "draft",
+          matchCriteria: { garantia: "caucao" },
+          engine: "google_docs",
+        }),
+      ],
+    });
+    const row = board.find((b) => b.modalidade === "locacao")!;
+    expect(row.cells.find((c) => c.garantia === "fiador")!.state).toBe("active");
+    expect(row.cells.find((c) => c.garantia === "caucao")!.state).toBe("draft");
+    expect(row.cells.find((c) => c.garantia === "seguro_fianca")!.state).toBe(
+      "missing"
+    );
+  });
+
+  it("defaultGarantia aponta a linha da ★ quando o padrão tem critério de garantia", () => {
+    const board = computeGarantiaBoard({
+      modules: ["locacao"],
+      templates: [
+        tpl({
+          id: "fiador",
+          name: "Locação — Fiador",
+          matchCriteria: { garantia: "fiador" },
+          isDefault: true,
+          engine: "google_docs",
+        }),
+        tpl({
+          id: "sf",
+          name: "Locação — Seguro Fiança",
+          matchCriteria: { garantia: "seguro_fianca" },
+          engine: "google_docs",
+        }),
+      ],
+    });
+    const row = board.find((b) => b.modalidade === "locacao")!;
+    expect(row.defaultGarantia).toBe("fiador");
+    // Sem genérico no pool, o fallback real da geração é o próprio padrão.
+    expect(row.fallbackName).toBe("Locação — Fiador");
+  });
+
+  it("padrão genérico → defaultGarantia null e fallbackName é o genérico", () => {
+    const board = computeGarantiaBoard({
+      modules: ["locacao"],
+      templates: [
+        tpl({
+          id: "generico",
+          name: "Locação Residencial",
+          matchCriteria: null,
+          isDefault: true,
+        }),
+        tpl({
+          id: "fiador",
+          name: "Locação — Fiador",
+          matchCriteria: { garantia: "fiador" },
+          engine: "google_docs",
+        }),
+      ],
+    });
+    const row = board.find((b) => b.modalidade === "locacao")!;
+    expect(row.defaultGarantia).toBeNull();
+    expect(row.fallbackName).toBe("Locação Residencial");
+  });
+
+  it("o genérico vence o padrão de OUTRA garantia como fallback — espelho do scoring", () => {
+    // Form pede caução: o template de fiador (mesmo isDefault) é
+    // desclassificado (-1) e o genérico sobrevive com 0 — é ele que gera.
+    const board = computeGarantiaBoard({
+      modules: ["locacao"],
+      templates: [
+        tpl({
+          id: "fiador",
+          name: "Locação — Fiador",
+          matchCriteria: { garantia: "fiador" },
+          isDefault: true,
+          engine: "google_docs",
+        }),
+        tpl({ id: "generico", name: "Locação Residencial", matchCriteria: null }),
+      ],
+    });
+    const row = board.find((b) => b.modalidade === "locacao")!;
+    expect(row.fallbackName).toBe("Locação Residencial");
+  });
+
+  it("modalidade sem NENHUM ativo → fallbackName null (faltante dura)", () => {
+    const board = computeGarantiaBoard({
+      modules: ["locacao"],
+      templates: [
+        tpl({
+          id: "draft",
+          name: "Rascunho",
+          status: "draft",
+          matchCriteria: { garantia: "fiador" },
+          engine: "google_docs",
+        }),
+      ],
+    });
+    const row = board.find((b) => b.modalidade === "locacao")!;
+    expect(row.fallbackName).toBeNull();
+    expect(row.defaultGarantia).toBeNull();
   });
 });
