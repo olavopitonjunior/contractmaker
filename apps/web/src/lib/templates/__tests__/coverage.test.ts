@@ -38,6 +38,35 @@ describe("isOwnTemplate", () => {
 });
 
 describe("computeTemplateCoverage", () => {
+  it("o representante da linha é o PADRÃO da modalidade, não o primeiro criado", () => {
+    // O caso real da Ativa: painel exibia o Seguro-Fiança (criado antes)
+    // enquanto o padrão era o Fiador — o operador trocou o padrão e a tela
+    // pareceu não ter mudado nada.
+    const report = computeTemplateCoverage({
+      modules: ["locacao"],
+      templates: [
+        {
+          id: "t1",
+          name: "Contrato — Seguro-Fiança",
+          modalidade: "locacao",
+          status: "active",
+          engine: "google_docs",
+          isDefault: false,
+        },
+        {
+          id: "t2",
+          name: "Contrato — Fiador (Administrado)",
+          modalidade: "locacao",
+          status: "active",
+          engine: "google_docs",
+          isDefault: true,
+        },
+      ],
+    });
+    const row = report.rows.find((r) => r.modalidade === "locacao");
+    expect(row?.templateName).toBe("Contrato — Fiador (Administrado)");
+  });
+
   it("org só-locação não é cobrada por modelos de venda", () => {
     const report = computeTemplateCoverage({ modules: ["locacao"], templates: [] });
     const modalidades = report.rows.map((r) => r.modalidade);

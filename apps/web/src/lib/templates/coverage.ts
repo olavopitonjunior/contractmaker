@@ -56,6 +56,8 @@ export interface CoverageTemplateLite {
    * segue passando os mesmos campos de antes.
    */
   matchCriteria?: unknown;
+  /** Padrão da modalidade — é ele que o painel deve exibir como representante. */
+  isDefault?: boolean;
 }
 
 export interface CoverageRow {
@@ -130,8 +132,13 @@ export function computeTemplateCoverage(input: {
 
   const rows: CoverageRow[] = ordered.map((modalidade) => {
     const matches = active.filter((t) => t.modalidade === modalidade);
-    const own = matches.find(isOwnTemplate);
-    const chosen = own ?? matches[0];
+    // O representante da linha é o PADRÃO da modalidade — é ele que a geração
+    // usa quando o formulário não decide. Mostrar "um modelo qualquer" aqui fez
+    // o painel da Ativa exibir o Seguro-Fiança enquanto o padrão era o Fiador:
+    // o operador trocou o padrão e a tela pareceu não ter mudado nada.
+    const ownDefault = matches.find((t) => t.isDefault === true && isOwnTemplate(t));
+    const own = ownDefault ?? matches.find(isOwnTemplate);
+    const chosen = own ?? matches.find((t) => t.isDefault === true) ?? matches[0];
     const state: CoverageState = own ? "own" : chosen ? "canonical" : "missing";
     return {
       modalidade,

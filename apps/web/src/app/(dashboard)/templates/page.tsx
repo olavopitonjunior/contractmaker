@@ -54,6 +54,7 @@ export default async function TemplatesPage({
         modalidade: true,
         status: true,
         engine: true,
+        isDefault: true,
         sourceHash: true,
       },
     }),
