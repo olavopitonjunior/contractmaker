@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { SalesFormWizard } from "@/components/forms/SalesFormWizard";
 import { LocacaoFormWizard } from "@/components/forms/LocacaoFormWizard";
-import { BrandMark } from "@/components/layout/brand-mark";
+import { BrandWordmark } from "@/components/layout/brand-mark";
 import type { ParticipantRole } from "@/lib/forms/participant-token";
 import type { Assignment } from "@/lib/forms/extracted-to-form";
 import type { GarantiaOptionLike } from "@/lib/forms/garantia-catalog";
@@ -25,6 +25,9 @@ interface SubtokenFormClientProps {
   completedAt: string | null;
   /** Form travado (SalesForm.lockedAt) → wizard somente-leitura. */
   locked?: boolean;
+  /** Logo da imobiliária (BrandingSettings.logoUrl). Ausente = marca do produto. */
+  brandLogoUrl?: string | null;
+  brandDisplayName?: string | null;
 }
 
 /**
@@ -60,6 +63,8 @@ export function SubtokenFormClient({
   formTitle,
   completedAt,
   locked,
+  brandLogoUrl,
+  brandDisplayName,
 }: SubtokenFormClientProps) {
   const roleLabel = ROLE_LABELS[role] ?? role;
   const isLocacao = schemaType.startsWith("locacao");
@@ -76,8 +81,12 @@ export function SubtokenFormClient({
       <header className="border-b bg-card px-6 py-4 shrink-0">
         <div className="mx-auto max-w-4xl flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-3">
-            <BrandMark className="h-8 w-8 text-primary" />
-            <div>
+            <BrandWordmark
+              logoUrl={brandLogoUrl ?? undefined}
+              displayName={brandDisplayName ?? undefined}
+              markClassName="h-8 w-8 text-primary"
+            />
+            <div className="border-l border-border pl-3">
               <h1 className="font-display text-lg font-semibold tracking-tight leading-tight">
                 Preencha seus dados como {roleLabel}
               </h1>

@@ -4,6 +4,7 @@ import {
   FileText,
   FileSignature,
   ListChecks,
+  Palette,
   Users,
   Briefcase,
   MessageCircle,
@@ -18,6 +19,7 @@ import {
 export type OnboardingStepKey =
   | "google"
   | "profile"
+  | "branding"
   | "templates"
   | "clicksign"
   | "form"
@@ -28,6 +30,9 @@ export type OnboardingStepKey =
 export const STEP_ORDER: OnboardingStepKey[] = [
   "google",
   "profile",
+  // Logo depois do perfil: é a MESMA tela, e a marca só faz sentido depois que
+  // a imobiliária está identificada.
+  "branding",
   "templates",
   "clicksign",
   "form",
@@ -82,6 +87,17 @@ export const STEP_META: Record<OnboardingStepKey, StepMeta> = {
     blurb:
       "Razão social, CNPJ, CRECI e endereço. A razão social nomeia a administradora nas cláusulas de locação e a intermediadora nas de venda; CNPJ e CRECI saem impressos junto.",
     icon: Building2,
+  },
+  branding: {
+    key: "branding",
+    short: "Marca",
+    title: "Enviar o logo da imobiliária",
+    eyebrow: "Identidade",
+    desc: "Sua marca nos documentos e no formulário.",
+    blurb:
+      "Sem logo, o formulário que o cliente preenche, o PDF do resumo, a página de pagamento e os e-mails saem só com o NOME da imobiliária em texto. O fallback é discreto o bastante para ninguém notar que faltou — em agosto de 2026, nenhuma das imobiliárias em produção tinha subido o arquivo.",
+    icon: Palette,
+    cta: "Enviar o logo",
   },
   templates: {
     key: "templates",
@@ -166,6 +182,12 @@ export function stepUrl(
       return "/settings/integracoes";
     case "profile":
       return "/settings/perfil";
+    // Mesma página do perfil — o BrandingForm vive lá. O passo é separado
+    // porque as duas coisas são diferentes: `profile` é a identidade LEGAL que
+    // entra nas cláusulas (razão social, CNPJ, CRECI); `branding` é o que o
+    // cliente final VÊ.
+    case "branding":
+      return "/settings/perfil#identidade-visual";
     case "templates":
       // `?ingest=1` abre a Central de envio já na tela — o passo é "mande seus
       // arquivos", não "olhe a lista". Fechando o diálogo, o painel "Modelos do

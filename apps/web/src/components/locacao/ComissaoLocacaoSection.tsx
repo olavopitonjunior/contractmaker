@@ -14,7 +14,7 @@ import {
   angariadorValorTotal,
   formaComissao,
   somaPercentuaisAngariadores,
-  taxaLocacaoValor,
+  taxaLocacaoEfetiva,
 } from "@/lib/locacao/commission";
 import { Building2, Trash2, UserPlus } from "lucide-react";
 
@@ -52,7 +52,10 @@ export interface AngariadorValue {
 }
 
 export interface ComissaoLocacaoValue {
+  /** `percentual` (default) ou `valor_fixo` — espelha o form público. */
+  forma_taxa_locacao?: "percentual" | "valor_fixo";
   taxa_locacao_percent?: number;
+  taxa_locacao_valor?: number;
   angariadores?: AngariadorValue[];
 }
 
@@ -104,8 +107,9 @@ export function ComissaoLocacaoSection({
 }: ComissaoLocacaoSectionProps) {
   const uid = useId();
   const angariadores = value.angariadores ?? [];
-  const taxaPercent = value.taxa_locacao_percent ?? 0;
-  const corretagem = taxaLocacaoValor(valorAluguel, taxaPercent);
+  const formaTaxa =
+    value.forma_taxa_locacao === "valor_fixo" ? "valor_fixo" : "percentual";
+  const corretagem = taxaLocacaoEfetiva(valorAluguel, value);
   const somaPercentuais = somaPercentuaisAngariadores(angariadores);
 
   const patchAngariador = (index: number, patch: Partial<AngariadorValue>) => {
@@ -147,30 +151,69 @@ export function ComissaoLocacaoSection({
           Comissão de corretagem (taxa de locação)
         </p>
         <p className="text-xs text-muted-foreground">
-          Percentual do PRIMEIRO aluguel devido à imobiliária pela intermediação,
-          cobrado uma única vez. Entra na cláusula de remuneração do contrato de
+          Devida à imobiliária pela intermediação, cobrada uma única vez sobre o
+          PRIMEIRO aluguel. Entra na cláusula de remuneração do contrato de
           administração.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <FormField label="Taxa de locação (%)">
-            <Input
-              id={`${uid}-taxa`}
-              type="number"
-              min="0"
-              max="100"
-              step="0.01"
+          {/* A forma tem que existir AQUI também: o cliente pode ter escolhido
+              valor fixo na etapa Comissão do formulário, e uma tela que só sabe
+              ler percentual mostraria a comissão dele como 0%. */}
+          <FormField label="Cobrada como">
+            <NativeSelect
+              value={formaTaxa}
               disabled={disabled}
-              value={value.taxa_locacao_percent ?? ""}
-              onChange={(e) =>
+              onChange={(v) =>
                 onChange({
                   ...value,
-                  taxa_locacao_percent: toNumberOrUndefined(e.target.value),
+                  forma_taxa_locacao: v === "valor_fixo" ? "valor_fixo" : "percentual",
                 })
               }
-              placeholder="Ex: 100 (um aluguel)"
+              options={[
+                { value: "percentual", label: "% do primeiro aluguel" },
+                { value: "valor_fixo", label: "Valor fixo (R$)" },
+              ]}
             />
           </FormField>
-          {corretagem > 0 && (
+          {formaTaxa === "valor_fixo" ? (
+            <FormField label="Valor da taxa (R$)">
+              <Input
+                id={`${uid}-taxa-valor`}
+                type="number"
+                min="0"
+                step="0.01"
+                disabled={disabled}
+                value={value.taxa_locacao_valor ?? ""}
+                onChange={(e) =>
+                  onChange({
+                    ...value,
+                    taxa_locacao_valor: toNumberOrUndefined(e.target.value),
+                  })
+                }
+                placeholder="Ex: 800"
+              />
+            </FormField>
+          ) : (
+            <FormField label="Taxa de locação (%)">
+              <Input
+                id={`${uid}-taxa`}
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                disabled={disabled}
+                value={value.taxa_locacao_percent ?? ""}
+                onChange={(e) =>
+                  onChange({
+                    ...value,
+                    taxa_locacao_percent: toNumberOrUndefined(e.target.value),
+                  })
+                }
+                placeholder="Ex: 100 (um aluguel)"
+              />
+            </FormField>
+          )}
+          {formaTaxa === "percentual" && corretagem > 0 && (
             <div className="flex flex-col justify-end pb-1">
               <p className="text-sm">
                 <span className="text-muted-foreground">Equivale a </span>

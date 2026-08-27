@@ -134,8 +134,13 @@ describe("paths de locação", () => {
 
   it("imóvel e aluguel usam os paths SINGULARES do schema de locação", () => {
     expect(resolveRequiredFieldsForModule("locacao", essencial, STEP_IMOVEL)).toEqual(
-      expect.arrayContaining(["imovel.rua", "imovel.cidade", "imovel.descricao"]),
+      expect.arrayContaining(["imovel.rua", "imovel.cidade"]),
     );
+    // A descrição saiu dos presets (2026-08): o endereço identifica o imóvel e
+    // o campo virava discussão de negociação.
+    expect(
+      resolveRequiredFieldsForModule("locacao", completo, STEP_IMOVEL)
+    ).not.toContain("imovel.descricao");
     expect(resolveRequiredFieldsForModule("locacao", completo, STEP_IMOVEL)).toContain(
       "imovel.matricula",
     );
@@ -305,7 +310,6 @@ describe("requiredPathsForRoleScope (link por parte)", () => {
     const scoped = requiredPathsForRoleScope(byStep, [0, 1, 3], ["locadores", "imovel"]);
     expect(scoped).toContain("locadores.0.cpf");
     expect(scoped).toContain("imovel.rua");
-    expect(scoped).toContain("imovel.descricao");
     // Aluguel (etapa 4) não está nos steps do locador.
     expect(scoped.some((p) => p.startsWith("aluguel"))).toBe(false);
   });

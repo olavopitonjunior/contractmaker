@@ -63,11 +63,22 @@ export function renderFormSummaryHtml(
     ? (meta.primaryColor as string)
     : "#1a1a1a";
 
+  // O `wrapWithStyle` do exporter aplica a tipografia de CONTRATO ao que não
+  // traz DocumentStyle: h1/h2 centralizados, em CAIXA ALTA, dourados, e o h2
+  // com o ornamento (losango) do `h2::after`. Num documento que é uma sequência
+  // de tabelas label/valor isso saía como um contrato mal impresso — foi a
+  // "quebra de layout" relatada em 2026-08-25. Estas regras vêm DEPOIS no
+  // documento, então vencem por ordem, na mesma especificidade.
+  const reset = `
+      h1, h2, h3 { text-align: left; text-transform: none; letter-spacing: normal; color: inherit; }
+      h2::after, h1::after, h3::after { content: none; }
+      p { text-align: left; text-indent: 0; hyphens: none; }`;
+
   const style = `
-    <style>
+    <style>${reset}
       .fs-header { display: flex; align-items: center; gap: 14px; border-bottom: 2px solid ${primary}; padding-bottom: 8px; margin-bottom: 18px; }
       .fs-logo { height: 44px; width: auto; max-width: 180px; object-fit: contain; flex: none; }
-      .fs-header h1 { font-size: 18pt; margin: 0 0 4px; }
+      .fs-header h1 { font-size: 18pt; margin: 0 0 4px; color: ${primary}; }
       .fs-header .fs-meta { font-size: 9pt; color: #555; }
       .fs-section { margin: 0 0 16px; page-break-inside: avoid; }
       .fs-section h2 { font-size: 12pt; margin: 0 0 6px; padding: 4px 0; border-bottom: 1px solid #ccc; }
@@ -122,7 +133,41 @@ export interface GeneratedPdf {
   title: string;
   orgId: string;
   orgName: string;
+  /**
+   * Prévia para o corpo do e-mail (a tabela de destaques do `FormSummaryEmail`
+   * existia e nunca recebia dados). Uma linha por seção-chave.
+   */
+  highlights: { label: string; value: string }[];
 }
+
+/**
+ * Perfil de página do RESUMO — não é contrato.
+ *
+ * Sem isto o exporter caía no `classicMargin` de contrato
+ * (30/25/35/25mm, assimétrico para encadernação): sobravam 150mm de coluna útil
+ * numa página de tabelas, deslocados para a direita, e o rodapé de numeração —
+ * com `padding: 0 25mm` fixo — não batia com os 35mm da esquerda. Era a
+ * "quebra de margem" que a corretora viu no PDF.
+ *
+ * Margens simétricas, fonte sem serifa e entrelinha menor: é um documento para
+ * conferir dados, não para ler corrido.
+ */
+const SUMMARY_PAGE_STYLE = {
+  fontFamily: '"Helvetica Neue", Helvetica, Arial, sans-serif',
+  fontSizeBase: 10,
+  lineHeight: 1.4,
+  marginTopMm: 16,
+  marginBottomMm: 16,
+  marginLeftMm: 16,
+  marginRightMm: 16,
+  colorPrimary: "#1a1a1a",
+  headerHtml: null,
+  // Rodapé com o MESMO recuo das margens do corpo (o default do exporter usa
+  // 25mm fixos, herdados do contrato).
+  footerHtml:
+    '<div style="width:100%;font-size:8pt;padding:0 16mm;color:#666;text-align:right;"><span class="pageNumber"></span> / <span class="totalPages"></span></div>',
+  pageNumbers: true,
+};
 
 const LOGO_FETCH_TIMEOUT_MS = 5000;
 const LOGO_MAX_BYTES = 2 * 1024 * 1024;
@@ -135,18 +180,29 @@ const LOGO_MAX_BYTES = 2 * 1024 * 1024;
  * timeout curto: falhou, o header sai limpo sem logo.
  */
 async function fetchLogoDataUri(url: string): Promise<string | null> {
+  // Cada `return null` daqui vira um PDF sem logo, e todos eram MUDOS: quando a
+  // corretora reportou "o resumo saiu sem o logo" não havia como saber se o
+  // tenant não tinha configurado, se o blob respondeu 404 ou se o fetch estourou
+  // o timeout. Agora cada motivo deixa rastro.
+  const falhou = (motivo: string, extra?: unknown) => {
+    console.warn(`[form-summary] logo não embutido (${motivo})`, extra ?? "");
+    return null;
+  };
   try {
     const res = await fetch(url, {
       signal: AbortSignal.timeout(LOGO_FETCH_TIMEOUT_MS),
     });
-    if (!res.ok) return null;
+    if (!res.ok) return falhou("HTTP " + res.status, url);
     const mime = res.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
-    if (!mime.startsWith("image/")) return null;
+    if (!mime.startsWith("image/")) return falhou("content-type não é imagem", mime);
     const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.byteLength === 0 || buf.byteLength > LOGO_MAX_BYTES) return null;
+    if (buf.byteLength === 0) return falhou("arquivo vazio", url);
+    if (buf.byteLength > LOGO_MAX_BYTES) {
+      return falhou(`arquivo acima de ${LOGO_MAX_BYTES} bytes`, buf.byteLength);
+    }
     return `data:${mime};base64,${buf.toString("base64")}`;
-  } catch {
-    return null;
+  } catch (err) {
+    return falhou("fetch falhou ou estourou o timeout", err);
   }
 }
 
@@ -249,9 +305,17 @@ export async function generateFormSummaryPdf(formId: string): Promise<GeneratedP
     console.warn("[form-summary] falha ao resolver branding, PDF sem logo:", err);
   }
 
-  const logoDataUri = brand?.logoUrl
-    ? await fetchLogoDataUri(brand.logoUrl)
-    : null;
+  let logoDataUri: string | null = null;
+  if (brand?.logoUrl) {
+    logoDataUri = await fetchLogoDataUri(brand.logoUrl);
+  } else {
+    // O caso mais provável de "o resumo saiu sem o logo" é este: o tenant nunca
+    // preencheu o logo em Configurações → Perfil. Sem o log, indistinguível de
+    // um bug do PDF.
+    console.warn(
+      `[form-summary] org ${form.orgId} não tem BrandingSettings.logoUrl — PDF sai só com o nome`
+    );
+  }
 
   const orgName = form.org?.name ?? "Contractmaker";
   const title = form.title || "Resumo do formulário";
@@ -268,7 +332,7 @@ export async function generateFormSummaryPdf(formId: string): Promise<GeneratedP
     }),
   });
 
-  const buffer = await exportPdfToBuffer(html, "A4", null);
+  const buffer = await exportPdfToBuffer(html, "A4", SUMMARY_PAGE_STYLE);
   return {
     buffer,
     filename: `resumo-formulario-${form.id.slice(0, 8)}.pdf`,
@@ -276,5 +340,15 @@ export async function generateFormSummaryPdf(formId: string): Promise<GeneratedP
     title,
     orgId: form.orgId,
     orgName,
+    // Prévia para o corpo do e-mail. O template já tinha a tabela de destaques,
+    // mas ninguém passava `highlights` — o e-mail chegava dizendo só "o PDF
+    // está anexado". A primeira linha de cada uma das três primeiras seções é
+    // a linha IDENTIFICADORA delas (as seções vêm ordenadas Partes → Imóvel →
+    // Aluguel/Pagamento), então é o resumo do resumo sem escolher campo a dedo.
+    highlights: sections
+      .slice(0, 3)
+      .map((sec) => sec.rows[0])
+      .filter((r) => Boolean(r))
+      .map((r) => ({ label: r.label, value: r.value })),
   };
 }

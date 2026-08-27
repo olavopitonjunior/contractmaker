@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 import { seedOutrosEncargos, sumEncargosMensais } from "@/lib/forms/validation-locacao";
 import { formatMoneyBR } from "@/lib/format/money";
-import { MoneyField } from "./_PartyFields";
+import { DecimalField, MoneyField } from "./_PartyFields";
 import { FormField } from "@/components/forms/fields/FormField";
 
 const INDICE_OPTIONS = [
@@ -218,13 +218,12 @@ export function AluguelStep({ form }: { form: UseFormReturn<any> }) {
                   />
                 </FormField>
                 <FormField form={form} name="aluguel.taxa_admin_percent" label="Taxa de administração (%)">
-                  <Input
-                    {...form.register("aluguel.taxa_admin_percent", { valueAsNumber: true })}
-                    type="number"
-                    inputMode="decimal"
+                  <DecimalField
+                    form={form}
+                    name="aluguel.taxa_admin_percent"
+                    suffix="%"
                     min={0}
                     max={100}
-                    step="0.5"
                     placeholder="10"
                   />
                 </FormField>

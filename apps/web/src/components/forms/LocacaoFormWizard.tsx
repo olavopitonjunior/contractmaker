@@ -22,6 +22,7 @@ import {
 import type { ParticipantRole } from "@/lib/forms/participant-token";
 import {
   effectiveRequiredPaths,
+  matriculaConditionalPathsLocacao,
   findSignatureRecommendations,
   getByPath,
   isValueEmpty,
@@ -32,6 +33,7 @@ import { DocumentosStep } from "@/components/forms/steps/DocumentosStep";
 import type { Assignment } from "@/lib/forms/extracted-to-form";
 import { locacaoDocAdapter } from "@/components/forms/steps/locacao/locacao-doc-adapter";
 import { ImovelLocacaoStep } from "@/components/forms/steps/locacao/ImovelLocacaoStep";
+import { VoiceInputButton } from "@/components/forms/VoiceInputButton";
 import { AluguelStep } from "@/components/forms/steps/locacao/AluguelStep";
 import { GarantiaStep } from "@/components/forms/steps/locacao/GarantiaStep";
 import { ComissaoLocacaoStep } from "@/components/forms/steps/locacao/ComissaoLocacaoStep";
@@ -95,8 +97,15 @@ const PARTY_STEP: Record<number, { list: "locadores" | "locatarios"; label: stri
 // Required mínimo dos demais steps (non-empty check manual, já que não usamos
 // zodResolver). A validação completa roda no servidor no finalize
 // (schemaForLocacaoType) e retorna validationIssues.
+// Steps com ditado por voz — os mesmos que têm schema em voice-extract.ts
+// (LOCACAO_STEP_SCHEMA): 1 Locador, 2 Locatário, 3 Imóvel, 4 Aluguel,
+// 5 Garantia. Fora: 0 Documentos e 6 Comissão.
+const STEPS_WITH_VOICE = new Set([1, 2, 3, 4, 5]);
+
 const STEP_REQUIRED: Record<number, string[]> = {
-  3: ["imovel.descricao"],
+  // A etapa do imóvel não trava mais na descrição (ver imovelLocacaoSchema): o
+  // endereço já identifica o imóvel, e a obrigatoriedade real vem do preset da
+  // org quando ela quiser.
   4: ["aluguel.valor"],
 };
 
@@ -203,8 +212,18 @@ export function LocacaoFormWizard({
   // conforme o cliente digita, não só quando ele tenta avançar.
   const currentRequiredRaw =
     requiredFieldsByStep?.[visibleStepIndexes[currentStep] ?? currentStep] ?? [];
+  // Condicional que não vem do preset: marcar "a matrícula deverá ser
+  // solicitada" torna número e cartório obrigatórios. Somado aos TRÊS
+  // consumidores da lista (gate, contagem e asterisco) — um que esqueça mostra
+  // uma verdade diferente dos outros.
+  const matriculaCondicional = matriculaConditionalPathsLocacao((path) =>
+    getByPath(watchedData, path),
+  );
+  const isStepImovel = (visibleStepIndexes[currentStep] ?? currentStep) === 3;
   const currentEffectiveRequired = effectiveRequiredPaths(
-    currentRequiredRaw,
+    isStepImovel
+      ? [...currentRequiredRaw, ...matriculaCondicional]
+      : currentRequiredRaw,
     (path) => getByPath(watchedData, path),
   );
   const currentMissingCount = currentEffectiveRequired.filter((p) =>
@@ -216,7 +235,7 @@ export function LocacaoFormWizard({
   // wizard barrava nele, e campos PF-only (RG, estado civil) apareciam
   // marcados numa ficha de empresa que nem os renderiza.
   const allRequiredPaths = effectiveRequiredPaths(
-    (requiredFieldsByStep ?? []).flat(),
+    [...(requiredFieldsByStep ?? []).flat(), ...matriculaCondicional],
     (path) => getByPath(watchedData, path),
   );
 
@@ -336,7 +355,10 @@ export function LocacaoFormWizard({
     }
 
     // (2) Obrigatoriedade configurada pela imobiliária.
-    const configured = requiredFieldsByStep?.[step] ?? [];
+    const configured = [
+      ...(requiredFieldsByStep?.[step] ?? []),
+      ...(step === 3 ? matriculaConditionalPathsLocacao(readValue) : []),
+    ];
     if (configured.length === 0) return true;
 
     const paths = effectiveRequiredPaths(configured, readValue);
@@ -450,12 +472,26 @@ export function LocacaoFormWizard({
     );
   }
 
+  // As rotas `api/forms/[token]/attachments/*` resolvem `SalesForm.token` — o
+  // MESMO token do formulário de locação (a rota de commissioners já é reusada
+  // assim). Aceitam subtoken via `resolveFormScope`, então a parte que recebe o
+  // próprio link também consegue anexar a matrícula na etapa do imóvel.
+  const attachmentsEndpoint = `/api/forms/${token}/attachments`;
+  // O autoSave de locação aponta pra /api/locacao/forms/<token>, que não tem
+  // subrota de voz. A rota de voz é a token-scoped de sempre (ela resolve
+  // SalesForm.token e descobre a esteira pelo schemaType). No link por parte, o
+  // endpoint do participante já é o certo.
+  const voiceEndpoint =
+    finalizeMode === "main"
+      ? `/api/forms/${token}/voice-extract`
+      : `${endpoint}/voice-extract`;
+
   const steps = comercial
     ? [
         <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} allowedTopKeys={pathScope} selfAssignment={selfAssignment} viewerIsMember={viewerIsMember} />,
         <LocacaoParteStep key="s1" form={form} listKey="locadores" singular="Locador" />,
         <LocacaoParteStep key="s2" form={form} listKey="locatarios" singular="Locatário" />,
-        <ImovelLocacaoStep key="s3" form={form} comercial />,
+        <ImovelLocacaoStep key="s3" form={form} comercial attachmentsEndpoint={attachmentsEndpoint} />,
         <AluguelStep key="s4" form={form} />,
         <GarantiaStep key="s5" form={form} garantiaOptions={garantiaOptions} pathScope={pathScope} />,
         <ComissaoLocacaoStep key="s6" form={form} token={token} viewerIsMember={viewerIsMember} />,
@@ -464,7 +500,7 @@ export function LocacaoFormWizard({
         <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} allowedTopKeys={pathScope} selfAssignment={selfAssignment} viewerIsMember={viewerIsMember} />,
         <LocacaoParteStep key="s1" form={form} listKey="locadores" singular="Locador" />,
         <LocacaoParteStep key="s2" form={form} listKey="locatarios" singular="Locatário" />,
-        <ImovelLocacaoStep key="s3" form={form} />,
+        <ImovelLocacaoStep key="s3" form={form} attachmentsEndpoint={attachmentsEndpoint} />,
         <AluguelStep key="s4" form={form} />,
         <GarantiaStep key="s5" form={form} garantiaOptions={garantiaOptions} pathScope={pathScope} />,
         <ComissaoLocacaoStep key="s6" form={form} token={token} viewerIsMember={viewerIsMember} />,
@@ -586,6 +622,25 @@ export function LocacaoFormWizard({
         visible={failedTriggerCount > 0}
         trigger={failedTriggerCount}
       />
+
+      {/* Ditado por voz — existia só em venda desde a v1. Steps 1-5 (Locador,
+          Locatário, Imóvel, Aluguel, Garantia) têm schema mapeado em
+          voice-extract.ts; Documentos (0) e Comissão (6) ficam de fora pelo
+          mesmo motivo da venda: voz não casa com upload nem com cálculo. */}
+      {STEPS_WITH_VOICE.has(visibleStepIndexes[currentStep] ?? currentStep) &&
+        !readOnly && (
+          <div className="mb-3 flex items-center justify-end gap-2">
+            <span className="text-xs text-muted-foreground hidden sm:inline">
+              Prefere falar?
+            </span>
+            <VoiceInputButton
+              form={form as never}
+              stepIndex={visibleStepIndexes[currentStep] ?? currentStep}
+              endpoint={voiceEndpoint}
+              pathScope={pathScope}
+            />
+          </div>
+        )}
 
       <RequiredFieldsProvider paths={allRequiredPaths}>
         <fieldset disabled={readOnly} className="m-0 border-0 p-0 min-w-0 disabled:opacity-70">

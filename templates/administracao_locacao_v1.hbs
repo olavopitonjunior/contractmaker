@@ -22,8 +22,14 @@
 
 <h2>5. REMUNERAÇÃO</h2>
 <p>5.1. Pela administração ora contratada, a ADMINISTRADORA fará jus à taxa de administração de {{config.taxa_admin_percent}}% ({{numeroExtenso config.taxa_admin_percent}} por cento) sobre os aluguéis e encargos efetivamente recebidos, retida por ocasião de cada repasse.</p>
+{{#if (eq comissao.forma_taxa_locacao "valor_fixo")}}
+{{#if (gt comissao.taxa_locacao_valor 0)}}
+<p>5.2. Pela intermediação da locação inicial, será devida à ADMINISTRADORA, por uma única vez, taxa de locação de {{moeda comissao.taxa_locacao_valor}} ({{extenso comissao.taxa_locacao_valor}}), retida do primeiro repasse.</p>
+{{/if}}
+{{else}}
 {{#if (gt comissao.taxa_locacao_percent 0)}}
 <p>5.2. Pela intermediação da locação inicial, será devida à ADMINISTRADORA, por uma única vez, taxa de locação equivalente a {{comissao.taxa_locacao_percent}}% ({{numeroExtenso comissao.taxa_locacao_percent}} por cento) do primeiro aluguel, retida do primeiro repasse.</p>
+{{/if}}
 {{/if}}
 
 <h2>6. REPASSE</h2>

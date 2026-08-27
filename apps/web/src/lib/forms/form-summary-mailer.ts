@@ -224,6 +224,7 @@ export async function sendFormSummary(
       orgName,
       formTitle,
       pdfUrl,
+      highlights: pdf.highlights,
       attachedCount: count,
       attachmentsSkipped: skipped,
     });

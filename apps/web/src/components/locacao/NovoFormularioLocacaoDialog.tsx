@@ -102,7 +102,9 @@ export function NovoFormularioLocacaoDialog({
         ...(managerUserId ? { managerUserId } : {}),
         ...(force ? { force: true } : {}),
         comissao: {
+          forma_taxa_locacao: comissao.forma_taxa_locacao ?? "percentual",
           taxa_locacao_percent: comissao.taxa_locacao_percent ?? 0,
+          taxa_locacao_valor: comissao.taxa_locacao_valor,
           angariadores: comissao.angariadores ?? [],
         },
       }),
