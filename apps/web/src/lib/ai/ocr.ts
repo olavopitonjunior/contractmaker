@@ -2,6 +2,8 @@ import { Anthropic } from "@anthropic-ai/sdk";
 import { ocrModelFromEnv } from "./agents/model-provenance";
 import { GoogleGenAI } from "@google/genai";
 import type { ExtractionResult } from "./types";
+import { expectedFieldsFor } from "@/lib/forms/expected-fields";
+import type { Assignment } from "@/lib/forms/extracted-to-form";
 import { recordAIUsage, geminiUsageToTokens, calcCostUsd } from "./usage";
 import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
@@ -600,6 +602,64 @@ function schemaDaCategoria(categoria: string): SchemaNode | null {
 }
 
 /**
+ * Schema no vocabulário do FORMULÁRIO, para um destino específico.
+ *
+ * A diferença para `schemaDaCategoria` é só o nome das chaves — e é essa
+ * diferença que recupera os 43,9% que a tradução descartava. Pedir `cpf` em vez
+ * de `cpf_numero` faz o valor chegar ao formulário sem passar por dicionário
+ * nenhum.
+ *
+ * O rótulo humano de cada campo vira a `description`: "Vendedor — Nome da mãe"
+ * é uma instrução melhor do que a chave crua, e sai de graça.
+ */
+function schemaGuiado(campos: readonly { campo: string; rotulo: string }[]): SchemaNode {
+  const properties: SchemaNode = {};
+  for (const { campo, rotulo } of campos) {
+    const node = stringField(campo);
+    // A descrição anti-vazamento é mais específica que o rótulo e vence — é ela
+    // que impede a naturalidade de aterrissar na cidade do endereço.
+    if (!node.description) node.description = `${rotulo}. null se nao estiver no documento.`;
+    properties[campo] = node;
+  }
+  return {
+    type: "OBJECT",
+    properties: {
+      tipo: { type: "STRING", format: "enum", enum: VALID_CATEGORIES },
+      campos: { type: "OBJECT", properties },
+      confidence: { type: "NUMBER" },
+    },
+    required: ["tipo", "campos", "confidence"],
+  };
+}
+
+/**
+ * Prompt da extração guiada.
+ *
+ * Diz ao modelo exatamente quais campos preencher e com que nome. O ponto de
+ * cuidado está na última regra: pedir campo que o documento não tem é o que
+ * produz invenção, e a lista aqui é uma interseção justamente para reduzir
+ * isso — mas o lembrete de que `null` é resposta legítima continua valendo.
+ */
+function promptGuiado(campos: readonly { campo: string; rotulo: string }[]): string {
+  const linhas = campos.map((c) => `- ${c.campo}: ${c.rotulo}`).join("\n");
+  return `Voce e um especialista em documentos brasileiros. Analise o documento anexo.
+
+Retorne APENAS um JSON valido: {"tipo": "<categoria>", "campos": { ... }, "confidence": <0-1>}
+
+Categorias validas: ${VALID_CATEGORIES.join(", ")}.
+
+Preencha EXATAMENTE estes campos, com estes nomes:
+${linhas}
+
+Regras:
+- Use null no campo que nao estiver no documento. E NORMAL que varios nao estejam: cada documento traz um subconjunto. Campo ausente e resposta correta; campo inventado nao.
+- Nao acrescente campos fora da lista.
+- CPF e CNPJ so digitos, sem pontos ou tracos.
+- Datas no formato ISO YYYY-MM-DD.
+- NAO inclua explicacoes, apenas o JSON.`;
+}
+
+/**
  * O batch segue SEM schema.
  *
  * Ele manda até 4 documentos numa chamada, de categorias potencialmente
@@ -927,8 +987,17 @@ function logarSeForCredencial(p: {
 async function callGemini(
   model: string,
   base64Data: string,
-  mimeType: string
-): Promise<{ text: string; usage: GeminiUsageMetadata | undefined }> {
+  mimeType: string,
+  /**
+   * Destino escolhido no card ("este documento é do Vendedor 1"). Quando
+   * presente, e só então, a extração é guiada pelo vocabulário do formulário.
+   *
+   * A chamada SOMBRA não passa isto de propósito: ela existe para comparar dois
+   * modelos na mesma tarefa, e mudar a tarefa de um dos lados tornaria a
+   * comparação sem sentido.
+   */
+  assignment?: Assignment | null
+): Promise<{ text: string; usage: GeminiUsageMetadata | undefined; vocab?: "ocr" | "form" }> {
   if (isModeloOpenAI(model)) {
     // Duas etapas também aqui: sem a categoria não há schema, e o schema com
     // todos os campos de todas as categorias foi medido como pior que nenhum.
@@ -967,10 +1036,15 @@ async function callGemini(
   }
 
   const ai = getGenAI();
-  const contents = [
+  let contents = [
     { text: COMBINED_PROMPT },
     { inlineData: { mimeType, data: base64Data } },
   ];
+  /**
+   * Sinaliza que as chaves da resposta são do FORMULÁRIO, não do OCR. Viaja até
+   * `mapExtractedToForm`, que então aplica direto em vez de traduzir.
+   */
+  let vocab: "ocr" | "form" = "ocr";
 
   // ── Etapa 1: classificar ────────────────────────────────────────────────
   //
@@ -989,7 +1063,26 @@ async function callGemini(
       });
       usoClassificacao = (cls as { usageMetadata?: GeminiUsageMetadata }).usageMetadata;
       const tipo = parseGeminiJson(cls.text ?? "").tipo;
-      config = extractionConfig(schemaDaCategoria(tipo));
+
+      // Com a categoria em mãos e um destino escolhido, dá para pedir os campos
+      // no vocabulário do formulário — a interseção do que o destino aceita com
+      // o que este tipo de documento tem. É o que elimina a tradução, onde
+      // 43,9% do lido se perdia.
+      //
+      // `expectedFieldsFor` devolve `guiado: false` em qualquer dúvida (sem
+      // destino, categoria fora do catálogo, interseção vazia), e aí segue o
+      // caminho de sempre. Guiar no escuro seria pior que não guiar.
+      const guia = expectedFieldsFor(assignment, tipo);
+      if (guia.guiado) {
+        config = extractionConfig(schemaGuiado(guia.campos));
+        contents = [
+          { text: promptGuiado(guia.campos) },
+          { inlineData: { mimeType, data: base64Data } },
+        ];
+        vocab = "form";
+      } else {
+        config = extractionConfig(schemaDaCategoria(tipo));
+      }
     } catch (err) {
       // Classificação falhou: segue SEM schema. A etapa 2 é a que importa, e
       // o comportamento sem schema é o de produção hoje — degradar é melhor
@@ -1034,6 +1127,7 @@ async function callGemini(
   return {
     text: response.text ?? "{}",
     usage: somarUso(usoClassificacao, usoExtracao),
+    vocab,
   };
 }
 
@@ -1142,6 +1236,14 @@ export interface ClassifyOptions {
   skipPrevalidation?: boolean;
   /** Raw buffer — required if skipPrevalidation is false */
   buffer?: Buffer;
+  /**
+   * Destino do documento no formulário, quando já escolhido.
+   *
+   * Só com ele a extração pode ser guiada: sem saber que o documento é do
+   * Vendedor 1, não há lista de campos a pedir. Ausente = comportamento de
+   * sempre, que é o caso do upload antes de o corretor escolher o slot.
+   */
+  assignment?: Assignment | null;
 }
 
 export async function classifyAndExtract(
@@ -1169,11 +1271,15 @@ export async function classifyAndExtract(
   let text: string;
   let usage: GeminiUsageMetadata | undefined;
   let modelUsed = primaryModel;
+  // Em que vocabulário as chaves voltaram. Viaja até `mapExtractedToForm`, que
+  // decide entre aplicar direto ou traduzir pelo dicionário.
+  let vocab: "ocr" | "form" = "ocr";
 
   try {
-    const result = await callGemini(primaryModel, base64Data, mimeType);
+    const result = await callGemini(primaryModel, base64Data, mimeType, options.assignment);
     text = result.text;
     usage = result.usage;
+    vocab = result.vocab ?? "ocr";
   } catch (primaryErr) {
     // Fallback: try a different model on 5xx / safety / decode errors
     if (fallbackModel && fallbackModel !== primaryModel && shouldTryFallbackModel(primaryErr)) {
@@ -1192,9 +1298,10 @@ export async function classifyAndExtract(
         );
       }
       try {
-        const result = await callGemini(fallbackModel, base64Data, mimeType);
+        const result = await callGemini(fallbackModel, base64Data, mimeType, options.assignment);
         text = result.text;
         usage = result.usage;
+        vocab = result.vocab ?? "ocr";
         modelUsed = fallbackModel;
       } catch (fallbackErr) {
         // Phase F.I-β — último recurso: Claude Haiku 4.5 vision.
@@ -1327,6 +1434,7 @@ export async function classifyAndExtract(
     fields: parsed.fields as Record<string, string>,
     confidence: parsed.confidence,
     rawText: text,
+    vocab,
   };
 }
 

@@ -97,6 +97,15 @@ export interface ExtractionResult {
   fields: Record<string, string>;
   confidence: number;
   rawText?: string;
+  /**
+   * Em que vocabulário as chaves de `fields` estão.
+   *
+   * `"ocr"` (ou ausente) são as chaves do prompt (`cpf_numero`), que passam pelo
+   * dicionário `FIELD_MAP_PERSON` antes de chegar ao formulário. `"form"` são
+   * os nomes finais (`cpf`), pedidos assim ao modelo — sem tradução, sem a
+   * perda que a tradução causava.
+   */
+  vocab?: "ocr" | "form";
 }
 
 /**
