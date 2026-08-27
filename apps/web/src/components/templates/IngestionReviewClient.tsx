@@ -454,7 +454,7 @@ function PlanReview({
           title={`Modelos — ${modalidadeLabel(modalidade)}`}
           count={templates.length}
           icon={<FileText className="h-4 w-4" />}
-          hint="Garantia diferente é modelo diferente — é o que faz o sistema escolher o certo a partir do formulário. Abra um card para ver os detalhes."
+          hint="Um modelo por garantia. Clique no nome para ver os detalhes."
         >
           {templates.map((t) => {
             const key = templateKey(t);
@@ -467,6 +467,7 @@ function PlanReview({
             return (
               <CollapsibleCard
                 key={key}
+                kind="modelo"
                 checked={decisions?.templates[key] ?? false}
                 disabled={submitting || !reviewing}
                 onChange={(v) =>
@@ -581,13 +582,14 @@ function PlanReview({
         title="Cláusulas propostas"
         count={plan.clauses.length}
         icon={<Layers className="h-4 w-4" />}
-        hint="Vão para o acervo aguardando aprovação. É a redação de vocês que entra no lugar do espaço reutilizável do modelo — e a mesma cláusula serve residencial e comercial."
+        hint="A redação por fornecedor que entra no espaço do modelo ao gerar o contrato."
       >
         {plan.clauses.map((c) => {
           const key = clauseKey(c);
           return (
             <CollapsibleCard
               key={key}
+              kind="clausula"
               checked={decisions?.clauses[key] ?? false}
               disabled={submitting || !reviewing}
               onChange={(v) =>
@@ -625,11 +627,12 @@ function PlanReview({
         title="Arquivos descartados"
         count={plan.discards.length}
         icon={<Trash2 className="h-4 w-4" />}
-        hint="Desmarque para registrar que você não concorda com o descarte — o arquivo não vira nada nesta rodada, mas o relatório guarda a discordância."
+        hint="Desmarque um descarte para registrar que você discorda."
       >
         {plan.discards.map((d) => (
           <CollapsibleCard
             key={d.itemId}
+            kind="descarte"
             checked={decisions?.discards[d.itemId] ?? true}
             disabled={submitting || !reviewing}
             onChange={(v) =>
@@ -982,15 +985,13 @@ function CostBadge({ aiCostUsd }: { aiCostUsd: number | string | null | undefine
 
 function SuggestOnlyNotice() {
   return (
-    <div className="rounded-lg border border-violet-300 bg-violet-50/50 p-3 text-xs leading-snug dark:border-violet-900 dark:bg-violet-950/20">
-      <p className="font-medium">Nada entra no ar sozinho.</p>
-      <p className="mt-1 text-muted-foreground">
-        Os modelos aprovados aqui nascem como <strong>rascunho</strong> e as cláusulas
-        entram no acervo <strong>aguardando aprovação</strong>. Enquanto isso, nada do
-        que já funciona hoje muda.
-      </p>
+    <details className="rounded-lg border border-violet-300 bg-violet-50/50 p-3 text-xs leading-snug dark:border-violet-900 dark:bg-violet-950/20">
+      <summary className="cursor-pointer font-medium">
+        Nada entra no ar sozinho — tudo nasce como rascunho.{" "}
+        <span className="font-normal text-muted-foreground">Como ativar depois?</span>
+      </summary>
       <ActivationOrder />
-    </div>
+    </details>
   );
 }
 
@@ -1097,12 +1098,25 @@ function Section({
  * chips); aberto mostra o resto. É o que transforma 10 modelos numa lista
  * escaneável em vez de uma parede.
  */
+const KIND_STYLE: Record<string, { label: string; className: string }> = {
+  modelo: {
+    label: "MODELO",
+    className: "border-l-4 border-l-emerald-500 dark:border-l-emerald-600",
+  },
+  clausula: {
+    label: "CLÁUSULA",
+    className: "border-l-4 border-l-violet-500 dark:border-l-violet-600",
+  },
+  descarte: { label: "DESCARTE", className: "border-l-4 border-l-zinc-300" },
+};
+
 function CollapsibleCard({
   checked,
   disabled,
   onChange,
   title,
   subtitle,
+  kind,
   chips,
   children,
 }: {
@@ -1111,12 +1125,15 @@ function CollapsibleCard({
   onChange: (value: boolean) => void;
   title: string;
   subtitle: string;
+  /** Identidade visual do card: o operador precisa saber O QUE está aprovando. */
+  kind?: "modelo" | "clausula" | "descarte";
   chips?: React.ReactNode;
   children?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const style = kind ? KIND_STYLE[kind] : null;
   return (
-    <li className="rounded-lg border p-3">
+    <li className={`rounded-lg border p-3 ${style?.className ?? ""}`}>
       <div className="flex items-start gap-2.5">
         <input
           type="checkbox"
@@ -1131,6 +1148,11 @@ function CollapsibleCard({
           onClick={() => setOpen((v) => !v)}
         >
           <span className="flex items-center gap-1.5">
+            {style && (
+              <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[9px] font-semibold tracking-wide text-muted-foreground">
+                {style.label}
+              </span>
+            )}
             <span className="block truncate text-sm font-medium">{title}</span>
             {open ? (
               <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />

@@ -78,7 +78,7 @@ export default async function IngestionRunPage({
     <div className="space-y-6">
       <PageHeader
         title="Conferir o envio dos seus modelos"
-        description="Isto é o que entendemos dos arquivos que vocês mandaram. Confira e desmarque o que não fizer sentido — só o que ficar marcado entra na biblioteca."
+        description="Só o que ficar marcado entra na biblioteca — e entra como rascunho."
       >
         <Button size="sm" variant="ghost" asChild>
           <Link href="/templates">
