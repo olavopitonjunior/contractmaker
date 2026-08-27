@@ -52,11 +52,20 @@ interface StepSchemaSpec {
   paths: ReadonlyArray<{ path: string; hint: string }>;
 }
 
+/** Esteira do formulário — os índices de step significam coisas diferentes. */
+export type VoiceEsteira = "venda" | "locacao";
+
 /**
  * Resumo do schema por step. Não é exaustivo — pega o "núcleo" dos campos
  * comumente preenchidos por voz. Caller pode filtrar mais via `pathScope`.
+ *
+ * Indexado por ESTEIRA porque os índices colidem: em venda 1=Vendedor,
+ * 2=Comprador, 3=Imóvel, 5=Pagamento; em locação 1=Locador, 2=Locatário,
+ * 3=Imóvel, 4=Aluguel, 5=Garantia. Com um mapa só, a voz em locação devolvia
+ * `{}` em SILÊNCIO — o filtro por `pathScope` zerava (nenhuma spec tem chave
+ * `locadores`) e o prompt virava literalmente "Retorne {} — nada a preencher".
  */
-const STEP_SCHEMA_BY_INDEX: Record<number, StepSchemaSpec> = {
+const VENDA_STEP_SCHEMA: Record<number, StepSchemaSpec> = {
   1: {
     description: "Dados do vendedor (parte que vende o imóvel)",
     paths: [
@@ -124,11 +133,110 @@ const STEP_SCHEMA_BY_INDEX: Record<number, StepSchemaSpec> = {
   },
 };
 
-function buildVoicePrompt(
+const LOCACAO_STEP_SCHEMA: Record<number, StepSchemaSpec> = {
+  1: {
+    description: "Dados do locador (proprietário que aluga o imóvel)",
+    paths: [
+      { path: "locadores.0.nome", hint: "nome completo" },
+      { path: "locadores.0.cpf", hint: "CPF (11 dígitos)" },
+      { path: "locadores.0.rg", hint: "RG" },
+      { path: "locadores.0.data_nascimento", hint: "data de nascimento ISO YYYY-MM-DD" },
+      { path: "locadores.0.nacionalidade", hint: "nacionalidade" },
+      { path: "locadores.0.estado_civil", hint: "Solteiro(a)|Casado(a)|Divorciado(a)|Viúvo(a)|União Estável" },
+      { path: "locadores.0.profissao", hint: "profissão" },
+      { path: "locadores.0.email", hint: "email" },
+      { path: "locadores.0.mobile_phone", hint: "celular com DDD, só dígitos" },
+      { path: "locadores.0.endereco", hint: "endereço rua" },
+      { path: "locadores.0.numero", hint: "número do endereço" },
+      { path: "locadores.0.bairro", hint: "bairro" },
+      { path: "locadores.0.cidade", hint: "cidade" },
+      { path: "locadores.0.uf", hint: "UF (2 letras maiúsculas)" },
+      { path: "locadores.0.cep", hint: "CEP" },
+    ],
+  },
+  2: {
+    description: "Dados do locatário (inquilino)",
+    paths: [
+      { path: "locatarios.0.nome", hint: "nome completo" },
+      { path: "locatarios.0.cpf", hint: "CPF (11 dígitos)" },
+      { path: "locatarios.0.rg", hint: "RG" },
+      { path: "locatarios.0.data_nascimento", hint: "data de nascimento ISO YYYY-MM-DD" },
+      { path: "locatarios.0.nacionalidade", hint: "nacionalidade" },
+      { path: "locatarios.0.estado_civil", hint: "Solteiro(a)|Casado(a)|Divorciado(a)|Viúvo(a)|União Estável" },
+      { path: "locatarios.0.profissao", hint: "profissão" },
+      { path: "locatarios.0.email", hint: "email" },
+      { path: "locatarios.0.mobile_phone", hint: "celular com DDD, só dígitos" },
+      { path: "locatarios.0.endereco", hint: "endereço rua" },
+      { path: "locatarios.0.numero", hint: "número do endereço" },
+      { path: "locatarios.0.bairro", hint: "bairro" },
+      { path: "locatarios.0.cidade", hint: "cidade" },
+      { path: "locatarios.0.uf", hint: "UF (2 letras maiúsculas)" },
+      { path: "locatarios.0.cep", hint: "CEP" },
+      { path: "locatarios.0.renda_mensal", hint: "renda mensal declarada em reais (number)" },
+    ],
+  },
+  3: {
+    description: "Dados do imóvel alugado (UM imóvel por contrato)",
+    paths: [
+      { path: "imovel.rua", hint: "rua/avenida" },
+      { path: "imovel.numero", hint: "número" },
+      { path: "imovel.complemento", hint: "complemento (apto, bloco)" },
+      { path: "imovel.bairro", hint: "bairro" },
+      { path: "imovel.cidade", hint: "cidade" },
+      { path: "imovel.uf", hint: "UF" },
+      { path: "imovel.cep", hint: "CEP" },
+      { path: "imovel.matricula", hint: "número da matrícula" },
+      { path: "imovel.cartorio", hint: "cartório de registro" },
+      { path: "imovel.area", hint: "área em m² (number)" },
+      { path: "imovel.vagas_garagem", hint: "número de vagas de garagem (number inteiro)" },
+      { path: "imovel.condominio_nome", hint: "nome do condomínio/edifício" },
+      { path: "imovel.descricao", hint: "descrição do imóvel" },
+    ],
+  },
+  4: {
+    description: "Aluguel, encargos e reajuste",
+    paths: [
+      { path: "aluguel.valor", hint: "valor do aluguel em reais (number, 2500 = R$ 2.500,00)" },
+      { path: "aluguel.condominio_mensal", hint: "condomínio mensal em reais" },
+      { path: "aluguel.iptu_mensal", hint: "IPTU mensal em reais" },
+      { path: "aluguel.outros_encargos", hint: "outros encargos mensais em reais" },
+      { path: "aluguel.dia_vencimento", hint: "dia do vencimento (number 1-28)" },
+      { path: "aluguel.indice_reajuste", hint: 'índice: "IGPM", "IPCA" ou "outro"' },
+      { path: "aluguel.vigencia_inicio", hint: "início da vigência ISO YYYY-MM-DD" },
+      { path: "aluguel.vigencia_meses", hint: "prazo em meses (number)" },
+    ],
+  },
+  5: {
+    description: "Garantia locatícia",
+    paths: [
+      {
+        path: "garantia.tipo",
+        hint: 'modalidade: "caucao", "fiador", "seguro_fianca", "garantia_onerosa", "titulo_capitalizacao", "propria" ou "sem_garantia"',
+      },
+      { path: "garantia.caucao_meses", hint: "nº de aluguéis de caução (number, máx 3)" },
+      { path: "garantia.fiador.nome", hint: "nome completo do fiador" },
+      { path: "garantia.fiador.cpf", hint: "CPF do fiador (11 dígitos)" },
+      { path: "garantia.fiador.email", hint: "email do fiador" },
+      { path: "garantia.fiador.mobile_phone", hint: "celular do fiador, só dígitos" },
+      { path: "observacoes", hint: "observações gerais sobre a negociação" },
+    ],
+  },
+};
+
+const STEP_SCHEMA_BY_ESTEIRA: Record<VoiceEsteira, Record<number, StepSchemaSpec>> = {
+  venda: VENDA_STEP_SCHEMA,
+  locacao: LOCACAO_STEP_SCHEMA,
+};
+
+/** Exportado só para teste: garante que as duas esteiras não colidam. */
+export const __STEP_SCHEMA_BY_ESTEIRA = STEP_SCHEMA_BY_ESTEIRA;
+
+export function buildVoicePrompt(
   stepIndex: number,
   pathScope?: readonly string[],
+  esteira: VoiceEsteira = "venda",
 ): string {
-  const spec = STEP_SCHEMA_BY_INDEX[stepIndex];
+  const spec = STEP_SCHEMA_BY_ESTEIRA[esteira][stepIndex];
   if (!spec) {
     return `Você é um assistente de preenchimento de formulário. Transcreva o áudio e retorne JSON vazio se não houver campos identificáveis.`;
   }
@@ -188,13 +296,14 @@ export async function extractFromVoice(
   stepIndex: number,
   ctx: VoiceExtractContext,
   pathScope?: readonly string[],
+  esteira: VoiceEsteira = "venda",
 ): Promise<VoiceExtractResult> {
   if (!SUPPORTED_VOICE_MIMES.has(mimeType)) {
     return { fields: {}, rawText: "" };
   }
 
   const t0 = Date.now();
-  const prompt = buildVoicePrompt(stepIndex, pathScope);
+  const prompt = buildVoicePrompt(stepIndex, pathScope, esteira);
 
   let text = "";
   let usage:
