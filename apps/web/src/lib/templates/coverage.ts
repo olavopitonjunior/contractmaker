@@ -307,3 +307,67 @@ export function computeGarantiaCoverage(input: {
 
   return { garantias, rows, gaps };
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Quadro por garantia — a aba "Tipos de contrato" (taxonomia do dono, 28/08)
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Em locação, cada tipo de garantia é um TIPO DE CONTRATO de primeira classe:
+ * a tela lista as 7 garantias como linhas, não como chips. Este quadro é a
+ * projeção de `computeGarantiaCoverage` nas modalidades de CONTRATO de locação
+ * (propostas ficam de fora — decisão "linha única"), acrescida do que a linha
+ * precisa exibir: quem é o ★ (a garantia do template padrão) e com qual modelo
+ * a geração cai quando a garantia escolhida não tem template próprio.
+ */
+export interface GarantiaBoardRow {
+  modalidade: string;
+  label: string;
+  cells: GarantiaCoverageCell[];
+  /**
+   * Garantia do template ativo `isDefault` da modalidade — a linha que leva a
+   * ★. `null` quando o padrão é um modelo genérico (sem critério de garantia)
+   * ou quando não há padrão.
+   */
+  defaultGarantia: GarantiaTipo | null;
+  /**
+   * Nome do modelo que a geração REALMENTE usa quando a garantia do formulário
+   * não tem template próprio. A ordem espelha `pickTemplateByFacts`: o
+   * genérico sobrevive com pontuação 0 enquanto os de outra garantia são
+   * desclassificados; só quando não há genérico é que a eleição recai no pool
+   * inteiro e o `isDefault` desempata. `null` = modalidade sem NENHUM ativo
+   * (faltante "dura": a geração deste tipo morre).
+   */
+  fallbackName: string | null;
+}
+
+/** Modalidades de contrato de locação que o quadro decompõe por garantia. */
+const BOARD_MODALIDADES: readonly string[] = ["locacao", "locacao_comercial"];
+
+export function computeGarantiaBoard(input: {
+  modules: readonly string[];
+  templates: CoverageTemplateLite[];
+}): GarantiaBoardRow[] {
+  const coverage = computeGarantiaCoverage(input);
+  return coverage.rows
+    .filter((r) => BOARD_MODALIDADES.includes(r.modalidade))
+    .map((r) => {
+      const actives = input.templates.filter(
+        (t) => t.status === "active" && t.modalidade === r.modalidade
+      );
+      const def = actives.find((t) => t.isDefault === true) ?? null;
+      const generic =
+        actives.find((t) => !parseMatchCriteria(t.matchCriteria)?.garantia) ??
+        null;
+      const fallback = generic ?? def ?? actives[0] ?? null;
+      return {
+        modalidade: r.modalidade,
+        label: r.label,
+        cells: r.cells,
+        defaultGarantia: def
+          ? parseMatchCriteria(def.matchCriteria)?.garantia ?? null
+          : null,
+        fallbackName: fallback?.name ?? null,
+      };
+    });
+}

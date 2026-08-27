@@ -20,6 +20,8 @@ import {
   providerTag,
   providerTagsOf,
   rankSlotCandidates,
+  providerLabelFromSlug,
+  providersByGarantiaFromTags,
 } from "../clause-slots";
 import { CANONICAL_TEMPLATE_SOURCES } from "../canonical-sources.generated";
 import { renderContratoHTML } from "@/lib/render/handlebars";
@@ -679,5 +681,47 @@ describe("precedência do tenant sobre a plataforma", () => {
     });
 
     expect(db.knowledgeItem.findMany).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("providersByGarantiaFromTags — sublinha de seguradoras da aba Tipos", () => {
+  it("agrupa por garantia com rótulo title-case do slug", () => {
+    const map = providersByGarantiaFromTags([
+      { tags: ["slot:garantia", "garantia:seguro_fianca", "provider:porto_seguro"] },
+      { tags: ["slot:garantia", "garantia:seguro_fianca", "provider:tokio_marine"] },
+      { tags: ["slot:garantia", "garantia:garantia_onerosa", "provider:loft"] },
+    ]);
+    expect(map.seguro_fianca).toEqual(["Porto Seguro", "Tokio Marine"]);
+    expect(map.garantia_onerosa).toEqual(["Loft"]);
+  });
+
+  it("cláusula sem provider é a genérica do tipo — não entra no mapa", () => {
+    const map = providersByGarantiaFromTags([
+      { tags: ["slot:garantia", "garantia:fiador"] },
+    ]);
+    expect(map.fiador).toBeUndefined();
+  });
+
+  it("ignora tag de garantia fora da taxonomia e cláusula fora do slot", () => {
+    const map = providersByGarantiaFromTags([
+      { tags: ["slot:garantia", "garantia:inventada", "provider:loft"] },
+      { tags: ["garantia:seguro_fianca", "provider:loft"] },
+      { tags: null },
+    ]);
+    expect(Object.keys(map)).toHaveLength(0);
+  });
+
+  it("dedup e ordenação estável dos rótulos", () => {
+    const map = providersByGarantiaFromTags([
+      { tags: ["slot:garantia", "garantia:seguro_fianca", "provider:too"] },
+      { tags: ["slot:garantia", "garantia:seguro_fianca", "provider:too"] },
+      { tags: ["slot:garantia", "garantia:seguro_fianca", "provider:pottencial"] },
+    ]);
+    expect(map.seguro_fianca).toEqual(["Pottencial", "Too"]);
+  });
+
+  it("providerLabelFromSlug faz title-case por segmento", () => {
+    expect(providerLabelFromSlug("porto_seguro")).toBe("Porto Seguro");
+    expect(providerLabelFromSlug("credpago")).toBe("Credpago");
   });
 });

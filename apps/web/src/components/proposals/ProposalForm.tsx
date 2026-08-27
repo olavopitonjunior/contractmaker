@@ -60,6 +60,11 @@ import {
   type ProposalFormValues,
 } from "@/lib/proposals/form-data";
 import { parseMoneyBR } from "@/lib/format/money";
+import {
+  providersForTipo,
+  tipoTemGarantidor,
+  type GarantiaOptionLike,
+} from "@/lib/forms/garantia-catalog";
 
 export interface SchemaOption {
   label: string;
@@ -96,11 +101,14 @@ export function ProposalForm({
   parentProposalId,
   initialResponsibleUserId = "",
   initialResponsibleName,
+  garantiaOptions = [],
 }: {
   mode: "create" | "edit";
   proposalId?: string;
   initial: ProposalFormValues;
   schemaOptions: SchemaOption[];
+  /** Catálogo de prestadoras da org (só ativas) — mesmo dado do form público. */
+  garantiaOptions?: GarantiaOptionLike[];
   /** Membros da org pro select de responsável (só usado em create + canAssign). */
   members?: { id: string; name: string }[];
   /** PROPOSAL_ASSIGN — sem ela o select não aparece e o POST não manda o campo. */
@@ -695,7 +703,15 @@ export function ProposalForm({
                       <Select
                         value={v.garantia.tipo}
                         onValueChange={(t) =>
-                          patch({ garantia: { ...v.garantia, tipo: t as GarantiaTipo } })
+                          // Trocar o tipo zera a prestadora — ela pertence ao
+                          // tipo anterior.
+                          patch({
+                            garantia: {
+                              ...v.garantia,
+                              tipo: t as GarantiaTipo,
+                              provider: "",
+                            },
+                          })
                         }
                       >
                         <SelectTrigger>
@@ -723,18 +739,15 @@ export function ProposalForm({
                         />
                       </div>
                     )}
-                    {["seguro_fianca", "garantia_onerosa", "titulo_capitalizacao"].includes(
-                      v.garantia.tipo
-                    ) && (
-                      <div className="space-y-1">
-                        <Label>Seguradora / provedora</Label>
-                        <Input
-                          value={v.garantia.provider}
-                          onChange={(e) =>
-                            patch({ garantia: { ...v.garantia, provider: e.target.value } })
-                          }
-                        />
-                      </div>
+                    {tipoTemGarantidor(v.garantia.tipo) && (
+                      <GarantiaProviderPicker
+                        tipo={v.garantia.tipo}
+                        provider={v.garantia.provider}
+                        garantiaOptions={garantiaOptions}
+                        onChange={(provider) =>
+                          patch({ garantia: { ...v.garantia, provider } })
+                        }
+                      />
                     )}
                   </div>
 
@@ -1037,5 +1050,90 @@ export function ProposalForm({
         onConfirm={addWitnesses}
       />
     </div>
+  );
+}
+
+/**
+ * Prestadora da garantia: select do catálogo da org + "Outra…" (texto livre).
+ * Mesmo split do GarantiaStep do formulário público — o `provider` gravado é
+ * o que casa a cláusula da seguradora no acervo; fora do catálogo, a geração
+ * usa a cláusula genérica do tipo. Sem prestadora cadastrada pro tipo, o
+ * campo é só o texto livre.
+ */
+const OUTRA_PRESTADORA = "__outra__";
+
+function GarantiaProviderPicker({
+  tipo,
+  provider,
+  garantiaOptions,
+  onChange,
+}: {
+  tipo: GarantiaTipo;
+  provider: string;
+  garantiaOptions: GarantiaOptionLike[];
+  onChange: (provider: string) => void;
+}) {
+  const providers = useMemo(
+    () => providersForTipo(garantiaOptions, tipo),
+    [garantiaOptions, tipo]
+  );
+  const [outraEscolhida, setOutraEscolhida] = useState(false);
+  const isCatalogProvider = providers.includes(provider);
+  const showInput =
+    providers.length === 0 ||
+    outraEscolhida ||
+    (provider !== "" && !isCatalogProvider);
+  const selectValue = isCatalogProvider
+    ? provider
+    : showInput
+      ? OUTRA_PRESTADORA
+      : "";
+
+  return (
+    <>
+      {providers.length > 0 && (
+        <div className="space-y-1">
+          <Label>Seguradora / prestadora</Label>
+          <Select
+            value={selectValue}
+            onValueChange={(value) => {
+              if (value === OUTRA_PRESTADORA) {
+                setOutraEscolhida(true);
+                onChange("");
+                return;
+              }
+              setOutraEscolhida(false);
+              onChange(value);
+            }}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Selecione" />
+            </SelectTrigger>
+            <SelectContent>
+              {providers.map((p) => (
+                <SelectItem key={p} value={p}>
+                  {p}
+                </SelectItem>
+              ))}
+              <SelectItem value={OUTRA_PRESTADORA}>Outra…</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+      {showInput && (
+        <div className="space-y-1">
+          <Label>
+            {providers.length > 0
+              ? "Qual seguradora / prestadora?"
+              : "Seguradora / prestadora"}
+          </Label>
+          <Input
+            value={provider}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="Nome da seguradora ou garantidora"
+          />
+        </div>
+      )}
+    </>
   );
 }

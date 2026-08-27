@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { UseFormReturn } from "react-hook-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -16,11 +16,15 @@ import {
 } from "./_PartyFields";
 
 import {
-  buildGarantiaChoices,
-  findGarantiaChoice,
-  selectedGarantiaChoiceValue,
+  DEFAULT_GARANTIA_OPTIONS,
+  providersForTipo,
+  tipoTemGarantidor,
   type GarantiaOptionLike,
 } from "@/lib/forms/garantia-catalog";
+import {
+  GARANTIA_LABELS,
+  GARANTIA_TIPOS,
+} from "@/lib/contracts/template-category";
 
 // Seguro-fiança e garantia onerosa: quem paga a apólice e por quanto tempo ela
 // vale. Sem opção pré-selecionada — o padrão varia por seguradora/imobiliária,
@@ -40,12 +44,19 @@ const VIGENCIA_OPTIONS = [
  * por tipo: caução → nº de aluguéis (≤3, art. 38 §2º); fiador → dados do fiador;
  * seguro/garantia onerosa → tomador e vigência da apólice.
  *
- * A modalidade e o GARANTIDOR viraram uma escolha só ("Seguro-fiança — Porto
- * Seguro") em 2026-07-30, alimentada pelo catálogo da imobiliária
- * (`garantiaOptions`, que desce server-side pela page do form — ele é anônimo).
- * Escolher preenche `garantia.tipo` + `garantia.provider` de uma vez; é o
- * `provider` normalizado que casa com a cláusula da seguradora. "Outro
- * garantidor…" mantém o texto livre como escape hatch.
+ * Tipo e prestadora são DOIS campos separados (decisão do dono, 28/08 — o par
+ * combinado "Seguro-fiança — Porto Seguro" durou de 2026-07-30 até aqui):
+ *
+ *   1. "Tipo de garantia" — select FIXO do sistema (as 7 de GARANTIA_TIPOS).
+ *      É esta escolha que seleciona o TEMPLATE do contrato, de forma
+ *      vinculante (`matchCriteria.garantia`).
+ *   2. "Seguradora / prestadora" — só nos tipos com garantidor; opções do
+ *      catálogo da org (`garantiaOptions`, que desce server-side pela page —
+ *      o form é anônimo) + "Outra…" com texto livre. É o `provider`
+ *      normalizado que casa a CLÁUSULA da seguradora no acervo; prestadora
+ *      fora do catálogo cai na cláusula genérica do tipo.
+ *
+ * O shape gravado não mudou: `garantia.tipo` + `garantia.provider`.
  */
 export function GarantiaStep({
   form,
@@ -71,24 +82,45 @@ export function GarantiaStep({
   const tomador = form.watch("garantia.seguro_tomador");
   const vigencia = form.watch("garantia.seguro_vigencia");
 
-  const choices = useMemo(
-    () => buildGarantiaChoices(garantiaOptions),
-    [garantiaOptions],
+  const catalog = garantiaOptions ?? DEFAULT_GARANTIA_OPTIONS;
+  const providers = useMemo(
+    () => providersForTipo(catalog, tipo),
+    [catalog, tipo],
   );
-  const selectedValue = selectedGarantiaChoiceValue(choices, tipo, provider);
-  const selected = findGarantiaChoice(choices, selectedValue);
-  // Texto livre só no escape hatch — nas demais o garantidor vem do catálogo.
-  const showProviderInput = Boolean(selected?.isOutro);
+  // "Outra…" é escolha do usuário, não estado do dado — mas um provider
+  // gravado que não está (ou não está mais) no catálogo também é "outra":
+  // desativar uma seguradora não pode apagar o que o form já tinha.
+  const [outraEscolhida, setOutraEscolhida] = useState(false);
+  const temGarantidor = tipoTemGarantidor(tipo);
+  const isCatalogProvider = providers.includes(provider);
+  const showProviderInput =
+    temGarantidor &&
+    (providers.length === 0 ||
+      outraEscolhida ||
+      (provider !== "" && !isCatalogProvider));
+  const OUTRA = "__outra__";
+  const providerSelectValue = isCatalogProvider
+    ? provider
+    : showProviderInput
+      ? OUTRA
+      : "";
 
-  const onChoiceChange = (value: string) => {
-    const choice = findGarantiaChoice(choices, value);
-    if (!choice) return;
-    form.setValue("garantia.tipo", choice.tipo, { shouldDirty: true });
-    // "Outro garantidor…" zera o campo pra quem preenche digitar — trocar de
-    // Porto Seguro pra "outro" não pode deixar "Porto Seguro" pendurado.
-    form.setValue("garantia.provider", choice.isOutro ? "" : choice.provider, {
-      shouldDirty: true,
-    });
+  const onTipoChange = (value: string) => {
+    form.setValue("garantia.tipo", value, { shouldDirty: true });
+    // Trocar o tipo zera a prestadora — a Porto Seguro do seguro-fiança não
+    // pode ficar pendurada num título de capitalização.
+    form.setValue("garantia.provider", "", { shouldDirty: true });
+    setOutraEscolhida(false);
+  };
+
+  const onProviderSelect = (value: string) => {
+    if (value === OUTRA) {
+      setOutraEscolhida(true);
+      form.setValue("garantia.provider", "", { shouldDirty: true });
+      return;
+    }
+    setOutraEscolhida(false);
+    form.setValue("garantia.provider", value, { shouldDirty: true });
   };
 
   return (
@@ -98,16 +130,45 @@ export function GarantiaStep({
           <CardTitle className="text-base font-semibold">Garantia locatícia</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4 pt-0">
-          <FormField form={form} name="garantia.tipo" label="Modalidade de garantia">
+          <FormField form={form} name="garantia.tipo" label="Tipo de garantia">
             <NativeSelect
-              value={selectedValue}
-              onChange={onChoiceChange}
-              options={choices.map((c) => ({ value: c.value, label: c.label }))}
+              value={tipo}
+              onChange={onTipoChange}
+              options={GARANTIA_TIPOS.map((t) => ({
+                value: t,
+                label: GARANTIA_LABELS[t],
+              }))}
             />
           </FormField>
 
+          {temGarantidor && providers.length > 0 && (
+            <FormField
+              form={form}
+              name="garantia.provider"
+              label="Seguradora / prestadora"
+            >
+              <NativeSelect
+                value={providerSelectValue}
+                onChange={onProviderSelect}
+                placeholder="Selecione"
+                options={[
+                  ...providers.map((p) => ({ value: p, label: p })),
+                  { value: OUTRA, label: "Outra…" },
+                ]}
+              />
+            </FormField>
+          )}
+
           {showProviderInput && (
-            <FormField form={form} name="garantia.provider" label="Garantidor / seguradora">
+            <FormField
+              form={form}
+              name="garantia.provider"
+              label={
+                providers.length > 0
+                  ? "Qual seguradora / prestadora?"
+                  : "Seguradora / prestadora"
+              }
+            >
               <Input
                 {...form.register("garantia.provider")}
                 placeholder="Nome da seguradora ou garantidora"

@@ -122,6 +122,27 @@ describe("buildConsolidatedFormSummary — locação", () => {
     ]);
   });
 
+  it("NÃO-REGRESSÃO do split tipo × prestadora: tipo + provider seguem no resumo", () => {
+    // O formulário passou a coletar tipo e prestadora em DOIS campos (28/08),
+    // mas o shape gravado é o mesmo (`garantia.tipo` + `garantia.provider`) —
+    // o relatório do negócio não pode mudar.
+    const sections = buildConsolidatedFormSummary(
+      {
+        ...LOCACAO_DATA,
+        garantia: {
+          tipo: "seguro_fianca",
+          provider: "Porto Seguro",
+          seguro_tomador: "inquilino",
+        },
+      },
+      { schemaType: "locacao_residencial_v1" }
+    );
+    const garantia = sections.find((s) => s.title === "Garantia locatícia")!;
+    const rows = Object.fromEntries(garantia.rows.map((r) => [r.label, r.value]));
+    expect(rows["Modalidade"]).toBe("Seguro fiança");
+    expect(Object.values(rows)).toContain("Porto Seguro");
+  });
+
   it("dataJson vazio de locação devolve [] (nada de PDF em branco)", () => {
     expect(
       buildConsolidatedFormSummary({}, { schemaType: "locacao_residencial_v1" })

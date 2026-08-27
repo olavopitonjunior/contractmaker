@@ -94,3 +94,33 @@ describe("selectPropostaTemplate × matchCriteria", () => {
     expect(mockFindMany).not.toHaveBeenCalled();
   });
 });
+
+describe("selectPropostaTemplate — garantiaMatched (D16)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("true no match exato, false no fallback de outra garantia", async () => {
+    const generico = tpl("generico", null, true);
+    const fiador = tpl("fiador", { garantia: "fiador" });
+    mockFindMany.mockResolvedValueOnce([generico, fiador]);
+    const exato = await selectPropostaTemplate("org-1", "locacao_residencial_v1", {
+      garantia: { tipo: "fiador" },
+    });
+    expect(exato?.template.id).toBe("fiador");
+    expect(exato?.garantiaMatched).toBe(true);
+
+    mockFindMany.mockResolvedValueOnce([generico, fiador]);
+    const fallback = await selectPropostaTemplate("org-1", "locacao_residencial_v1", {
+      garantia: { tipo: "seguro_fianca" },
+    });
+    expect(fallback?.template.id).toBe("generico");
+    expect(fallback?.garantiaMatched).toBe(false);
+  });
+
+  it("proposta antiga sem garantia → true (nada a casar)", async () => {
+    mockFindMany.mockResolvedValueOnce([tpl("generico", null, true)]);
+    const result = await selectPropostaTemplate("org-1", "locacao_residencial_v1", {});
+    expect(result?.garantiaMatched).toBe(true);
+  });
+});

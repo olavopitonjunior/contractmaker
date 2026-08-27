@@ -1,43 +1,75 @@
 import Link from "next/link";
-import { Check, CircleAlert, Sparkles, TriangleAlert } from "lucide-react";
+import { Check, CircleAlert, Sparkles, Star, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type {
   CoverageReport,
   CoverageRow,
-  GarantiaCoverageReport,
-  GarantiaCoverageRow,
+  GarantiaBoardRow,
+  GarantiaCoverageCell,
 } from "@/lib/templates/coverage";
+import type { GarantiaTipo } from "@/lib/contracts/template-category";
 
 /**
  * Aba "Tipos de contrato" — a tela principal de /templates.
  *
- * Uma linha por tipo padrão do sistema (as modalidades canônicas dos módulos
- * habilitados). Cada linha responde UMA pergunta: qual modelo é o PADRÃO deste
- * tipo? Três estados:
+ * Taxonomia do dono (28/08): em locação, cada TIPO DE GARANTIA é um tipo de
+ * contrato de primeira classe — a seção de locação lista as 7 garantias como
+ * linhas, cada uma com seu template físico. Vendas divide por forma de
+ * pagamento (com × sem financiamento imobiliário). Administração e propostas
+ * são linha única.
  *
- *   atribuído   — nome do modelo padrão em destaque + origem (seu modelo ×
- *                 modelo do sistema); ação: Abrir.
- *   sem padrão  — há modelos ativos mas nenhum `isDefault`; ação: Escolher
- *                 padrão (aba Modelos filtrada pelo tipo).
- *   faltando    — nenhum modelo ativo; a geração deste tipo morre; ação:
- *                 Enviar modelo.
+ * Estados por linha de garantia:
+ *   atribuído   — template ativo com `matchCriteria.garantia` deste tipo;
+ *                 ★ quando ele é o padrão da modalidade.
+ *   em revisão  — só rascunho (veio da ingestão, falta ativar) → Conferir.
+ *   faltante    — sem modelo próprio; âmbar quando a geração cai no modelo
+ *                 genérico/padrão (nome exibido), vermelho quando a modalidade
+ *                 não tem NENHUM ativo (a geração morre).
  *
- * Incluir/gerenciar modelos NÃO acontece aqui — é papel da aba Modelos. Esta
- * tela substitui o antigo SystemTemplatesPanel, que misturava cobertura com
- * convite de upload em toda linha e não distinguia "sem padrão" de "coberto".
+ * Ofertantes (Loft, Pottencial, Tokio…) NÃO são templates: são cláusulas do
+ * acervo injetadas no slot — por isso aparecem como sublinha informativa, não
+ * como linha.
+ *
+ * Incluir/gerenciar modelos NÃO acontece aqui — é papel da aba Modelos.
  */
 export function ContractTypesPanel({
   report,
-  garantias,
+  board,
+  providersByGarantia,
 }: {
   report: CoverageReport;
-  garantias: GarantiaCoverageReport;
+  board: GarantiaBoardRow[];
+  /** Seguradoras com cláusula própria no acervo, por tipo de garantia. */
+  providersByGarantia: Partial<Record<GarantiaTipo, string[]>>;
 }) {
-  const required = report.rows.filter((r) => r.required);
-  const optional = report.rows.filter((r) => !r.required);
-  const garantiaByModalidade = new Map(
-    garantias.rows.map((r) => [r.modalidade, r] as const)
-  );
+  const byModalidade = new Map(report.rows.map((r) => [r.modalidade as string, r]));
+  const boardByModalidade = new Map(board.map((b) => [b.modalidade, b]));
+
+  // Rótulos de venda na linguagem do dono — locais do painel, de propósito:
+  // o resto da UI segue MODALIDADE_LABELS.
+  const vendas = [
+    { modalidade: "a_vista", label: "Venda sem financiamento imobiliário" },
+    { modalidade: "financiamento", label: "Venda com financiamento imobiliário" },
+    { modalidade: "proposta_venda", label: "Proposta de compra" },
+  ].flatMap((v) => {
+    const row = byModalidade.get(v.modalidade);
+    return row ? [{ row, label: v.label }] : [];
+  });
+
+  const locacoes = ["locacao", "locacao_comercial"].flatMap((m) => {
+    const row = byModalidade.get(m);
+    const b = boardByModalidade.get(m);
+    return row && b ? [{ row, board: b }] : [];
+  });
+
+  const administracao = byModalidade.get("administracao_locacao");
+  const propostas = [
+    "proposta_locacao_residencial",
+    "proposta_locacao_comercial",
+  ].flatMap((m) => {
+    const row = byModalidade.get(m);
+    return row ? [row] : [];
+  });
 
   return (
     <section className="rounded-lg border">
@@ -58,28 +90,44 @@ export function ContractTypesPanel({
         </p>
       </header>
 
-      <div className="divide-y">
-        {required.map((row) => (
-          <TypeLine
-            key={row.modalidade}
-            row={row}
-            garantia={garantiaByModalidade.get(row.modalidade)}
-          />
-        ))}
-      </div>
-
-      {optional.length > 0 && (
+      {vendas.length > 0 && (
         <>
-          <p className="border-t bg-muted/30 px-4 py-1.5 text-xs font-medium text-muted-foreground">
-            Opcionais do seu plano
-          </p>
+          <SectionStrip title="Vendas" />
           <div className="divide-y">
-            {optional.map((row) => (
-              <TypeLine
-                key={row.modalidade}
-                row={row}
-                garantia={garantiaByModalidade.get(row.modalidade)}
-              />
+            {vendas.map(({ row, label }) => (
+              <TypeLine key={row.modalidade} row={row} labelOverride={label} />
+            ))}
+          </div>
+        </>
+      )}
+
+      {locacoes.map(({ row, board: b }) => (
+        <LocacaoSection
+          key={row.modalidade}
+          row={row}
+          board={b}
+          providersByGarantia={providersByGarantia}
+        />
+      ))}
+
+      {administracao && (
+        <>
+          <SectionStrip
+            title="Administração de locação"
+            optional={!administracao.required}
+          />
+          <div className="divide-y">
+            <TypeLine row={administracao} />
+          </div>
+        </>
+      )}
+
+      {propostas.length > 0 && (
+        <>
+          <SectionStrip title="Propostas de locação" />
+          <div className="divide-y">
+            {propostas.map((row) => (
+              <TypeLine key={row.modalidade} row={row} />
             ))}
           </div>
         </>
@@ -88,27 +136,223 @@ export function ContractTypesPanel({
   );
 }
 
-function TypeLine({
+/**
+ * Seção de um tipo de locação: cabeçalho com o estado da modalidade + as 7
+ * linhas de garantia. Quando o padrão da modalidade é um modelo GENÉRICO
+ * (nenhuma linha leva a ★), o cabeçalho diz quem ele é — senão o operador não
+ * encontra o padrão em lugar nenhum.
+ */
+function LocacaoSection({
   row,
-  garantia,
+  board,
+  providersByGarantia,
 }: {
   row: CoverageRow;
-  garantia?: GarantiaCoverageRow;
+  board: GarantiaBoardRow;
+  providersByGarantia: Partial<Record<GarantiaTipo, string[]>>;
+}) {
+  const genericDefault =
+    row.defaultAssigned && !board.defaultGarantia ? board.fallbackName : null;
+  return (
+    <>
+      <SectionStrip
+        title={`${board.label} — por tipo de garantia`}
+        optional={!row.required}
+      >
+        {row.state === "missing" ? (
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-destructive">
+            <CircleAlert className="h-3 w-3" /> nenhum modelo ativo
+          </span>
+        ) : !row.defaultAssigned ? (
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 dark:text-amber-400">
+            <TriangleAlert className="h-3 w-3" /> sem padrão definido
+          </span>
+        ) : genericDefault ? (
+          <span
+            className="text-[11px] text-muted-foreground"
+            title="O padrão desta modalidade é um modelo genérico, sem tipo de garantia — nenhuma linha abaixo leva a estrela"
+          >
+            padrão:{" "}
+            <span className="font-medium text-foreground">{genericDefault}</span>
+          </span>
+        ) : null}
+        {row.state === "missing" ? (
+          <Button size="sm" className="ml-auto" asChild>
+            <Link href="/templates?tab=modelos&ingest=1">Enviar modelo</Link>
+          </Button>
+        ) : !row.defaultAssigned ? (
+          <Button size="sm" variant="outline" className="ml-auto" asChild>
+            <Link href={`/templates?tab=modelos&modalidade=${row.modalidade}`}>
+              Escolher padrão
+            </Link>
+          </Button>
+        ) : null}
+      </SectionStrip>
+      <div className="divide-y">
+        {board.cells.map((cell) => (
+          <GarantiaLine
+            key={cell.garantia}
+            cell={cell}
+            board={board}
+            providers={providersByGarantia[cell.garantia]}
+          />
+        ))}
+      </div>
+    </>
+  );
+}
+
+/** Linha de UM tipo de garantia dentro da seção de locação. */
+function GarantiaLine({
+  cell,
+  board,
+  providers,
+}: {
+  cell: GarantiaCoverageCell;
+  board: GarantiaBoardRow;
+  providers?: string[];
+}) {
+  const isStar =
+    cell.state === "active" && board.defaultGarantia === cell.garantia;
+  return (
+    <div className="px-4 py-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <GarantiaStateBadge cell={cell} hasFallback={Boolean(board.fallbackName)} />
+        <span className="text-sm font-medium">{cell.label}</span>
+        {cell.state !== "missing" && cell.templateName && (
+          <span className="min-w-0 truncate text-sm text-muted-foreground">
+            · <span className="text-foreground">{cell.templateName}</span>
+          </span>
+        )}
+        {isStar && (
+          <span
+            title="Padrão da modalidade — é este modelo que a geração usa quando o formulário não decide"
+            className="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-1.5 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+          >
+            <Star className="h-3 w-3 fill-current" /> padrão da modalidade
+          </span>
+        )}
+        {cell.state === "missing" && board.fallbackName && (
+          <span className="min-w-0 truncate text-xs text-muted-foreground">
+            gera com o padrão:{" "}
+            <span className="text-foreground">{board.fallbackName}</span>
+          </span>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          {cell.state === "missing" ? (
+            <Button size="sm" variant="outline" asChild>
+              <Link href="/templates?tab=modelos&ingest=1">Enviar modelo</Link>
+            </Button>
+          ) : cell.state === "draft" ? (
+            <Button size="sm" variant="outline" asChild>
+              <Link href={`/templates/${cell.templateId}`}>Conferir</Link>
+            </Button>
+          ) : (
+            cell.templateId && (
+              <Button size="sm" variant="ghost" asChild>
+                <Link href={`/templates/${cell.templateId}`}>Abrir</Link>
+              </Button>
+            )
+          )}
+        </div>
+      </div>
+      {providers && providers.length > 0 && (
+        <p className="mt-1 pl-0.5 text-[11px] text-muted-foreground">
+          Seguradoras no acervo: {providers.join(" · ")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function GarantiaStateBadge({
+  cell,
+  hasFallback,
+}: {
+  cell: GarantiaCoverageCell;
+  hasFallback: boolean;
+}) {
+  if (cell.state === "active") {
+    return (
+      <span
+        title="Modelo próprio deste tipo de garantia — o formulário o seleciona de forma vinculante"
+        className="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-1.5 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+      >
+        <Check className="h-3 w-3" /> atribuído
+      </span>
+    );
+  }
+  if (cell.state === "draft") {
+    return (
+      <span
+        title="Veio da ingestão e ainda não foi ativado — a geração não o enxerga"
+        className="inline-flex items-center gap-1 rounded-md border border-dashed border-amber-400 bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
+      >
+        <TriangleAlert className="h-3 w-3" /> em revisão
+      </span>
+    );
+  }
+  if (hasFallback) {
+    return (
+      <span
+        title="Sem modelo próprio — contratos desta garantia saem com o modelo padrão da modalidade"
+        className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-300"
+      >
+        <TriangleAlert className="h-3 w-3" /> faltante
+      </span>
+    );
+  }
+  return (
+    <span
+      title="Sem nenhum modelo ativo nesta modalidade — a geração deste tipo falha"
+      className="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-1.5 py-0.5 text-xs font-medium text-destructive"
+    >
+      <CircleAlert className="h-3 w-3" /> faltante
+    </span>
+  );
+}
+
+function SectionStrip({
+  title,
+  optional,
+  children,
+}: {
+  title: string;
+  optional?: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t bg-muted/30 px-4 py-1.5 first:border-t-0">
+      <span className="text-xs font-medium text-muted-foreground">{title}</span>
+      {optional && (
+        <span className="rounded-full border px-1.5 py-px text-[10px] text-muted-foreground">
+          Opcional
+        </span>
+      )}
+      {children}
+    </div>
+  );
+}
+
+function TypeLine({
+  row,
+  labelOverride,
+}: {
+  row: CoverageRow;
+  labelOverride?: string;
 }) {
   const assigned = row.state !== "missing" && row.defaultAssigned;
   return (
     <div className="px-4 py-2.5">
       <div className="flex flex-wrap items-center gap-2">
         <StateBadge row={row} />
-        <span className="text-sm font-medium">{row.label}</span>
+        <span className="text-sm font-medium">{labelOverride ?? row.label}</span>
         {assigned && row.templateName && (
           <span className="min-w-0 truncate text-sm text-muted-foreground">
             · <span className="text-foreground">{row.templateName}</span>
           </span>
         )}
-        {assigned && (
-          <OriginBadge own={row.state === "own"} />
-        )}
+        {assigned && <OriginBadge own={row.state === "own"} />}
         <div className="ml-auto flex items-center gap-2">
           {row.state === "missing" ? (
             <Button size="sm" asChild>
@@ -129,54 +373,6 @@ function TypeLine({
           )}
         </div>
       </div>
-      <GarantiaChips row={garantia} modalidade={row.modalidade} />
-    </div>
-  );
-}
-
-/**
- * Segunda dimensão dos tipos de locação: variantes por garantia. Só aparece
- * quando a org JÁ cobre alguma garantia neste tipo (mesma régua anti-muro dos
- * `gaps` da matriz) — um tenant sem variantes não ganha uma linha de aviso
- * sobre um recurso que nunca usou.
- */
-function GarantiaChips({
-  row,
-  modalidade,
-}: {
-  row?: GarantiaCoverageRow;
-  modalidade: string;
-}) {
-  if (!row) return null;
-  const covered = row.cells.filter((c) => c.state !== "missing");
-  if (covered.length === 0) return null;
-  const missing = row.cells.filter((c) => c.state === "missing");
-  return (
-    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 pl-0.5">
-      <span className="text-[11px] text-muted-foreground">Garantias:</span>
-      {covered.map((c) => (
-        <Link
-          key={c.garantia}
-          href={`/templates?tab=modelos&modalidade=${modalidade}`}
-          title={
-            c.state === "draft"
-              ? `${c.templateName ?? c.label} — em revisão, falta ativar`
-              : c.templateName ?? c.label
-          }
-          className={
-            c.state === "draft"
-              ? "rounded-full border border-dashed border-amber-400 px-2 py-px text-[11px] text-amber-700 dark:text-amber-400"
-              : "rounded-full border px-2 py-px text-[11px] text-muted-foreground"
-          }
-        >
-          {c.label}
-        </Link>
-      ))}
-      {missing.length > 0 && (
-        <span className="text-[11px] text-muted-foreground/70">
-          · {missing.length} sem modelo próprio
-        </span>
-      )}
     </div>
   );
 }

@@ -456,6 +456,22 @@ export function scoreTemplateAgainstFacts(criteria: unknown, facts: TemplateFact
   return score;
 }
 
+/**
+ * O template escolhido é DA garantia que o formulário declarou?
+ *
+ * `true` quando o form não declara garantia (nada a casar) ou quando o
+ * critério do template bate com o fato. `false` é o fallback que era
+ * SILENCIOSO (D16): o form pediu uma garantia sem template próprio e a eleição
+ * caiu no genérico/padrão da modalidade — o chamador avisa, não bloqueia.
+ */
+export function garantiaMatchedForFacts(
+  criteria: unknown,
+  facts: TemplateFacts
+): boolean {
+  if (facts.garantia == null) return true;
+  return parseMatchCriteria(criteria)?.garantia === facts.garantia;
+}
+
 export interface TemplateCriteriaCandidate {
   isDefault: boolean;
   matchCriteria?: unknown;
@@ -502,7 +518,7 @@ export async function selectLocacaoTemplate(
   orgId: string,
   schemaType: string,
   dataJson?: unknown
-): Promise<{ template: ContractTemplate } | null> {
+): Promise<{ template: ContractTemplate; garantiaMatched: boolean } | null> {
   const modalidade = modalidadeForLocacaoSchemaType(schemaType);
   const { prisma } = await import("@/lib/db/prisma");
   const active = await prisma.contractTemplate.findMany({
@@ -511,16 +527,20 @@ export async function selectLocacaoTemplate(
   if (active.length === 0) return null;
 
   const facts = deriveTemplateFacts(dataJson);
+  const withMatch = (template: ContractTemplate) => ({
+    template,
+    garantiaMatched: garantiaMatchedForFacts(template.matchCriteria, facts),
+  });
 
   // 1) match exato da modalidade de locação. Dentro do conjunto, as ESCOLHAS DO
   //    FORM (garantia / fiador PF-PJ / locatário PF-PJ) desempatam variantes;
   //    sem variante marcada o resultado é o de sempre (isDefault, senão a 1ª).
   const exact = active.filter((t) => t.modalidade === modalidade);
-  if (exact.length) return { template: pickTemplateByFacts(exact, facts) };
+  if (exact.length) return withMatch(pickTemplateByFacts(exact, facts));
 
   // 2) fallback: qualquer template de locação ativo (modalidade começa com "locacao")
   const anyLocacao = active.filter((t) => (t.modalidade ?? "").startsWith("locacao"));
-  if (anyLocacao.length) return { template: pickTemplateByFacts(anyLocacao, facts) };
+  if (anyLocacao.length) return withMatch(pickTemplateByFacts(anyLocacao, facts));
 
   return null;
 }
