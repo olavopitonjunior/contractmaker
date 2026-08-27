@@ -6,17 +6,38 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
 import { TemplatesListClient } from "@/components/templates/TemplatesListClient";
 import { DocumentIngestionDialog } from "@/components/templates/DocumentIngestionDialog";
-import { SystemTemplatesPanel } from "@/components/templates/SystemTemplatesPanel";
+import { ContractTypesPanel } from "@/components/templates/ContractTypesPanel";
 import { StartIngestionRunButton } from "@/components/templates/StartIngestionRunButton";
 import { getOrgModules } from "@/lib/modules/read";
 import { MODULE_CATALOG, type ModuleKey } from "@/lib/modules/catalog";
-import { computeTemplateCoverage } from "@/lib/templates/coverage";
+import {
+  computeGarantiaCoverage,
+  computeTemplateCoverage,
+} from "@/lib/templates/coverage";
+import { modalidadeLabel } from "@/lib/contracts/template-category";
 import { isIngestionEnabled } from "@/lib/ingestion/guard";
 
+/**
+ * /templates em DUAS abas (decisão de produto, 28/08):
+ *
+ *   Tipos de contrato (padrão) — o que o sistema espera: uma linha por tipo,
+ *     com o modelo padrão atribuído ou o estado faltante/sem padrão. Não é
+ *     repositório: nenhuma listagem completa aqui.
+ *   Modelos — o repositório: listagem completa, enviar acervo/documento, criar
+ *     do zero, tornar padrão, arquivar.
+ *
+ * `?ingest=1` e `?archived=1` forçam a aba Modelos: são links antigos
+ * (onboarding, acervo de cláusulas) que apontam direto pra ação de repositório.
+ */
 export default async function TemplatesPage({
   searchParams,
 }: {
-  searchParams?: { archived?: string; ingest?: string };
+  searchParams?: {
+    tab?: string;
+    archived?: string;
+    ingest?: string;
+    modalidade?: string;
+  };
 }) {
   const session = await auth();
   if (!session?.user) return null;
@@ -25,29 +46,18 @@ export default async function TemplatesPage({
   if (!org) return <p className="text-muted-foreground p-6">Sem organizacao.</p>;
 
   const showArchived = searchParams?.archived === "1";
+  const autoIngest = searchParams?.ingest === "1";
+  const repoTab =
+    searchParams?.tab === "modelos" || autoIngest || showArchived;
+  const modalidadeFilter = searchParams?.modalidade || null;
 
-  const templates = await prisma.contractTemplate.findMany({
-    where: {
-      orgId: org.id,
-      status: showArchived ? "archived" : { not: "archived" },
-    },
-    include: { _count: { select: { contracts: true } } },
-    orderBy: [
-      { isDefault: "desc" },
-      { modalidade: "asc" },
-      { createdAt: "desc" },
-    ],
-  });
-
-  const [archivedCount, modules, activeForCoverage, openRun] = await Promise.all([
-    prisma.contractTemplate.count({
-      where: { orgId: org.id, status: "archived" },
-    }),
+  const [modules, notArchived, openRun] = await Promise.all([
     getOrgModules(org.id),
-    // A cobertura mede o que a GERAÇÃO enxerga (ativos), independente do filtro
-    // "arquivados" da listagem acima.
+    // Alimenta as DUAS coberturas da aba Tipos: o painel (que filtra ativos
+    // internamente) e a matriz de garantias (que enxerga rascunho de propósito
+    // — o run de ingestão nasce suggest-only).
     prisma.contractTemplate.findMany({
-      where: { orgId: org.id, status: "active" },
+      where: { orgId: org.id, status: { not: "archived" } },
       select: {
         id: true,
         name: true,
@@ -56,6 +66,7 @@ export default async function TemplatesPage({
         engine: true,
         isDefault: true,
         sourceHash: true,
+        matchCriteria: true,
       },
     }),
     // Lote em andamento: sem esta faixa, quem fecha a aba durante a ingestão
@@ -73,44 +84,45 @@ export default async function TemplatesPage({
   const ingestionEnabled = await isIngestionEnabled(org.id);
   const coverage = computeTemplateCoverage({
     modules: enabledModules,
-    templates: activeForCoverage,
+    templates: notArchived,
   });
+  const garantias = computeGarantiaCoverage({
+    modules: enabledModules,
+    templates: notArchived,
+  });
+
+  const templates = repoTab
+    ? await prisma.contractTemplate.findMany({
+        where: {
+          orgId: org.id,
+          status: showArchived ? "archived" : { not: "archived" },
+          ...(modalidadeFilter ? { modalidade: modalidadeFilter } : {}),
+        },
+        include: { _count: { select: { contracts: true } } },
+        orderBy: [
+          { isDefault: "desc" },
+          { modalidade: "asc" },
+          { createdAt: "desc" },
+        ],
+      })
+    : [];
+
+  const archivedCount = repoTab
+    ? await prisma.contractTemplate.count({
+        where: {
+          orgId: org.id,
+          status: "archived",
+          ...(modalidadeFilter ? { modalidade: modalidadeFilter } : {}),
+        },
+      })
+    : 0;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Templates de Contrato"
-        description="Mande os documentos da sua imobiliária — contratos, propostas e cláusulas, de uma vez. Nós lemos, dizemos o que cada um é e você confirma; modelos parecidos viram um só."
-      >
-        {/* O lote é o caminho para quem já tem acervo: quem só onboardou via
-            wizard tinha o botão lá, e a imobiliária que chega depois com a pasta
-            inteira ficava sem por onde começar. */}
-        {ingestionEnabled && (
-          <StartIngestionRunButton orgId={org.id} label="Enviar acervo de uma vez" />
-        )}
-        <DocumentIngestionDialog
-          autoOpen={searchParams?.ingest === "1"}
-          enabledModules={enabledModules}
-        />
-        <Button size="sm" variant="ghost" asChild>
-          <Link href="/settings/knowledge-base">
-            <Library className="mr-1.5 h-4 w-4" />
-            Acervo de cláusulas
-          </Link>
-        </Button>
-        <Button size="sm" variant="ghost" asChild>
-          <Link href="/templates/new">
-            <PenLine className="mr-1.5 h-4 w-4" />
-            Criar do zero (avançado)
-          </Link>
-        </Button>
-        <Button size="sm" variant="ghost" asChild>
-          <Link href="/templates/placeholders">
-            <KeyRound className="mr-1.5 h-4 w-4" />
-            Chaves de auto-preenchimento
-          </Link>
-        </Button>
-      </PageHeader>
+        description="Cada tipo de contrato tem um modelo padrão — é ele que gera o documento."
+      />
 
       {openRun && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-violet-300 bg-violet-50/50 p-3 text-sm dark:border-violet-900 dark:bg-violet-950/20">
@@ -127,26 +139,110 @@ export default async function TemplatesPage({
         </div>
       )}
 
-      <SystemTemplatesPanel report={coverage} />
+      <nav className="flex gap-1 border-b" aria-label="Seções de templates">
+        <TabLink href="/templates" active={!repoTab}>
+          Tipos de contrato
+        </TabLink>
+        <TabLink href="/templates?tab=modelos" active={repoTab}>
+          Modelos
+        </TabLink>
+      </nav>
 
-      <TemplatesListClient
-        templates={templates.map((t) => ({
-          id: t.id,
-          name: t.name,
-          description: t.description,
-          modalidade: t.modalidade,
-          category: t.category,
-          matchCriteria: t.matchCriteria,
-          version: t.version,
-          isDefault: t.isDefault,
-          status: t.status,
-          engine: t.engine,
-          contractsCount: t._count.contracts,
-          updatedAt: t.updatedAt.toISOString(),
-        }))}
-        showArchived={showArchived}
-        archivedCount={archivedCount}
-      />
+      {!repoTab ? (
+        <ContractTypesPanel report={coverage} garantias={garantias} />
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            {ingestionEnabled && (
+              <StartIngestionRunButton
+                orgId={org.id}
+                label="Enviar acervo de uma vez"
+              />
+            )}
+            <DocumentIngestionDialog
+              autoOpen={autoIngest}
+              enabledModules={enabledModules}
+            />
+            <Button size="sm" variant="ghost" asChild>
+              <Link href="/settings/knowledge-base">
+                <Library className="mr-1.5 h-4 w-4" />
+                Acervo de cláusulas
+              </Link>
+            </Button>
+            <Button size="sm" variant="ghost" asChild>
+              <Link href="/templates/new">
+                <PenLine className="mr-1.5 h-4 w-4" />
+                Criar do zero (avançado)
+              </Link>
+            </Button>
+            <Button size="sm" variant="ghost" asChild>
+              <Link href="/templates/placeholders">
+                <KeyRound className="mr-1.5 h-4 w-4" />
+                Chaves de auto-preenchimento
+              </Link>
+            </Button>
+          </div>
+
+          {modalidadeFilter && (
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-muted-foreground">
+                Mostrando só{" "}
+                <span className="font-medium text-foreground">
+                  {modalidadeLabel(modalidadeFilter)}
+                </span>
+                {" — marque um como padrão ou envie um modelo novo."}
+              </span>
+              <Button size="sm" variant="ghost" asChild>
+                <Link href="/templates?tab=modelos">Ver todos</Link>
+              </Button>
+            </div>
+          )}
+
+          <TemplatesListClient
+            templates={templates.map((t) => ({
+              id: t.id,
+              name: t.name,
+              description: t.description,
+              modalidade: t.modalidade,
+              category: t.category,
+              matchCriteria: t.matchCriteria,
+              version: t.version,
+              isDefault: t.isDefault,
+              status: t.status,
+              engine: t.engine,
+              contractsCount: t._count.contracts,
+              updatedAt: t.updatedAt.toISOString(),
+            }))}
+            showArchived={showArchived}
+            archivedCount={archivedCount}
+            modalidadeFilter={modalidadeFilter}
+          />
+        </>
+      )}
     </div>
+  );
+}
+
+function TabLink({
+  href,
+  active,
+  children,
+}: {
+  href: string;
+  active: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      aria-current={active ? "page" : undefined}
+      className={
+        active
+          ? "-mb-px border-b-2 border-primary px-3 py-2 text-sm font-medium text-foreground"
+          : "-mb-px border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
+      }
+    >
+      {children}
+    </Link>
   );
 }

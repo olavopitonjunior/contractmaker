@@ -46,6 +46,8 @@ interface Props {
   templates: TemplateRow[];
   showArchived: boolean;
   archivedCount: number;
+  /** Filtro ativo por modalidade (vem do CTA "Escolher padrão" da aba Tipos). */
+  modalidadeFilter?: string | null;
 }
 
 function formatDate(iso: string): string {
@@ -65,7 +67,14 @@ export function TemplatesListClient({
   templates,
   showArchived,
   archivedCount,
+  modalidadeFilter,
 }: Props) {
+  // A lista vive na aba Modelos: os filtros Ativos/Arquivados precisam
+  // preservar a aba e o filtro de modalidade, senão o clique volta pra aba
+  // Tipos e o operador perde o contexto do "Escolher padrão".
+  const baseQuery = `tab=modelos${
+    modalidadeFilter ? `&modalidade=${modalidadeFilter}` : ""
+  }`;
   const router = useRouter();
   const [pending, start] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -155,14 +164,14 @@ export function TemplatesListClient({
           size="sm"
           asChild
         >
-          <Link href="/templates">Ativos</Link>
+          <Link href={`/templates?${baseQuery}`}>Ativos</Link>
         </Button>
         <Button
           variant={showArchived ? "default" : "outline"}
           size="sm"
           asChild
         >
-          <Link href="/templates?archived=1">
+          <Link href={`/templates?${baseQuery}&archived=1`}>
             Arquivados ({archivedCount})
           </Link>
         </Button>

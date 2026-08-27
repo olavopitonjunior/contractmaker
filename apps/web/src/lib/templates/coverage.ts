@@ -69,6 +69,14 @@ export interface CoverageRow {
   /** Template que satisfaz a linha (quando `state !== "missing"`). */
   templateId?: string;
   templateName?: string;
+  /**
+   * Existe um template ativo `isDefault` nesta modalidade? Distingue "tem
+   * modelos mas ninguém é o padrão" de "atribuído": a geração usa o padrão
+   * como desempate e como fallback quando o formulário não decide — uma
+   * modalidade com ativos e sem padrão é um estado que a tela precisa acusar,
+   * não esconder atrás do primeiro representante que encontrar.
+   */
+  defaultAssigned: boolean;
 }
 
 export interface CoverageReport {
@@ -148,6 +156,7 @@ export function computeTemplateCoverage(input: {
       state,
       templateId: chosen?.id,
       templateName: chosen?.name,
+      defaultAssigned: matches.some((t) => t.isDefault === true),
     };
   });
 
