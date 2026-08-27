@@ -118,7 +118,10 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
       {
         key: FEATURE.LOCACAO_INGESTAO_ACERVO,
         label: "Ingestão de acervo em lote — locação",
-        default: false,
+        // ON por padrão desde a entrega da Ativa (27/08/2026): é o caminho
+        // padrão de onboarding. Suggest-only + cap de custo por lote — nada
+        // nasce ativo e nenhum tenant paga análise sem subir arquivos.
+        default: true,
       },
     ],
   },
