@@ -249,13 +249,47 @@ export function sanitizeUf(s: unknown): string | null {
   return /^[A-Z]{2}$/.test(upper) ? upper : null;
 }
 
+/**
+ * Um CEP nunca é número de porta.
+ *
+ * O prompt do `comprovante_residencia` pede `endereco_completo` E `cep`
+ * separados, mas o modelo repete o CEP dentro do endereço ("Rua das Flores -
+ * Centro - CEP 01310-100"). Como o `\d+` do regex de endereço não tem teto de
+ * dígitos e o `.+?` é preguiçoso, o primeiro grupo numérico que ele achava era
+ * o CEP — e um endereço SEM número de porta gravava `numero = "01310"` (ou
+ * `"13010000"` no CEP sem hífen), engolindo o bairro dentro de `rua`.
+ *
+ * Reportado na sessão com a corretora em 2026-08-25 ("o CEP veio trocado com o
+ * número do imóvel").
+ *
+ * Regras: 8 dígitos é CEP sem máscara; 5 dígitos seguidos de `-###` é a
+ * primeira metade de um CEP mascarado. Número de porta real com 5 dígitos
+ * existe (99999), então só recusamos os 5 dígitos quando o sufixo de CEP vem
+ * logo atrás.
+ */
+function pareceCep(numero: string, resto: string): boolean {
+  if (numero.length === 8) return true;
+  if (numero.length === 5 && /^-?\s*\d{3}(?!\d)/.test(resto.trim())) return true;
+  return false;
+}
+
 export function parseEndereco(value: unknown): { rua?: string; numero?: string } {
   if (typeof value !== "string" || !value.trim()) return {};
-  const match = value.match(/^(.+?),?\s*(\d+[A-Za-z]?)(?:\s*[-,]\s*(.*))?$/);
-  if (match) {
-    return { rua: match[1].trim(), numero: match[2].trim() };
+  const texto = value.trim();
+  const match = texto.match(/^(.+?),?\s*(\d+[A-Za-z]?)(?:\s*[-,]\s*(.*))?$/);
+  if (!match) return { rua: texto };
+
+  const numero = match[2].trim();
+  const resto = match[3] ?? "";
+  // A palavra "CEP" logo antes do grupo numérico é o sinal mais barato de todos.
+  const rotuladoCep = /(^|[^a-z])cep[\s:.-]*$/i.test(match[1]);
+  if (rotuladoCep || pareceCep(numero.replace(/\D/g, ""), resto)) {
+    // Devolver a string inteira como `rua` é melhor que inventar um número: o
+    // `skipIfDirty` do apply deixa o usuário corrigir, e nada errado é gravado
+    // no campo `numero`.
+    return { rua: texto };
   }
-  return { rua: value.trim() };
+  return { rua: match[1].trim(), numero };
 }
 
 /**

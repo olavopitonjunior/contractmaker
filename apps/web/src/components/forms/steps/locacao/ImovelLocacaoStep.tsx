@@ -9,6 +9,7 @@ import { UFSelect } from "@/components/forms/UFSelect";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 import { maskCEP } from "@/lib/forms/field-formats";
 import { FormField } from "@/components/forms/fields/FormField";
+import { DecimalField } from "./_PartyFields";
 
 const KIND_OPTIONS = [
   { value: "apartamento", label: "Apartamento" },
@@ -104,12 +105,7 @@ export function ImovelLocacaoStep({
             <Input {...form.register("imovel.inscricao_iptu")} placeholder="Inscrição municipal" />
           </FormField>
           <FormField form={form} name="imovel.area" label="Área (m²)">
-            <Input
-              {...form.register("imovel.area", { valueAsNumber: true })}
-              type="number"
-              inputMode="decimal"
-              placeholder="0"
-            />
+            <DecimalField form={form} name="imovel.area" suffix="m²" placeholder="0" />
           </FormField>
           <FormField form={form} name="imovel.vagas_garagem" label="Vagas de garagem">
             <Input

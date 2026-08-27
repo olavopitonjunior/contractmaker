@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,11 +67,16 @@ export default function NewFormPage() {
   const [idemKey, setIdemKey] = useState(() => crypto.randomUUID());
 
   // Já escolhidos não devem reaparecer nas sugestões do combobox.
-  async function fetchAvailableCorretores(q: string): Promise<CorretorComboboxOption[]> {
-    const options = await fetchCorretorOptions(q);
-    const chosen = new Set(corretores.map((c) => c.id));
-    return options.filter((o) => !chosen.has(o.id));
-  }
+  // Memoizado porque o CorretorCombobox tem `fetchOptions` nas dependências do
+  // seu efeito de busca — função nova a cada render vira loop de refetch.
+  const fetchAvailableCorretores = useCallback(
+    async (q: string): Promise<CorretorComboboxOption[]> => {
+      const options = await fetchCorretorOptions(q);
+      const chosen = new Set(corretores.map((c) => c.id));
+      return options.filter((o) => !chosen.has(o.id));
+    },
+    [corretores]
+  );
 
   async function postForm(key: string, force: boolean) {
     const res = await fetch("/api/forms", {

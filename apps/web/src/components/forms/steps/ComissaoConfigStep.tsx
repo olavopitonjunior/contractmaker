@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useFieldArray, UseFormReturn, Controller } from "react-hook-form";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -90,14 +90,30 @@ export function ComissaoConfigStep({
   // no topo da rota). `credentials` default (same-origin): em prod
   // imobpro.ia.br o endpoint é público sem auth; em preview Vercel com SSO,
   // "omit" quebrava a request com 401 por não enviar o cookie de SSO.
-  async function fetchCommissionerOptions(q: string): Promise<CorretorComboboxOption[]> {
-    if (!token) return [];
-    const url = `/api/forms/${token}/commissioners?q=${encodeURIComponent(q)}`;
-    const res = await fetch(url);
-    if (!res.ok) return [];
-    const data = await res.json().catch(() => ({}));
-    return Array.isArray(data?.items) ? data.items : [];
-  }
+  //
+  // `useCallback` NÃO é cosmético: o CorretorCombobox tem `fetchOptions` nas
+  // dependências do seu useEffect. Sem memo, cada render devolvia uma função
+  // nova, o efeito re-rodava, agendava outro debounce de 300ms e disparava
+  // outro fetch — ~1 request a cada 300ms contra o teto de 30/min da rota. O
+  // limite estourava em ~9s e todo 429 seguinte virava lista vazia ("não puxa
+  // os corretores cadastrados").
+  const fetchCommissionerOptions = useCallback(
+    async (q: string): Promise<CorretorComboboxOption[]> => {
+      if (!token) return [];
+      const url = `/api/forms/${token}/commissioners?q=${encodeURIComponent(q)}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        // Silenciar aqui foi o que disfarçou o 429 de lista vazia por semanas.
+        console.warn(
+          `[comissao] lookup de corretores falhou: HTTP ${res.status}`
+        );
+        throw new Error(`lookup_failed_${res.status}`);
+      }
+      const data = await res.json().catch(() => ({}));
+      return Array.isArray(data?.items) ? data.items : [];
+    },
+    [token]
+  );
 
   const {
     fields: testemunhaFields,

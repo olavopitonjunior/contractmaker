@@ -153,9 +153,15 @@ export async function materializeLeaseParties(
     const nome = str(a.nome);
     if (!nome) continue;
     const cpfCnpj = docOrSynthetic(str(a.cpf) || str(a.cnpj), leaseContractId, "angariador", idx);
+    // A imobiliária parceira entra como angariador PJ; hardcodar "fisica" fazia
+    // o cadastro nascer com a pessoa errada (e o CNPJ num campo de CPF).
+    const tipoPessoa =
+      str(a.tipo_pessoa) === "juridica" || (!str(a.cpf) && str(a.cnpj))
+        ? "juridica"
+        : "fisica";
     const party = await db.propertyOwner.upsert({
       where: { orgId_cpfCnpj: { orgId, cpfCnpj } },
-      create: { orgId, tipoPessoa: "fisica", nome, cpfCnpj },
+      create: { orgId, tipoPessoa, nome, cpfCnpj },
       update: { nome },
     });
     // LeaseAngariador não tem unique composto — checar antes de criar (idempotência).
