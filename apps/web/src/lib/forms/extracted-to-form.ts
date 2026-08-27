@@ -44,6 +44,19 @@ export interface ExtractedDoc {
   category: string | null;
   fields: Record<string, unknown>;
   confidence?: number;
+  /**
+   * Em que vocabulário as chaves de `fields` estão.
+   *
+   * `"ocr"` (ou ausente) é o histórico: chaves do prompt (`cpf_numero`,
+   * `filiacao_mae`) que passam pelo dicionário `FIELD_MAP_PERSON`. Ausente
+   * significa "ocr" — os 188 documentos já extraídos não têm este campo.
+   *
+   * `"form"` é a extração guiada: as chaves JÁ SÃO os nomes do formulário
+   * (`cpf`, `nome_mae`), porque foi assim que o modelo foi instruído a
+   * devolver. Sem tradução, não há perda na tradução — e a tradução é onde
+   * 43,9% do que o OCR lê estava sendo descartado.
+   */
+  vocab?: "ocr" | "form";
 }
 
 export interface Assignment {
@@ -654,6 +667,20 @@ export function mapExtractedToForm(
     form.clearErrors(fullPath as never);
     filled += 1;
   };
+
+  // Extração guiada: as chaves já são do formulário, então vão direto, sem
+  // passar pelo dicionário. É aqui que se recupera o que a tradução perdia —
+  // `telefone`/`mobile_phone`, `titular_cpf`/`cpf` e companhia deixam de
+  // existir como problema, porque o modelo foi instruído com o nome final.
+  //
+  // Sem `return` de propósito: se o payload trouxer TAMBÉM chaves de OCR (por
+  // exemplo `conjuge_nome`, que alimenta os ramos colaterais abaixo), elas
+  // continuam sendo aproveitadas. `applyField` já protege contra sobrescrita.
+  if (extraction.vocab === "form") {
+    for (const [formField, raw] of Object.entries(fields)) {
+      applyField(formField, raw);
+    }
+  }
 
   if (isPerson) {
     for (const [ocrKey, formField] of Object.entries(FIELD_MAP_PERSON)) {
