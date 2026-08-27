@@ -67,6 +67,48 @@ describe("computeTemplateCoverage", () => {
     expect(row?.templateName).toBe("Contrato — Fiador (Administrado)");
   });
 
+  it("defaultAssigned: ativos sem isDefault → linha 'sem padrão', não 'atribuído'", () => {
+    const report = computeTemplateCoverage({
+      modules: ["locacao"],
+      templates: [
+        tpl({ id: "t1", name: "Contrato A", engine: "google_docs", isDefault: false }),
+        tpl({ id: "t2", name: "Contrato B", engine: "google_docs", isDefault: false }),
+      ],
+    });
+    const row = report.rows.find((r) => r.modalidade === "locacao");
+    expect(row?.state).toBe("own");
+    expect(row?.defaultAssigned).toBe(false);
+  });
+
+  it("defaultAssigned: isDefault de template ARQUIVADO não conta", () => {
+    const report = computeTemplateCoverage({
+      modules: ["locacao"],
+      templates: [
+        tpl({ id: "t1", engine: "google_docs", isDefault: true, status: "archived" }),
+        tpl({ id: "t2", name: "Contrato B", engine: "google_docs", isDefault: false }),
+      ],
+    });
+    const row = report.rows.find((r) => r.modalidade === "locacao");
+    expect(row?.defaultAssigned).toBe(false);
+  });
+
+  it("defaultAssigned: modalidade faltante fica false (não há o que atribuir)", () => {
+    const report = computeTemplateCoverage({ modules: ["locacao"], templates: [] });
+    const row = report.rows.find((r) => r.modalidade === "locacao");
+    expect(row?.state).toBe("missing");
+    expect(row?.defaultAssigned).toBe(false);
+  });
+
+  it("defaultAssigned: canônico semeado (isDefault) conta como atribuído", () => {
+    const report = computeTemplateCoverage({
+      modules: ["locacao"],
+      templates: [tpl({ isDefault: true })],
+    });
+    const row = report.rows.find((r) => r.modalidade === "locacao");
+    expect(row?.state).toBe("canonical");
+    expect(row?.defaultAssigned).toBe(true);
+  });
+
   it("org só-locação não é cobrada por modelos de venda", () => {
     const report = computeTemplateCoverage({ modules: ["locacao"], templates: [] });
     const modalidades = report.rows.map((r) => r.modalidade);
