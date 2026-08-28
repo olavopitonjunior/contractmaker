@@ -31,6 +31,8 @@ interface ComissaoConfigStepProps {
    * O POST faz a mesma checagem; aqui é só a metade visual.
    */
   viewerIsMember?: boolean;
+  /** A imobiliária exige os dados de recebimento do corretor nesta etapa. */
+  requireCommissionerReceiving?: boolean;
 }
 
 function FormField({
@@ -81,6 +83,7 @@ export function ComissaoConfigStep({
   form,
   token,
   viewerIsMember = false,
+  requireCommissionerReceiving = false,
 }: ComissaoConfigStepProps) {
   const quemPaga = form.watch("comissao.quem_paga");
   const quandoPaga = form.watch("comissao.quando_paga");
@@ -334,6 +337,10 @@ export function ComissaoConfigStep({
                           | "outro"
                           | null) ?? "imobiliaria_principal",
                       incluir_como_signatario: false,
+                      // Estado do cadastro (booleano, nunca o dado
+                      // bancário): alimenta o gate de recebimento da
+                      // etapa quando a imobiliária o exige.
+                      recebimentoPendente: r.receivingPending === true,
                     });
                     toast.success(`${r.label} adicionado(a) como comissionado.`);
                   }}
@@ -584,6 +591,7 @@ export function ComissaoConfigStep({
                     endpoint={`/api/forms/${token}/commissioners`}
                     papelDefault="imobiliaria_principal"
                     showReceiving={viewerIsMember}
+                    required={requireCommissionerReceiving}
                   />
                 )}
               </div>

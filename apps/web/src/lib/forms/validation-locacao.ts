@@ -313,6 +313,12 @@ export const angariadorLocacaoSchema = z.object({
   party_id: z.string().optional(),
   /** Backfill do registry (lib/asaas/commissioner-registry.ts). */
   splitRecipientId: z.string().optional(),
+  // Estado do cadastro de recebimento do corretor, para o gate da etapa
+  // Comissão (OrgFormSettings.requireCommissionerReceiving). É um BOOLEANO
+  // — nunca a chave PIX nem a conta, que seguem fora do dataJson por
+  // serem devolvidas a qualquer portador do link. `true` = cadastro sem
+  // meio de repasse (SplitRecipient.pendingFields não vazio).
+  recebimentoPendente: z.boolean().optional(),
   nome: z.string().min(2, "Nome do angariador obrigatório"),
   tipo_pessoa: z.enum(["fisica", "juridica"]).optional().default("fisica"),
   cpf: z.string().optional().default(""),

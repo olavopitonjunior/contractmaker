@@ -62,6 +62,10 @@ const formSettingsPatchSchema = z.object({
     .max(200)
     .optional(),
   autoLockFormOnFinalize: z.boolean().optional(),
+  // Exigir os dados de recebimento do corretor na etapa Comissão (as duas
+  // esteiras). Vale só para quem preenche como MEMBRO da imobiliária — o
+  // cliente anônimo não vê nem pode enviar esses campos.
+  requireCommissionerReceiving: z.boolean().optional(),
   // Resumo consolidado por e-mail. String vazia limpa o destinatário.
   summaryRecipientEmail: z
     .union([z.string().email("E-mail inválido"), z.literal("")])
@@ -195,6 +199,12 @@ export async function PATCH(req: NextRequest) {
         : {}),
       ...(parsed.data.autoLockFormOnFinalize !== undefined
         ? { autoLockFormOnFinalize: parsed.data.autoLockFormOnFinalize }
+        : {}),
+      ...(parsed.data.requireCommissionerReceiving !== undefined
+        ? {
+            requireCommissionerReceiving:
+              parsed.data.requireCommissionerReceiving,
+          }
         : {}),
       ...(parsed.data.summaryRecipientEmail !== undefined
         ? { summaryRecipientEmail: parsed.data.summaryRecipientEmail || null }

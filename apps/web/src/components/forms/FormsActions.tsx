@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import Link from "next/link";
 import { SendFormSummaryDialog } from "@/components/forms/SendFormSummaryDialog";
 import { formPublicPath } from "@/lib/forms/form-url";
+import { isLocacaoSchemaType } from "@/lib/forms/validation-locacao";
 
 interface FormsActionsProps {
   formId: string;
@@ -24,6 +25,12 @@ export function FormsActions({ formId, token, status, hasDeal, dealId, title, sc
   const [copied, setCopied] = useState(false);
   const [creating, setCreating] = useState(false);
   const publicPath = formPublicPath(token, title);
+  // O deal de locação mora em /locacao/deals/[id]; /deals/[id] é a UI de VENDA e
+  // não tem guard de kind, então abria a tela errada em silêncio (mesma classe do
+  // bug já registrado no BUGS.md para o card do kanban de locação).
+  const dealPath = isLocacaoSchemaType(schemaType)
+    ? `/locacao/deals/${dealId}`
+    : `/deals/${dealId}`;
 
   function handleCopy() {
     const url = `${window.location.origin}${publicPath}`;
@@ -92,7 +99,7 @@ export function FormsActions({ formId, token, status, hasDeal, dealId, title, sc
         </Button>
         {hasDeal && dealId && (
           <Button size="sm" variant="outline" asChild>
-            <Link href={`/deals/${dealId}`}>
+            <Link href={dealPath}>
               Ver Negócio
             </Link>
           </Button>

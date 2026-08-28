@@ -181,7 +181,12 @@ describe("paths de locação", () => {
 
   it("isKnownLocacaoFormPath rejeita path órfão e aceita índice qualquer", () => {
     expect(isKnownLocacaoFormPath("locadores.2.cpf")).toBe(true);
-    expect(isKnownLocacaoFormPath("garantia.fiador.cpf")).toBe(true);
+    // `garantia.fiador.*` saiu da allowlist: PARTY_PATH_RE (party-required) não
+    // casa esse prefixo, então o path passava sem o remap PF/PJ e sem checar se
+    // a garantia é fiança — exigência incondicional de um campo que só existe
+    // quando o tipo é "fiador". Essa obrigatoriedade já é aplicada, e de forma
+    // condicional, por collectLocacaoFinalizeIssues.
+    expect(isKnownLocacaoFormPath("garantia.fiador.cpf")).toBe(false);
     expect(isKnownLocacaoFormPath("locadores.0.nome_mae")).toBe(false);
     expect(isKnownLocacaoFormPath("imoveis.0.rua")).toBe(false); // plural é de venda
     expect(isKnownLocacaoFormPath("foo.bar")).toBe(false);

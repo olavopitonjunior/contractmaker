@@ -40,6 +40,11 @@ import { PrivacyConsent } from "@/components/legal/PrivacyConsent";
 import { RequiredFieldMarker } from "@/components/forms/RequiredFieldMarker";
 import { RequiredFieldsProvider } from "@/components/forms/RequiredFieldsContext";
 import { describeMissingPaths } from "@/lib/forms/field-labels";
+import {
+  pendenciasDeRecebimento,
+  mensagemDePendencia,
+} from "@/lib/forms/commissioner-receiving";
+
 import { VoiceInputButton } from "@/components/forms/VoiceInputButton";
 
 // Apenas steps com schema definido em `lib/ai/voice-extract.ts` ativam o
@@ -78,6 +83,8 @@ interface SalesFormWizardProps {
    * (403); isto aqui é a metade visual.
    */
   viewerIsMember?: boolean;
+  /** Exigir dados de recebimento do corretor na etapa Comissão (org). */
+  requireCommissionerReceiving?: boolean;
   /**
    * Subset de step indexes (0..7) a mostrar. Usado por subtoken (PR 4)
    * pra esconder steps que não pertencem ao role (vendedor não vê
@@ -443,6 +450,7 @@ export function SalesFormWizard({
   prefilled,
   proposalAttachmentUrl,
   viewerIsMember = false,
+  requireCommissionerReceiving = false,
   stepIndexes,
   endpoint,
   pathScope,
@@ -522,7 +530,7 @@ export function SalesFormWizard({
     readValue,
   );
   const currentMissingCount = currentEffectiveRequired.filter((p) =>
-    isValueEmpty(readValue(p)),
+    isValueEmpty(readValue(p), p),
   ).length;
 
   // Paths obrigatórios de TODAS as etapas — alimenta o asterisco dos campos via
@@ -629,7 +637,7 @@ export function SalesFormWizard({
           for (const path of stepFields) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const raw = form.getValues(path as any) as unknown;
-            if (isValueEmpty(raw)) {
+            if (isValueEmpty(raw, path)) {
               missingPaths.push(path);
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               form.setError(path as any, {
@@ -659,6 +667,22 @@ export function SalesFormWizard({
               type: "required",
               message: "Campo obrigatório",
             });
+          }
+          // Dados de recebimento do corretor (etapa Comissão), quando a
+          // imobiliária exige — ver lib/forms/commissioner-receiving.ts.
+          const pendenciasReceb =
+            i === 6
+              ? pendenciasDeRecebimento(
+                  form.getValues("comissao.comissionados") as never,
+                  requireCommissionerReceiving && viewerIsMember
+                )
+              : [];
+          if (pendenciasReceb.length > 0) {
+            setFailedTriggerCount((n) => n + 1);
+            toast.error(mensagemDePendencia(pendenciasReceb));
+            setCurrentStep(i);
+            window.scrollTo({ top: 0, behavior: "smooth" });
+            return false;
           }
           if (missingPaths.length > 0 || !triggerValid) {
             setFailedTriggerCount((n) => n + 1);
@@ -861,6 +885,7 @@ export function SalesFormWizard({
       form={form}
       token={token}
       viewerIsMember={viewerIsMember}
+      requireCommissionerReceiving={requireCommissionerReceiving}
     />,
   ];
 

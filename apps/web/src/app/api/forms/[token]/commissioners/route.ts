@@ -107,6 +107,9 @@ export async function GET(
       papel: true,
       email: true,
       phone: true,
+      // Booleano derivado — o front precisa saber se o cadastro tem meio de
+      // repasse para o gate da etapa Comissão. NUNCA os campos bancários em si.
+      pendingFields: true,
     },
   });
 
@@ -121,6 +124,7 @@ export async function GET(
     papel: r.papel ?? null,
     email: r.email ?? null,
     phone: r.phone ?? null,
+    receivingPending: r.pendingFields.length > 0,
   }));
 
   return NextResponse.json({ items });

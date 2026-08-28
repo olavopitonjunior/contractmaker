@@ -13,6 +13,7 @@ import {
   type EffectivePermissions,
 } from "@/lib/security/rbac/check";
 import type { PermissionKey } from "@/lib/security/rbac/permissions";
+import { getEffectiveUserId } from "@/lib/auth/impersonation";
 
 /**
  * Shape lite do deal carregado pelo scope — o suficiente pra autorização e
@@ -241,7 +242,14 @@ export async function guardDealScope(params: {
     return notFound();
   }
 
-  const eff = await getEffectivePermissions(userId, orgId);
+  // Ator EFETIVO: sob impersonation, `getUserOrg` já devolveu a org IMPERSONADA
+  // (lib/auth/user-org.ts), mas o `userId` que chega aqui é o do super_admin real —
+  // que não tem OrgMembership nesse tenant. Sem esta linha, getEffectivePermissions
+  // volta null e o guard responde 404 em toda rota que usa este helper, enquanto a
+  // PÁGINA (que resolve getEffectiveUserId) abre normalmente. Fora da impersonation
+  // o helper devolve o próprio userId — comportamento inalterado.
+  const effUserId = await getEffectiveUserId(userId);
+  const eff = await getEffectivePermissions(effUserId, orgId);
   if (
     !eff ||
     !canAccessDeal({
@@ -296,7 +304,14 @@ export async function guardContractScope(params: {
   const contractOrgId = row.deal?.pipeline?.orgId;
   if (contractOrgId && contractOrgId !== orgId) return notFound();
 
-  const eff = await getEffectivePermissions(userId, orgId);
+  // Ator EFETIVO: sob impersonation, `getUserOrg` já devolveu a org IMPERSONADA
+  // (lib/auth/user-org.ts), mas o `userId` que chega aqui é o do super_admin real —
+  // que não tem OrgMembership nesse tenant. Sem esta linha, getEffectivePermissions
+  // volta null e o guard responde 404 em toda rota que usa este helper, enquanto a
+  // PÁGINA (que resolve getEffectiveUserId) abre normalmente. Fora da impersonation
+  // o helper devolve o próprio userId — comportamento inalterado.
+  const effUserId = await getEffectiveUserId(userId);
+  const eff = await getEffectivePermissions(effUserId, orgId);
   if (
     !eff ||
     !canAccessDeal({
