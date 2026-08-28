@@ -19,6 +19,7 @@ import {
 } from "@/lib/forms/negotiation-summary";
 import { GARANTIA_LABELS, normalizeGarantiaTipo } from "@/lib/contracts/template-category";
 import { LOCACAO_SCHEMA_TYPES } from "@/lib/forms/validation-locacao";
+import { TIPO_IMOVEL_TEXTO } from "@/lib/locacao/enrich";
 
 type AnyObj = Record<string, unknown>;
 const obj = (v: unknown): AnyObj => (v && typeof v === "object" ? (v as AnyObj) : {});
@@ -68,6 +69,96 @@ function dateBR(v: unknown): string {
   const [, y, mo, d] = m;
   return `${d}/${mo}/${y}`;
 }
+
+/**
+ * Rótulos dos enums que o formulário grava como slug. Sem eles o resumo imprime
+ * "comercial_sala", "paga_e_retem", "retem_imobiliaria" — exatamente o defeito
+ * que o TEXTO do contrato já tinha corrigido via `enrichLocacaoData`, e que
+ * seguia visível na tela e no PDF. Valor fora do mapa cai no próprio slug com
+ * os underscores trocados por espaço, nunca em vazio.
+ */
+export const ENUM_LABELS: Record<string, Record<string, string>> = {
+  indice_reajuste: { IGPM: "IGP-M", IPCA: "IPCA", outro: "Outro" },
+  meio_pagamento_aluguel: { pix: "PIX", boleto: "Boleto bancário", qualquer: "PIX ou boleto" },
+  encargos_repasse: {
+    paga_e_retem: "Imobiliária paga e retém no repasse",
+    repasse_integral: "Repassados integralmente no boleto do locatário",
+  },
+  seguro_tomador: { inquilino: "Locatário", proprietario: "Locador" },
+  seguro_vigencia: { anual_renovavel: "Anual renovável", prazo_contrato: "Prazo do contrato" },
+  regime_ir: {
+    nao_retem: "Não retém",
+    retem_sem_controle: "Retém (sem controle)",
+    retem_imobiliaria: "Retido pela imobiliária",
+    retem_inquilino: "Retido pelo locatário",
+  },
+  regime_cobranca: { mes_vencido: "Mês vencido", mes_a_vencer: "Mês a vencer" },
+  repasse_garantido: {
+    nao: "Não",
+    alguns_meses: "Alguns meses",
+    todo_contrato: "Todo o contrato",
+  },
+  tipo_conta: { corrente: "Conta corrente", poupanca: "Poupança" },
+  parcela_momento: {
+    assinatura: "na assinatura",
+    escritura: "na escritura",
+    registro: "no registro",
+    data_exata: "em data definida",
+    contrato_financiamento: "no contrato de financiamento",
+  },
+  parcela_meio: {
+    pix: "PIX",
+    ted: "TED",
+    transferencia: "Transferência",
+    dinheiro: "Dinheiro",
+    cheque: "Cheque",
+    boleto: "Boleto",
+  },
+};
+
+function enumLabel(group: string, v: unknown): string {
+  const raw = str(v);
+  if (!raw) return "";
+  return ENUM_LABELS[group]?.[raw] ?? raw.replace(/_/g, " ");
+}
+
+/** Tipo do imóvel com a inicial maiúscula — o mapa é escrito para o meio da frase. */
+function tipoImovelLabel(v: unknown): string {
+  const raw = str(v);
+  if (!raw) return "";
+  const texto = TIPO_IMOVEL_TEXTO[raw] ?? raw.replace(/_/g, " ");
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
+}
+
+/** "Sim"/"Não" só quando o booleano existe — ausente é form antigo, não "Não". */
+function boolLabel(v: unknown): string {
+  if (v === true) return "Sim";
+  if (v === false) return "Não";
+  return "";
+}
+
+function pct(v: unknown): string {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) && n > 0 ? `${n}%` : "";
+}
+
+function dias(v: unknown): string {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) && n > 0 ? `${n} dia(s)` : "";
+}
+
+function meses(v: unknown, unidade = "mês(es)"): string {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) && n > 0 ? `${n} ${unidade}` : "";
+}
+
+/**
+ * Esteira do formulário. `partySection`/`imovelSection` são compartilhadas, e sem
+ * a variante empurravam linhas de campos que o schema da OUTRA esteira não tem
+ * (nome da mãe/naturalidade/SQL/inscrição municipal em locação) — linhas mortas
+ * que nunca renderizavam nada mas mascaravam o que faltava de verdade.
+ */
+type SummaryVariant = "venda" | "locacao";
 
 function endereco(o: AnyObj): string {
   const rua = str(o.endereco) || str(o.rua);
@@ -122,14 +213,25 @@ function recebimentoValue(parte: AnyObj): string {
  * que o form coleta e a imobiliária precisa (o cônjuge costuma ser signatário).
  */
 function relatedPersonValue(p: AnyObj): string {
+  // Endereço PRÓPRIO: `endereco_igual_ao_titular === true` significa "vale o do
+  // titular", e repetir o endereço dele aqui seria informação inventada. O
+  // PROCURADOR não tem essa flag no schema — comparar com `false` fazia o
+  // endereço dele nunca aparecer, embora o formulário o colete.
+  const enderecoProprio =
+    p.endereco_igual_ao_titular !== true ? endereco(p) : "";
   return [
     str(p.nome),
     cpf(p.cpf) && `CPF ${cpf(p.cpf)}`,
     str(p.rg) && `RG ${str(p.rg)}`,
+    str(p.nacionalidade),
+    str(p.estado_civil),
     str(p.profissao),
     dateBR(p.data_nascimento) && `nasc. ${dateBR(p.data_nascimento)}`,
+    str(p.nome_mae) && `mãe: ${str(p.nome_mae)}`,
+    str(p.naturalidade),
     str(p.email),
     str(p.mobile_phone),
+    enderecoProprio,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -150,15 +252,22 @@ function hasIdentity(parte: AnyObj): boolean {
   );
 }
 
-function partySection(parte: AnyObj, title: string): SummarySection | null {
+function partySection(
+  parte: AnyObj,
+  title: string,
+  variant: SummaryVariant = "venda"
+): SummarySection | null {
   const rows: SummaryRow[] = [];
   const tipo = str(parte.tipo_pessoa);
+  // Só venda tem `recebimento` (PIX/conta de quem recebe) e os campos de
+  // certidão PF (nome da mãe, naturalidade) no schema da parte.
+  const isVenda = variant === "venda";
 
   if (tipo === "juridica") {
     pushIf(rows, "Razão social", str(parte.razao_social));
     pushIf(rows, "CNPJ", cnpj(parte.cnpj));
     pushIf(rows, "Endereço", endereco(parte));
-    pushIf(rows, "Recebimento", recebimentoValue(parte));
+    if (isVenda) pushIf(rows, "Recebimento", recebimentoValue(parte));
     const rep = obj(parte.representante);
     if (str(rep.nome)) pushIf(rows, "Representante", relatedPersonValue(rep));
   } else {
@@ -170,12 +279,14 @@ function partySection(parte: AnyObj, title: string): SummarySection | null {
     pushIf(rows, "Estado civil", str(parte.estado_civil));
     pushIf(rows, "Profissão", str(parte.profissao));
     pushIf(rows, "Nascimento", dateBR(parte.data_nascimento));
-    pushIf(rows, "Nome da mãe", str(parte.nome_mae));
-    pushIf(rows, "Naturalidade", str(parte.naturalidade));
+    if (isVenda) {
+      pushIf(rows, "Nome da mãe", str(parte.nome_mae));
+      pushIf(rows, "Naturalidade", str(parte.naturalidade));
+    }
     pushIf(rows, "E-mail", str(parte.email));
     pushIf(rows, "Telefone", str(parte.mobile_phone));
     pushIf(rows, "Endereço", endereco(parte));
-    pushIf(rows, "Recebimento", recebimentoValue(parte));
+    if (isVenda) pushIf(rows, "Recebimento", recebimentoValue(parte));
     const conj = obj(parte.conjuge);
     if (str(conj.nome)) pushIf(rows, "Cônjuge", relatedPersonValue(conj));
     const proc = obj(parte.procurador);
@@ -203,7 +314,11 @@ function matriculaSituacaoLabel(imovel: AnyObj): string {
   return arquivo ? `Anexada (${arquivo})` : "Anexada ao formulário";
 }
 
-function imovelSection(imovel: AnyObj, title: string): SummarySection | null {
+function imovelSection(
+  imovel: AnyObj,
+  title: string,
+  variant: SummaryVariant = "venda"
+): SummarySection | null {
   const rows: SummaryRow[] = [];
   pushIf(rows, "Endereço", endereco(imovel));
   pushIf(rows, "Matrícula", str(imovel.matricula));
@@ -213,8 +328,11 @@ function imovelSection(imovel: AnyObj, title: string): SummarySection | null {
   // de ônus, a escritura não sai. Ausente (form legado) não gera linha.
   pushIf(rows, "Matrícula atualizada", matriculaSituacaoLabel(imovel));
   pushIf(rows, "Inscrição IPTU", str(imovel.inscricao_iptu));
-  pushIf(rows, "SQL", str(imovel.sql));
-  pushIf(rows, "Inscrição municipal", str(imovel.inscricao_municipal));
+  if (variant === "venda") {
+    // `sql` e `inscricao_municipal` só existem no imóvel de VENDA.
+    pushIf(rows, "SQL", str(imovel.sql));
+    pushIf(rows, "Inscrição municipal", str(imovel.inscricao_municipal));
+  }
   pushIf(rows, "Descrição", str(imovel.descricao));
   if (rows.length === 0) return null;
   return { title, rows };
@@ -298,14 +416,45 @@ export function buildConsolidatedFormSummary(
   if (parcelas.length > 0) {
     const rows: SummaryRow[] = parcelas.map((p, i) => {
       const parc = obj(p);
-      const valor = typeof parc.valor === "number" ? parc.valor : Number(parc.valor);
-      const valorF = Number.isFinite(valor) && valor > 0
-        ? `R$ ${valor.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`
-        : "";
-      const desc = [str(parc.tipo_texto) || str(parc.tipo), str(parc.momento) && `(${str(parc.momento)})`]
+      const valorF = brl(parc.valor);
+      // `tipo_outros_texto`/`permuta_descricao` são o que dá sentido a "outros" e
+      // "permuta_*" — sem eles a linha dizia só "outros".
+      const tipoBase = str(parc.tipo_texto) || str(parc.tipo);
+      const tipoDetalhe =
+        str(parc.tipo_outros_texto) || str(parc.permuta_descricao);
+      const tipoF = [tipoBase, tipoDetalhe && `(${tipoDetalhe})`]
         .filter(Boolean)
         .join(" ");
-      return { label: `Parcela ${i + 1}`, value: [valorF, desc].filter(Boolean).join(" — ") || "—" };
+      // Quando/como: momento nomeado, data exata, prazo em dias e meio de
+      // pagamento — tudo já coletado no formulário e invisível no resumo.
+      const quando = [
+        enumLabel("parcela_momento", parc.momento),
+        dateBR(parc.data_exata),
+        dias(parc.dias),
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      const meio = enumLabel("parcela_meio", parc.meio_pagamento);
+      const pix = obj(parc.pix);
+      const bancarios = obj(parc.bancarios);
+      const destino = str(pix.chave)
+        ? `PIX ${str(pix.tipo_chave) ? `(${str(pix.tipo_chave)}) ` : ""}${str(pix.chave)}${
+            str(pix.titular_nome) ? ` — ${str(pix.titular_nome)}` : ""
+          }`
+        : [
+            str(bancarios.banco),
+            str(bancarios.agencia) && `Ag. ${str(bancarios.agencia)}`,
+            str(bancarios.conta) && `Conta ${str(bancarios.conta)}`,
+            enumLabel("tipo_conta", bancarios.tipo_conta),
+            str(bancarios.titular_nome),
+          ]
+            .filter(Boolean)
+            .join(" · ");
+      const value =
+        [valorF, tipoF, quando, meio, destino, str(parc.banco_financiamento)]
+          .filter(Boolean)
+          .join(" — ") || "—";
+      return { label: `Parcela ${i + 1}`, value };
     });
     sections.push({ title: "Parcelas", rows });
   }
@@ -330,6 +479,7 @@ export function buildConsolidatedFormSummary(
         str(c.creci) && `CRECI ${str(c.creci)}`,
         fatia,
         str(c.email),
+        str(c.mobile_phone),
       ]
         .filter(Boolean)
         .join(" · ");
@@ -384,6 +534,12 @@ export function buildConsolidatedFormSummary(
       .filter(Boolean)
       .join(" · ")
   );
+  // `buildNegotiationSummary` já emite "Regularizações" com a descrição, mas o
+  // PRAZO ficava só no schema — e é ele que a imobiliária cobra.
+  const regularizacoes = obj(data.regularizacoes);
+  if (regularizacoes.tem === true) {
+    pushIf(posseRows, "Prazo das regularizações", dias(regularizacoes.prazo_dias));
+  }
   if (posseRows.length > 0) {
     sections.push({ title: "Posse e propriedade", rows: posseRows });
   }
@@ -406,14 +562,6 @@ export function buildConsolidatedFormSummary(
   // ---- Config (multas/juros) ----
   const config = obj(data.config);
   const cfgRows: SummaryRow[] = [];
-  const pct = (v: unknown) => {
-    const n = typeof v === "number" ? v : Number(v);
-    return Number.isFinite(n) && n > 0 ? `${n}%` : "";
-  };
-  const dias = (v: unknown) => {
-    const n = typeof v === "number" ? v : Number(v);
-    return Number.isFinite(n) && n > 0 ? `${n} dia(s)` : "";
-  };
   pushIf(cfgRows, "Multa moratória", pct(config.multa_penal_moratoria));
   pushIf(cfgRows, "Base de cálculo da multa", str(config.base_calculo_multa));
   pushIf(cfgRows, "Juros mensais", pct(config.juros_mensais_atraso));
@@ -493,7 +641,7 @@ function buildLocacaoConsolidatedSummary(
         list.length > 1
           ? `${singular} ${i + 1}${nome ? ` — ${nome}` : ""}`
           : `${singular}${nome ? ` — ${nome}` : ""}`;
-      const sec = partySection(parte, title);
+      const sec = partySection(parte, title, "locacao");
       if (!sec) return;
       // Renda/faturamento — insumo da análise de crédito, só existe em locação.
       const renda = brl(parte.renda_mensal);
@@ -510,9 +658,9 @@ function buildLocacaoConsolidatedSummary(
 
   // ---- Imóvel ----
   const imovel = obj(data.imovel);
-  const imovelSec = imovelSection(imovel, "Imóvel");
+  const imovelSec = imovelSection(imovel, "Imóvel", "locacao");
   const extraImovelRows: SummaryRow[] = [];
-  pushIf(extraImovelRows, "Tipo", str(imovel.kind));
+  pushIf(extraImovelRows, "Tipo", tipoImovelLabel(imovel.kind));
   pushIf(extraImovelRows, "Destinação", str(imovel.destinacao));
   const area = Number(imovel.area);
   if (Number.isFinite(area) && area > 0) {
@@ -532,6 +680,7 @@ function buildLocacaoConsolidatedSummary(
 
   // ---- Aluguel e reajuste ----
   const aluguel = obj(data.aluguel);
+  const fiscal = obj(data.fiscal);
   const aluguelRows: SummaryRow[] = [];
   pushIf(aluguelRows, "Aluguel mensal", brl(aluguel.valor));
   pushIf(aluguelRows, "Encargos mensais (total)", brl(aluguel.encargos));
@@ -542,13 +691,13 @@ function buildLocacaoConsolidatedSummary(
   if (Number.isFinite(diaVenc) && diaVenc > 0) {
     aluguelRows.push({ label: "Vencimento", value: `Dia ${diaVenc}` });
   }
-  pushIf(aluguelRows, "Índice de reajuste", str(aluguel.indice_reajuste));
+  pushIf(aluguelRows, "Índice de reajuste", enumLabel("indice_reajuste", aluguel.indice_reajuste));
   pushIf(aluguelRows, "Início da vigência", dateBR(aluguel.vigencia_inicio));
   const vigencia = Number(aluguel.vigencia_meses);
   if (Number.isFinite(vigencia) && vigencia > 0) {
     aluguelRows.push({ label: "Vigência", value: `${vigencia} meses` });
   }
-  pushIf(aluguelRows, "Meio de pagamento", str(aluguel.meio_pagamento));
+  pushIf(aluguelRows, "Meio de pagamento", enumLabel("meio_pagamento_aluguel", aluguel.meio_pagamento));
   // Administração/despesas decididas no form (2026-08). Booleans explícitos —
   // ausente = form antigo, sem linha.
   if (typeof aluguel.adm_imobiliaria === "boolean") {
@@ -557,22 +706,25 @@ function buildLocacaoConsolidatedSummary(
       value: aluguel.adm_imobiliaria ? "Sim" : "Não",
     });
   }
-  if (aluguel.adm_imobiliaria === true) {
-    const taxaAdm = Number(aluguel.taxa_admin_percent);
-    if (Number.isFinite(taxaAdm) && taxaAdm > 0) {
-      aluguelRows.push({ label: "Taxa de administração", value: `${taxaAdm}%` });
-    }
-    const repasse = str(aluguel.encargos_repasse);
-    if (repasse) {
-      aluguelRows.push({
-        label: "Encargos",
-        value:
-          repasse === "paga_e_retem"
-            ? "Imobiliária paga e retém no repasse"
-            : "Repassados integralmente no boleto do locatário",
-      });
-    }
+  // A taxa de administração NÃO pode depender de `adm_imobiliaria === true`:
+  // esse booleano só existe em forms de 2026-08 pra frente, então em todo
+  // formulário anterior a taxa simplesmente sumia do resumo. E a fonte
+  // preferencial é `fiscal.*` — é lá que o operador acerta a relação
+  // imobiliária ↔ proprietário, e era o que a TELA já lia enquanto o PDF lia só
+  // o form (as duas superfícies podiam mostrar números diferentes).
+  const taxaAdmValor = Number(
+    Number(fiscal.taxa_admin_percent) > 0
+      ? fiscal.taxa_admin_percent
+      : aluguel.taxa_admin_percent
+  );
+  if (Number.isFinite(taxaAdmValor) && taxaAdmValor > 0) {
+    aluguelRows.push({ label: "Taxa de administração", value: `${taxaAdmValor}%` });
   }
+  pushIf(
+    aluguelRows,
+    "Encargos",
+    enumLabel("encargos_repasse", aluguel.encargos_repasse)
+  );
   if (typeof aluguel.contas_consumo_individualizadas === "boolean") {
     aluguelRows.push({
       label: "Contas de consumo",
@@ -611,11 +763,22 @@ function buildLocacaoConsolidatedSummary(
       value: `${caucaoMeses} ${caucaoMeses === 1 ? "aluguel" : "aluguéis"}`,
     });
   }
+  pushIf(garantiaRows, "Cobertura", meses(garantia.cobertura_meses));
   pushIf(garantiaRows, "Título de capitalização", brl(garantia.titulo_valor));
-  pushIf(garantiaRows, "Tomador da apólice", str(garantia.seguro_tomador));
+  pushIf(garantiaRows, "Nº da proposta do título", str(garantia.titulo_proposta));
+  pushIf(
+    garantiaRows,
+    "Tomador da apólice",
+    enumLabel("seguro_tomador", garantia.seguro_tomador)
+  );
+  pushIf(
+    garantiaRows,
+    "Vigência da apólice",
+    enumLabel("seguro_vigencia", garantia.seguro_vigencia)
+  );
   const fiador = obj(garantia.fiador);
   if (hasIdentity(fiador)) {
-    const fiadorSec = partySection(fiador, "Fiador");
+    const fiadorSec = partySection(fiador, "Fiador", "locacao");
     if (fiadorSec) {
       garantiaRows.push({
         label: "Fiador",
@@ -625,6 +788,16 @@ function buildLocacaoConsolidatedSummary(
         sections.push({ title: "Garantia locatícia", rows: garantiaRows });
       }
       fiadorSec.title = `Fiador${partyName(fiador) ? ` — ${partyName(fiador)}` : ""}`;
+      // A capacidade financeira do fiador é o que sustenta a fiança — sem ela o
+      // resumo mostrava o fiador sem o dado que justifica aceitá-lo.
+      const rendaFiador = brl(fiador.renda_mensal);
+      if (rendaFiador) {
+        fiadorSec.rows.push({ label: "Renda mensal declarada", value: rendaFiador });
+      }
+      const faturamentoFiador = brl(fiador.faturamento_mensal);
+      if (faturamentoFiador) {
+        fiadorSec.rows.push({ label: "Faturamento mensal", value: faturamentoFiador });
+      }
       sections.push(fiadorSec);
     }
   } else if (garantiaRows.length > 0) {
@@ -646,12 +819,40 @@ function buildLocacaoConsolidatedSummary(
           : "Sim",
     });
   }
+  pushIf(cfgRows, "Multa por atraso", pct(cfg.multa_atraso_percent));
+  pushIf(cfgRows, "Juros mensais por atraso", pct(cfg.juros_mensais_atraso));
   pushIf(cfgRows, "Foro", str(data.foro));
   const assinatura = obj(data.assinatura);
   const local = [str(assinatura.cidade), str(assinatura.uf)].filter(Boolean).join("/");
   pushIf(cfgRows, "Local de assinatura", local);
   pushIf(cfgRows, "Data de assinatura", dateBR(assinatura.data));
+  pushIf(cfgRows, "Vistoria de referência", str(data.vistoria_ref));
   if (cfgRows.length > 0) sections.push({ title: "Configuração contratual", rows: cfgRows });
+
+  // ---- Administração (fiscal) ----
+  // Preenchida pelo OPERADOR e não renderizada no contrato, mas o resumo é
+  // dossiê INTERNO da imobiliária: é onde se confere IR, regime de cobrança e
+  // repasse antes de gerar as cobranças.
+  const fiscalRows: SummaryRow[] = [];
+  pushIf(fiscalRows, "Retenção de IR", enumLabel("regime_ir", fiscal.regime_ir));
+  pushIf(
+    fiscalRows,
+    "Regime de cobrança",
+    enumLabel("regime_cobranca", fiscal.regime_cobranca)
+  );
+  pushIf(fiscalRows, "Emite NFS-e", boolLabel(fiscal.emitir_nfse));
+  pushIf(fiscalRows, "Isenção de multa", meses(fiscal.isencao_multa_meses));
+  const repasseGarantido = enumLabel("repasse_garantido", fiscal.repasse_garantido);
+  if (repasseGarantido && str(fiscal.repasse_garantido) !== "nao") {
+    const qtd = meses(fiscal.repasse_garantido_meses);
+    fiscalRows.push({
+      label: "Repasse garantido",
+      value: qtd ? `${repasseGarantido} (${qtd})` : repasseGarantido,
+    });
+  }
+  if (fiscalRows.length > 0) {
+    sections.push({ title: "Administração", rows: fiscalRows });
+  }
 
   // ---- Comissão ----
   // Faltava: venda já trazia "Comissionados" e "Intermediação", e o resumo de
@@ -699,9 +900,21 @@ function buildLocacaoConsolidatedSummary(
     const meses = Number(a.meses_comissao);
     const duracao =
       Number.isFinite(meses) && meses > 0 ? ` por ${meses} mês(es)` : " (todo o contrato)";
+    // Documento/CRECI/contato: o angariador vira SplitRecipient e recebe
+    // repasse — quem confere o resumo precisa saber QUEM é, não só quanto leva.
+    const doc = onlyDigits(a.cnpj) ? cnpj(a.cnpj) : cpf(a.cpf);
+    const qualificacao = [
+      doc,
+      str(a.creci) && `CRECI ${str(a.creci)}`,
+      str(a.email),
+      str(a.mobile_phone),
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    const fatia = quanto ? `${quanto}${duracao}` : "";
     comissaoRows.push({
       label: `Angariador — ${nome}`,
-      value: quanto ? `${quanto}${duracao}` : "—",
+      value: [fatia, qualificacao].filter(Boolean).join(" — ") || "—",
     });
   }
   if (comissaoRows.length > 0) sections.push({ title: "Comissão", rows: comissaoRows });

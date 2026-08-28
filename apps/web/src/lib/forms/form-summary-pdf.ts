@@ -263,7 +263,15 @@ export async function generateFormSummaryPdf(formId: string): Promise<GeneratedP
       },
     },
   });
-  if (!form) throw new Error(`SalesForm ${formId} não encontrado`);
+  if (!form) {
+    // A mensagem deste Error vai VERBATIM pro toast do usuário (a rota devolve
+    // err.message no 500), e "SalesForm <id> não encontrado" era indistinguível
+    // do 404 de escopo — dois problemas com causas opostas e o mesmo texto.
+    console.error(`[form-summary] SalesForm ${formId} não encontrado`);
+    throw new Error(
+      "O formulário deste negócio não foi encontrado. Verifique se ele ainda está vinculado."
+    );
+  }
 
   // O builder cobre venda e locação (2026-08). Qualquer outro schemaType
   // devolveria [] e a gente gerava, persistia na pasta do deal e MANDAVA POR

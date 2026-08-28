@@ -11,141 +11,17 @@
  * Client-safe (sem prisma) — os wizards são componentes de cliente.
  */
 
+import {
+  KNOWN_FORM_PATH_LIST,
+  KNOWN_LOCACAO_PATH_LIST,
+} from "@/lib/forms/presets";
+
 export interface FieldCatalogGroup {
   step: number;
   label: string;
   paths: ReadonlyArray<{ path: string; label: string }>;
 }
 
-// Catálogo dos paths editáveis no override fino de obrigatoriedade. Não é
-// exaustivo — só os campos onde faz sentido permitir override por org. Paths
-// fora desta lista podem ser adicionados manualmente via API se necessário.
-export const VENDA_FIELD_CATALOG: ReadonlyArray<FieldCatalogGroup> = [
-  {
-    step: 1,
-    label: "Vendedor",
-    paths: [
-      { path: "vendedores.0.cpf", label: "CPF" },
-      { path: "vendedores.0.rg", label: "RG" },
-      { path: "vendedores.0.data_nascimento", label: "Data de nascimento" },
-      { path: "vendedores.0.nome_mae", label: "Nome da mãe (TJSP/PGFN)" },
-      { path: "vendedores.0.estado_civil", label: "Estado civil" },
-      { path: "vendedores.0.profissao", label: "Profissão" },
-      { path: "vendedores.0.email", label: "Email" },
-      { path: "vendedores.0.mobile_phone", label: "Celular" },
-      { path: "vendedores.0.endereco", label: "Endereço (rua)" },
-      { path: "vendedores.0.cidade", label: "Cidade" },
-      { path: "vendedores.0.uf", label: "UF" },
-      { path: "vendedores.0.cep", label: "CEP" },
-    ],
-  },
-  {
-    step: 2,
-    label: "Comprador",
-    paths: [
-      { path: "compradores.0.cpf", label: "CPF" },
-      { path: "compradores.0.rg", label: "RG" },
-      { path: "compradores.0.data_nascimento", label: "Data de nascimento" },
-      { path: "compradores.0.nome_mae", label: "Nome da mãe (TJSP/PGFN)" },
-      { path: "compradores.0.estado_civil", label: "Estado civil" },
-      { path: "compradores.0.profissao", label: "Profissão" },
-      { path: "compradores.0.email", label: "Email" },
-      { path: "compradores.0.mobile_phone", label: "Celular" },
-      { path: "compradores.0.endereco", label: "Endereço (rua)" },
-      { path: "compradores.0.cidade", label: "Cidade" },
-      { path: "compradores.0.uf", label: "UF" },
-      { path: "compradores.0.cep", label: "CEP" },
-    ],
-  },
-  {
-    step: 3,
-    label: "Imóvel",
-    paths: [
-      { path: "imoveis.0.numero", label: "Número" },
-      { path: "imoveis.0.bairro", label: "Bairro" },
-      { path: "imoveis.0.cep", label: "CEP" },
-      { path: "imoveis.0.matricula", label: "Matrícula" },
-      { path: "imoveis.0.cartorio", label: "Cartório" },
-      { path: "imoveis.0.inscricao_iptu", label: "Inscrição IPTU" },
-      { path: "imoveis.0.sql", label: "SQL (Setor.Quadra.Lote)" },
-    ],
-  },
-  {
-    step: 5,
-    label: "Pagamento",
-    paths: [
-      { path: "modalidade", label: "Modalidade (à vista / financiamento)" },
-      { path: "pagamento.sinal_arras", label: "Sinal/Arras" },
-    ],
-  },
-];
-
-// Steps do wizard de locação (LOCACAO_STEP_LABELS). Garantia fica de fora: o
-// fiador só existe quando a garantia é fiança, e a exigência dele já é
-// condicional no servidor (collectLocacaoFinalizeIssues).
-export const LOCACAO_FIELD_CATALOG: ReadonlyArray<FieldCatalogGroup> = [
-  {
-    step: 1,
-    label: "Locador",
-    paths: [
-      { path: "locadores.0.cpf", label: "CPF / CNPJ" },
-      { path: "locadores.0.rg", label: "RG" },
-      { path: "locadores.0.data_nascimento", label: "Data de nascimento" },
-      { path: "locadores.0.nacionalidade", label: "Nacionalidade" },
-      { path: "locadores.0.estado_civil", label: "Estado civil" },
-      { path: "locadores.0.profissao", label: "Profissão" },
-      { path: "locadores.0.email", label: "E-mail" },
-      { path: "locadores.0.mobile_phone", label: "Celular" },
-      { path: "locadores.0.endereco", label: "Endereço (rua)" },
-      { path: "locadores.0.numero", label: "Número" },
-      { path: "locadores.0.bairro", label: "Bairro" },
-      { path: "locadores.0.cidade", label: "Cidade" },
-      { path: "locadores.0.uf", label: "UF" },
-      { path: "locadores.0.cep", label: "CEP" },
-    ],
-  },
-  {
-    step: 2,
-    label: "Locatário",
-    paths: [
-      { path: "locatarios.0.cpf", label: "CPF / CNPJ" },
-      { path: "locatarios.0.rg", label: "RG" },
-      { path: "locatarios.0.data_nascimento", label: "Data de nascimento" },
-      { path: "locatarios.0.nacionalidade", label: "Nacionalidade" },
-      { path: "locatarios.0.estado_civil", label: "Estado civil" },
-      { path: "locatarios.0.profissao", label: "Profissão" },
-      { path: "locatarios.0.email", label: "E-mail" },
-      { path: "locatarios.0.mobile_phone", label: "Celular" },
-      { path: "locatarios.0.endereco", label: "Endereço (rua)" },
-      { path: "locatarios.0.numero", label: "Número" },
-      { path: "locatarios.0.bairro", label: "Bairro" },
-      { path: "locatarios.0.cidade", label: "Cidade" },
-      { path: "locatarios.0.uf", label: "UF" },
-      { path: "locatarios.0.cep", label: "CEP" },
-    ],
-  },
-  {
-    step: 3,
-    label: "Imóvel",
-    paths: [
-      { path: "imovel.numero", label: "Número" },
-      { path: "imovel.bairro", label: "Bairro" },
-      { path: "imovel.cep", label: "CEP" },
-      { path: "imovel.matricula", label: "Matrícula" },
-      { path: "imovel.cartorio", label: "Cartório" },
-      { path: "imovel.inscricao_iptu", label: "Inscrição IPTU" },
-    ],
-  },
-  {
-    step: 4,
-    label: "Aluguel e Reajuste",
-    paths: [
-      { path: "aluguel.vigencia_inicio", label: "Início da vigência" },
-      { path: "aluguel.dia_vencimento", label: "Dia de vencimento" },
-      { path: "aluguel.indice_reajuste", label: "Índice de reajuste" },
-    ],
-  },
-];
 
 /** Rótulo por NOME DE CAMPO (último segmento) — fallback comum às 2 esteiras. */
 const FIELD_LABELS: Record<string, string> = {
@@ -186,7 +62,6 @@ const FIELD_LABELS: Record<string, string> = {
   inscricao_municipal: "Inscrição municipal",
   descricao: "Descrição do imóvel",
   modalidade: "Modalidade",
-  valor: "Valor do aluguel",
   valor_total: "Valor total",
   sinal_arras: "Sinal/Arras",
   vigencia_inicio: "Início da vigência",
@@ -199,6 +74,56 @@ const FIELD_LABELS: Record<string, string> = {
   contas_no_condominio: "Contas no boleto do condomínio",
   clausula_rescisoria: "Cláusula rescisória",
   multa_rescisoria_meses: "Multa rescisória (nº de aluguéis)",
+  // --- Imóvel ---
+  kind: "Tipo do imóvel",
+  destinacao: "Destinação (ramo de atividade)",
+  area: "Área (m²)",
+  vagas_garagem: "Vagas de garagem",
+  condominio_nome: "Nome do condomínio",
+  // --- Aluguel ---
+  encargos: "Encargos mensais (total)",
+  iptu_mensal: "IPTU mensal",
+  condominio_mensal: "Condomínio mensal",
+  outros_encargos: "Outros encargos",
+  meio_pagamento: "Meio de pagamento",
+  vigencia_meses: "Vigência (meses)",
+  // --- Garantia ---
+  provider: "Seguradora / provedora",
+  cobertura_meses: "Cobertura (meses)",
+  caucao_meses: "Caução (nº de aluguéis)",
+  titulo_valor: "Título de capitalização (valor)",
+  titulo_proposta: "Título de capitalização (nº da proposta)",
+  seguro_tomador: "Tomador da apólice",
+  seguro_vigencia: "Vigência da apólice",
+  // --- Pessoas / renda ---
+  renda_mensal: "Renda mensal declarada",
+  faturamento_mensal: "Faturamento mensal",
+  // --- Recebimento (PIX / conta) ---
+  pix_chave: "Chave PIX",
+  pix_tipo_chave: "Tipo da chave PIX",
+  banco: "Banco",
+  agencia: "Agência",
+  conta: "Conta",
+  tipo_conta: "Tipo de conta",
+  // --- Pagamento (venda) ---
+  recursos_proprios: "Recursos próprios",
+  fgts: "FGTS",
+  cessao_consorcio: "Cessão de consórcio",
+  alienacao_fiduciaria: "Financiamento (alienação fiduciária)",
+  outras_formas: "Outras formas",
+  banco_financiamento: "Banco do financiamento",
+  // --- Comissão ---
+  creci: "CRECI",
+  percentual: "Percentual",
+  valor: "Valor",
+  taxa_locacao_percent: "Taxa de locação (%)",
+  taxa_locacao_valor: "Taxa de locação (R$)",
+  observacoes: "Observações gerais",
+  // --- Rótulos por PATH: o mesmo campo muda de nome conforme a seção ---
+  "aluguel.valor": "Valor do aluguel",
+  "comissao.valor": "Valor da comissão",
+  "garantia.tipo": "Tipo de garantia",
+  "imovel.kind": "Tipo do imóvel",
 };
 
 /** Nome singular da lista de partes, pro prefixo "Vendedor 2 — …". */
@@ -252,3 +177,124 @@ export function describeMissingPaths(paths: readonly string[], max = 4): string 
   const extra = paths.length - labels.length;
   return `${labels.join(", ")}${extra > 0 ? ` e mais ${extra}` : ""}`;
 }
+
+/**
+ * Etapa do wizard a que cada path pertence, por PREFIXO. É o único ponto que
+ * precisa saber a numeração das etapas; o catálogo em si é derivado da
+ * allowlist.
+ */
+const VENDA_STEP_BY_PREFIX: ReadonlyArray<[RegExp, number]> = [
+  [/^vendedores/, 1],
+  [/^compradores/, 2],
+  [/^imoveis/, 3],
+  [/^(modalidade$|pagamento.)/, 5],
+  [/^(comissao.|testemunhas.|observacoes$)/, 6],
+];
+
+const LOCACAO_STEP_BY_PREFIX: ReadonlyArray<[RegExp, number]> = [
+  [/^locadores/, 1],
+  [/^locatarios/, 2],
+  [/^imovel./, 3],
+  [/^aluguel./, 4],
+  [/^(garantia.|observacoes$)/, 5],
+  [/^comissao./, 6],
+];
+
+const VENDA_STEP_LABELS: Record<number, string> = {
+  1: "Vendedor",
+  2: "Comprador",
+  3: "Imóvel",
+  5: "Pagamento",
+  6: "Comissão, testemunhas e observações",
+};
+
+const LOCACAO_STEP_LABELS_CATALOG: Record<number, string> = {
+  1: "Locador",
+  2: "Locatário",
+  3: "Imóvel",
+  4: "Aluguel e reajuste",
+  5: "Garantia e observações",
+  6: "Comissão",
+};
+
+/** Prefixos de sub-objeto que viram parte do rótulo ("Cônjuge — CPF"). */
+const SUB_OBJECT_LABELS: Record<string, string> = {
+  conjuge: "Cônjuge",
+  procurador: "Procurador",
+  representante: "Representante",
+  recebimento: "Recebimento",
+  comissionados: "Comissionado",
+  angariadores: "Angariador",
+  testemunhas: "Testemunha",
+};
+
+/**
+ * Rótulo do path DENTRO da etapa: o grupo já diz de quem é o campo, então aqui
+ * fica só o campo — com o sub-objeto na frente quando existe.
+ */
+function labelWithinStep(path: string): string {
+  const segs = path.split(".").filter((seg) => !/^\d+$/.test(seg));
+  const field = segs[segs.length - 1];
+  // Path completo primeiro: `comissao.valor` é "Valor da comissão", enquanto
+  // `aluguel.valor` é "Valor do aluguel" — o nome do campo sozinho não decide.
+  const porPath = FIELD_LABELS[path] ?? FIELD_LABELS[segs.join(".")];
+  const base = porPath ?? FIELD_LABELS[field] ?? humanize(field);
+  if (porPath) return base;
+  // O primeiro segmento é a lista/seção (já no título do grupo); o penúltimo,
+  // quando é um sub-objeto conhecido, qualifica o campo.
+  const sub = segs.length > 2 ? SUB_OBJECT_LABELS[segs[segs.length - 2]] : undefined;
+  if (sub) return `${sub} — ${base}`;
+  // Lista no topo do path (testemunhas.0.nome, comissao.comissionados.0.cpf)
+  const raiz = SUB_OBJECT_LABELS[segs[0]];
+  if (raiz && segs.length > 1) return `${raiz} — ${base}`;
+  return base;
+}
+
+/**
+ * Monta o catálogo a partir da ALLOWLIST — a mesma lista que a rota
+ * `PATCH /api/org/form-settings` valida.
+ *
+ * Antes havia duas listas mantidas à mão, e a da tela era um subconjunto: a
+ * etapa Comissão inteira, os encargos e a garantia de locação, o endereço do
+ * cônjuge e o recebimento das partes eram aceitos pela API e invisíveis para o
+ * admin. Derivando, a tela oferece exatamente o que a rota aceita — nem mais
+ * (path sem campo na tela vira pendência insolúvel), nem menos.
+ */
+function buildCatalog(
+  paths: readonly string[],
+  stepByPrefix: ReadonlyArray<[RegExp, number]>,
+  stepLabels: Record<number, string>
+): FieldCatalogGroup[] {
+  const porStep = new Map<number, { path: string; label: string }[]>();
+  for (const path of paths) {
+    // Path guarda-chuva da lista ("vendedores") = "tem ao menos uma parte";
+    // é exigência de preset, não checkbox de campo.
+    if (!path.includes(".")) {
+      if (path !== "modalidade" && path !== "observacoes") continue;
+    }
+    const hit = stepByPrefix.find(([re]) => re.test(path));
+    if (!hit) continue;
+    const step = hit[1];
+    if (!porStep.has(step)) porStep.set(step, []);
+    porStep.get(step)!.push({ path, label: labelWithinStep(path) });
+  }
+  return [...porStep.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([step, list]) => ({
+      step,
+      label: stepLabels[step] ?? `Etapa ${step + 1}`,
+      paths: list.sort((a, b) => a.label.localeCompare(b.label, "pt-BR")),
+    }));
+}
+
+export const VENDA_FIELD_CATALOG: ReadonlyArray<FieldCatalogGroup> = buildCatalog(
+  KNOWN_FORM_PATH_LIST,
+  VENDA_STEP_BY_PREFIX,
+  VENDA_STEP_LABELS
+);
+
+export const LOCACAO_FIELD_CATALOG: ReadonlyArray<FieldCatalogGroup> = buildCatalog(
+  KNOWN_LOCACAO_PATH_LIST,
+  LOCACAO_STEP_BY_PREFIX,
+  LOCACAO_STEP_LABELS_CATALOG
+);

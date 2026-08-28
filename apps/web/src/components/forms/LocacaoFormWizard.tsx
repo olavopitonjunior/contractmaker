@@ -16,6 +16,11 @@ import { RequiredFieldMarker } from "@/components/forms/RequiredFieldMarker";
 import { RequiredFieldsProvider } from "@/components/forms/RequiredFieldsContext";
 import { describeMissingPaths } from "@/lib/forms/field-labels";
 import {
+  pendenciasDeRecebimento,
+  mensagemDePendencia,
+} from "@/lib/forms/commissioner-receiving";
+
+import {
   PartyLinksPanel,
   SharePartyLinkButton,
 } from "@/components/forms/PartyLinksPanel";
@@ -79,6 +84,8 @@ interface LocacaoFormWizardProps {
    * com o cliente. O servidor é o guard autoritativo (403); isto é UX.
    */
   viewerIsMember?: boolean;
+  /** Exigir dados de recebimento do corretor na etapa Comissão (org). */
+  requireCommissionerReceiving?: boolean;
 }
 
 // Steps de partes (locador/locatário) — validados de forma CIENTE de
@@ -168,6 +175,7 @@ export function LocacaoFormWizard({
   finalizeMode = "main",
   readOnly = false,
   viewerIsMember = false,
+  requireCommissionerReceiving = false,
 }: LocacaoFormWizardProps) {
   const comercial = schemaType === LOCACAO_COMERCIAL_SCHEMA_TYPE;
   const stepLabels = stepLabelsForLocacaoType(schemaType);
@@ -227,7 +235,7 @@ export function LocacaoFormWizard({
     (path) => getByPath(watchedData, path),
   );
   const currentMissingCount = currentEffectiveRequired.filter((p) =>
-    isValueEmpty(getByPath(watchedData, p)),
+    isValueEmpty(getByPath(watchedData, p), p),
   ).length;
   // Remapeado por `tipo_pessoa` ANTES de virar asterisco: o preset declara
   // `locadores.0.cpf`/`.email`, que numa PJ viram `cnpj` e
@@ -336,12 +344,10 @@ export function LocacaoFormWizard({
       const required = STEP_REQUIRED[step] ?? [];
       const missingPiso: string[] = [];
       for (const path of required) {
-        const raw = readValue(path);
-        // `0` conta como vazio aqui (valor do aluguel nasce 0 no default).
-        const empty =
-          raw === undefined || raw === null || raw === "" || raw === 0 ||
-          (Array.isArray(raw) && raw.length === 0);
-        if (empty) {
+        // Regra de vazio ÚNICA (party-required): este piso tinha uma cópia
+        // inline que tratava `0` como vazio, enquanto o preset não — o mesmo
+        // campo era obrigatório ou não conforme o caminho que o checava.
+        if (isValueEmpty(readValue(path), path)) {
           missingPiso.push(path);
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           form.setError(path as any, { type: "required", message: "Campo obrigatório" });
@@ -362,7 +368,7 @@ export function LocacaoFormWizard({
     if (configured.length === 0) return true;
 
     const paths = effectiveRequiredPaths(configured, readValue);
-    const missing = paths.filter((p) => isValueEmpty(readValue(p)));
+    const missing = paths.filter((p) => isValueEmpty(readValue(p), p));
     for (const p of paths) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (missing.includes(p)) form.setError(p as any, { type: "required", message: "Campo obrigatório" });
@@ -373,6 +379,21 @@ export function LocacaoFormWizard({
       setFailedTriggerCount((n) => n + 1);
       toast.error(`Preencha: ${describeMissingPaths(missing)}`);
       return false;
+    }
+
+    // Dados de recebimento do corretor (etapa Comissão), quando a imobiliária
+    // exige. Fica fora do preset porque os campos não vivem no dataJson — ver
+    // lib/forms/commissioner-receiving.ts.
+    if (step === 6) {
+      const pendencias = pendenciasDeRecebimento(
+        readValue("comissao.angariadores") as never,
+        requireCommissionerReceiving && viewerIsMember
+      );
+      if (pendencias.length > 0) {
+        setFailedTriggerCount((n) => n + 1);
+        toast.error(mensagemDePendencia(pendencias));
+        return false;
+      }
     }
     return true;
   };
@@ -494,7 +515,7 @@ export function LocacaoFormWizard({
         <ImovelLocacaoStep key="s3" form={form} comercial attachmentsEndpoint={attachmentsEndpoint} />,
         <AluguelStep key="s4" form={form} />,
         <GarantiaStep key="s5" form={form} garantiaOptions={garantiaOptions} pathScope={pathScope} />,
-        <ComissaoLocacaoStep key="s6" form={form} token={token} viewerIsMember={viewerIsMember} />,
+        <ComissaoLocacaoStep key="s6" form={form} token={token} viewerIsMember={viewerIsMember} requireCommissionerReceiving={requireCommissionerReceiving} />,
       ]
     : [
         <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} allowedTopKeys={pathScope} selfAssignment={selfAssignment} viewerIsMember={viewerIsMember} />,
@@ -503,7 +524,7 @@ export function LocacaoFormWizard({
         <ImovelLocacaoStep key="s3" form={form} attachmentsEndpoint={attachmentsEndpoint} />,
         <AluguelStep key="s4" form={form} />,
         <GarantiaStep key="s5" form={form} garantiaOptions={garantiaOptions} pathScope={pathScope} />,
-        <ComissaoLocacaoStep key="s6" form={form} token={token} viewerIsMember={viewerIsMember} />,
+        <ComissaoLocacaoStep key="s6" form={form} token={token} viewerIsMember={viewerIsMember} requireCommissionerReceiving={requireCommissionerReceiving} />,
       ];
 
   return (

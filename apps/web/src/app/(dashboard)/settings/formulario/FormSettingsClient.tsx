@@ -26,6 +26,7 @@ interface FormSettingsClientProps {
     locacaoPreset: string;
     locacaoCustomRequiredPaths: unknown;
     autoLockFormOnFinalize: boolean;
+    requireCommissionerReceiving: boolean;
     summaryRecipientEmail?: string | null;
     autoSendSummaryOnComplete?: boolean;
     summaryIncludeAttachments?: boolean;
@@ -141,6 +142,9 @@ export function FormSettingsClient({
       parseCustomPaths(initial.locacaoCustomRequiredPaths).length > 0,
   );
   const [autoLock, setAutoLock] = useState(Boolean(initial.autoLockFormOnFinalize));
+  const [requireReceiving, setRequireReceiving] = useState(
+    Boolean(initial.requireCommissionerReceiving)
+  );
   const [summaryEmail, setSummaryEmail] = useState(initial.summaryRecipientEmail ?? "");
   const [autoSend, setAutoSend] = useState(initial.autoSendSummaryOnComplete ?? false);
   const [includeAttachments, setIncludeAttachments] = useState(
@@ -206,6 +210,7 @@ export function FormSettingsClient({
           locacaoPreset,
           locacaoCustomRequiredPaths: locacaoPaths,
           autoLockFormOnFinalize: autoLock,
+          requireCommissionerReceiving: requireReceiving,
           summaryRecipientEmail: summaryEmail.trim(),
           autoSendSummaryOnComplete: autoSend,
           summaryIncludeAttachments: includeAttachments,
@@ -391,6 +396,25 @@ export function FormSettingsClient({
               </p>
             </div>
             <Switch checked={autoLock} onCheckedChange={setAutoLock} />
+          </label>
+
+          <label className="flex items-start justify-between gap-4 cursor-pointer">
+            <div className="flex-1">
+              <p className="text-sm font-medium">
+                Exigir os dados bancários do corretor
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Na etapa Comissão, cada corretor precisa ter cadastro com chave
+                PIX antes de concluir — é o que permite o repasse automático da
+                comissão. Vale para venda e locação. Só se aplica a quem preenche
+                logado como membro da imobiliária: o cliente que recebe o link
+                não vê esses campos.
+              </p>
+            </div>
+            <Switch
+              checked={requireReceiving}
+              onCheckedChange={setRequireReceiving}
+            />
           </label>
         </CardContent>
       </Card>

@@ -18,7 +18,7 @@ const MEIO_PAGAMENTO_ALUGUEL_TEXTO: Record<string, string> = {
 // Rótulo legível do tipo do imóvel (evita slug cru tipo "comercial_sala" no
 // corpo do contrato). Em minúsculas pois entra no meio da frase ("o imóvel de
 // tipo sala comercial, situado em…"). Fallback troca "_" por espaço.
-const TIPO_IMOVEL_TEXTO: Record<string, string> = {
+export const TIPO_IMOVEL_TEXTO: Record<string, string> = {
   apartamento: "apartamento",
   casa: "casa",
   comercial_sala: "sala comercial",

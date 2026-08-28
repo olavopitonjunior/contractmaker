@@ -63,6 +63,16 @@ export default async function PublicFormPage({
   // apagava documento de qualquer parte, sem deixar rastro). Nos dois casos o
   // servidor faz a MESMA checagem — esconder sem barrar seria só cosmético.
   const viewerIsMember = await viewerIsOrgMember(form.orgId);
+  // Exigir os dados de recebimento do corretor na etapa Comissão. Desce daqui
+  // pelo mesmo motivo do requiredFieldsByStep: o formulário é anônimo e não
+  // pode consultar uma API autenticada. Só tem efeito para MEMBRO — é quem vê
+  // e pode enviar esses campos.
+  const orgFormSettings = viewerIsMember
+    ? await prisma.orgFormSettings.findUnique({
+        where: { orgId: form.orgId },
+        select: { requireCommissionerReceiving: true },
+      })
+    : null;
   // Branding do tenant: o cliente da imobiliária via a marca do PRODUTO
   // ("imobpro.ai") no topo do formulário dela. Mesmo resolver de /pay, /s e do
   // dashboard. Best-effort — falha aqui não pode derrubar o formulário.
@@ -79,6 +89,9 @@ export default async function PublicFormPage({
       proposalAttachmentUrl={proposalAttachmentUrl}
       locked={Boolean(form.lockedAt)}
       viewerIsMember={viewerIsMember}
+      requireCommissionerReceiving={
+        orgFormSettings?.requireCommissionerReceiving ?? false
+      }
       brandLogoUrl={brand?.logoUrl ?? null}
       brandDisplayName={brand?.displayName ?? null}
     />

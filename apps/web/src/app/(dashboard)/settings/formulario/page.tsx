@@ -97,6 +97,7 @@ export default async function FormularioSettingsPage() {
           locacaoCustomRequiredPaths:
             settings.locacaoCustomRequiredPaths as unknown,
           autoLockFormOnFinalize: settings.autoLockFormOnFinalize,
+          requireCommissionerReceiving: settings.requireCommissionerReceiving,
           summaryRecipientEmail: settings.summaryRecipientEmail,
           autoSendSummaryOnComplete: settings.autoSendSummaryOnComplete,
           summaryIncludeAttachments: settings.summaryIncludeAttachments,

@@ -3063,6 +3063,16 @@ model OrgFormSettings {
   // código. Sanitização e allowlists (etapa 6/Comissão nunca entra) em
   // lib/forms/participant-visibility.ts. Merge por branch no PATCH.
   participantVisibilityJson Json?
+  // Exige os dados de recebimento (PIX/conta) do corretor na etapa Comissão,
+  // nas DUAS esteiras. Não é um path de `customRequiredPaths` porque esses
+  // campos NÃO vivem no dataJson de propósito: o dataJson volta inteiro no GET
+  // público do formulário e vai no resumo por e-mail, então PIX e conta do
+  // corretor são write-only (sobem no POST e ficam no SplitRecipient). A
+  // exigência é satisfeita quando o comissionado tem cadastro sem pendências
+  // (`SplitRecipient.pendingFields` vazio) — o mesmo critério de "pagável" que
+  // a esteira de repasse já usa. Só vale para quem é MEMBRO da imobiliária: o
+  // cliente anônimo não vê nem pode enviar esses campos.
+  requireCommissionerReceiving Boolean @default(false)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 

@@ -4,6 +4,7 @@ import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/db/prisma";
 import { dealOrgScopeWhere, resolveUserOrgId } from "@/lib/security/org-scope";
 import { DealDetail } from "@/components/pipeline/DealDetail";
+import { buildConsolidatedFormSummary } from "@/lib/forms/form-summary";
 import { isNewtonEnabledForDeal } from "@/lib/newton/gate";
 import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
 import { surveyFeatureForKind } from "@/lib/modules/catalog";
@@ -87,8 +88,23 @@ export default async function DealPage({
     surveyFeatureForKind(deal.kind)
   );
 
+  // Mesmas seções que vão pro PDF/e-mail do resumo (builder puro). Sem isto a
+  // aba Dados mostrava um recorte manual bem menor que o do PDF — etapa de
+  // posse/título, observações e configuração contratual não apareciam.
+  const formSummarySections = buildConsolidatedFormSummary(
+    (deal.form?.dataJson as Record<string, unknown> | null) ?? null,
+    {
+      schemaType: deal.form?.schemaType ?? null,
+      attachments: (deal.form?.attachments ?? []).map((a) => ({
+        filename: a.filename,
+        category: a.category,
+      })),
+    }
+  );
+
   return (
     <DealDetail
+      formSummarySections={formSummarySections}
       deal={deal}
       newtonEnabled={newtonEnabled}
       surveysEnabled={surveysEnabled}

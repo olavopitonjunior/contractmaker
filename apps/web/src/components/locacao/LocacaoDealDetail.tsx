@@ -16,6 +16,7 @@ import type { LeaseSignerData } from "@/components/locacao/SendLeaseEnvelopeDial
 import { LocacaoDealHeaderActions } from "@/components/locacao/LocacaoDealHeaderActions";
 import { LocacaoDadosTab } from "@/components/locacao/LocacaoDadosTab";
 import { SendFormSummaryDialog } from "@/components/forms/SendFormSummaryDialog";
+import type { SummarySection } from "@/lib/forms/negotiation-summary";
 import type { LocacaoAttachment } from "@/components/locacao/LocacaoDocumentsTab";
 import {
   LocacaoCreditAnalysisCard,
@@ -124,6 +125,8 @@ interface LeaseProp {
 }
 
 interface LocacaoDealDetailProps {
+  /** Seções do resumo consolidado, iguais às do PDF (calculadas no server). */
+  formSummarySections?: SummarySection[];
   deal: {
     id: string;
     title: string;
@@ -206,6 +209,7 @@ function extractLeaseSignerData(dataJson: Record<string, unknown> | null): Lease
 }
 
 export function LocacaoDealDetail({
+  formSummarySections,
   deal,
   contract,
   versions,
@@ -453,6 +457,7 @@ export function LocacaoDealDetail({
             </div>
           )}
           <LocacaoDadosTab
+            summarySections={formSummarySections}
             dealId={deal.id}
             dataJson={deal.dataJson}
             formToken={deal.formToken}

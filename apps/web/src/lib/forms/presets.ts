@@ -454,10 +454,15 @@ export function resolveRequiredFieldsForModule(
       ? []
       : (table[preset] ?? table[MODULE_DEFAULT_PRESET[module]])[stepIndex] ?? [];
 
+  // Filtra na LEITURA, não só na gravação: paths que já estavam salvos quando
+  // a allowlist mudou (ou que nunca tiveram campo na tela) viravam
+  // "obrigatoriedade fantasma" — pendência num campo que ninguém consegue
+  // preencher, sem saída pelo formulário.
+  const isKnown = module === "locacao" ? isKnownLocacaoFormPath : isKnownFormPath;
   const customForStep = extractCustomPathsForStep(
     settings?.customRequiredPaths,
     stepIndex,
-  );
+  ).filter(isKnown);
   if (customForStep.length === 0) return base;
   return Array.from(new Set([...base, ...customForStep]));
 }
@@ -555,6 +560,11 @@ const PARTY_FIELDS = [
   "endereco", "numero", "complemento", "bairro", "cidade", "uf", "cep",
 ] as const;
 
+// Dados de recebimento da parte (PIX + conta), em venda.
+const RECEBIMENTO_FIELDS = [
+  "pix_chave", "pix_tipo_chave", "banco", "agencia", "conta", "tipo_conta",
+] as const;
+
 // Sub-pessoas da parte e seus campos requereáveis.
 const PARTY_SUB_FIELDS = ["nome", "cpf", "rg", "data_nascimento", "nome_mae", "sexo", "email", "mobile_phone"] as const;
 const PARTY_SUBS = ["conjuge", "procurador", "representante"] as const;
@@ -574,20 +584,47 @@ function buildKnownFormPaths(): Set<string> {
     }
   }
   for (const f of IMOVEL_FIELDS) s.add(`imoveis.0.${f}`);
+  // Recebimento (PIX/conta) de quem RECEBE — o campo existe no wizard desde
+  // sempre (VendedorStep) e nunca pôde ser exigido, embora seja o que trava o
+  // pagamento quando falta.
+  for (const list of ["vendedores", "compradores"] as const) {
+    for (const f of RECEBIMENTO_FIELDS) s.add(`${list}.0.recebimento.${f}`);
+  }
   for (const f of [
     "valor_total", "sinal_arras", "recursos_proprios", "fgts", "cessao_consorcio",
     "alienacao_fiduciaria", "outras_formas", "meio_pagamento", "banco_financiamento",
   ]) {
     s.add(`pagamento.${f}`);
   }
-  for (const f of ["valor", "imobiliaria_nome", "imobiliaria_cnpj", "imobiliaria_email", "creci", "percentual"]) {
-    s.add(`comissao.${f}`);
+  // `imobiliaria_nome/cnpj/email/creci/percentual` SAÍRAM: não têm input na
+  // etapa 7 — são espelhos legados que o código deriva de `comissionados[0]`.
+  // Marcá-los criava uma pendência insolúvel num campo que não está na tela.
+  s.add("comissao.valor");
+  for (const f of ["nome", "cpf", "cnpj", "creci", "email", "mobile_phone", "percentual"]) {
+    s.add(`comissao.comissionados.0.${f}`);
   }
-  for (const f of ["modalidade", "status_propriedade", "ocupacao", "foro"]) s.add(f);
+  for (const f of ["nome", "cpf", "email"]) s.add(`testemunhas.0.${f}`);
+  s.add("observacoes");
+  s.add("modalidade");
+  // `foro`, `status_propriedade` e `ocupacao` SAÍRAM: `foro` deixou de ser
+  // coletado no formulário público (virou aba Configurações do contrato) e os
+  // outros dois têm default não-vazio no schema — a exigência nunca dispararia.
   return s;
 }
 
 const KNOWN_FORM_PATHS = buildKnownFormPaths();
+
+/**
+ * A allowlist como LISTA, para a tela de Configurações → Formulário montar os
+ * checkboxes a partir dela.
+ *
+ * Antes, a tela tinha um catálogo estático próprio (`field-labels.ts`) com um
+ * subconjunto do que a API aceita: campo que existia no formulário e era
+ * obrigatóvel pela rota simplesmente não aparecia para o admin marcar — a
+ * etapa Comissão inteira, os encargos de locação, a garantia, o endereço do
+ * cônjuge. Derivar daqui elimina a segunda lista.
+ */
+export const KNOWN_FORM_PATH_LIST: readonly string[] = [...KNOWN_FORM_PATHS];
 
 /** Normaliza segmentos numéricos (índices de array) para `0`. */
 function normalizeFormPath(path: string): string {
@@ -651,17 +688,30 @@ function buildKnownLocacaoPaths(): Set<string> {
     s.add(list); // path guarda-chuva (array não-vazio)
     addParty(`${list}.0`);
   }
-  addParty("garantia.fiador");
+  // `garantia.fiador.*` SAIU: `PARTY_PATH_RE` (party-required) não casa esse
+  // prefixo, então o path passava sem o remap PF/PJ e sem checar se a garantia
+  // é fiança — exigência incondicional de um campo que só existe às vezes. A
+  // obrigatoriedade do fiador já é condicional em collectLocacaoFinalizeIssues.
   for (const f of LOCACAO_IMOVEL_FIELDS) s.add(`imovel.${f}`);
   for (const f of LOCACAO_ALUGUEL_FIELDS) s.add(`aluguel.${f}`);
   for (const f of LOCACAO_GARANTIA_FIELDS) s.add(`garantia.${f}`);
-  for (const f of ["cidade", "uf", "data"]) s.add(`assinatura.${f}`);
-  s.add("foro");
-  s.add("vistoria_ref");
+  for (const f of ["taxa_locacao_percent", "taxa_locacao_valor"]) {
+    s.add(`comissao.${f}`);
+  }
+  for (const f of ["nome", "cpf", "cnpj", "creci", "email", "mobile_phone"]) {
+    s.add(`comissao.angariadores.0.${f}`);
+  }
+  s.add("observacoes");
+  // `assinatura.*`, `foro` e `vistoria_ref` SAÍRAM: a etapa "Confirmação e
+  // Assinatura" foi removida em 2026-07-30 e `vistoria_ref` não tem input no
+  // wizard — nenhum dos três pode ser preenchido por quem responde o formulário.
   return s;
 }
 
 const KNOWN_LOCACAO_PATHS = buildKnownLocacaoPaths();
+
+/** Gêmeo de `KNOWN_FORM_PATH_LIST` para locação. */
+export const KNOWN_LOCACAO_PATH_LIST: readonly string[] = [...KNOWN_LOCACAO_PATHS];
 
 /** True se o path é um campo conhecido e obrigatóvel do form de locação. */
 export function isKnownLocacaoFormPath(path: string): boolean {

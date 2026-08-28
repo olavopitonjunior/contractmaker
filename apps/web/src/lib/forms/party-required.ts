@@ -90,8 +90,52 @@ export function parsePartyPath(path: string): ParsedPartyPath | null {
   };
 }
 
-/** Regra de "vazio" única — idêntica à checagem manual do wizard. */
-export function isValueEmpty(raw: unknown): boolean {
+/**
+ * Campos onde `0` é "não preenchido", não uma resposta.
+ *
+ * O Zod dá `.default(0)` a quase todo campo de dinheiro e medida, então o valor
+ * nasce zero e NUNCA fica `undefined`. Sem esta lista, marcar
+ * `pagamento.valor_total` como obrigatório (ele está em TODOS os presets de
+ * venda) não bloqueava nada: o formulário era concluído com valor total zero.
+ * O piso de locação já tratava `aluguel.valor` assim, por conta própria e com
+ * regra própria — as duas leituras de "vazio" agora são a mesma.
+ *
+ * A lista é deliberadamente curta. `vagas_garagem: 0`, `caucao_meses: 0` e
+ * `isencao_multa_meses: 0` são RESPOSTAS legítimas ("nenhuma") e ficam de fora.
+ */
+const ZERO_IS_EMPTY_FIELDS: ReadonlySet<string> = new Set([
+  // Dinheiro
+  "valor_total",
+  "valor",
+  "sinal_arras",
+  "renda_mensal",
+  "faturamento_mensal",
+  "taxa_locacao_valor",
+  "valor_fixo",
+  // Medida / prazo que não faz sentido zerado
+  "area",
+  "vigencia_meses",
+  "dia_vencimento",
+  "taxa_admin_percent",
+  "taxa_locacao_percent",
+  "percentual",
+]);
+
+/**
+ * Regra de "vazio" única — idêntica à checagem manual do wizard.
+ *
+ * `path` é opcional por retrocompat: sem ele, `0` continua sendo um valor
+ * preenchido (é o que `blank-party` espera ao decidir se uma linha de parte
+ * está em branco).
+ */
+export function isValueEmpty(raw: unknown, path?: string): boolean {
+  if (
+    raw === 0 &&
+    path &&
+    ZERO_IS_EMPTY_FIELDS.has(path.split(".").pop() as string)
+  ) {
+    return true;
+  }
   return (
     raw === undefined ||
     raw === null ||
@@ -226,7 +270,7 @@ export function findMissingRequired(
   getValue: (path: string) => unknown,
 ): string[] {
   return effectiveRequiredPaths(paths, getValue).filter((p) =>
-    isValueEmpty(getValue(p)),
+    isValueEmpty(getValue(p), p),
   );
 }
 
@@ -275,7 +319,8 @@ export function findCertidaoRecommendations(
     const isPJ = getValue(`${list}.${idx}.tipo_pessoa`) === "juridica";
     if (isPJ) continue;
     for (const field of CERTIDAO_RECOMMENDED_PARTY_FIELDS) {
-      if (isValueEmpty(getValue(`${list}.${idx}.${field}`))) {
+      const certidaoPath = `${list}.${idx}.${field}`;
+      if (isValueEmpty(getValue(certidaoPath), certidaoPath)) {
         out.push({ list, idx, field });
       }
     }
