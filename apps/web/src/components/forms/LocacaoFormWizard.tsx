@@ -384,18 +384,26 @@ export function LocacaoFormWizard({
     // Dados de recebimento do corretor (etapa Comissão), quando a imobiliária
     // exige. Fica fora do preset porque os campos não vivem no dataJson — ver
     // lib/forms/commissioner-receiving.ts.
-    if (step === 6) {
-      const pendencias = pendenciasDeRecebimento(
-        readValue("comissao.angariadores") as never,
-        requireCommissionerReceiving && viewerIsMember
-      );
-      if (pendencias.length > 0) {
-        setFailedTriggerCount((n) => n + 1);
-        toast.error(mensagemDePendencia(pendencias));
-        return false;
-      }
-    }
+    if (step === 6 && !gateRecebimentoOk()) return false;
     return true;
+  };
+
+  /**
+   * Gate dos dados de recebimento do corretor. Precisa ser chamado TAMBÉM no
+   * finalize: `handleFinalize` não passa por `validateStep`, e a Comissão é a
+   * ÚLTIMA etapa — o gate no avanço sozinho nunca dispararia (achado no smoke
+   * de staging, com o formulário concluindo sem os dados exigidos).
+   */
+  const gateRecebimentoOk = (): boolean => {
+    const pendencias = pendenciasDeRecebimento(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      form.getValues("comissao.angariadores" as any) as never,
+      requireCommissionerReceiving && viewerIsMember
+    );
+    if (pendencias.length === 0) return true;
+    setFailedTriggerCount((n) => n + 1);
+    toast.error(mensagemDePendencia(pendencias));
+    return false;
   };
 
   const goTo = (target: number) => {
@@ -415,6 +423,13 @@ export function LocacaoFormWizard({
   };
 
   const handleFinalize = async () => {
+    // A etapa Comissão é a última: sem esta chamada o gate só rodaria num
+    // avanço que nunca acontece.
+    if (!gateRecebimentoOk()) {
+      setCurrentStep(TOTAL - 1);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
     setIsSubmitting(true);
     try {
       // Subtoken: PATCH no endpoint do participant com markCompleted —
