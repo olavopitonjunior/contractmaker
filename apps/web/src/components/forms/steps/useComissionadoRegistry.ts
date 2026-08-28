@@ -75,6 +75,14 @@ export function useComissionadoRegistry({
   /** Desligado enquanto o formulário está travado ou fora de escopo. */
   enabled?: boolean;
 }) {
+  // Perguntar exige quem responda. O diálogo só é renderizado para membro da
+  // imobiliária — quem preenche pelo link anônimo não o vê, e deixar um
+  // candidato pendente ali travaria a linha para sempre: `criar()` nunca
+  // rodaria e a identidade já estaria marcada como tentada. Para esse caso
+  // vamos direto ao POST, que aplica o MESMO `findCommissionerMatch` no
+  // servidor e devolve o cadastro existente — que é exatamente o que o botão
+  // antigo fazia. Nenhum dado de terceiro é mostrado ao cliente.
+  const askOnDuplicate = viewerIsMember;
   const [candidato, setCandidato] = useState<CandidatoCorretor | null>(null);
   const [ocupado, setOcupado] = useState(false);
   // Candidatos que o usuário já disse "não é a mesma pessoa". Por id, e por
@@ -246,6 +254,14 @@ export function useComissionadoRegistry({
       return;
     }
 
+    // Sem quem responda à pergunta, nem consultamos: o POST já dedupe no
+    // servidor, e pedir o candidato aqui só serviria para trazer dados de um
+    // terceiro ao browser de quem preenche pelo link.
+    if (!askOnDuplicate) {
+      await criar();
+      return;
+    }
+
     setOcupado(true);
     try {
       const qs = new URLSearchParams();
@@ -264,7 +280,7 @@ export function useComissionadoRegistry({
       const data = await res.json();
       const c: CandidatoCorretor | null = data?.candidate ?? null;
 
-      if (c && !dispensados.current.has(c.id)) {
+      if (c && askOnDuplicate && !dispensados.current.has(c.id)) {
         if (vivo.current) setCandidato(c);
         return;
       }
@@ -274,7 +290,7 @@ export function useComissionadoRegistry({
     } finally {
       if (vivo.current) setOcupado(false);
     }
-  }, [enabled, ler, matchEndpoint, criar, viewerIsMember, preencherVazios]);
+  }, [enabled, ler, matchEndpoint, criar, viewerIsMember, askOnDuplicate, preencherVazios]);
 
   const confirmarMesmaPessoa = useCallback(() => {
     if (!candidato) return;
