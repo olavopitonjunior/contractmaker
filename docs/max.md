@@ -686,8 +686,11 @@ Quem assume simetria escreve um vazamento cross-tenant que **nenhum teste de
 RBAC pega**, porque o RBAC está certo — o que falta é o tenant. Há teste com
 mutação de controle travando o `pipeline.orgId`.
 
-Em `deal.detail`, o `negocio_id` é **intersectado** com o escopo, nunca o
-substitui: trocar um pelo outro transforma "detalhar" em IDOR.
+O `negocio_id` é **intersectado** com o escopo, nunca o substitui — e isso vale
+para **todo** verbo `deal.*` que o receba, não só `deal.detail` (`deal.list` e
+`deal.pending` também aceitam o parâmetro). Trocar um pelo outro transforma
+"detalhar" em IDOR, e para o corretor, cujo escopo já é `id: { in: [...] }`,
+abriria a carteira inteira da org.
 
 ### 12.5 Paridade
 

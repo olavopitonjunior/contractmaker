@@ -24,7 +24,7 @@ import { signMaxAdminRequest } from "@/lib/max/hmac";
  * o `/admin/status` do max-agent recusa o formato antigo. O sunset não se
  * apoiou no log de telemetria — a rota só é chamada quando alguém abre o
  * painel, então "log zerado" media apenas que ninguém tinha olhado a tela. A
- * prova foi estática: `getMaxStatus` abaixo é o ÚNICO chamador da rota, e ele
+ * prova foi estática: `fetchMaxStatus` abaixo é o ÚNICO chamador da rota, e ele
  * assina o formato novo.
  */
 

@@ -296,6 +296,29 @@ describe("deal.pending responde sem apontar um negócio", () => {
     });
   });
 
+  it("deal.pending COM negocio_id soma os dois filtros, não troca um pelo outro", async () => {
+    // "Este negócio específico está pendente?" — a composição dos dois
+    // primitivos já testados em separado. O teste existe para travar a ORDEM de
+    // atribuição no `where`: um refactor que montasse o objeto ao contrário
+    // poderia perder um dos filtros sem que nenhum outro teste notasse.
+    usuarioResolve("u-1");
+    await POST(
+      req({
+        verb: "deal.pending",
+        subject: { kind: "user", userId: "u-1" },
+        phone: E164,
+        args: { negocio_id: "deal-x" },
+      })
+    );
+
+    const where = mockPrisma.deal.findMany.mock.calls[0][0].where;
+    expect(where).toMatchObject({ pipeline: { orgId: "org-1" } });
+    expect(where.id).toBe("deal-x");
+    expect(where.certidaoJobs).toEqual({
+      some: { status: { in: ["pending", "fetching", "awaiting_portal"] } },
+    });
+  });
+
   it("deal.detail SEM negocio_id não consulta nada", async () => {
     usuarioResolve("u-1");
     const res = await POST(
