@@ -7,9 +7,17 @@
 // — nunca propaga para a geração, que já respondeu há muito.
 import { prisma } from "@/lib/db/prisma";
 import { dedupeKeyFor, renderQualityChecks } from "@/lib/ai/quickChecks";
+import { calcCostUsd, recordAIUsage } from "@/lib/ai/usage";
+import { buildConsolidatedFormSummary } from "@/lib/forms/form-summary";
 import { isContractReviewEnabled } from "./guard";
 import { parseGenerationPlan } from "./plan";
 import { clausePlanChecks, type ReviewFinding } from "./checks";
+import { checkReviewDailyCap } from "./budget";
+import {
+  renderFormSummaryText,
+  renderPlanSummaryText,
+  runContractReviewLlm,
+} from "./reviewer";
 import {
   REVIEW_MAX_ATTEMPTS,
   reviewClaimWhere,
@@ -53,10 +61,16 @@ export async function advanceReviewRun(runId: string): Promise<AdvanceReviewResu
     select: {
       id: true,
       status: true,
+      dataJson: true,
       htmlContent: true,
       googleDocId: true,
       generationPlanJson: true,
-      deal: { select: { kind: true } },
+      deal: {
+        select: {
+          kind: true,
+          form: { select: { dataJson: true, schemaType: true } },
+        },
+      },
     },
   });
 
@@ -129,6 +143,20 @@ export async function advanceReviewRun(runId: string): Promise<AdvanceReviewResu
     });
   }
 
+  // ── Revisor LLM (dados×texto, coerência jurídica, estrutura) ────────────
+
+  const llm = await runLlmStage(run, contract, plan, docText);
+  if (llm.retry) {
+    if (run.attempt >= REVIEW_MAX_ATTEMPTS) {
+      return finalize(runId, "failed", { reason: "llm-error", detail: llm.error });
+    }
+    await prisma.contractReviewRun.update({
+      where: { id: runId },
+      data: { status: "queued", startedAt: null },
+    });
+    return { runId, claimed: true, status: "queued", reason: "llm-retry" };
+  }
+
   return finalize(runId, "done", {
     deterministic: {
       hasPlan: Boolean(plan),
@@ -138,7 +166,135 @@ export async function advanceReviewRun(runId: string): Promise<AdvanceReviewResu
         severity: f.severity,
       })),
     },
+    llm: llm.report,
   });
+}
+
+interface LlmStageOutcome {
+  /** Erro transitório de API — devolver o run ao sweeper. */
+  retry?: boolean;
+  error?: string;
+  report: Record<string, unknown>;
+}
+
+/**
+ * Estágio LLM da revisão. Skips (cap diário, teto de comentários) NÃO são
+ * falha do run — os checks determinísticos acima já rodaram e são o piso da
+ * revisão; o motivo fica no report.
+ */
+async function runLlmStage(
+  run: { id: string; orgId: string; contractId: string },
+  contract: {
+    id: string;
+    dataJson: unknown;
+    generationPlanJson: unknown;
+    deal: {
+      kind: string;
+      form: { dataJson: unknown; schemaType: string | null } | null;
+    };
+  },
+  plan: ReturnType<typeof parseGenerationPlan>,
+  docText: string
+): Promise<LlmStageOutcome> {
+  // Teto de comentários IA não resolvidos — mesmo cap da análise passiva
+  // (MAX_AI_UNRESOLVED_COMMENTS): acima disso, mais achado é ruído.
+  const existingComments = await prisma.contractComment.findMany({
+    where: { contractId: contract.id, authorType: "ai", resolved: false },
+    select: { text: true, selectedText: true },
+    take: 50,
+  });
+  if (existingComments.length >= 50) {
+    return { report: { skipped: "comment-cap" } };
+  }
+
+  const budget = await checkReviewDailyCap(run.orgId);
+  if (!budget.withinCap) {
+    return {
+      report: {
+        skipped: "daily-cap",
+        spentUsd: budget.spentUsd,
+        capUsd: budget.capUsd,
+      },
+    };
+  }
+
+  const family = contract.deal.kind === "locacao" ? ("locacao" as const) : ("venda" as const);
+  const formData = (contract.deal.form?.dataJson ?? contract.dataJson) as Record<string, unknown>;
+  const sections = buildConsolidatedFormSummary(formData, {
+    schemaType: contract.deal.form?.schemaType ?? null,
+  });
+
+  try {
+    const result = await runContractReviewLlm({
+      family,
+      formSummaryText: renderFormSummaryText(sections),
+      planSummaryText: renderPlanSummaryText(plan),
+      docText,
+      existingComments,
+    });
+
+    // Custo: uma linha de AIUsage por degrau + acumulado no run (é o que o
+    // cap diário soma amanhã e o painel mostra hoje).
+    let costUsd = 0;
+    for (const step of result.steps) {
+      costUsd += calcCostUsd(
+        step.model,
+        step.usage.promptTokens,
+        step.usage.completionTokens,
+        step.usage.cacheReadTokens,
+        step.usage.cacheWriteTokens
+      );
+      recordAIUsage({
+        orgId: run.orgId,
+        contractId: contract.id,
+        provider: "anthropic",
+        model: step.model,
+        operation: "contract_review",
+        promptTokens: step.usage.promptTokens,
+        completionTokens: step.usage.completionTokens,
+        cacheReadTokens: step.usage.cacheReadTokens,
+        cacheWriteTokens: step.usage.cacheWriteTokens,
+        latencyMs: step.latencyMs,
+      });
+    }
+    await prisma.contractReviewRun.update({
+      where: { id: run.id },
+      data: { aiCostUsd: costUsd },
+    });
+
+    for (const f of result.findings) {
+      const dedupeKey = dedupeKeyFor("ai", `review:${f.category}`, f.selectedText);
+      const parts = [f.finding];
+      if (f.expected) parts.push(`**Esperado (formulário/plano):** ${f.expected}`);
+      if (f.suggestedFix) parts.push(`**Sugestão:** ${f.suggestedFix}`);
+      await upsertComment(contract.id, {
+        dedupeKey,
+        authorName: "Revisão Pós-Geração",
+        text: `**${f.title}**\n\n${parts.join("\n\n")}`,
+        selectedText: f.selectedText,
+        severity: f.severity,
+      });
+    }
+
+    return {
+      report: {
+        model: result.steps[result.steps.length - 1]?.model,
+        findings: result.findings.map((f) => ({
+          category: f.category,
+          severity: f.severity,
+          title: f.title,
+        })),
+        documentOk: result.documentOk,
+        discarded: result.violations.length,
+        retried: result.retried,
+        costUsd,
+      },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    console.error(`[contract-review] LLM falhou no run ${run.id}:`, err);
+    return { retry: true, error: message.slice(0, 500), report: { error: message.slice(0, 500) } };
+  }
 }
 
 async function upsertComment(

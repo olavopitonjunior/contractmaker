@@ -9,9 +9,25 @@ vi.mock("../guard", () => ({
 vi.mock("@/lib/google/docs", () => ({
   getDocPlainText: vi.fn(),
 }));
+// O estágio LLM tem testes próprios (reviewer.test.ts); aqui ele é stubado
+// para os testes do executor não dependerem do runner estruturado.
+vi.mock("../reviewer", async () => {
+  const actual = await vi.importActual<typeof import("../reviewer")>("../reviewer");
+  return {
+    ...actual,
+    runContractReviewLlm: vi.fn(async () => ({
+      findings: [],
+      documentOk: true,
+      violations: [],
+      steps: [],
+      retried: false,
+    })),
+  };
+});
 
 import { isContractReviewEnabled } from "../guard";
 import { getDocPlainText } from "@/lib/google/docs";
+import { runContractReviewLlm } from "../reviewer";
 
 const runUpdateMany = prisma.contractReviewRun.updateMany as ReturnType<typeof vi.fn>;
 const runFindUnique = prisma.contractReviewRun.findUnique as ReturnType<typeof vi.fn>;
@@ -41,6 +57,13 @@ beforeEach(() => {
   runUpdate.mockResolvedValue({});
   commentUpsert.mockResolvedValue({});
   (isContractReviewEnabled as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+  (runContractReviewLlm as ReturnType<typeof vi.fn>).mockResolvedValue({
+    findings: [],
+    documentOk: true,
+    violations: [],
+    steps: [],
+    retried: false,
+  });
 });
 
 describe("advanceReviewRun", () => {
@@ -125,6 +148,57 @@ describe("advanceReviewRun", () => {
     const result = await advanceReviewRun("run1");
     expect(result.status).toBe("failed");
     expect(result.reason).toBe("drive-unavailable");
+  });
+
+  it("findings do LLM viram ContractComment e o custo vai pro run", async () => {
+    mockContract({ htmlContent: "<p>O aluguel mensal é de R$ 2.500,00.</p>" });
+    (runContractReviewLlm as ReturnType<typeof vi.fn>).mockResolvedValue({
+      findings: [
+        {
+          category: "dados_form",
+          severity: "warning",
+          title: "Aluguel divergente",
+          finding: "Form R$ 2.300 × texto R$ 2.500.",
+          selectedText: "O aluguel mensal é de R$ 2.500,00",
+          suggestedFix: "Corrija no formulário do negócio.",
+        },
+      ],
+      documentOk: false,
+      violations: [],
+      steps: [
+        {
+          model: "claude-sonnet-5",
+          usage: { promptTokens: 10_000, completionTokens: 1_000, cacheReadTokens: 0, cacheWriteTokens: 2_000 },
+          latencyMs: 900,
+        },
+      ],
+      retried: false,
+    });
+
+    const result = await advanceReviewRun("run1");
+    expect(result.status).toBe("done");
+
+    const llmComment = commentUpsert.mock.calls.find(
+      (c) => c[0].create.authorName === "Revisão Pós-Geração"
+    );
+    expect(llmComment).toBeDefined();
+    expect(llmComment![0].create.severity).toBe("warning");
+    expect(llmComment![0].create.dedupeKey).toMatch(/^ai-/);
+    expect(llmComment![0].create.text).toContain("Aluguel divergente");
+
+    // Custo do degrau acumulado no run (sonnet-5: 10k×$2 + 1k×$10 + 2k×$2.5 por MTok).
+    const costUpdate = runUpdate.mock.calls.find((c) => c[0].data?.aiCostUsd !== undefined);
+    expect(costUpdate).toBeDefined();
+    expect(costUpdate![0].data.aiCostUsd).toBeCloseTo(0.035, 3);
+  });
+
+  it("erro de API no LLM → run devolvido a queued (retry)", async () => {
+    mockContract();
+    (runContractReviewLlm as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("api down"));
+    runFindUniqueOrThrow.mockResolvedValue({ ...RUN, attempt: 1 });
+    const result = await advanceReviewRun("run1");
+    expect(result.status).toBe("queued");
+    expect(result.reason).toBe("llm-retry");
   });
 
   it("contrato sem plano (legado/importado) → done sem findings de plano", async () => {
