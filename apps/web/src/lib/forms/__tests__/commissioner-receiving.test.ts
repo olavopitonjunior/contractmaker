@@ -5,6 +5,7 @@ import {
   temRecebimento,
   temContaCompleta,
   recebimentoFromRecipient,
+  cadastroSemDadosBancarios,
 } from "@/lib/forms/commissioner-receiving";
 
 /**
@@ -94,6 +95,39 @@ describe("recebimentoFromRecipient", () => {
       titular_nome: null,
       titular_doc: null,
     });
+  });
+});
+
+describe("cadastroSemDadosBancarios — o rótulo do cadastro", () => {
+  // O selo do combobox e a linha do diálogo de duplicidade diziam "sem dados
+  // bancários" para um cadastro com banco, agência e conta preenchidos — porque
+  // liam `receivingPending`, que é PAGABILIDADE da esteira de repasse e segue
+  // verdadeiro sem chave PIX, de propósito. Achado no smoke de staging (28/08).
+  const contaCheia = {
+    banco: "Itaú",
+    agencia: "0001",
+    conta: "12345-6",
+    tipo_conta: "corrente",
+  };
+
+  it("conta completa sem PIX NÃO é 'sem dados bancários'", () => {
+    expect(
+      cadastroSemDadosBancarios({ recebimento: contaCheia, receivingPending: true })
+    ).toBe(false);
+  });
+
+  it("cadastro realmente vazio é 'sem dados bancários'", () => {
+    expect(
+      cadastroSemDadosBancarios({ recebimento: {}, receivingPending: true })
+    ).toBe(true);
+  });
+
+  it("sem o recebimento na mão (leitor anônimo), cai no booleano", () => {
+    // O servidor só manda `recebimento` para membro da org; para os demais o
+    // booleano é o único sinal disponível.
+    expect(cadastroSemDadosBancarios({ receivingPending: true })).toBe(true);
+    expect(cadastroSemDadosBancarios({ receivingPending: false })).toBe(false);
+    expect(cadastroSemDadosBancarios({})).toBe(false);
   });
 });
 

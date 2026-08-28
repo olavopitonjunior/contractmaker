@@ -119,6 +119,29 @@ export function temRecebimento(r: RecebimentoData | undefined | null): boolean {
   return nonEmpty(r.pix_chave) || temContaCompleta(r);
 }
 
+/**
+ * "Este cadastro tem como receber?" — para os rótulos que a UI mostra sobre um
+ * CADASTRO (o selo do combobox, a linha do diálogo de duplicidade).
+ *
+ * NÃO é `receivingPending`. Aquele booleano deriva de
+ * `SplitRecipient.pendingFields`, que é PAGABILIDADE da esteira de repasse: um
+ * cadastro com banco, agência e conta completos, mas sem chave PIX, continua
+ * "pendente" ali de propósito — conta bancária é TED manual. Usá-lo como rótulo
+ * fazia a tela dizer "sem dados bancários" para um corretor cuja conta acabara
+ * de ser preenchida. Achado no smoke de staging em 28/08.
+ *
+ * Quando o leitor é membro da org, o servidor manda o `recebimento` e a
+ * resposta é exata. Para anônimo, que não recebe esses campos, sobra o
+ * booleano — que ali é o melhor sinal disponível.
+ */
+export function cadastroSemDadosBancarios(o: {
+  recebimento?: RecebimentoData | null;
+  receivingPending?: boolean;
+}): boolean {
+  if (o.recebimento) return !temRecebimento(o.recebimento);
+  return o.receivingPending === true;
+}
+
 export interface ComissionadoRecebimento {
   nome?: string;
   splitRecipientId?: string;

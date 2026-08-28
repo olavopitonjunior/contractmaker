@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { cadastroSemDadosBancarios } from "@/lib/forms/commissioner-receiving";
 import type { CandidatoCorretor } from "@/components/forms/steps/useComissionadoRegistry";
 
 /**
@@ -71,7 +72,7 @@ export function DuplicataCorretorDialog({
           )}
           <p className="text-xs flex items-center gap-1.5 text-muted-foreground">
             <Landmark className="h-3.5 w-3.5 shrink-0" />
-            {candidato.receivingPending
+            {cadastroSemDadosBancarios(candidato)
               ? "Sem dados bancários no cadastro — você pode informá-los agora."
               : "Já tem dados bancários no cadastro."}
           </p>

@@ -13,7 +13,10 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import type { RecebimentoData } from "@/lib/forms/commissioner-receiving";
+import {
+  cadastroSemDadosBancarios,
+  type RecebimentoData,
+} from "@/lib/forms/commissioner-receiving";
 
 /** Shape mínimo comum às duas fontes de dados (admin autenticado e form
  *  público token-scoped) — cada caller mapeia sua resposta pra este formato. */
@@ -187,7 +190,7 @@ export function CorretorCombobox({
                             corretores da org). Dizer quais estão incompletos é
                             o que impede a lista maior de virar surpresa lá na
                             frente, na hora de pagar. */}
-                        {o.receivingPending && (
+                        {cadastroSemDadosBancarios(o) && (
                           <span className="ml-1.5 text-xs font-normal text-amber-700 dark:text-amber-500">
                             · sem dados bancários
                           </span>
