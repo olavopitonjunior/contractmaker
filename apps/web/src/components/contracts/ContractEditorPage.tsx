@@ -562,6 +562,7 @@ export function ContractEditorPage({
             }}
             isApproved={isApproved}
             onContentUpdate={() => {}}
+            onReviewFinished={refreshAiCommentsCount}
             onAddComment={
               !isApproved
                 ? () => {

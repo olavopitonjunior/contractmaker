@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
-import { Check, MessageSquare, Trash2, Send, Bot, User as UserIcon, AlertTriangle, Plus, Sparkles } from "lucide-react";
+import { Check, MessageSquare, Trash2, Send, Bot, User as UserIcon, AlertTriangle, Plus, Sparkles, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { AiResolveDialog } from "./AiResolveDialog";
 
@@ -35,6 +35,8 @@ interface CommentsPanelProps {
   /** Callback chamado quando a IA aplica uma correção via dialog. Usado pra
    *  refrescar o conteúdo do iframe Google Docs. */
   onContentUpdate?: (html: string) => void;
+  /** Chamado quando a revisão sob demanda termina (badge do header refresca). */
+  onReviewFinished?: () => void;
 }
 
 function formatRelative(iso: string): string {
@@ -54,12 +56,14 @@ export function CommentsPanel({
   onAddComment,
   isApproved = false,
   onContentUpdate,
+  onReviewFinished,
 }: CommentsPanelProps) {
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
   const [aiResolveTarget, setAiResolveTarget] = useState<Comment | null>(null);
+  const [reviewing, setReviewing] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -122,18 +126,83 @@ export function CommentsPanel({
     }
   }
 
+  /**
+   * "Revisar com IA": a revisão automática roda na geração; depois de edições
+   * manuais no Doc o operador pede outra por aqui. O servidor reusa run vivo
+   * (clicar duas vezes não paga duas revisões); o poll acompanha até o fim e
+   * recarrega a lista — os apontamentos novos chegam como comentários.
+   */
+  async function startReview() {
+    setReviewing(true);
+    try {
+      const res = await fetch(`/api/contracts/${contractId}/review`, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(body.error || "Não foi possível iniciar a revisão");
+        setReviewing(false);
+        return;
+      }
+      toast.success("Revisão iniciada — os apontamentos chegam em instantes");
+      const runId: string = body.runId;
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 5000));
+        const poll = await fetch(`/api/contracts/${contractId}/review`);
+        if (!poll.ok) continue;
+        const { run } = await poll.json();
+        if (!run || run.id !== runId) continue;
+        if (run.status === "done") {
+          toast.success("Revisão concluída");
+          break;
+        }
+        if (run.status === "failed") {
+          toast.error("A revisão falhou — tente novamente mais tarde");
+          break;
+        }
+        if (run.status === "skipped") {
+          toast.info("Revisão não se aplica a este contrato agora");
+          break;
+        }
+      }
+      await load();
+      onReviewFinished?.();
+    } catch {
+      toast.error("Não foi possível iniciar a revisão");
+    } finally {
+      setReviewing(false);
+    }
+  }
+
   if (loading) {
     return <p className="text-sm text-muted-foreground p-4">Carregando…</p>;
   }
 
-  const headerCta = onAddComment ? (
-    <div className="px-4 pt-2 pb-1">
-      <Button size="sm" variant="outline" className="w-full" onClick={onAddComment}>
-        <Plus className="h-4 w-4 mr-1" />
-        Novo comentário
-      </Button>
-    </div>
-  ) : null;
+  const headerCta =
+    onAddComment || !isApproved ? (
+      <div className="px-4 pt-2 pb-1 flex gap-2">
+        {onAddComment ? (
+          <Button size="sm" variant="outline" className="flex-1" onClick={onAddComment}>
+            <Plus className="h-4 w-4 mr-1" />
+            Novo comentário
+          </Button>
+        ) : null}
+        {!isApproved ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="flex-1"
+            onClick={startReview}
+            disabled={reviewing}
+          >
+            {reviewing ? (
+              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4 mr-1" />
+            )}
+            {reviewing ? "Revisando…" : "Revisar com IA"}
+          </Button>
+        ) : null}
+      </div>
+    ) : null;
 
   if (comments.length === 0) {
     return (
