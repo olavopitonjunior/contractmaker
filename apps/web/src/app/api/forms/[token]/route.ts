@@ -29,7 +29,12 @@ import {
   mergeSalesFormDataJson,
   FormNotFoundError,
 } from "@/lib/forms/atomic-merge";
-import { formClosedResponse } from "@/lib/forms/form-gate";
+import { formClosedResponse, viewerIsOrgMember } from "@/lib/forms/form-gate";
+import {
+  redactCommissionerReceiving,
+  preserveCommissionerReceiving,
+  stripCommissionerReceiving,
+} from "@/lib/forms/redact-datajson";
 import { autoRegisterFormCommissioners } from "@/lib/forms/auto-register-commissioners";
 import { notifyDealEvent } from "@/lib/notifications/deal-events";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
@@ -53,13 +58,17 @@ export async function GET(
   const closed = await formClosedResponse(form);
   if (closed) return closed;
 
+  // Dados bancários do corretor só para quem é da imobiliária. Este GET devolve
+  // o dataJson INTEIRO a qualquer portador do link — normalmente o cliente.
+  const viewerIsMember = await viewerIsOrgMember(form.orgId);
+
   return NextResponse.json(
     {
       id: form.id,
       token: form.token,
       title: form.title,
       schemaType: form.schemaType,
-      dataJson: form.dataJson,
+      dataJson: redactCommissionerReceiving(form.dataJson, { viewerIsMember }),
       status: form.status,
       updatedAt: form.updatedAt,
       // Travamento: quando setado, o cliente público renderiza somente-leitura.
@@ -109,6 +118,9 @@ export async function PATCH(
     typeof body.status === "string" ? body.status : undefined;
   const autoLockSetting =
     form.org.formSettings?.autoLockFormOnFinalize === true;
+  // Quem é da imobiliária enxerga (e portanto devolve) os dados bancários do
+  // corretor; de quem não é, eles precisam ser restaurados no merge.
+  const viewerIsMember = await viewerIsOrgMember(form.orgId);
 
   // A transição pra "completo" é decidida contra o estado FRESCO lido sob o
   // lock (não contra a leitura inicial acima): um auto-save concorrente
@@ -142,8 +154,19 @@ export async function PATCH(
       // que um link individual preencheu. `testemunhas` entra — o default do
       // wizard traz 2 entradas vazias (mesmo vetor).
       protectBlankPartyArrays: ["vendedores", "compradores", "testemunhas"],
-      transform: (merged, fresh) =>
-        decideFinalize(fresh).isFinalizing ? dedupConjuges(merged) : merged,
+      transform: (merged, fresh) => {
+        // Restaura os dados bancários do corretor que a REDAÇÃO tirou do GET.
+        // Este PATCH não tem allowlist de propósito, e o autosave de quem não é
+        // membro devolve o array de comissionados sem o `recebimento` — sem
+        // esta linha, o cliente com o link apagaria, só por salvar, o dado
+        // bancário que a imobiliária preencheu. As duas metades andam juntas.
+        const preservado = preserveCommissionerReceiving(merged, fresh.dataJson, {
+          viewerIsMember,
+        });
+        return decideFinalize(fresh).isFinalizing
+          ? dedupConjuges(preservado)
+          : preservado;
+      },
       extraData: (fresh) => {
         const { newStatus, isFinalizing } = decideFinalize(fresh);
         finalizedNow = isFinalizing;
@@ -338,7 +361,11 @@ export async function PATCH(
               (existingContract.dataJson as Record<string, unknown> | null) ?? {};
             const syncedData = deepMergeAtPaths(
               structuredClone(existingData),
-              mergedData
+              // Sem os dados bancários do corretor: o Contract.dataJson é lido
+              // pelo prompt do LLM de análise, pelo ClickSign e pelo DIMOB, e
+              // nenhum deles precisa da chave PIX. Mesma regra do fan-out em
+              // contract-generation.
+              stripCommissionerReceiving(mergedData)
             ).merged;
             await prisma.contract.update({
               where: { id: existingContract.id },

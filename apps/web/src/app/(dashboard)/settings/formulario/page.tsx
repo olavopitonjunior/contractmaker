@@ -10,6 +10,7 @@ import {
 } from "@/lib/contracts/default-config";
 import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
 import { MODULE } from "@/lib/modules/catalog";
+import { EsteiraTabs, EsteiraOnly } from "./EsteiraTabs";
 import { FormSettingsClient } from "./FormSettingsClient";
 import { ContractDefaultsCard } from "./ContractDefaultsCard";
 import { ParticipantCategoriesCard } from "./ParticipantCategoriesCard";
@@ -88,22 +89,45 @@ export default async function FormularioSettingsPage() {
         </p>
       </div>
 
-      <FormSettingsClient
-        locacaoEnabled={locacaoEnabled}
-        initial={{
-          preset: settings.preset,
-          customRequiredPaths: settings.customRequiredPaths as unknown,
-          locacaoPreset: settings.locacaoPreset,
-          locacaoCustomRequiredPaths:
-            settings.locacaoCustomRequiredPaths as unknown,
-          autoLockFormOnFinalize: settings.autoLockFormOnFinalize,
-          requireCommissionerReceiving: settings.requireCommissionerReceiving,
-          summaryRecipientEmail: settings.summaryRecipientEmail,
-          autoSendSummaryOnComplete: settings.autoSendSummaryOnComplete,
-          summaryIncludeAttachments: settings.summaryIncludeAttachments,
-        }}
-      />
+      {/* Um seletor de esteira só, governando os cards que TÊM esteira. O
+          catálogo de seguradoras entra por ele: prestadora de garantia é
+          assunto de locação e não tem o que fazer na configuração de venda. */}
+      <EsteiraTabs locacaoEnabled={locacaoEnabled}>
+        <FormSettingsClient
+          initial={{
+            preset: settings.preset,
+            customRequiredPaths: settings.customRequiredPaths as unknown,
+            locacaoPreset: settings.locacaoPreset,
+            locacaoCustomRequiredPaths:
+              settings.locacaoCustomRequiredPaths as unknown,
+            autoLockFormOnFinalize: settings.autoLockFormOnFinalize,
+            requireCommissionerReceiving: settings.requireCommissionerReceiving,
+            summaryRecipientEmail: settings.summaryRecipientEmail,
+            autoSendSummaryOnComplete: settings.autoSendSummaryOnComplete,
+            summaryIncludeAttachments: settings.summaryIncludeAttachments,
+          }}
+        />
 
+        {locacaoEnabled && (
+          <EsteiraOnly esteira="locacao">
+            <GarantiaOptionsCard
+              initial={garantiaOptions}
+              clauseSlugsByTipo={clauseSlugsByTipo}
+            />
+          </EsteiraOnly>
+        )}
+
+        <ContractDefaultsCard
+          initial={defaults.venda}
+          initialLocacao={defaults.locacao}
+          initialComissaoLocacao={comissaoLocacao}
+          locacaoEnabled={locacaoEnabled}
+        />
+      </EsteiraTabs>
+
+      {/* Fora do seletor de propósito: estes dois mostram as DUAS esteiras
+          juntas — a visibilidade é uma matriz, e "a que esteiras esta categoria
+          se aplica" é propriedade do dado, não filtro de tela. */}
       <ParticipantVisibilityCard
         initial={settings.participantVisibilityJson}
         locacaoEnabled={locacaoEnabled}
@@ -111,20 +135,6 @@ export default async function FormularioSettingsPage() {
 
       <ParticipantCategoriesCard
         initial={participantCategories}
-        locacaoEnabled={locacaoEnabled}
-      />
-
-      {locacaoEnabled && (
-        <GarantiaOptionsCard
-          initial={garantiaOptions}
-          clauseSlugsByTipo={clauseSlugsByTipo}
-        />
-      )}
-
-      <ContractDefaultsCard
-        initial={defaults.venda}
-        initialLocacao={defaults.locacao}
-        initialComissaoLocacao={comissaoLocacao}
         locacaoEnabled={locacaoEnabled}
       />
     </div>

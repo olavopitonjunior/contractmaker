@@ -368,11 +368,11 @@ export default function SplitRecipientsClient() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-display text-2xl font-semibold tracking-tight">Destinatários de split</h1>
+          <h1 className="font-display text-2xl font-semibold tracking-tight">Destinatários de repasse</h1>
           <p className="text-sm text-muted-foreground">
             Cadastre beneficiários que podem receber repasse em cobranças. Eles
-            podem ter conta Asaas (split nativo, instantâneo) ou só PIX em outro
-            banco (transferência automática após o pagamento).
+            podem ter conta Asaas (repasse nativo, instantâneo) ou só PIX em
+            outro banco (transferência automática após o pagamento).
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -411,8 +411,8 @@ export default function SplitRecipientsClient() {
                 ⚠️ Pendentes de completar ({pendentes.length})
               </div>
               <p className="text-xs text-muted-foreground">
-                Estes destinatários não recebem split em cobranças até completar
-                os campos faltantes (chave PIX ou wallet ID).
+                Estes destinatários não recebem repasse em cobranças até
+                completar os campos faltantes (chave PIX ou wallet ID).
               </p>
               {pendentes.map((r) => (
                 <RecipientRow
@@ -520,7 +520,7 @@ export default function SplitRecipientsClient() {
                       Conta Asaas
                     </div>
                     <div className="text-xs text-muted-foreground mt-1">
-                      Beneficiário tem conta Asaas. Split nativo, gratuito e
+                      Beneficiário tem conta Asaas. Repasse nativo, gratuito e
                       instantâneo.
                     </div>
                   </button>
@@ -631,8 +631,8 @@ export default function SplitRecipientsClient() {
               Desativar &ldquo;{confirmDeactivate?.label}&rdquo;?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Cobranças futuras não poderão usar este destinatário. Splits já
-              criados continuam disparando normalmente. Você pode reativar a
+              Cobranças futuras não poderão usar este destinatário. Os repasses
+              já criados continuam disparando normalmente. Você pode reativar a
               qualquer momento.
             </AlertDialogDescription>
           </AlertDialogHeader>

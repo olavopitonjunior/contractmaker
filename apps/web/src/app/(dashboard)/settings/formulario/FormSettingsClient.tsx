@@ -18,6 +18,7 @@ import {
   type FormModule,
   type ModulePresetKey,
 } from "@/lib/forms/presets";
+import { useEsteira } from "./EsteiraTabs";
 
 interface FormSettingsClientProps {
   initial: {
@@ -31,8 +32,6 @@ interface FormSettingsClientProps {
     autoSendSummaryOnComplete?: boolean;
     summaryIncludeAttachments?: boolean;
   };
-  /** Módulo de locação habilitado pro tenant (lib/modules). */
-  locacaoEnabled: boolean;
 }
 
 interface CustomPathItem {
@@ -117,11 +116,10 @@ function parseCustomPaths(raw: unknown): CustomPathItem[] {
   return out;
 }
 
-export function FormSettingsClient({
-  initial,
-  locacaoEnabled,
-}: FormSettingsClientProps) {
-  const [module, setModule] = useState<FormModule>("venda");
+export function FormSettingsClient({ initial }: FormSettingsClientProps) {
+  // A esteira é da PÁGINA, não deste card: o mesmo seletor governa o padrão
+  // contratual e o catálogo de seguradoras (ver EsteiraTabs.tsx).
+  const module = useEsteira();
 
   // Estado por módulo. `preset` guarda o valor CRU (pode ser um dos legados de
   // venda enquanto ninguém salvar) — o card marcado sai de
@@ -233,25 +231,9 @@ export function FormSettingsClient({
     <div className="space-y-6">
       <Card>
         <CardHeader className="space-y-3">
-          <CardTitle className="text-base">Campos obrigatórios</CardTitle>
-          {locacaoEnabled && (
-            <div className="inline-flex rounded-lg border p-0.5 w-fit">
-              {(["venda", "locacao"] as FormModule[]).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setModule(m)}
-                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                    module === m
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-muted"
-                  }`}
-                >
-                  {MODULE_LABEL[m]}
-                </button>
-              ))}
-            </div>
-          )}
+          <CardTitle className="text-base">
+            Campos obrigatórios · {MODULE_LABEL[module]}
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {!isVenda && selectedCard === null && (
@@ -404,11 +386,11 @@ export function FormSettingsClient({
                 Exigir os dados bancários do corretor
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Na etapa Comissão, cada corretor precisa ter cadastro com chave
-                PIX antes de concluir — é o que permite o repasse automático da
-                comissão. Vale para venda e locação. Só se aplica a quem preenche
-                logado como membro da imobiliária: o cliente que recebe o link
-                não vê esses campos.
+                Na etapa Comissão, cada corretor precisa informar a chave PIX{" "}
+                <strong>ou</strong> os dados da conta bancária (banco, agência,
+                conta e tipo) antes de concluir. Vale para venda e locação. Só se
+                aplica a quem preenche logado como membro da imobiliária: o
+                cliente que recebe o link não vê esses campos.
               </p>
             </div>
             <Switch

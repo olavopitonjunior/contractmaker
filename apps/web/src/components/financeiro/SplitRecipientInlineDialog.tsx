@@ -135,7 +135,7 @@ export function SplitRecipientInlineDialog({
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Cadastrar destinatário de split</DialogTitle>
+          <DialogTitle>Cadastrar destinatário de repasse</DialogTitle>
           <DialogDescription>
             {prefill.nome
               ? `${prefill.nome} ainda não está cadastrado nesta org. Adicione abaixo para que possa receber repasses.`
@@ -174,7 +174,7 @@ export function SplitRecipientInlineDialog({
                 <Wallet className="h-4 w-4 mb-1" />
                 Conta Asaas
                 <span className="text-xs font-normal text-muted-foreground mt-1 text-center">
-                  Split nativo (gratuito)
+                  Repasse nativo (gratuito)
                 </span>
               </button>
             </div>
@@ -247,7 +247,7 @@ export function SplitRecipientInlineDialog({
             />
             <p className="text-xs text-muted-foreground mt-1">
               Se preenchido, o destinatário recebe email quando uma cobrança que
-              o inclui no split é paga.
+              o inclui no repasse é paga.
             </p>
           </div>
 
@@ -265,8 +265,8 @@ export function SplitRecipientInlineDialog({
                 </span>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Permite cadastrar sem chave PIX/wallet agora. O destinatário
-                  fica inativo até completar o cadastro — splits desta cobrança
-                  ficarão em estado FALHOU até resolver.
+                  fica inativo até completar o cadastro — os repasses desta
+                  cobrança ficarão em estado FALHOU até resolver.
                 </p>
               </div>
             </label>

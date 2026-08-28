@@ -142,6 +142,13 @@ export async function PATCH(
   if (typeof patchData.email === "string") {
     patchData.email = normalizeEmail(patchData.email);
   }
+  // Reativar desarquiva. Sem isto, "Reativar" na tela devolvia `active: true` e
+  // o cadastro continuava sumido do picker do formulário, que agora filtra por
+  // `archivedAt` — o admin veria o corretor reativado e o corretor seguiria
+  // invisível, que é a mesma queixa por outro caminho.
+  if (patchData.active === true) {
+    (patchData as { archivedAt?: Date | null }).archivedAt = null;
+  }
 
   // Dedupe no PATCH: o partial unique do banco só cobre commissioners ATIVOS —
   // editar um RASCUNHO pro CPF/CNPJ de um corretor existente criava duplicata
@@ -228,10 +235,15 @@ export async function DELETE(
     return NextResponse.json({ error: "Recipient não encontrado" }, { status: 404 });
   }
 
-  // Soft delete — preserva histórico de splits que já referenciam esse walletId
+  // Soft delete — preserva histórico de splits que já referenciam esse walletId.
+  // `archivedAt` é o que marca a EXCLUSÃO; `active: false` continua sendo
+  // gravado porque é o critério de pagabilidade que o splitDispatcher lê. Antes
+  // só havia o booleano, e ele ficava indistinguível do rascunho que nasce
+  // inativo por falta de meio de repasse — foi assim que o picker do formulário
+  // escondeu 40 dos 42 corretores da org.
   const updated = await prisma.splitRecipient.update({
     where: { id },
-    data: { active: false },
+    data: { active: false, archivedAt: new Date() },
   });
 
   await audit(

@@ -18,7 +18,7 @@ const CAPABILITY_DESCRIPTIONS: Record<string, string> = {
   view: "KPIs, extrato, lista de cobranças e clientes",
   create_charge: "Emitir cobranças, cancelar, refund, mark received in cash",
   init_transfer: "Sacar saldo (PIX/TED) com dual-approval acima do cap",
-  configure: "Editar taxas, branding e splits dessa conta",
+  configure: "Editar taxas, branding e repasses dessa conta",
 };
 
 interface Member {

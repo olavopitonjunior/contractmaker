@@ -36,6 +36,14 @@ export interface FreshFormRow {
   status: string;
   completedAt: Date | null;
   privacyAcceptedAt: Date | null;
+  /**
+   * O `dataJson` GRAVADO, lido sob o lock. Exposto ao `transform` porque há
+   * decisão de merge que depende do que já está no banco — a restauração dos
+   * dados bancários do corretor que a redação por leitor tirou do GET
+   * (`preserveCommissionerReceiving`) precisa da versão de lá, não da que o
+   * cliente devolveu.
+   */
+  dataJson: unknown;
 }
 
 export interface AtomicMergeArgs {
@@ -103,7 +111,7 @@ export async function mergeSalesFormDataJson(
     async (tx) => {
       // Row lock: serializa contra outros merges do mesmo form. A releitura
       // sob o lock é o que elimina o lost update.
-      type LockedRow = FreshFormRow & { dataJson: unknown };
+      type LockedRow = FreshFormRow;
       const rows =
         "id" in args.where
           ? await tx.$queryRaw<LockedRow[]>`

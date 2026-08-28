@@ -4,6 +4,7 @@ import {
   isValidBirthdate,
 } from "@/lib/forms/field-formats";
 import { isMarried } from "@/lib/forms/estado-civil";
+import { comissionadoRecebimentoSchema } from "@/lib/forms/commissioner-receiving";
 import { OBSERVACOES_MAX } from "@/lib/forms/validation";
 import { normalizeGarantiaTipo } from "@/lib/contracts/template-category";
 
@@ -313,12 +314,15 @@ export const angariadorLocacaoSchema = z.object({
   party_id: z.string().optional(),
   /** Backfill do registry (lib/asaas/commissioner-registry.ts). */
   splitRecipientId: z.string().optional(),
-  // Estado do cadastro de recebimento do corretor, para o gate da etapa
-  // Comissão (OrgFormSettings.requireCommissionerReceiving). É um BOOLEANO
-  // — nunca a chave PIX nem a conta, que seguem fora do dataJson por
-  // serem devolvidas a qualquer portador do link. `true` = cadastro sem
-  // meio de repasse (SplitRecipient.pendingFields não vazio).
+  // Estado do cadastro no registry: `true` = SplitRecipient sem meio de
+  // repasse (`pendingFields` não vazio). Continua sendo só um BOOLEANO, e segue
+  // servindo aos formulários em circulação, cujos dados bancários vivem apenas
+  // no cadastro (ver `linhaSatisfeita`).
   recebimentoPendente: z.boolean().optional(),
+  // Dados bancários do corretor — mesmo shape e mesmas obrigações da esteira de
+  // venda: redação por leitor em toda superfície de leitura e ausência no
+  // resumo. Ver `lib/forms/commissioner-receiving.ts`.
+  recebimento: comissionadoRecebimentoSchema.optional(),
   nome: z.string().min(2, "Nome do angariador obrigatório"),
   tipo_pessoa: z.enum(["fisica", "juridica"]).optional().default("fisica"),
   cpf: z.string().optional().default(""),

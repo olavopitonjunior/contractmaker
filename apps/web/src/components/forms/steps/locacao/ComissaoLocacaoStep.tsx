@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useCallback } from "react";
 import { useFieldArray, UseFormReturn } from "react-hook-form";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Plus, Trash2, UserPlus, Building2, Search } from "lucide-react";
+import { Plus, Trash2, UserPlus, Building2 } from "lucide-react";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 import { DecimalField, MoneyField } from "./_PartyFields";
 import { taxaLocacaoValor } from "@/lib/locacao/commission";
@@ -14,23 +14,10 @@ import { formatMoneyBR } from "@/lib/format/money";
 import { FormField } from "@/components/forms/fields/FormField";
 import { maskCPF, maskCNPJ, maskTelefone } from "@/lib/forms/field-formats";
 import { CadastroRecebimento } from "../CadastroRecebimento";
-
-interface CommissionerLookup {
-  id: string;
-  label: string;
-  tipoPessoa: string | null;
-  doc: string | null;
-  creci: string | null;
-  papel: string | null;
-  email: string | null;
-  phone: string | null;
-  /**
-   * Cadastro sem meio de repasse (`SplitRecipient.pendingFields` não vazio).
-   * Booleano derivado — o endpoint token-scoped NUNCA devolve os campos
-   * bancários em si.
-   */
-  receivingPending?: boolean;
-}
+import {
+  CorretorCombobox,
+  type CorretorComboboxPage,
+} from "@/components/corretores/CorretorCombobox";
 
 const FORMA_COMISSAO_OPTIONS = [
   { value: "percentual", label: "% do aluguel mensal" },
@@ -60,33 +47,28 @@ export function ComissaoLocacaoStep({
   /** A imobiliária exige os dados de recebimento do corretor nesta etapa. */
   requireCommissionerReceiving?: boolean;
 }) {
-  const [lookupOpen, setLookupOpen] = useState(false);
-  const [lookupQuery, setLookupQuery] = useState("");
-  const [lookupResults, setLookupResults] = useState<CommissionerLookup[]>([]);
-  const [lookupLoading, setLookupLoading] = useState(false);
-  const datalistId = useId();
-
-  useEffect(() => {
-    if (!lookupOpen || !token) return;
-    let cancelled = false;
-    setLookupLoading(true);
-    const q = lookupQuery.trim();
-    const url = `/api/forms/${token}/commissioners${q ? `?q=${encodeURIComponent(q)}` : ""}`;
-    fetch(url)
-      .then((r) => (r.ok ? r.json() : { items: [] }))
-      .then((data) => {
-        if (!cancelled) setLookupResults(Array.isArray(data?.items) ? data.items : []);
-      })
-      .catch(() => {
-        if (!cancelled) setLookupResults([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLookupLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [lookupOpen, lookupQuery, token]);
+  // `useCallback` NÃO é detalhe: `CorretorCombobox` tem `fetchOptions` nas
+  // dependências do efeito de busca. Sem identidade estável, era uma requisição
+  // a cada render — ~1 a cada 300ms contra um teto de 30/min — e o 429 chegava
+  // em ~9 segundos disfarçado de "Nenhum corretor encontrado". Foi assim que a
+  // listagem sumiu em venda até 08/2026; esta esteira nasceu de uma cópia
+  // anterior ao conserto e usava um `<datalist>` próprio que engolia o erro.
+  const fetchCommissionerOptions = useCallback(
+    async (q: string): Promise<CorretorComboboxPage> => {
+      if (!token) return [];
+      const url = `/api/forms/${token}/commissioners${q ? `?q=${encodeURIComponent(q)}` : ""}`;
+      const res = await fetch(url);
+      // Lançar é deliberado: o combobox tem estado de FALHA separado de "lista
+      // vazia", e engolir aqui devolveria a mentira que já custou uma queixa.
+      if (!res.ok) throw new Error(`commissioners ${res.status}`);
+      const data = await res.json();
+      return {
+        items: Array.isArray(data?.items) ? data.items : [],
+        hasMore: data?.hasMore === true,
+      };
+    },
+    [token]
+  );
 
   const {
     fields: angariadorFields,
@@ -181,14 +163,38 @@ export function ComissaoLocacaoStep({
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <p className="text-sm font-semibold w-full">Corretores / angariadores</p>
             {token && (
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                onClick={() => setLookupOpen((v) => !v)}
-              >
-                <Search className="h-3.5 w-3.5 mr-1.5" /> Selecionar cadastrado
-              </Button>
+              <CorretorCombobox
+                fetchOptions={fetchCommissionerOptions}
+                onSelect={(r) => {
+                  const isPF = r.tipoPessoa === "fisica";
+                  appendAngariador({
+                    splitRecipientId: r.id,
+                    nome: r.label,
+                    tipo_pessoa: isPF ? "fisica" : "juridica",
+                    // O endpoint token-scoped devolve o doc MASCARADO
+                    // (anti-scraping, ex. "390***05") — persistir isso em
+                    // dataJson envenenaria ClickSign/DIMOB/qualificação, furava
+                    // o dedupe por documento (normalizeDoc via 5 dígitos) e
+                    // criava PropertyOwner com doc falso no materialize-parties.
+                    // O vínculo real é splitRecipientId; o doc fica vazio pra
+                    // quem preenche completar (ou o finalize resolver).
+                    cpf: "",
+                    cnpj: "",
+                    creci: r.creci ?? "",
+                    email: r.email ?? "",
+                    mobile_phone: r.phone ?? "",
+                    forma_comissao: "percentual",
+                    // Estado do cadastro (booleano): alimenta o gate de
+                    // recebimento da etapa quando a imobiliária o exige.
+                    recebimentoPendente: r.receivingPending === true,
+                    // Dados bancários do cadastro — só vêm para membro da org.
+                    ...(r.recebimento ? { recebimento: r.recebimento } : {}),
+                  });
+                  toast.success(`${r.label} adicionado(a) como angariador(a).`);
+                }}
+                placeholder="Selecionar cadastrado"
+                className="w-64"
+              />
             )}
             <Button
               type="button"
@@ -220,84 +226,6 @@ export function ComissaoLocacaoStep({
             </Button>
           </div>
 
-          {lookupOpen && token && (
-            <div className="rounded-md border bg-muted/30 p-3 space-y-2">
-              <div className="flex items-center gap-2">
-                <Search className="h-3.5 w-3.5 text-muted-foreground" />
-                <Input
-                  list={datalistId}
-                  value={lookupQuery}
-                  onChange={(e) => setLookupQuery(e.target.value)}
-                  placeholder="Buscar por nome, CPF/CNPJ ou CRECI..."
-                  className="bg-background"
-                />
-              </div>
-              <datalist id={datalistId}>
-                {lookupResults.map((r) => (
-                  <option key={r.id} value={r.label}>
-                    {r.label} — {r.tipoPessoa === "fisica" ? "Corretor" : "Imobiliária"}
-                    {r.creci ? ` · CRECI ${r.creci}` : ""}
-                  </option>
-                ))}
-              </datalist>
-              {lookupLoading && <p className="text-xs text-muted-foreground">Buscando...</p>}
-              {!lookupLoading && lookupResults.length === 0 && lookupQuery && (
-                <p className="text-xs text-muted-foreground">
-                  Nenhum cadastrado encontrado. Use os botões acima pra cadastrar.
-                </p>
-              )}
-              {!lookupLoading && lookupResults.length > 0 && (
-                <div className="space-y-1 max-h-60 overflow-y-auto">
-                  {lookupResults.map((r) => (
-                    <button
-                      key={r.id}
-                      type="button"
-                      onClick={() => {
-                        const isPF = r.tipoPessoa === "fisica";
-                        appendAngariador({
-                          splitRecipientId: r.id,
-                          nome: r.label,
-                          tipo_pessoa: isPF ? "fisica" : "juridica",
-                          // O endpoint token-scoped devolve o doc MASCARADO
-                          // (anti-scraping, ex. "390***05") — persistir isso em
-                          // dataJson envenenaria ClickSign/DIMOB/qualificação,
-                          // furava o dedupe por documento (normalizeDoc via 5
-                          // dígitos) e criava PropertyOwner com doc falso no
-                          // materialize-parties. O vínculo real é
-                          // splitRecipientId; o doc fica vazio pra quem
-                          // preenche completar (ou o finalize resolver).
-                          cpf: "",
-                          cnpj: "",
-                          creci: r.creci ?? "",
-                          email: r.email ?? "",
-                          mobile_phone: r.phone ?? "",
-                          forma_comissao: "percentual",
-                          // Estado do cadastro (booleano, nunca o dado
-                          // bancário): alimenta o gate de recebimento da
-                          // etapa quando a imobiliária o exige.
-                          recebimentoPendente: r.receivingPending === true,
-                        });
-                        toast.success(`${r.label} adicionado(a) como angariador(a).`);
-                        setLookupOpen(false);
-                      }}
-                      className="w-full text-left rounded border bg-background hover:bg-accent p-2 text-sm transition-colors"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium">{r.label}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {r.tipoPessoa === "fisica" ? "Corretor" : "Imobiliária"}
-                        </span>
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {r.doc ?? ""}
-                        {r.creci ? ` · CRECI ${r.creci}` : ""}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
 
           {angariadorFields.map((field, index) => {
             const base = `comissao.angariadores.${index}`;

@@ -11,7 +11,12 @@ import {
   FormNotFoundError,
 } from "@/lib/forms/atomic-merge";
 import { syncDealClientName } from "@/lib/forms/sync-deal-client-name";
-import { formClosedResponse } from "@/lib/forms/form-gate";
+import { formClosedResponse, viewerIsOrgMember } from "@/lib/forms/form-gate";
+import {
+  redactCommissionerReceiving,
+  preserveCommissionerReceiving,
+  stripCommissionerReceiving,
+} from "@/lib/forms/redact-datajson";
 import { autoRegisterFormCommissioners } from "@/lib/forms/auto-register-commissioners";
 import { notifyDealEvent } from "@/lib/notifications/deal-events";
 import {
@@ -48,13 +53,17 @@ export async function GET(
   const closed = await formClosedResponse(form);
   if (closed) return closed;
 
+  // Mesma redação da esteira de venda — o angariador tem os mesmos dados
+  // bancários e o link de locação também costuma estar com o cliente.
+  const viewerIsMember = await viewerIsOrgMember(form.orgId);
+
   return NextResponse.json(
     {
       id: form.id,
       token: form.token,
       title: form.title,
       schemaType: form.schemaType,
-      dataJson: form.dataJson,
+      dataJson: redactCommissionerReceiving(form.dataJson, { viewerIsMember }),
       status: form.status,
       updatedAt: form.updatedAt,
       lockedAt: form.lockedAt ? form.lockedAt.toISOString() : null,
@@ -101,6 +110,9 @@ export async function PATCH(
     typeof body.status === "string" ? body.status : undefined;
   const autoLockSetting =
     form.org.formSettings?.autoLockFormOnFinalize === true;
+  // Ver /api/forms/[token]: de quem não é membro, o `recebimento` do angariador
+  // volta redigido e precisa ser restaurado no merge.
+  const viewerIsMember = await viewerIsOrgMember(form.orgId);
   let finalizedNow = false;
 
   // Obrigatoriedade configurada pela imobiliária: BLOQUEIA o finalize (422) em
@@ -151,6 +163,11 @@ export async function PATCH(
       // que um link individual preencheu. Fiador fica fora — mora dentro do
       // objeto `garantia` (deep-merge de objeto, não substituição de array).
       protectBlankPartyArrays: ["locadores", "locatarios"],
+      // Mesma restauração da esteira de venda: o autosave de quem não é membro
+      // devolve os angariadores sem o `recebimento`, que a redação tirou do
+      // GET, e o merge os apagaria.
+      transform: (merged, fresh) =>
+        preserveCommissionerReceiving(merged, fresh.dataJson, { viewerIsMember }),
       extraData: (fresh) => {
         const newStatus = requestedStatus ?? fresh.status;
         const isFinalizing =
@@ -274,7 +291,11 @@ export async function PATCH(
               (existingContract.dataJson as Record<string, unknown> | null) ?? {};
             const syncedData = deepMergeAtPaths(
               structuredClone(existingData),
-              mergedData
+              // Sem os dados bancários do corretor: o Contract.dataJson é lido
+              // pelo prompt do LLM de análise, pelo ClickSign e pelo DIMOB, e
+              // nenhum deles precisa da chave PIX. Mesma regra do fan-out em
+              // contract-generation.
+              stripCommissionerReceiving(mergedData)
             ).merged;
             await prisma.contract.update({
               where: { id: existingContract.id },

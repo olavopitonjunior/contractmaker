@@ -6,6 +6,7 @@ import { listGarantiaOptions } from "@/lib/forms/garantia-option-repo";
 import { isLocacaoSchemaType } from "@/lib/forms/validation-locacao";
 import { FormClosedNotice } from "@/components/forms/FormClosedNotice";
 import { FormPageClient } from "../form-client";
+import { redactCommissionerReceiving } from "@/lib/forms/redact-datajson";
 import { getOrgBrand } from "@/lib/tenant/branding";
 
 export default async function PublicFormPage({
@@ -82,7 +83,14 @@ export default async function PublicFormPage({
     <FormPageClient
       token={form.token}
       schemaType={form.schemaType}
-      initialData={(form.dataJson as Record<string, unknown>) || {}}
+      // O dataJson vai INTEIRO pro browser de quem abrir o link. Os dados
+      // bancários do corretor saem daqui para quem não é da imobiliária — a
+      // mesma redação que o GET da API faz, porque este é o outro caminho pelo
+      // qual o formulário chega ao cliente.
+      initialData={redactCommissionerReceiving(
+        (form.dataJson as Record<string, unknown>) || {},
+        { viewerIsMember }
+      )}
       requiredFieldsByStep={requiredFieldsByStep}
       garantiaOptions={garantiaOptions}
       prefilled={isPrefilled}

@@ -48,7 +48,7 @@ import {
 const SCOPES = [
   { id: "deals:rw", label: "Deals (read/write)", description: "CRUD de deals e movimentação no Kanban" },
   { id: "contracts:rw", label: "Contratos (read/write)", description: "Editar, comentar, sugerir e aprovar contratos" },
-  { id: "charges:rw", label: "Cobranças Asaas (read/write)", description: "Criar e consultar cobranças e splits" },
+  { id: "charges:rw", label: "Cobranças Asaas (read/write)", description: "Criar e consultar cobranças e repasses" },
   { id: "signatures:rw", label: "Assinaturas ClickSign (read/write)", description: "Criar envelopes e gerenciar signatários" },
   { id: "documents:rw", label: "Documentos e certidões (read/write)", description: "Anexos, OCR e disparo de certidões Infosimples" },
   { id: "proposals:rw", label: "Propostas (read/write)", description: "Listar, criar, atribuir e sincronizar propostas. Enviar, converter e cancelar passam por aprovação humana (HITL)." },

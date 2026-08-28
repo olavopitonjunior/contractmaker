@@ -24,7 +24,7 @@ export function DualApprovalRequestEmail({
     {
       TRANSFER: "Transferência",
       REFUND_LARGE: "Estorno de alto valor",
-      SPLIT_CHANGE: "Alteração de split",
+      SPLIT_CHANGE: "Alteração de repasse",
       FEES_CHANGE: "Alteração de taxas",
     }[kind] ?? kind;
 

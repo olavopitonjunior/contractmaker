@@ -35,7 +35,7 @@ const SETTINGS_GROUPS: { title: string; items: SettingsLink[] }[] = [
     title: "Financeiro & assinaturas",
     items: [
       { href: "/settings/pagamentos/contas", label: "Contas bancárias", icon: Wallet, requires: FEATURE.VENDAS_PAGADORIA },
-      { href: "/settings/pagamentos/split-recipients", label: "Destinatários de split", icon: Split, requires: FEATURE.VENDAS_PAGADORIA },
+      { href: "/settings/pagamentos/split-recipients", label: "Destinatários de repasse", icon: Split, requires: FEATURE.VENDAS_PAGADORIA },
       { href: "/settings/signatures", label: "Assinaturas", icon: FileSignature },
       { href: "/settings/signatures?tab=testemunhas", label: "Testemunhas padrão", icon: UsersRound },
     ],

@@ -695,7 +695,7 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
         </h1>
         <p className="text-sm text-muted-foreground">
           {mode === "commission_from_deal"
-            ? "Pagador, valor e splits são pré-preenchidos a partir do contrato aprovado."
+            ? "Pagador, valor e repasses são pré-preenchidos a partir do contrato aprovado."
             : isAvulsaInDeal
               ? "Cobrança vinculada a este deal mas sem relação com o contrato (ex: reembolso, honorários)."
               : "Cobrança sem vínculo a deal específico."}
@@ -721,7 +721,7 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
             done={step === "review"}
             status={splitsStatus}
             badgeCount={blockingNoMatch}
-            label="3. Splits"
+            label="3. Repasses"
           />
         )}
         <StepPill
@@ -1254,7 +1254,7 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
               Repasse de comissão
               <span
                 className="text-xs font-normal text-muted-foreground cursor-help"
-                title="Splits pré-preenchidos do contrato. EyeOff oculta linhas do pagador (valor consolida em outra). PIX externos disparam após pagamento."
+                title="Repasses pré-preenchidos do contrato. EyeOff oculta linhas do pagador (valor consolida em outra). PIX externos disparam após pagamento."
               >
                 (?)
               </span>

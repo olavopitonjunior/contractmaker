@@ -16,7 +16,7 @@ import { OBSERVACOES_MAX } from "@/lib/forms/validation";
 import { maskCPF, maskCNPJ, maskTelefone } from "@/lib/forms/field-formats";
 import {
   CorretorCombobox,
-  type CorretorComboboxOption,
+  type CorretorComboboxPage,
 } from "@/components/corretores/CorretorCombobox";
 import { CadastroRecebimento } from "./CadastroRecebimento";
 
@@ -101,7 +101,7 @@ export function ComissaoConfigStep({
   // limite estourava em ~9s e todo 429 seguinte virava lista vazia ("não puxa
   // os corretores cadastrados").
   const fetchCommissionerOptions = useCallback(
-    async (q: string): Promise<CorretorComboboxOption[]> => {
+    async (q: string): Promise<CorretorComboboxPage> => {
       if (!token) return [];
       const url = `/api/forms/${token}/commissioners?q=${encodeURIComponent(q)}`;
       const res = await fetch(url);
@@ -113,7 +113,10 @@ export function ComissaoConfigStep({
         throw new Error(`lookup_failed_${res.status}`);
       }
       const data = await res.json().catch(() => ({}));
-      return Array.isArray(data?.items) ? data.items : [];
+      return {
+        items: Array.isArray(data?.items) ? data.items : [],
+        hasMore: data?.hasMore === true,
+      };
     },
     [token]
   );
@@ -337,10 +340,12 @@ export function ComissaoConfigStep({
                           | "outro"
                           | null) ?? "imobiliaria_principal",
                       incluir_como_signatario: false,
-                      // Estado do cadastro (booleano, nunca o dado
-                      // bancário): alimenta o gate de recebimento da
-                      // etapa quando a imobiliária o exige.
+                      // Estado do cadastro (booleano): alimenta o gate de
+                      // recebimento da etapa quando a imobiliária o exige.
                       recebimentoPendente: r.receivingPending === true,
+                      // Dados bancários do cadastro — só vêm para membro da
+                      // org, e evitam redigitar o que a imobiliária já tem.
+                      ...(r.recebimento ? { recebimento: r.recebimento } : {}),
                     });
                     toast.success(`${r.label} adicionado(a) como comissionado.`);
                   }}
