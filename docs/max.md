@@ -187,6 +187,7 @@ produto: **notificação de sistema por e-mail passa a sair de madrugada**.
 |---|---|---|
 | `GET /api/agents/profile?agentKey=max` | `agents:r` | 1 — modelo, `ragScope`, budget, kill switch · **F5: `maxPolicy`** (§11) |
 | `POST /api/agents/usage` | `agents:rw` (**só Bearer**) | 2 — custo por turn, uma linha **por modelo**. Aceita `costUsd` do provedor quando `provider: "openrouter"` (§9.1) |
+| `POST /api/agents/scope-query` | `agents:rw` (**só Bearer**) | 5 — leitura de negócio com projeção por sujeito (§12). **Sem consumidor até o PR 6** |
 | `POST /api/agents/knowledge/search` | `agents:r` | 2 — RAG escopado pelo `ragScope` do perfil |
 | `GET /api/users/by-phone?phone=` | `metrics:r` | 1 — telefone → org/usuário |
 | `POST /api/forms` | `documents:rw` | 3 — form de vendas (já existia) |
@@ -603,3 +604,100 @@ Isto vale para o round-trip. A **serialização** do §11.5 continua sendo afirm
 byte a byte de propósito: lá o que está sob teste é o que atravessa a rede,
 montado por `JSON.stringify` do nosso literal, e não passou por `jsonb` nenhum.
 
+
+## 12. `POST /api/agents/scope-query` — leitura de negócio com projeção (PR 5)
+
+**Nasce sem consumidor, e isso é o desenho** (regra 2: receptor primeiro,
+inerte). O nó `tools` do max-agent que a chama é o PR 6. Entregar a rota antes
+do emissor é o que evita a janela em que um lado chama o que o outro ainda não
+expõe.
+
+### 12.1 Não substitui o `broker-scope` — são camadas diferentes
+
+| Rota | Responde | Devolve |
+|---|---|---|
+| `GET /api/agents/broker-scope` | "quem é este telefone e de que negócios participa?" | **IDs**: `splitRecipientId`, `label`, `dealIds` |
+| `POST /api/agents/scope-query` | "o que este sujeito pode LER destes negócios?" | **dados projetados** |
+
+As duas compartilham a MESMA resolução de identidade
+(`lib/max/broker-identity.ts`, extraída da primeira neste PR). Duas
+implementações divergiriam **em silêncio** — sem log, sem erro e sem teste
+vermelho —, que é o modo de falha do §11.5.
+
+### 12.2 Contrato
+
+```jsonc
+// request
+{ "verb": "deal.list",
+  "subject": { "kind": "user", "userId": "cm..." },   // ou { kind:"broker", splitRecipientId }
+  "phone": "+5511987654321",
+  "args": { "estado": "ativo", "limite": 10 } }
+```
+
+Verbos: `deal.list`, `deal.detail`, `deal.pending`, `proposal.list`,
+`proposal.detail`. Verbo fora do catálogo é **400**, e nada é consultado.
+
+**Auth:** Bearer com escopo **`agents:rw`** + `maxAgentRouteGate`. Sessão de
+navegador é **403**. Exigir escopo de ESCRITA para uma leitura é deliberado:
+mantém a rota fora do alcance de um token `agents:r`. O token do Max já carrega
+`agents:rw` desde a F1 e escopo é congelado na emissão — **nenhum reprovision
+por org é necessário**.
+
+**`phone` é obrigatório e VALIDA o `subject`.** O servidor refaz o vínculo
+telefone→sujeito com as MESMAS travas das rotas de identidade que já existem —
+`/api/users/by-phone` para `kind: "user"` (confina pela membership na org de
+quem pergunta, já que `User.phone` é `@unique` global) e `broker-scope` para
+`kind: "broker"`. Não existe um `/api/agents/by-phone`; quem procurar por ele
+não acha. Divergência é **403, não 200 com lista vazia**. Vazio seria
+uma mentira operacional ("você não tem negócio") e apagaria o sinal de ataque.
+Para `broker`, a resolução traz junto a trava **`maxEnabled`** — a atribuição
+explícita da imobiliária, `default false`. Sem ela, um corretor cadastrado mas
+não atribuído ao tenant leria dados de negócio.
+
+### 12.3 Projeção por sujeito (regra 5)
+
+| campo | `user` | `broker` |
+|---|---|---|
+| `id`, `etapa`, `pendencias`, `atualizadoEm` | ✅ | ✅ |
+| `titulo` (**carrega endereço**), `cliente`, `valor` | ✅ | ⛔ |
+| `referencia` | — | ✅ |
+
+`referencia` (`"Negócio #DEAL-1"`) existe porque o corretor precisa dizer de
+qual negócio fala sem que a plataforma lhe entregue o endereço. Deriva dos 6
+últimos caracteres do `id`, e **não** de um contador: um sequencial por org
+revelaria o volume da imobiliária a quem não é da casa.
+
+**A projeção CONSTRÓI o objeto campo a campo; nunca APAGA campos de um objeto
+pronto.** Apagando, uma coluna nova passa (fail-open, em silêncio). Construindo,
+ela não aparece até alguém escrevê-la (fail-closed). É pelo mesmo motivo que o
+teste afirma a **AUSÊNCIA** dos campos proibidos, e não a presença dos
+permitidos: presença segue verde no dia do vazamento.
+
+### 12.4 ⚠️ `Deal` não tem `orgId` — e a assimetria com proposta
+
+A org de um negócio vem por `pipeline` (`Pipeline.orgId`), então todo `where` de
+deal carrega `pipeline: { orgId }` à mão. Isso não é redundante com o RBAC:
+
+- `dealScopeWhere` devolve `{}` para usuário irrestrito — **fail-open por
+  desenho** — e **não inclui a org**. Sozinho, não confina nada.
+- `proposalScopeWhere` é o oposto: **fail-closed** e **já inclui `orgId`**.
+
+Quem assume simetria escreve um vazamento cross-tenant que **nenhum teste de
+RBAC pega**, porque o RBAC está certo — o que falta é o tenant. Há teste com
+mutação de controle travando o `pipeline.orgId`.
+
+Em `deal.detail`, o `negocio_id` é **intersectado** com o escopo, nunca o
+substitui: trocar um pelo outro transforma "detalhar" em IDOR.
+
+### 12.5 Paridade
+
+Vetor fixo dos dois lados (regra 1):
+`apps/web/src/lib/max/__tests__/scope-parity.test.ts` aqui e
+`max-agent/src/graph/__tests__/scope-parity.test.ts` lá, com os MESMOS literais.
+A diferença entre as metades é de propósito: **aqui** o vetor é comparado contra
+a saída real de `projetarDeal` (prova que o produtor produz o combinado); **lá**
+é um literal tipado, porque ainda não há cliente (prova que o consumidor espera
+o combinado). Uma metade sozinha não pega divergência.
+
+A comparação é de **fio, byte a byte** — o corpo HTTP preserva ordem de chave,
+ao contrário de `jsonb`.
