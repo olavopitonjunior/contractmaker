@@ -15,8 +15,9 @@ export interface RawReviewFinding {
   title: string;
   finding: string;
   selectedText: string;
-  expected?: string;
-  suggestedFix?: string;
+  /** Null = não se aplica (o schema estruturado exige o campo; ausência é valor). */
+  expected?: string | null;
+  suggestedFix?: string | null;
 }
 
 export interface ReviewLlmOutput {

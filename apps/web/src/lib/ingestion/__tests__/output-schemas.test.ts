@@ -23,6 +23,7 @@ import {
 } from "@/lib/ai/shared/schema-lint";
 import * as llmClassifier from "@/lib/ingestion/llm-classifier";
 import * as planner from "@/lib/ingestion/planner";
+import * as reviewer from "@/lib/contract-review/reviewer";
 
 /**
  * Os módulos inteiros são importados de propósito: a varredura por `*_SCHEMA`
@@ -32,6 +33,10 @@ import * as planner from "@/lib/ingestion/planner";
 const MODULES: Array<[string, Record<string, unknown>]> = [
   ["llm-classifier", llmClassifier as unknown as Record<string, unknown>],
   ["planner", planner as unknown as Record<string, unknown>],
+  // Revisor pós-geração de contrato (Workstream B) — o REVIEW_OUTPUT_SCHEMA
+  // pagou o próprio 400 em staging (maxItems, req_011CeUHW9zfUz84zouVdXdFY)
+  // por não estar nesta guarda. Agora está.
+  ["contract-review/reviewer", reviewer as unknown as Record<string, unknown>],
 ];
 
 function exportedSchemas(): Array<[string, unknown]> {
@@ -45,8 +50,9 @@ function exportedSchemas(): Array<[string, unknown]> {
 }
 
 describe("schemas de output_config.format", () => {
-  it("a varredura encontra os dois schemas do caminho de ingestão", () => {
+  it("a varredura encontra os schemas conhecidos", () => {
     expect(exportedSchemas().map(([name]) => name).sort()).toEqual([
+      "contract-review/reviewer.REVIEW_OUTPUT_SCHEMA",
       "llm-classifier.CLASSIFICATION_SCHEMA",
       "planner.PLAN_SCHEMA",
     ]);
