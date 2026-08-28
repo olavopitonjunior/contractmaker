@@ -21,6 +21,7 @@ import {
   GARANTIA_LABELS,
 } from "@/lib/contracts/template-category";
 import { resolveClauseSlots } from "@/lib/templates/clause-slots";
+import { buildGenerationPlan } from "@/lib/contract-review/plan";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import {
   DEFAULT_CONTRACT_SETTINGS,
@@ -913,6 +914,24 @@ export async function generateContractForDeal(
   const htmlContent = isGoogleDocsEngine
     ? `<p>Contrato gerado a partir de Google Doc (${template.name}).</p>`
     : renderContratoHTML(template.handlebarsSource, enrichedData);
+  // Em engine="google_docs" o htmlContent acima é um STUB — o texto real só
+  // existe após o exportDocAsHtml. O linter pós-geração precisa ver o texto
+  // real (senão o check de `{{` residual nunca acusa nada nesse engine), então
+  // esta variável é reapontada para o snapshot quando ele chega.
+  let linterHtml = htmlContent;
+
+  // Plano de geração materializado — ground truth da revisão pós-geração.
+  const generationPlan = buildGenerationPlan({
+    family: "venda",
+    template: {
+      id: template.id,
+      name: template.name,
+      engine: template.engine,
+      modalidade: template.modalidade,
+    },
+    manualTemplate: Boolean(opts?.template),
+    dataJson,
+  });
 
   // Versionamento atômico (C1 — QA deal 20486): a versão vem de MAX(version)+1
   // (robusto a rows duplicadas legadas) e o par updateMany(isLatest:false) +
@@ -938,6 +957,7 @@ export async function generateContractForDeal(
         userId,
         version: nextVersion,
         dataJson: enrichedData as any,
+        generationPlanJson: generationPlan as any,
         htmlContent,
         status: "rascunho",
         isLatest: true,
@@ -1000,6 +1020,7 @@ export async function generateContractForDeal(
             where: { id: contract.id },
             data: { htmlContent: snapshot },
           });
+          linterHtml = snapshot;
         } catch (snapErr) {
           console.error("[contract-generation] Falha no snapshot exportDocAsHtml:", snapErr);
         }
@@ -1207,7 +1228,7 @@ export async function generateContractForDeal(
   // /approve e BLOQUEIA a aprovação; "warning" só sinaliza. O agente pode
   // autocorrigir via "Resolver com IA".
   waitUntil(
-    analyzeRenderQualityForContract(contract.id, htmlContent).catch((err) => {
+    analyzeRenderQualityForContract(contract.id, linterHtml).catch((err) => {
       console.error("[contract-generation] analyzeRenderQualityForContract falhou:", err);
     })
   );
@@ -1262,6 +1283,7 @@ export async function generateLocacaoContractForDeal(
   // status, modalidade compatível com o kind) — quando vem, o matcher nem roda.
   let template = opts?.template;
   let templateNotice: string | undefined;
+  let garantiaMatched: boolean | undefined;
   if (!template) {
     const selection = await selectLocacaoTemplate(orgId, schemaType, dataJson);
     if (!selection) {
@@ -1270,6 +1292,7 @@ export async function generateLocacaoContractForDeal(
       );
     }
     template = selection.template;
+    garantiaMatched = selection.garantiaMatched;
     // D16: garantia sem modelo próprio gera com o padrão — avisando, nunca
     // bloqueando (a aba Tipos já acusa o buraco; aqui morre o silêncio).
     if (!selection.garantiaMatched) {
@@ -1321,7 +1344,11 @@ export async function generateLocacaoContractForDeal(
   // `Contract.dataJson` e todo re-render posterior (export PDF, diff da aba
   // Configurações, memória) reproduz o mesmo texto sem reconsultar o acervo.
   const slotFormat = template.engine === "google_docs" ? "text" : "html";
-  const { values: slotValues } = await resolveClauseSlots({
+  const {
+    values: slotValues,
+    resolved: slotResolved,
+    failures: slotFailures,
+  } = await resolveClauseSlots({
     orgId,
     templateSource: template.handlebarsSource,
     data: enrichedData,
@@ -1337,6 +1364,28 @@ export async function generateLocacaoContractForDeal(
   const htmlContent = isLocacaoGoogleDocsEngine
     ? `<p>Contrato gerado a partir do modelo Google Doc (${template.name}).</p>`
     : renderContratoHTML(template.handlebarsSource, enrichedData);
+  // Em engine="google_docs" o htmlContent acima é um STUB — sem o reaponte
+  // para o snapshot, o linter rodava contra o stub e o check de `{{` residual
+  // nunca via o documento real (defeito corrigido no Workstream B).
+  let linterHtml = htmlContent;
+
+  // Plano de geração materializado — o que era volátil (garantiaMatched/
+  // templateNotice) ou descartado (resolved/failures dos slots) vira ground
+  // truth em Contract.generationPlanJson para a revisão pós-geração.
+  const generationPlan = buildGenerationPlan({
+    family: "locacao",
+    template: {
+      id: template.id,
+      name: template.name,
+      engine: template.engine,
+      modalidade: template.modalidade,
+    },
+    manualTemplate: Boolean(opts?.template),
+    garantiaMatched,
+    templateNotice,
+    dataJson,
+    slots: { values: slotValues, resolved: slotResolved, failures: slotFailures },
+  });
 
   const agg = await prisma.contract.aggregate({
     where: { dealId: deal.id, kind: "contract" },
@@ -1356,6 +1405,7 @@ export async function generateLocacaoContractForDeal(
         userId,
         version: nextVersion,
         dataJson: enrichedData as any,
+        generationPlanJson: generationPlan as any,
         htmlContent,
         status: "rascunho",
         isLatest: true,
@@ -1407,6 +1457,7 @@ export async function generateLocacaoContractForDeal(
             where: { id: contract.id },
             data: { htmlContent: snapshot },
           });
+          linterHtml = snapshot;
         } catch (snapErr) {
           console.error("[locacao-generation] Falha no snapshot exportDocAsHtml:", snapErr);
         }
@@ -1545,7 +1596,7 @@ export async function generateLocacaoContractForDeal(
 
   // Render linter (genérico) — materializa findings como ContractComment.
   waitUntil(
-    analyzeRenderQualityForContract(contract.id, htmlContent).catch((err) => {
+    analyzeRenderQualityForContract(contract.id, linterHtml).catch((err) => {
       console.error("[locacao-generation] analyzeRenderQualityForContract falhou:", err);
     })
   );
@@ -1623,6 +1674,8 @@ export async function generateAdministracaoContractForDeal(
   const htmlContent = isGoogleDocsEngine
     ? `<p>Contrato de administração gerado a partir do modelo Google Doc (${template.name}).</p>`
     : renderContratoHTML(template.handlebarsSource, enrichedData);
+  // Mesmo fix do stub das outras esteiras: o linter deve ver o snapshot real.
+  let linterHtml = htmlContent;
 
   const agg = await prisma.contract.aggregate({
     where: { dealId: deal.id, kind: "administracao" },
@@ -1693,6 +1746,7 @@ export async function generateAdministracaoContractForDeal(
             where: { id: contract.id },
             data: { htmlContent: snapshot },
           });
+          linterHtml = snapshot;
         } catch (snapErr) {
           console.error("[administracao-generation] Falha no snapshot exportDocAsHtml:", snapErr);
         }
@@ -1796,7 +1850,7 @@ export async function generateAdministracaoContractForDeal(
   // Render linter (genérico) — lacunas da administradora (CNPJ/CRECI vazios)
   // viram ContractComment e gateiam o /approve.
   waitUntil(
-    analyzeRenderQualityForContract(contract.id, htmlContent).catch((err) => {
+    analyzeRenderQualityForContract(contract.id, linterHtml).catch((err) => {
       console.error("[administracao-generation] analyzeRenderQualityForContract falhou:", err);
     })
   );

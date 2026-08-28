@@ -1586,6 +1586,13 @@ model Contract {
   userId              String
   version             Int       @default(1)
   dataJson            Json
+  // Plano de geração materializado (Workstream B — revisor pós-geração):
+  // template escolhido e por quê (matcher × escolha manual), garantiaMatched/
+  // templateNotice (antes voláteis — só existiam no corpo do 201), e o
+  // resultado COMPLETO do resolveClauseSlots (resolved[]/failures[]), que a
+  // geração descartava. É o ground truth que a revisão confere contra o texto.
+  // NULL = gerado antes da feature, ou contrato importado (templateId null).
+  generationPlanJson  Json?
   htmlContent         String?   @db.Text
   templateOverride    String?   @db.Text
   status              String    @default("rascunho")
