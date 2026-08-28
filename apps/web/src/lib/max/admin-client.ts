@@ -17,12 +17,15 @@ import { signMaxAdminRequest } from "@/lib/max/hmac";
  * problema é que isso deixava a QUERY de fora: uma assinatura capturada valia
  * cinco minutos para **qualquer `?orgId=`**, e o painel de um tenant abria o
  * de outro. O serviço fechou essa porta assinando
- * `${timestamp}.${método}.${caminho com query}` e passou a tolerar o formato
- * antigo só enquanto este cliente não migrasse — com um log de sunset
- * apontando para cá (`max-agent/src/lib/auth.ts`, "issue #347").
+ * `${timestamp}.${método}.${caminho com query}` e tolerou o formato antigo
+ * enquanto este cliente não migrasse.
  *
- * Este arquivo é a migração. Com ela, o `allowLegacyEmptyBody` do lado de lá
- * pode cair assim que o log parar de aparecer.
+ * Este arquivo é a migração, e a tolerância **já caiu** (max#21, 2026-08-28):
+ * o `/admin/status` do max-agent recusa o formato antigo. O sunset não se
+ * apoiou no log de telemetria — a rota só é chamada quando alguém abre o
+ * painel, então "log zerado" media apenas que ninguém tinha olhado a tela. A
+ * prova foi estática: `fetchMaxStatus` abaixo é o ÚNICO chamador da rota, e ele
+ * assina o formato novo.
  */
 
 /**

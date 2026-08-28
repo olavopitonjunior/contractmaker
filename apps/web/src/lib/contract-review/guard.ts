@@ -12,7 +12,7 @@
  */
 
 import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
-import { reviewFeatureForDealKind } from "@/lib/modules/catalog";
+import { proposalReviewFeatureForKind, reviewFeatureForDealKind } from "@/lib/modules/catalog";
 
 export async function isContractReviewEnabled(
   orgId: string,
@@ -20,4 +20,12 @@ export async function isContractReviewEnabled(
 ): Promise<boolean> {
   const view = await getOrgModules(orgId);
   return isFeatureEnabled(view, reviewFeatureForDealKind(dealKind));
+}
+
+export async function isProposalReviewEnabled(
+  orgId: string,
+  proposalKind: string
+): Promise<boolean> {
+  const view = await getOrgModules(orgId);
+  return isFeatureEnabled(view, proposalReviewFeatureForKind(proposalKind));
 }

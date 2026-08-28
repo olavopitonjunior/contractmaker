@@ -77,6 +77,7 @@ import {
   mergeFamilyPlans,
   splitBatchByFamily,
   type FamilySplit,
+  routeOperatorComments,
 } from "@/lib/ingestion/plan-fanout";
 import type { LibraryPlan } from "@/lib/ingestion/library-plan";
 import {
@@ -1204,6 +1205,12 @@ async function persistPlan(args: {
   // mais lenta, não a soma. `allSettled` porque uma família que falha não pode
   // custar o estado (pago) das que terminaram: primeiro persiste-se tudo que
   // voltou, depois o erro sobe e derruba o run com o resto preservado.
+  // Instruções do operador roteadas por família (menção de arquivo → só a
+  // família dona do item; sem arquivo reconhecível → todas). Roteado contra
+  // TODOS os splits para a instrução de uma família já planejada não vazar
+  // para as pendentes na retomada.
+  const routedComments = routeOperatorComments(operatorComments, splits);
+
   const startedAt = Date.now();
   const settled = await Promise.allSettled(
     pendingSplits.map(async (split) => {
@@ -1215,7 +1222,7 @@ async function persistPlan(args: {
           items: split.items,
           grouping: split.grouping,
           library,
-          operatorComments,
+          operatorComments: routedComments.get(split.key) ?? [],
         },
         {
           meter: args.meter,

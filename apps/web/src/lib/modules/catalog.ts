@@ -37,6 +37,7 @@ export const FEATURE = {
   VENDAS_PESQUISAS: "vendas.pesquisas",
   VENDAS_INGESTAO_ACERVO: "vendas.ingestao_acervo",
   VENDAS_REVISAO_CONTRATO: "vendas.revisao_contrato",
+  VENDAS_REVISAO_PROPOSTA: "vendas.revisao_proposta",
 
   // Módulo Locação
   LOCACAO_PIPELINE: "locacao.pipeline",
@@ -54,6 +55,7 @@ export const FEATURE = {
   LOCACAO_PESQUISAS: "locacao.pesquisas",
   LOCACAO_INGESTAO_ACERVO: "locacao.ingestao_acervo",
   LOCACAO_REVISAO_CONTRATO: "locacao.revisao_contrato",
+  LOCACAO_REVISAO_PROPOSTA: "locacao.revisao_proposta",
 } as const;
 
 export type FeatureKey = (typeof FEATURE)[keyof typeof FEATURE];
@@ -106,6 +108,15 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
         label: "Revisão pós-geração de contrato — vendas",
         default: true,
       },
+      // Revisão pós-ENVIO de proposta (3º ciclo do WS B): roda sobre o
+      // snapshot congelado no envio; achado vira evento na timeline da
+      // proposta (registro de auditoria — nunca gate). Chave própria para o
+      // tenant poder desligar proposta sem desligar contrato.
+      {
+        key: FEATURE.VENDAS_REVISAO_PROPOSTA,
+        label: "Revisão pós-envio de proposta — vendas",
+        default: true,
+      },
     ],
   },
   {
@@ -140,6 +151,11 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
       {
         key: FEATURE.LOCACAO_REVISAO_CONTRATO,
         label: "Revisão pós-geração de contrato — locação",
+        default: true,
+      },
+      {
+        key: FEATURE.LOCACAO_REVISAO_PROPOSTA,
+        label: "Revisão pós-envio de proposta — locação",
         default: true,
       },
     ],
@@ -249,6 +265,13 @@ export function reviewFeatureForDealKind(kind: string): FeatureKey {
   return kind === "locacao"
     ? FEATURE.LOCACAO_REVISAO_CONTRATO
     : FEATURE.VENDAS_REVISAO_CONTRATO;
+}
+
+/** Feature da revisão pós-envio de PROPOSTA por `Proposal.kind`. */
+export function proposalReviewFeatureForKind(kind: string): FeatureKey {
+  return kind === "locacao"
+    ? FEATURE.LOCACAO_REVISAO_PROPOSTA
+    : FEATURE.VENDAS_REVISAO_PROPOSTA;
 }
 
 /** Definição completa de um módulo. */

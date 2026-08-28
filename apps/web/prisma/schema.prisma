@@ -1516,7 +1516,11 @@ model IngestionRun {
 // Transições em lib/contract-review/review-state.ts.
 model ContractReviewRun {
   id         String @id @default(cuid())
-  contractId String
+  // Alvo da revisão: EXATAMENTE UM de contractId/proposalId (CHECK no banco,
+  // migration proposal_review_run). Contrato foi o 1º ciclo; proposta entrou
+  // no 3º — mesma máquina de run/claim/sweeper, executor ramifica pelo alvo.
+  contractId String?
+  proposalId String?
   orgId      String
   // queued | reviewing | done | failed | skipped
   status     String @default("queued")
@@ -1534,11 +1538,13 @@ model ContractReviewRun {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  contract Contract? @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  proposal Proposal? @relation(fields: [proposalId], references: [id], onDelete: Cascade)
 
   @@index([orgId, status])
   @@index([status, updatedAt])
   @@index([contractId])
+  @@index([proposalId])
 }
 
 // Um arquivo do lote. `blobUrl` porque o upload é client-direct pro Vercel Blob
@@ -3728,6 +3734,8 @@ model Proposal {
   envelopes      Envelope[]
 
   @@unique([orgId, code])
+  reviewRuns ContractReviewRun[]
+
   @@index([orgId, status])
   // Lista/KPIs filtram sempre por (org, tipo, status) — venda × locação.
   @@index([orgId, kind, status])

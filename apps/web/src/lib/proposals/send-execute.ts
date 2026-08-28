@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
+import { waitUntil } from "@vercel/functions";
+import { enqueueProposalReview } from "@/lib/contract-review/enqueue";
 import { prisma } from "@/lib/db/prisma";
+import { logProposalEvent } from "@/lib/proposals/events";
 import { exportPdfToBuffer } from "@/lib/render/exporter";
 import { loadOrgDocumentStyleExport } from "@/lib/render/org-document-style";
 import {
@@ -252,6 +255,19 @@ async function runSend(
     where: { id: proposal.id },
     data: { sentSnapshotHtml: html, sentSnapshotHash: snapshotHash },
   });
+
+  // 3o ciclo do revisor pos-geracao: o snapshot congelado E o documento final
+  // da proposta - enfileira a revisao (fire-and-forget; achado vira evento
+  // review_completed na timeline). Nunca pode atrapalhar o envio.
+  waitUntil(
+    enqueueProposalReview({
+      proposalId: proposal.id,
+      orgId: proposal.orgId,
+      kind: proposal.kind,
+    }).catch((err) => {
+      console.error("[proposal-send] enqueueProposalReview falhou:", err);
+    })
+  );
 
   if (decision.instrument === "aceite") {
     return sendAceite(proposal, decision, html);
@@ -1161,19 +1177,4 @@ async function sendVendedorEnvelopeLocked(
   }
 }
 
-async function logProposalEvent(
-  proposalId: string,
-  eventName: string,
-  payload?: Record<string, unknown>
-): Promise<void> {
-  await prisma.proposalEvent
-    .create({
-      data: {
-        proposalId,
-        eventName,
-        source: "system",
-        ...(payload ? { payload: payload as never } : {}),
-      },
-    })
-    .catch(() => {});
-}
+

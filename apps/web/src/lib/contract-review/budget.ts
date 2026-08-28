@@ -28,7 +28,9 @@ export async function reviewSpentTodayUsd(orgId: string, now = new Date()): Prom
   const sum = await prisma.aIUsage.aggregate({
     where: {
       orgId,
-      operation: "contract_review",
+      // O cap é da REVISÃO como um todo: contrato + proposta compartilham o
+      // teto diário da org (duas operações no AIUsage, um freio só).
+      operation: { in: ["contract_review", "proposal_review"] },
       createdAt: { gte: utcDayStart(now) },
     },
     _sum: { estimatedCostUsd: true },

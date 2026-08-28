@@ -1716,6 +1716,20 @@ export async function generateAdministracaoContractForDeal(
   // Mesmo fix do stub das outras esteiras: o linter deve ver o snapshot real.
   let linterHtml = htmlContent;
 
+  // Plano de geração materializado (2º ciclo do WS B). Sem garantia nem slots
+  // — administração é instrumento imobiliária↔proprietário; a seleção é por
+  // modalidade exata (selectAdministracaoTemplate), nunca manual nesta rota.
+  const generationPlan = buildGenerationPlan({
+    family: "administracao",
+    template: {
+      id: template.id,
+      name: template.name,
+      engine: template.engine,
+      modalidade: template.modalidade,
+    },
+    manualTemplate: false,
+  });
+
   const agg = await prisma.contract.aggregate({
     where: { dealId: deal.id, kind: "administracao" },
     _max: { version: true },
@@ -1734,6 +1748,7 @@ export async function generateAdministracaoContractForDeal(
         userId,
         version: nextVersion,
         dataJson: enrichedData as any,
+        generationPlanJson: generationPlan as any,
         htmlContent,
         status: "rascunho",
         isLatest: true,
@@ -1891,6 +1906,17 @@ export async function generateAdministracaoContractForDeal(
   waitUntil(
     analyzeRenderQualityForContract(contract.id, linterHtml).catch((err) => {
       console.error("[administracao-generation] analyzeRenderQualityForContract falhou:", err);
+    })
+  );
+
+  // 2º ciclo do WS B — administração entra na revisão pós-geração.
+  waitUntil(
+    enqueueContractReview({
+      contractId: contract.id,
+      orgId,
+      dealKind: deal.kind,
+    }).catch((err) => {
+      console.error("[administracao-generation] enqueueContractReview falhou:", err);
     })
   );
 
