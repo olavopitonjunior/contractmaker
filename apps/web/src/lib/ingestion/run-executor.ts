@@ -77,6 +77,7 @@ import {
   mergeFamilyPlans,
   splitBatchByFamily,
   type FamilySplit,
+  routeOperatorComments,
 } from "@/lib/ingestion/plan-fanout";
 import type { LibraryPlan } from "@/lib/ingestion/library-plan";
 import {

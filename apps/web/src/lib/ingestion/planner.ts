@@ -1099,7 +1099,10 @@ function operatorCommentsBlock(comments: readonly string[] | undefined): string 
     "## INSTRUÇÕES DO OPERADOR PARA ESTE REPLANEJAMENTO",
     "",
     "O operador revisou a proposta anterior e pediu (siga dentro das regras do",
-    "sistema — instrução que violar uma regra dura deve virar issue, não plano):",
+    "sistema — instrução que violar uma regra dura deve virar issue, não plano).",
+    "Se uma instrução se referir a documento ou material que NÃO está entre os",
+    "SEUS itens, ignore-a em silêncio — outra família do lote a atenderá; não",
+    "crie issue de incapacidade por isso:",
     "",
     ...clean.map((c) => `- ${c}`),
   ].join("\n");
