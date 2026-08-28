@@ -119,7 +119,9 @@ function parseCustomPaths(raw: unknown): CustomPathItem[] {
 export function FormSettingsClient({ initial }: FormSettingsClientProps) {
   // A esteira é da PÁGINA, não deste card: o mesmo seletor governa o padrão
   // contratual e o catálogo de seguradoras (ver EsteiraTabs.tsx).
-  const module = useEsteira();
+  // `esteira`, não `module`: o nome `module` colide com a variável global do
+  // CommonJS e o `@next/next/no-assign-module-variable` reprova a atribuição.
+  const esteira = useEsteira();
 
   // Estado por módulo. `preset` guarda o valor CRU (pode ser um dos legados de
   // venda enquanto ninguém salvar) — o card marcado sai de
@@ -150,7 +152,7 @@ export function FormSettingsClient({ initial }: FormSettingsClientProps) {
   );
   const [saving, setSaving] = useState(false);
 
-  const isVenda = module === "venda";
+  const isVenda = esteira === "venda";
   const preset = isVenda ? vendaPreset : locacaoPreset;
   const setPreset = isVenda ? setVendaPreset : setLocacaoPreset;
   const customPaths = isVenda ? vendaPaths : locacaoPaths;
@@ -232,7 +234,7 @@ export function FormSettingsClient({ initial }: FormSettingsClientProps) {
       <Card>
         <CardHeader className="space-y-3">
           <CardTitle className="text-base">
-            Campos obrigatórios · {MODULE_LABEL[module]}
+            Campos obrigatórios · {MODULE_LABEL[esteira]}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -252,7 +254,7 @@ export function FormSettingsClient({ initial }: FormSettingsClientProps) {
             </p>
           )}
 
-          {PRESET_CARDS[module].map((card) => (
+          {PRESET_CARDS[esteira].map((card) => (
             <label
               key={card.key}
               className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
@@ -263,7 +265,7 @@ export function FormSettingsClient({ initial }: FormSettingsClientProps) {
             >
               <input
                 type="radio"
-                name={`preset-${module}`}
+                name={`preset-${esteira}`}
                 value={card.key}
                 checked={selectedCard === card.key}
                 onChange={() => setPreset(card.key)}
@@ -305,7 +307,7 @@ export function FormSettingsClient({ initial }: FormSettingsClientProps) {
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
           <CardTitle className="text-base flex items-center gap-2">
             <Settings2 className="h-4 w-4" />
-            Campos adicionais — {MODULE_LABEL[module]}
+            Campos adicionais — {MODULE_LABEL[esteira]}
           </CardTitle>
           <Button
             type="button"
