@@ -31,14 +31,15 @@ describe("reviewDailyMaxUsd", () => {
 describe("reviewSpentTodayUsd", () => {
   const now = new Date("2026-08-28T15:30:00Z");
 
-  it("soma o AIUsage do dia UTC da operação contract_review", async () => {
+  it("soma o AIUsage do dia UTC das operações de revisão (contrato + proposta)", async () => {
     aggregate.mockResolvedValue({ _sum: { estimatedCostUsd: "1.25" } });
     const spent = await reviewSpentTodayUsd("org1", now);
     expect(spent).toBe(1.25);
     expect(aggregate).toHaveBeenCalledWith({
       where: {
         orgId: "org1",
-        operation: "contract_review",
+        // Cap único da revisão: contrato e proposta compartilham o teto.
+        operation: { in: ["contract_review", "proposal_review"] },
         createdAt: { gte: utcDayStart(now) },
       },
       _sum: { estimatedCostUsd: true },

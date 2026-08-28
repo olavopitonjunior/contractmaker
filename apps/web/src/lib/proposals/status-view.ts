@@ -147,6 +147,9 @@ const EVENT_LABEL: Record<string, string> = {
   reminder_sent: "Lembrete enviado",
   assignee_changed: "Responsável alterado",
   status_transition_rejected: "Transição de status rejeitada",
+  // Revisão pós-envio (revisor do WS B): um evento por revisão do snapshot;
+  // os achados vão no payload (issues[].reason vira o detail da timeline).
+  review_completed: "Revisão IA do documento enviado",
   // Nomes REAIS gravados por send-execute.ts (os 5 chained_envelope2_* caíam
   // no fallback cru na timeline — 2026-08).
   chained_envelope2_sent: "2ª via enviada ao proprietário",
