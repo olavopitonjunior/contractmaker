@@ -170,6 +170,7 @@ vi.mock("@/lib/db/prisma", () => {
     contractComment: {
       findFirst: vi.fn(),
       create: vi.fn(),
+      upsert: vi.fn().mockResolvedValue({}),
       count: vi.fn().mockResolvedValue(0),
       findMany: vi.fn().mockResolvedValue([]),
     },
@@ -550,6 +551,19 @@ vi.mock("@/lib/db/prisma", () => {
       createMany: vi.fn(),
       findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
+    },
+    // Revisão pós-geração de contrato (Workstream B). Mesmo racional do
+    // ingestionRun: o claim é um updateMany com a disponibilidade no where —
+    // default count 0 (claim perdido) para o teste opt-in no sucesso.
+    contractReviewRun: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      findUnique: vi.fn().mockResolvedValue(null),
+      findUniqueOrThrow: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn(),
+      update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      count: vi.fn().mockResolvedValue(0),
     },
   };
   Object.assign(prismaMock, mock);

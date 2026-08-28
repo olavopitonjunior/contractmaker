@@ -1507,6 +1507,40 @@ model IngestionRun {
   @@index([status, updatedAt])
 }
 
+// Revisão pós-geração de contrato (Workstream B).
+//
+// Um run por geração de contrato: o hook da geração ENFILEIRA (waitUntil não
+// aguenta chamada de LLM) e a rota /advance + o cron sweeper conduzem. Um
+// contrato é UMA unidade — não há fatias nem itens; o valor do run é sair do
+// request da geração e ser retomável (claim + stale) quando o worker morre.
+// Transições em lib/contract-review/review-state.ts.
+model ContractReviewRun {
+  id         String @id @default(cuid())
+  contractId String
+  orgId      String
+  // queued | reviewing | done | failed | skipped
+  status     String @default("queued")
+  // Tentativas de leitura/execução (Drive indisponível → volta a queued até 3).
+  attempt    Int    @default(0)
+  // Relatório: findings determinísticos, findings LLM (brutos e pós-guardrail),
+  // motivo de skip, modelo/latência.
+  report     Json?
+  aiCostUsd  Decimal? @db.Decimal(12, 6)
+  error      String?
+  // CLAIM — mesmo padrão de IngestionRun.startedAt: disponibilidade no WHERE
+  // do updateMany, corrida resolvida pelo Postgres.
+  startedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
+  @@index([status, updatedAt])
+  @@index([contractId])
+}
+
 // Um arquivo do lote. `blobUrl` porque o upload é client-direct pro Vercel Blob
 // (o corpo de função serverless para em ~4.5MB) — o executor baixa de lá.
 model IngestionItem {
@@ -1639,6 +1673,7 @@ model Contract {
   suggestions       ContractSuggestion[]
   commissionCharges CommissionCharge[]
   envelopes         Envelope[]
+  reviewRuns        ContractReviewRun[]
 
   @@index([dealId, kind, isLatest])
 }

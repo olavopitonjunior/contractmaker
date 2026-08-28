@@ -46,6 +46,13 @@ const DEFAULT_STAGING_CRON_ALLOWLIST = new Set<string>([
   "/api/cron/alerts/digest",
   // `/api/cron/blob-gc` saiu daqui e do vercel.json: virou endpoint manual de
   // relatório, travado em dry-run. O sistema não apaga nada automaticamente.
+  //
+  // Revisão pós-geração de contrato: o sweeper é rede de segurança da corrente
+  // (lição D13 — cron fora do allowlist = corrente morta em silêncio). O custo
+  // externo existe (1 chamada de LLM por contrato GERADO) mas é acionado só
+  // por geração explícita, com cap diário por org — e o aceite E2E de staging
+  // depende exatamente deste cron.
+  "/api/cron/contract-review/sweep",
 ]);
 
 /**

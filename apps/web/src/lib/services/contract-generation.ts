@@ -22,6 +22,7 @@ import {
 } from "@/lib/contracts/template-category";
 import { resolveClauseSlots } from "@/lib/templates/clause-slots";
 import { buildGenerationPlan } from "@/lib/contract-review/plan";
+import { enqueueContractReview } from "@/lib/contract-review/enqueue";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import {
   DEFAULT_CONTRACT_SETTINGS,
@@ -1244,6 +1245,19 @@ export async function generateContractForDeal(
     })
   );
 
+  // Workstream B — revisão pós-geração. O waitUntil só ENFILEIRA (um run
+  // ContractReviewRun) e dispara a rota /advance; a chamada de LLM roda lá,
+  // e o cron sweeper pega o que sobrar. Flag por org, cap de custo diário.
+  waitUntil(
+    enqueueContractReview({
+      contractId: contract.id,
+      orgId,
+      dealKind: deal.kind,
+    }).catch((err) => {
+      console.error("[contract-generation] enqueueContractReview falhou:", err);
+    })
+  );
+
   // Sem notificação de "contrato pronto" — decisão de produto (2026-08-17):
   // o contrato recém-gerado é um rascunho interno; os marcos comunicados são
   // form_completed (no finalize do form) e contract_sent (no envio).
@@ -1598,6 +1612,17 @@ export async function generateLocacaoContractForDeal(
   waitUntil(
     analyzeRenderQualityForContract(contract.id, linterHtml).catch((err) => {
       console.error("[locacao-generation] analyzeRenderQualityForContract falhou:", err);
+    })
+  );
+
+  // Workstream B — revisão pós-geração (mesmo desenho da esteira de venda).
+  waitUntil(
+    enqueueContractReview({
+      contractId: contract.id,
+      orgId,
+      dealKind: deal.kind,
+    }).catch((err) => {
+      console.error("[locacao-generation] enqueueContractReview falhou:", err);
     })
   );
 

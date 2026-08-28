@@ -75,6 +75,9 @@ export function normalizeEvidenceText(value: string): string {
     .replace(/&quot;/gi, '"')
     .replace(/&#39;|&apos;/gi, "'")
     .replace(/\s+/g, " ")
+    // Tag vira espaço acima — "</i>," deixaria "fiança ,», que nunca casaria
+    // com o texto plano do Doc. Espaço antes de pontuação não existe em PT.
+    .replace(/ ([,.;:!?)])/g, "$1")
     .trim()
     .toLowerCase();
 }
