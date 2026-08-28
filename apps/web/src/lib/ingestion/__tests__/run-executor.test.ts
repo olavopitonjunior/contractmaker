@@ -862,6 +862,46 @@ describe("advanceRun — estágio planning", () => {
     expect(typed.grouping.families).toEqual(report.grouping.families);
   });
 
+  it("instruções do operador chegam ROTEADAS por família (menção de arquivo)", async () => {
+    seed(2, "planning");
+    items[0].status = "classified";
+    items[0].text = CONTRATO;
+    items[0].filename = "CONTRATO RESIDENCIAL FIADOR.docx";
+    items[0].classification = {
+      familyKey: "contrato_locacao:locacao:fiador",
+      modalidade: "locacao",
+    } as never;
+    items[1].status = "classified";
+    items[1].text = CONTRATO;
+    items[1].filename = "CONTRATO COMERCIAL ONEROSA.docx";
+    items[1].classification = {
+      familyKey: "contrato_locacao:locacao_comercial:garantia_onerosa",
+      modalidade: "locacao_comercial",
+    } as never;
+    runs[0].report = {
+      planningComments: [
+        'Sobre o modelo "X" (arquivo "CONTRATO COMERCIAL ONEROSA.docx"): trocar o eixo.',
+        "regra geral do lote",
+      ],
+    };
+    const planner = plannerReturning({ plan: emptyPlan(), accepted: true });
+    await drain({ planner });
+
+    const calls = (planner as unknown as ReturnType<typeof vi.fn>).mock.calls as Array<
+      [{ items: Array<{ id: string }>; operatorComments?: string[] }]
+    >;
+    expect(calls).toHaveLength(2);
+    const byItem = new Map(calls.map(([input]) => [input.items[0].id, input.operatorComments]));
+    // A instrução que cita o arquivo comercial NÃO chega à família residencial;
+    // a genérica (sem arquivo) chega às duas — é o fim do "não é possível
+    // atender" nas famílias sem o arquivo citado.
+    expect(byItem.get("item-0")).toEqual(["regra geral do lote"]);
+    expect(byItem.get("item-1")).toEqual([
+      'Sobre o modelo "X" (arquivo "CONTRATO COMERCIAL ONEROSA.docx"): trocar o eixo.',
+      "regra geral do lote",
+    ]);
+  });
+
   it("plano RECUSADO também chega a awaiting_review, com as issues visíveis", async () => {
     seed(2);
     const recusado: LibraryPlan = {
