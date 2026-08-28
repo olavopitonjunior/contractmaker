@@ -7,6 +7,7 @@ import {
 } from "@/lib/api/require-auth";
 import { prisma } from "@/lib/db/prisma";
 import { phoneE164Schema } from "@/lib/validation/schemas";
+import { resolveUserByPhone } from "@/lib/max/user-identity";
 
 /**
  * GET /api/users/by-phone?phone=+5511987654321
@@ -64,38 +65,31 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const user = await prisma.user.findUnique({
-    where: { phone: parsed.data },
-    select: {
-      id: true,
-      name: true,
-      deletedAt: true,
-      // Só a membership NA ORG DE QUEM PERGUNTA. Um usuário pode ser membro de
-      // várias imobiliárias (o corretor que atende duas casas), e antes daqui
-      // saía `take: 1` sem `orderBy` — a org devolvida era a ordem do Postgres,
-      // não-determinística entre chamadas. O mesmo defeito já tinha sido
-      // corrigido em `getUserOrg` (user-org.ts:114-124) e nunca chegou aqui.
-      orgMemberships: {
-        where: { orgId: callerOrgId },
-        select: { orgId: true, role: true },
-        take: 1,
-      },
-    },
+  // A resolução mora em `lib/max/user-identity.ts` desde que o
+  // `GET /api/agents/user-scope` passou a precisar da mesma resposta com um
+  // campo a mais. Duas implementações divergiriam em silêncio, e o que
+  // divergiria aqui é a política de 404 — decisão de segurança, não detalhe.
+  //
+  // **O shape desta resposta NÃO mudou.** A rota tem consumidores de fora
+  // (duas MCP tools, contrato no `openapi.json`, teste com `toEqual` exato);
+  // o `customRoleId` que a lib passou a trazer fica de fora daqui de
+  // propósito.
+  const user = await resolveUserByPhone({
+    orgId: callerOrgId,
+    phoneE164: parsed.data,
   });
 
   // Um 404 só, para os três casos (não existe / apagado / é de outro tenant):
   // separá-los revelaria que o número pertence a alguém na plataforma.
-  if (!user || user.deletedAt || user.orgMemberships.length === 0) {
+  if (!user) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  const membership = user.orgMemberships[0];
-
   // Versão básica (default)
   const base = {
-    userId: user.id,
-    orgId: membership.orgId,
-    role: membership.role,
+    userId: user.userId,
+    orgId: user.orgId,
+    role: user.role,
     name: user.name,
   };
 
@@ -120,12 +114,12 @@ export async function GET(req: NextRequest) {
   const SCOPE_CAP = 500;
   const [deals, contracts] = await Promise.all([
     prisma.deal.findMany({
-      where: { userId: user.id, pipeline: { orgId: callerOrgId } },
+      where: { userId: user.userId, pipeline: { orgId: callerOrgId } },
       select: { id: true },
       take: SCOPE_CAP,
     }),
     prisma.contract.findMany({
-      where: { userId: user.id, deal: { pipeline: { orgId: callerOrgId } } },
+      where: { userId: user.userId, deal: { pipeline: { orgId: callerOrgId } } },
       select: { id: true },
       take: SCOPE_CAP,
     }),

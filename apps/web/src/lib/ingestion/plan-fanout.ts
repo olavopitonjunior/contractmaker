@@ -30,6 +30,8 @@ import { playbookFamilyForModalidade } from "./playbooks";
 /** Item mínimo que a repartição precisa enxergar. */
 export interface FanoutItem {
   id: string;
+  /** Nome do arquivo — insumo do roteamento de instruções do operador. */
+  filename?: string | null;
   classification: { modalidade?: string | null } | null;
 }
 
@@ -57,6 +59,65 @@ export const PLAN_FAMILY_LABELS: Record<string, string> = {
   venda: "Venda",
   proposta: "Propostas",
 };
+
+// ────────────────────────────────────────────────────────────────────────────
+// Roteamento de instruções do operador por família
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Piso de caracteres úteis do nome (sem extensão) para valer como âncora —
+ *  nomes curtos demais produziriam falsos positivos ("VISTA" dentro de
+ *  "entrevista"). */
+const MIN_FILENAME_ANCHOR = 5;
+
+function normalizeForMatch(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Reparte as instruções do replan entre as famílias do fanout.
+ *
+ * Antes, a lista global ia para TODAS as escadas — e cada família que não
+ * tinha o arquivo citado respondia "não é possível atender", poluindo o topo
+ * da revisão (achado de UX do aceite de 28/08). A regra aqui é DETERMINÍSTICA
+ * e conservadora: instrução que menciona o NOME DE ARQUIVO de um item vai só
+ * para as famílias que contêm aquele item; instrução sem arquivo reconhecível
+ * continua indo para todas (não dá para rotear semântica sem interpretar — e
+ * o prompt manda a família ignorar em silêncio o que não é dela).
+ */
+export function routeOperatorComments<Item extends FanoutItem>(
+  comments: readonly string[],
+  splits: readonly FamilySplit<Item>[]
+): Map<string, string[]> {
+  const routed = new Map<string, string[]>(splits.map((s) => [s.key, []]));
+  if (comments.length === 0 || splits.length === 0) return routed;
+
+  // Âncoras por família: filename completo e sem extensão, normalizados.
+  const anchors = splits.map((split) => ({
+    key: split.key,
+    names: split.items.flatMap((item) => {
+      const raw = (item.filename ?? "").trim();
+      if (!raw) return [];
+      const full = normalizeForMatch(raw);
+      const semExt = full.replace(/\.[a-z0-9]{2,5}$/, "");
+      return semExt.length >= MIN_FILENAME_ANCHOR ? [full, semExt] : [full];
+    }),
+  }));
+
+  for (const comment of comments) {
+    const normalized = normalizeForMatch(comment);
+    const matched = anchors
+      .filter((a) => a.names.some((n) => n.length >= MIN_FILENAME_ANCHOR && normalized.includes(n)))
+      .map((a) => a.key);
+    const targets = matched.length > 0 ? matched : [...routed.keys()];
+    for (const key of targets) routed.get(key)!.push(comment);
+  }
+  return routed;
+}
 
 export interface FamilySplit<Item extends FanoutItem> {
   key: string;
