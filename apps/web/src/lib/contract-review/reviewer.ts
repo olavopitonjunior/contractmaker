@@ -26,7 +26,12 @@ import {
   type ReviewViolation,
 } from "./guardrails";
 
-export const REVIEW_MAX_TOKENS = 3000;
+// Teto de SAÍDA da chamada. O thinking adaptativo do Sonnet 5 (effort high)
+// consome deste mesmo teto ANTES do JSON — 3k truncou nos dois degraus do
+// aceite de staging (StructuredOutputTruncatedError). 16k dá folga para o
+// raciocínio + os ~1-2k do JSON; o custo segue em centavos (output só é
+// cobrado pelo que o modelo de fato emite).
+export const REVIEW_MAX_TOKENS = 16_000;
 /** Teto do texto do contrato no prompt (~15k tokens). Acima disso, corta com
  *  aviso no fim — contrato de locação/CCV real fica muito abaixo. */
 export const REVIEW_DOC_TEXT_CAP = 60_000;
@@ -223,6 +228,9 @@ export async function runContractReviewLlm(
       schema: REVIEW_OUTPUT_SCHEMA,
       maxTokens: REVIEW_MAX_TOKENS,
       effort: "high",
+      // Sem streaming a conexão fica muda enquanto o modelo pensa — com
+      // maxTokens deste tamanho é assim que uma chamada morre no timeout.
+      stream: true,
     });
     steps.push({ model: result.model, usage: result.usage, latencyMs: result.latencyMs });
     return result.data;
