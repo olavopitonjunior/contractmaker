@@ -734,17 +734,26 @@ function ReplanPanel({
   const [busy, setBusy] = useState(false);
   const [persist, setPersist] = useState(false);
 
-  // Comentários por card viram instrução nomeada; o geral entra como está.
+  // Comentários por card viram instrução nomeada COM o arquivo de origem —
+  // é o nome do arquivo que permite ao fanout rotear a instrução só para a
+  // família dona (routeOperatorComments); o geral entra como está.
   const collected = useMemo(() => {
+    const itemsById = new Map(run.items.map((i) => [i.id, i]));
     const list: string[] = [];
     for (const t of plan.templates) {
       const text = (comments[templateKey(t)] ?? "").trim();
-      if (text) list.push(`Sobre o modelo "${t.name}": ${text}`);
+      if (!text) continue;
+      const filename = itemsById.get(t.sourceItemId)?.filename;
+      list.push(
+        filename
+          ? `Sobre o modelo "${t.name}" (arquivo "${filename}"): ${text}`
+          : `Sobre o modelo "${t.name}": ${text}`
+      );
     }
     const general = (comments.__general ?? "").trim();
     if (general) list.push(general);
     return list;
-  }, [comments, plan.templates]);
+  }, [comments, plan.templates, run.items]);
 
   async function go() {
     setBusy(true);
