@@ -261,6 +261,10 @@ export type AIOperation =
   // Operação própria: somada em passive_*, o painel não separaria o custo do
   // revisor (toda geração) do da análise passiva (todo open/edit).
   | "contract_review"
+  // Revisão pós-ENVIO de proposta (3º ciclo): mesma máquina de run, alvo
+  // Proposal, achado na timeline. Operação própria pelo mesmo motivo acima —
+  // mas o CAP diário soma as duas (lib/contract-review/budget.ts).
+  | "proposal_review"
   // Agente externo (Max, LangGraph fora deste repo) reportando o próprio turn
   // por `POST /api/agents/usage`. O custo dele roda em infra nossa e some do
   // painel se não voltar por aqui.
