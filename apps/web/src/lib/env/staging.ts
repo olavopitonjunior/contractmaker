@@ -53,6 +53,10 @@ const DEFAULT_STAGING_CRON_ALLOWLIST = new Set<string>([
   // por geração explícita, com cap diário por org — e o aceite E2E de staging
   // depende exatamente deste cron.
   "/api/cron/contract-review/sweep",
+  // Relatório semanal do revisor: DB + e-mail, e o gate de staging do
+  // sendEmail redireciona destinatários pro owner — seguro e é a única
+  // verificação integrada do e-mail antes de prod (mesmo racional do digest).
+  "/api/cron/contract-review/weekly-report",
 ]);
 
 /**

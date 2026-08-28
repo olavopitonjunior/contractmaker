@@ -60,6 +60,7 @@ export async function advanceReviewRun(runId: string): Promise<AdvanceReviewResu
     where: { id: run.contractId },
     select: {
       id: true,
+      kind: true,
       status: true,
       dataJson: true,
       htmlContent: true,
@@ -186,6 +187,7 @@ async function runLlmStage(
   run: { id: string; orgId: string; contractId: string },
   contract: {
     id: string;
+    kind: string;
     dataJson: unknown;
     generationPlanJson: unknown;
     deal: {
@@ -218,7 +220,16 @@ async function runLlmStage(
     };
   }
 
-  const family = contract.deal.kind === "locacao" ? ("locacao" as const) : ("venda" as const);
+  // Família do playbook: o PLANO é a fonte (a geração sabe o que gerou);
+  // contrato sem plano (legado) cai no kind do Contract (administração tem
+  // kind próprio) e por fim no kind do deal.
+  const family =
+    plan?.family ??
+    (contract.kind === "administracao"
+      ? ("administracao" as const)
+      : contract.deal.kind === "locacao"
+        ? ("locacao" as const)
+        : ("venda" as const));
   const formData = (contract.deal.form?.dataJson ?? contract.dataJson) as Record<string, unknown>;
   const sections = buildConsolidatedFormSummary(formData, {
     schemaType: contract.deal.form?.schemaType ?? null,
