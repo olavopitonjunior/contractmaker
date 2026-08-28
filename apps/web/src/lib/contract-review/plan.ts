@@ -19,7 +19,7 @@ import { normalizeGarantiaTipo } from "@/lib/contracts/template-category";
 
 export const GENERATION_PLAN_VERSION = 1;
 
-export type GenerationPlanFamily = "venda" | "locacao";
+export type GenerationPlanFamily = "venda" | "locacao" | "administracao";
 
 /**
  * Evidência de presença da cláusula eleita: os primeiros ~160 chars do
@@ -162,7 +162,7 @@ export function parseGenerationPlan(json: unknown): GenerationPlan | null {
   if (!json || typeof json !== "object" || Array.isArray(json)) return null;
   const raw = json as Record<string, unknown>;
   if (raw.version !== GENERATION_PLAN_VERSION) return null;
-  if (raw.family !== "venda" && raw.family !== "locacao") return null;
+  if (raw.family !== "venda" && raw.family !== "locacao" && raw.family !== "administracao") return null;
   if (typeof raw.templateId !== "string" || !raw.templateId) return null;
   if (typeof raw.templateName !== "string") return null;
   if (typeof raw.engine !== "string") return null;
