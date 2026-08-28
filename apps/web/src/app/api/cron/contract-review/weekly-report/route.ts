@@ -46,7 +46,10 @@ export async function GET(req: NextRequest) {
     }),
     prisma.aIUsage.groupBy({
       by: ["orgId"],
-      where: { operation: "contract_review", createdAt: { gte: since } },
+      where: {
+        operation: { in: ["contract_review", "proposal_review"] },
+        createdAt: { gte: since },
+      },
       _sum: { estimatedCostUsd: true },
       _count: { _all: true },
     }),

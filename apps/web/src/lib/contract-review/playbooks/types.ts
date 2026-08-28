@@ -7,7 +7,7 @@
  * Módulo puro: sem prisma, sem rede.
  */
 
-export const REVIEW_FAMILIES = ["locacao", "venda", "administracao"] as const;
+export const REVIEW_FAMILIES = ["locacao", "venda", "administracao", "proposta"] as const;
 export type ReviewFamily = (typeof REVIEW_FAMILIES)[number];
 
 /**

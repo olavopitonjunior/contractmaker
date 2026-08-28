@@ -119,6 +119,10 @@ describe("proposalEventLabel — nomes REAIS gravados têm rótulo", () => {
     }
   });
 
+  it("review_completed (revisão pós-envio) tem rótulo", () => {
+    expect(proposalEventLabel("review_completed")).toBe("Revisão IA do documento enviado");
+  });
+
   it("eventos da parada de decisão e conclusão manual têm rótulo", () => {
     expect(proposalEventLabel("awaiting_owner_decision")).toBe("Aguardando sua decisão");
     expect(proposalEventLabel("completed_manually")).toMatch(/Concluída/);
