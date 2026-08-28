@@ -598,6 +598,25 @@ export function SalesFormWizard({
    * step que falhou), permitindo o StepIndicator destacar pendências em
    * cinza-âmbar pra steps que o usuário "encostou".
    */
+  /**
+   * Gate dos dados de recebimento do corretor (etapa Comissão), quando a
+   * imobiliária exige. Precisa rodar TAMBÉM no finalize: `handleFinalize` não
+   * passa por `validateAndNavigate`, e a Comissão é a ÚLTIMA etapa — o gate no
+   * avanço sozinho nunca dispararia (achado no smoke de staging, com o
+   * formulário concluindo sem os dados exigidos).
+   */
+  const gateRecebimentoOk = (): boolean => {
+    const pendencias = pendenciasDeRecebimento(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      form.getValues("comissao.comissionados" as any) as never,
+      requireCommissionerReceiving && viewerIsMember
+    );
+    if (pendencias.length === 0) return true;
+    setFailedTriggerCount((n) => n + 1);
+    toast.error(mensagemDePendencia(pendencias));
+    return false;
+  };
+
   const validateAndNavigate = async (target: number): Promise<boolean> => {
     if (target < 0 || target >= TOTAL_STEPS) return false;
     if (target === currentStep) return true;
@@ -670,16 +689,7 @@ export function SalesFormWizard({
           }
           // Dados de recebimento do corretor (etapa Comissão), quando a
           // imobiliária exige — ver lib/forms/commissioner-receiving.ts.
-          const pendenciasReceb =
-            i === 6
-              ? pendenciasDeRecebimento(
-                  form.getValues("comissao.comissionados") as never,
-                  requireCommissionerReceiving && viewerIsMember
-                )
-              : [];
-          if (pendenciasReceb.length > 0) {
-            setFailedTriggerCount((n) => n + 1);
-            toast.error(mensagemDePendencia(pendenciasReceb));
+          if (i === 6 && !gateRecebimentoOk()) {
             setCurrentStep(i);
             window.scrollTo({ top: 0, behavior: "smooth" });
             return false;
@@ -778,6 +788,14 @@ export function SalesFormWizard({
   };
 
   const handleFinalize = async () => {
+    // A etapa Comissão é a última: `handleFinalize` não passa pela validação
+    // por etapa, então sem esta chamada o gate nunca dispararia (achado no
+    // smoke de staging).
+    if (!gateRecebimentoOk()) {
+      setCurrentStep(6);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
     setIsSubmitting(true);
     try {
       // Subtoken (PR 4): PATCH no endpoint do participant com markCompleted.
