@@ -126,6 +126,8 @@ const SendAttachmentEnvelopeDialog = dynamic(
     ),
   { loading: () => null }
 );
+import { FormSummarySections } from "@/components/forms/FormSummarySections";
+
 const SendFormSummaryDialog = dynamic(
   () =>
     import("@/components/forms/SendFormSummaryDialog").then(
@@ -352,6 +354,8 @@ interface DealDetailProps {
   newtonEnabled?: boolean;
   /** Pesquisas de satisfação habilitadas (feature vendas.pesquisas, default OFF). */
   surveysEnabled?: boolean;
+  /** Seções do resumo consolidado, iguais às do PDF (calculadas no server). */
+  formSummarySections?: SummarySection[];
 }
 
 const BASE_TABS = [
@@ -367,6 +371,7 @@ export function DealDetail({
   deal,
   newtonEnabled = false,
   surveysEnabled = false,
+  formSummarySections,
 }: DealDetailProps) {
   const router = useRouter();
   const perms = usePermissions();
@@ -1561,6 +1566,17 @@ export function DealDetail({
               </CardContent>
             </Card>
           )}
+
+          {/* Espelho exato do PDF do resumo. Os cards acima são a visão rápida;
+              aqui não pode faltar nada que o cliente preencheu — a etapa de
+              posse/título, as observações e a configuração contratual só
+              existiam no PDF. */}
+          <div className="mt-4">
+            <FormSummarySections
+              sections={formSummarySections ?? []}
+              description="Tudo o que foi preenchido no formulário — o mesmo conteúdo do PDF do resumo."
+            />
+          </div>
         </TabsContent>
 
         <TabsContent value="anexos" className="mt-4">

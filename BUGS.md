@@ -15,6 +15,28 @@
 
 ## Bugs Ativos
 
+### [ALTA] Impersonation devolvia 404 "Nao encontrado" em 28 rotas de negocio (achado pelo download do resumo)
+- **Status:** corrigido no codigo (pendente deploy) — branch work/resumo-form-e-obrigatoriedade
+- **Encontrado em:** 2026-08-28 (relato: "ao tentar baixar o resumo, acusa deal nao encontrado na tela da Ativa")
+- **Descricao:** Sob impersonation (super_admin "testando como" um tenant), `getUserOrg` aplica o overlay e devolve a org IMPERSONADA (`lib/auth/user-org.ts:84-87`), mas `guardDealScope` recebia o `session.user.id` do admin REAL. `getEffectivePermissions(userId, orgId)` faz `orgMembership.findUnique({ userId_orgId })` — o admin nao e membro daquele tenant —, volta `null`, e o guard responde `{error:"Nao encontrado"}` 404 (`lib/deals/route-helpers.ts:236`). O `SendFormSummaryDialog` exibe o campo `error` verbatim, entao o usuario le exatamente "Nao encontrado". A PAGINA do negocio abre normalmente porque ela resolve `getEffectiveUserId` antes do RBAC (`(dashboard)/locacao/deals/[dealId]/page.tsx:63`) — dai a assimetria "vejo a tela, nao consigo baixar".
+- **Impacto:** ALTO e amplo. Nao era do resumo: **28 rotas** sob `/api/deals/[dealId]/*` chamam `guardDealScope({ userId: session.user.id })` — certidoes (emitir, retry, ZIP, compartilhar), anexos (upload, finalize, delete), diligenciados, notificacoes, Serasa, aditivo e as duas de form-summary. Todas respondiam 404 sob impersonation. `guardContractScope` tinha o mesmo defeito nas rotas de contrato.
+- **Solucao:** os dois guards resolvem `getEffectiveUserId` internamente, antes de ler permissoes — uma correcao para as 28 rotas, em vez de 28 correcoes que reabririam o buraco na proxima rota escrita no mesmo molde. Fora da impersonation o helper devolve o proprio userId (comportamento inalterado). `loadScopedDeal`/`loadScopedContract` ja eram impersonation-aware via `requireApiAuth`; as quatro portas de escopo agora usam a mesma identidade. Teste-guarda em `lib/deals/__tests__/route-helpers-impersonation.test.ts`, verificado falhando sem o fix.
+
+### [ALTA] Campo obrigatorio com valor numerico nunca bloqueava o formulario
+- **Status:** corrigido no codigo (pendente deploy) — branch work/resumo-form-e-obrigatoriedade
+- **Encontrado em:** 2026-08-28 (auditoria da tela de obrigatoriedade)
+- **Descricao:** `isValueEmpty` (`lib/forms/party-required.ts`) considerava vazio apenas `undefined | null | "" | []`. O Zod da `.default(0)` a quase todo campo de dinheiro, entao o valor nasce zero e nunca fica `undefined`. `pagamento.valor_total` esta em TODOS os presets de venda e a exigencia jamais disparava: o formulario era concluido com valor total zero. O piso de locacao ja tratava `aluguel.valor` como vazio em `0`, mas com uma copia inline da regra (`LocacaoFormWizard.tsx`) — o mesmo campo era obrigatorio ou nao conforme o caminho que o checava.
+- **Impacto:** ALTO e silencioso — a obrigatoriedade configurada pela imobiliaria nao valia para nenhum campo de valor, nas duas esteiras.
+- **Solucao:** `isValueEmpty(raw, path?)` com `ZERO_IS_EMPTY_FIELDS` — lista curta e justificada (dinheiro, area, vigencia, taxas). `vagas_garagem: 0`, `caucao_meses: 0` e `isencao_multa_meses: 0` seguem sendo RESPOSTAS legitimas e ficam de fora. O piso de locacao passou a usar a mesma funcao. **Endurece** a exigencia: formularios que passavam com valor zero num campo marcado como obrigatorio deixam de passar — que e o que o admin pediu ao marca-lo.
+
+### [MEDIA] Tela de obrigatoriedade oferecia menos campos do que a rota aceita (e alguns que nao existem mais)
+- **Status:** corrigido no codigo (pendente deploy) — branch work/resumo-form-e-obrigatoriedade
+- **Encontrado em:** 2026-08-28
+- **Descricao:** Tres camadas desalinhadas: os presets fixos, a ALLOWLIST que `PATCH /api/org/form-settings` valida (`presets.ts`) e o CATALOGO que a tela exibe (`field-labels.ts`), este ultimo um subconjunto mantido a mao — 31 campos em venda e 37 em locacao. A etapa Comissao nao tinha um unico campo configuravel nas duas esteiras; garantia e encargos de locacao, endereco do conjuge e dados de recebimento das partes eram aceitos pela API e invisiveis na tela. `imovel.descricao` de locacao, que o proprio schema manda "exigir pelo preset da org", nao estava la. No sentido inverso, a allowlist aceitava paths ORFAOS — `foro` (saiu do formulario publico), `comissao.imobiliaria_*` (espelhos sem input), `status_propriedade`/`ocupacao` (default nao-vazio) e, em locacao, `assinatura.*`, `foro` e `vistoria_ref` (etapa removida em 2026-07-30) —, cada um capaz de criar uma pendencia insoluvel. `garantia.fiador.*` passava sem o remap PF/PJ e sem checar se a garantia e fianca.
+- **Impacto:** MEDIO — a imobiliaria nao conseguia exigir a maior parte dos campos que coleta, e conseguia exigir alguns impossiveis de preencher.
+- **Solucao:** o catalogo passou a ser DERIVADO da allowlist (135 campos em venda, 124 em locacao) — a segunda lista deixou de existir. Orfaos removidos, e o filtro por path conhecido passou a valer tambem na LEITURA, para que o que ja estava salvo nao trave formularios em circulacao. Teste-guarda de paridade em `lib/forms/__tests__/presets-catalog-parity.test.ts`.
+
+
 ### [ALTA] CPF/CNPJ MASCARADO gravado no formulario ao selecionar corretor cadastrado (locacao)
 - **Status:** corrigido no codigo (pendente deploy) — branch feat/form-fixes-ativa
 - **Encontrado em:** 2026-08-27 (auditoria do form apos a sessao com a corretora da RE/MAX Ativa em 25/08)

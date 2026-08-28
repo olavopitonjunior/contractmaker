@@ -24,6 +24,12 @@ interface CommissionerLookup {
   papel: string | null;
   email: string | null;
   phone: string | null;
+  /**
+   * Cadastro sem meio de repasse (`SplitRecipient.pendingFields` não vazio).
+   * Booleano derivado — o endpoint token-scoped NUNCA devolve os campos
+   * bancários em si.
+   */
+  receivingPending?: boolean;
 }
 
 const FORMA_COMISSAO_OPTIONS = [
@@ -46,10 +52,13 @@ export function ComissaoLocacaoStep({
   form,
   token,
   viewerIsMember = false,
+  requireCommissionerReceiving = false,
 }: {
   form: UseFormReturn<any>;
   token?: string;
   viewerIsMember?: boolean;
+  /** A imobiliária exige os dados de recebimento do corretor nesta etapa. */
+  requireCommissionerReceiving?: boolean;
 }) {
   const [lookupOpen, setLookupOpen] = useState(false);
   const [lookupQuery, setLookupQuery] = useState("");
@@ -263,6 +272,10 @@ export function ComissaoLocacaoStep({
                           email: r.email ?? "",
                           mobile_phone: r.phone ?? "",
                           forma_comissao: "percentual",
+                          // Estado do cadastro (booleano, nunca o dado
+                          // bancário): alimenta o gate de recebimento da
+                          // etapa quando a imobiliária o exige.
+                          recebimentoPendente: r.receivingPending === true,
                         });
                         toast.success(`${r.label} adicionado(a) como angariador(a).`);
                         setLookupOpen(false);
@@ -418,6 +431,7 @@ export function ComissaoLocacaoStep({
                     endpoint={`/api/forms/${token}/commissioners`}
                     papelDefault="captador"
                     showReceiving={viewerIsMember}
+                    required={requireCommissionerReceiving}
                   />
                 )}
               </div>

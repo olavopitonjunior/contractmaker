@@ -87,6 +87,7 @@ export function CadastroRecebimento({
   endpoint,
   papelDefault,
   showReceiving,
+  required = false,
 }: {
   form: UseFormReturn<any>;
   /** Prefixo RHF da linha, ex. `comissao.comissionados.0`. */
@@ -97,10 +98,18 @@ export function CadastroRecebimento({
   papelDefault: string;
   /** Visitante é membro da imobiliária — só então PIX/banco aparecem. */
   showReceiving: boolean;
+  /**
+   * A imobiliária exige estes dados para concluir a etapa
+   * (OrgFormSettings.requireCommissionerReceiving). Abre o bloco já expandido e
+   * destaca o botão — o padrão fechado escondia o passo de quem precisava dele.
+   */
+  required?: boolean;
 }) {
   const [saving, setSaving] = useState(false);
   const [requesting, setRequesting] = useState(false);
-  const [open, setOpen] = useState(false);
+  // Aberto de saída quando a imobiliária exige os dados: o bloco fechado, atrás
+  // de um botão discreto, era o motivo de o passo passar despercebido.
+  const [open, setOpen] = useState(required);
   const [receb, setReceb] = useState<RecebimentoState>(EMPTY_RECEBIMENTO);
   const fieldId = useId();
 
@@ -210,6 +219,12 @@ export function CadastroRecebimento({
       if (recipientId) {
         form.setValue(`${basePath}.splitRecipientId`, recipientId, { shouldDirty: true });
       }
+      // Booleano de ESTADO — o gate da etapa (quando a imobiliária exige os
+      // dados de recebimento) precisa saber se sobrou pendência. O dado
+      // bancário em si continua fora do formulário.
+      form.setValue(`${basePath}.recebimentoPendente`, data?.isDraft === true, {
+        shouldDirty: true,
+      });
       // Some da tela: o dado agora vive no cadastro, e este formulário não é
       // lugar pra guardar chave PIX/conta.
       setReceb(EMPTY_RECEBIMENTO);
@@ -279,10 +294,21 @@ export function CadastroRecebimento({
   return (
     <div className="pt-2 border-t border-dashed space-y-3">
       {showReceiving && (
-        <div className="flex items-center justify-between flex-wrap gap-2">
+        <div
+          className={
+            required
+              ? "flex items-center justify-between flex-wrap gap-2 rounded-md border border-primary/40 bg-primary/5 p-3"
+              : "flex items-center justify-between flex-wrap gap-2"
+          }
+        >
           <div>
             <p className="text-sm font-semibold flex items-center gap-1.5">
               <Landmark className="h-4 w-4" /> Dados para recebimento da comissão
+              {required && (
+                <span className="text-xs font-normal text-primary">
+                  · obrigatório
+                </span>
+              )}
             </p>
             <p className="text-xs text-muted-foreground">
               Chave PIX habilita o repasse automático. Vão direto pro cadastro da
@@ -293,7 +319,7 @@ export function CadastroRecebimento({
           <Button
             type="button"
             size="sm"
-            variant={open ? "ghost" : "outline"}
+            variant={open ? "ghost" : "default"}
             onClick={() => setOpen((v) => !v)}
           >
             <Landmark className="h-3.5 w-3.5 mr-1.5" />

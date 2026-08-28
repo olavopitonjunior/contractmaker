@@ -13,8 +13,16 @@ import { ComissaoLocacaoCard } from "@/components/locacao/ComissaoLocacaoCard";
 import type { ComissaoLocacaoValue } from "@/components/locacao/ComissaoLocacaoSection";
 import { formPublicPath } from "@/lib/forms/form-url";
 import { formatMoneyBR } from "@/lib/format/money";
+import { FormSummarySections } from "@/components/forms/FormSummarySections";
+import type { SummarySection } from "@/lib/forms/negotiation-summary";
 
 interface LocacaoDadosTabProps {
+  /**
+   * Resumo consolidado (as MESMAS seções do PDF). Os cards acima seguem como
+   * visão rápida; este bloco garante que nenhum campo preenchido no formulário
+   * fique invisível na tela — que era a queixa da corretora.
+   */
+  summarySections?: SummarySection[];
   dealId: string;
   dataJson: Record<string, unknown>;
   formToken: string | null;
@@ -91,6 +99,7 @@ function Field({ label, value }: { label: string; value: string | null | undefin
  * editor estruturado inline fica como follow-up.
  */
 export function LocacaoDadosTab({
+  summarySections,
   dealId,
   dataJson,
   formToken,
@@ -154,6 +163,7 @@ export function LocacaoDadosTab({
           </CardContent>
         </Card>
         {comissaoCard}
+        <FormSummarySections sections={summarySections ?? []} />
       </div>
     );
   }
@@ -303,6 +313,11 @@ export function LocacaoDadosTab({
       </div>
 
       {comissaoCard}
+
+      <FormSummarySections
+        sections={summarySections ?? []}
+        description="Tudo o que foi preenchido no formulário — o mesmo conteúdo do PDF do resumo."
+      />
 
       {formToken && (
         <>

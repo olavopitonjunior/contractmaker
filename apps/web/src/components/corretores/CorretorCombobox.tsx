@@ -25,6 +25,12 @@ export interface CorretorComboboxOption {
   papel?: string | null;
   email?: string | null;
   phone?: string | null;
+  /**
+   * Cadastro sem meio de repasse (`SplitRecipient.pendingFields` não vazio).
+   * Booleano derivado — o endpoint token-scoped NUNCA devolve os campos
+   * bancários em si.
+   */
+  receivingPending?: boolean;
 }
 
 interface CorretorComboboxProps {

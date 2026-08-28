@@ -24,6 +24,7 @@ interface FormPageClientProps {
    * com o cliente, que não deve ver nem uma coisa nem outra.
    */
   viewerIsMember?: boolean;
+  requireCommissionerReceiving?: boolean;
   /** Logo da imobiliária (BrandingSettings.logoUrl). Ausente = marca do produto. */
   brandLogoUrl?: string | null;
   brandDisplayName?: string | null;
@@ -39,6 +40,7 @@ export function FormPageClient({
   proposalAttachmentUrl,
   locked,
   viewerIsMember,
+  requireCommissionerReceiving,
   brandLogoUrl,
   brandDisplayName,
 }: FormPageClientProps) {
@@ -76,6 +78,7 @@ export function FormPageClient({
             garantiaOptions={garantiaOptions}
             readOnly={locked}
             viewerIsMember={viewerIsMember}
+            requireCommissionerReceiving={requireCommissionerReceiving}
           />
         ) : (
           <SalesFormWizard
@@ -86,6 +89,7 @@ export function FormPageClient({
             proposalAttachmentUrl={proposalAttachmentUrl}
             readOnly={locked}
             viewerIsMember={viewerIsMember}
+            requireCommissionerReceiving={requireCommissionerReceiving}
           />
         )}
       </main>

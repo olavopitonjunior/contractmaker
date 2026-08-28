@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { LocacaoDealDetail } from "@/components/locacao/LocacaoDealDetail";
+import { buildConsolidatedFormSummary } from "@/lib/forms/form-summary";
 import { LOCACAO_SIMPLIFIED_MODE } from "@/lib/env/staging";
 import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
 import { loadOrgLocacaoDefaults } from "@/lib/contracts/org-defaults";
@@ -218,8 +219,18 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
   // Datas-marco do funil — regra canônica em lib/pipeline/deal-dates.ts.
   const milestones = serializeDealMilestones(deal);
 
+  // Mesmas seções que vão pro PDF e pro e-mail do resumo. O builder é puro
+  // (sem DB, sem rede) e roda aqui pra que a aba Dados e o PDF nunca mais
+  // divirjam — era a queixa: campo preenchido no formulário que não aparecia
+  // em lugar nenhum da tela.
+  const formSummarySections = buildConsolidatedFormSummary(
+    (deal.form?.dataJson as Record<string, unknown> | null) ?? null,
+    { schemaType: deal.form?.schemaType ?? null }
+  );
+
   return (
     <LocacaoDealDetail
+      formSummarySections={formSummarySections}
       surveysEnabled={surveysEnabled}
       orgDefaults={orgDefaults}
       deal={{
