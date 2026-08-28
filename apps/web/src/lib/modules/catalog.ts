@@ -36,6 +36,7 @@ export const FEATURE = {
   VENDAS_PROPOSTAS: "vendas.propostas",
   VENDAS_PESQUISAS: "vendas.pesquisas",
   VENDAS_INGESTAO_ACERVO: "vendas.ingestao_acervo",
+  VENDAS_REVISAO_CONTRATO: "vendas.revisao_contrato",
 
   // Módulo Locação
   LOCACAO_PIPELINE: "locacao.pipeline",
@@ -52,6 +53,7 @@ export const FEATURE = {
   LOCACAO_PROPOSTAS: "locacao.propostas",
   LOCACAO_PESQUISAS: "locacao.pesquisas",
   LOCACAO_INGESTAO_ACERVO: "locacao.ingestao_acervo",
+  LOCACAO_REVISAO_CONTRATO: "locacao.revisao_contrato",
 } as const;
 
 export type FeatureKey = (typeof FEATURE)[keyof typeof FEATURE];
@@ -94,6 +96,16 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
         label: "Ingestão de acervo em lote — vendas",
         default: false,
       },
+      // Revisor pós-geração de contrato (Workstream B): confere o documento
+      // gerado contra o plano de geração + dados do form e aponta divergências
+      // como ContractComment (só avisa, nunca trava /approve). ON por padrão
+      // (decisão do dono, 28/08/2026, mesma lógica da ingestão): suggest-only
+      // com cap de custo diário por org (CONTRACT_REVIEW_DAILY_MAX_USD).
+      {
+        key: FEATURE.VENDAS_REVISAO_CONTRATO,
+        label: "Revisão pós-geração de contrato — vendas",
+        default: true,
+      },
     ],
   },
   {
@@ -121,6 +133,13 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
         // ON por padrão desde a entrega da Ativa (27/08/2026): é o caminho
         // padrão de onboarding. Suggest-only + cap de custo por lote — nada
         // nasce ativo e nenhum tenant paga análise sem subir arquivos.
+        default: true,
+      },
+      // Revisor pós-geração — mesma feature do lado locação (ver o comentário
+      // na chave de vendas).
+      {
+        key: FEATURE.LOCACAO_REVISAO_CONTRATO,
+        label: "Revisão pós-geração de contrato — locação",
         default: true,
       },
     ],
@@ -220,6 +239,17 @@ export const INGESTION_FEATURES: readonly FeatureKey[] = [
   FEATURE.VENDAS_INGESTAO_ACERVO,
   FEATURE.LOCACAO_INGESTAO_ACERVO,
 ];
+
+/**
+ * Feature do revisor pós-geração por `Deal.kind` — uma chave por módulo, como
+ * o Newton/Propostas. A revisão é disparada pelo hook da geração, que já sabe
+ * o kind do deal; não há caso transversal como o da ingestão.
+ */
+export function reviewFeatureForDealKind(kind: string): FeatureKey {
+  return kind === "locacao"
+    ? FEATURE.LOCACAO_REVISAO_CONTRATO
+    : FEATURE.VENDAS_REVISAO_CONTRATO;
+}
 
 /** Definição completa de um módulo. */
 export function moduleDef(module: ModuleKey): ModuleDef {

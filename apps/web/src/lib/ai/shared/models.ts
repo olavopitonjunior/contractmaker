@@ -51,6 +51,22 @@ export const INGEST_PLAN_MODEL = "claude-opus-4-8";
 export const INGEST_ESCALATION_MODEL = "claude-opus-5";
 
 /**
+ * Revisor pós-geração de contrato (Workstream B) — uma chamada por contrato
+ * GERADO, com a flag ON por padrão para todos os tenants.
+ *
+ * Sonnet 5, e não Haiku/Opus (decisão do dono, 28/08/2026, com a tabela de
+ * preços na mesa): mais capaz E mais barato que o Sonnet 4.6 (US$2/US$10 por
+ * MTok), ~US$0,03-0,04 por revisão — e coerência jurídica pede julgamento que
+ * o Haiku não entrega. Roda pelo cliente de anthropic-structured (zero
+ * sampling params), então a família 5 é segura aqui.
+ *
+ * Override por env `CONTRACT_REVIEW_MODEL` (resolvido com `resolveModel` no
+ * call-site). Trocar o ID exige entrada no `PRICING` de lib/ai/usage.ts —
+ * modelo fora da tabela grava custo zero e DESLIGA o cap diário em silêncio.
+ */
+export const CONTRACT_REVIEW_MODEL = "claude-sonnet-5";
+
+/**
  * Modelos aposentados/deprecados → substituto atual. A Anthropic retorna 404
  * pra IDs aposentados (visto em prod 2026-07-15: auto-analyze quebrou com
  * claude-sonnet-4-20250514). O ID antigo pode sobreviver em 3 lugares que

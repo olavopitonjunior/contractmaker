@@ -1,0 +1,14 @@
+-- Workstream B (revisor pós-geração) — materializa o plano de geração.
+--
+-- Até aqui, o que a geração DECIDIA se perdia no retorno: `garantiaMatched` e
+-- o `templateNotice` (D16) só existiam no corpo do 201 e viravam toast; o
+-- resultado completo do `resolveClauseSlots` (`resolved[]`/`failures[]`, com
+-- knowledgeItemId, source knowledge|fallback, fromPlatform e a razão de cada
+-- descarte) era destruturado fora e morria num console.error. Nenhum registro
+-- em banco dizia QUAL cláusula foi eleita para o slot nem por quê.
+--
+-- `generationPlanJson` congela essa decisão no momento da geração — é o
+-- ground truth contra o qual o revisor pós-geração confere o documento.
+-- Nullable: contratos anteriores à feature e importados (templateId NULL)
+-- ficam sem plano e o revisor pula as checagens que dependem dele.
+ALTER TABLE "Contract" ADD COLUMN "generationPlanJson" JSONB;
