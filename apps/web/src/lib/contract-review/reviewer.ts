@@ -31,6 +31,10 @@ export const REVIEW_MAX_TOKENS = 3000;
  *  aviso no fim — contrato de locação/CCV real fica muito abaixo. */
 export const REVIEW_DOC_TEXT_CAP = 60_000;
 
+// Subconjunto ACEITO de JSON Schema do output_config (ver
+// lib/ai/shared/schema-lint.ts): nada de maxItems/maxLength (400 real em
+// staging, req_011CeUHW9zfUz84zouVdXdFY), todo campo em required, ausência
+// como null. Os limites de quantidade/tamanho são cobrados pelo guardrail.
 export const REVIEW_OUTPUT_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
@@ -42,18 +46,18 @@ export const REVIEW_OUTPUT_SCHEMA: Record<string, unknown> = {
     },
     findings: {
       type: "array",
-      maxItems: 8,
+      description: "No máximo 6 achados — priorize os mais graves.",
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["category", "severity", "title", "finding", "selectedText"],
+        required: ["category", "severity", "title", "finding", "selectedText", "expected", "suggestedFix"],
         properties: {
           category: {
             type: "string",
             enum: ["dados_form", "coerencia_juridica", "estrutura_documento"],
           },
           severity: { type: "string", enum: ["info", "warning"] },
-          title: { type: "string", maxLength: 80 },
+          title: { type: "string", description: "Título curto (até 80 caracteres)." },
           finding: {
             type: "string",
             description: "A divergência, citando o valor do formulário e o do texto.",
@@ -62,10 +66,13 @@ export const REVIEW_OUTPUT_SCHEMA: Record<string, unknown> = {
             type: "string",
             description: "Citação LITERAL do contrato (15-240 caracteres).",
           },
-          expected: { type: "string" },
+          expected: {
+            type: ["string", "null"],
+            description: "O que o formulário/plano diz. Null quando não se aplica.",
+          },
           suggestedFix: {
-            type: "string",
-            description: "Onde o operador corrige — nunca redação de cláusula.",
+            type: ["string", "null"],
+            description: "Onde o operador corrige — nunca redação de cláusula. Null quando não há ação clara.",
           },
         },
       },
