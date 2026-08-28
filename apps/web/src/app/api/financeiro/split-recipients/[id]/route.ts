@@ -142,12 +142,20 @@ export async function PATCH(
   if (typeof patchData.email === "string") {
     patchData.email = normalizeEmail(patchData.email);
   }
-  // Reativar desarquiva. Sem isto, "Reativar" na tela devolvia `active: true` e
-  // o cadastro continuava sumido do picker do formulário, que agora filtra por
-  // `archivedAt` — o admin veria o corretor reativado e o corretor seguiria
-  // invisível, que é a mesma queixa por outro caminho.
+  // Desativar/reativar pela tela `/corretores` mexe em `archivedAt` junto.
+  //
+  // É o par que mantém as duas telas coerentes. "Desativar" ali é a ação de
+  // tirar o corretor de circulação (usa PATCH, não o DELETE), e antes disso
+  // valer para `archivedAt` o corretor sumia das cobranças mas CONTINUAVA
+  // oferecido no picker do formulário — o inverso exato da queixa que o
+  // `archivedAt` veio resolver. "Reativar" desfaz os dois.
+  //
+  // Só esta tela manda `active` no PATCH; o sheet de edição não o inclui, então
+  // salvar um cadastro não o arquiva por acidente.
   if (patchData.active === true) {
     (patchData as { archivedAt?: Date | null }).archivedAt = null;
+  } else if (patchData.active === false) {
+    (patchData as { archivedAt?: Date | null }).archivedAt = new Date();
   }
 
   // Dedupe no PATCH: o partial unique do banco só cobre commissioners ATIVOS —

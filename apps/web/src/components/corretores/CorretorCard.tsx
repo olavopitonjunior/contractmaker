@@ -47,7 +47,10 @@ export function CorretorCard({
 }: CorretorCardProps) {
   // `pendingFields` é sempre sobre dados de RECEBIMENTO — só é motivo de
   // alarme visual quando a lente de pagadoria está ligada na org.
-  const paymentPending = !c.active && (c.pendingFields ?? []).length > 0;
+  // Cadastro desativado não é "pendente de dados bancários" — o alerta amarelo
+  // pedindo para completar o repasse não cabe em quem foi tirado de circulação.
+  const paymentPending =
+    !c.archivedAt && !c.active && (c.pendingFields ?? []).length > 0;
   const showPaymentAlert = pagadoriaEnabled && paymentPending;
   const hasContact = Boolean(c.email || c.phone);
   const silenced = c.notifyOptOut;

@@ -29,6 +29,22 @@ function recipient(over: Record<string, unknown>) {
 describe("resolveDealBrokers — comissionados do form × registry", () => {
   beforeEach(() => vi.clearAllMocks());
 
+  it("o roster consultado exclui corretor EXCLUÍDO, e só ele", async () => {
+    // Corretor tirado de circulação não recebe aviso de processo. `active`
+    // continua de fora de propósito: quem está sem chave PIX segue tendo
+    // direito de saber que o contrato foi assinado — os dois sentidos moravam
+    // no mesmo booleano até 08/2026, e excluir não silenciava nada.
+    rosterFind.mockResolvedValue([]);
+    await resolveDealBrokers({
+      orgId: "org1",
+      formDataJson: { comissao: { comissionados: [{ nome: "Alguém" }] } },
+      brokerIds: [],
+    });
+    expect(rosterFind).toHaveBeenCalledWith({
+      where: { orgId: "org1", kind: "commissioner", archivedAt: null },
+    });
+  });
+
   it("match por splitRecipientId explícito", async () => {
     rosterFind.mockResolvedValue([recipient({})]);
     const out = await resolveDealBrokers({

@@ -31,6 +31,12 @@ formulário.
 - **O bloco de dados bancários nasce aberto e marcado** quando a imobiliária exige, sem botão de mostrar/ocultar — recolhido atrás de um botão discreto era o motivo de o passo passar despercebido.
 - **Textos de split saíram da UI** (o módulo não entra agora): configurações do formulário, formulário público e telas financeiras passam a falar "repasse". Só texto visível — `SplitRecipient`, `splitJson` e `/api/financeiro/split-recipients` continuam com o nome que têm.
 
+- **`archivedAt` vale em todas as superfícies que decidem se o corretor está em circulação**, não só no picker. Introduzir a coluna e parar no formulário deixaria o sentido novo valendo num lugar e em nenhum outro:
+  - **"Desativar" em `/corretores` passa a arquivar.** A tela usa PATCH, não o DELETE — sem isto o corretor sairia das cobranças e **continuaria oferecido no formulário**, o inverso exato da queixa que originou a coluna. "Reativar" desfaz os dois. É o único PATCH que manda `active`; o sheet de edição não o inclui, então salvar um cadastro não o arquiva por acidente.
+  - **Notificações do processo** (`resolveDealBrokers` e o inverso que o Max usa) passam a excluir arquivado. Excluir um corretor não silenciava nada — o resolvedor ignora `active` de propósito, porque quem está sem chave PIX segue tendo direito de saber que o contrato foi assinado. Era um defeito que só ficou corrigível quando os dois sentidos se separaram.
+  - **Anexar corretor a negócio ou formulário novo** (`brokerIds` do painel de notificações e o pré-seed de `POST /api/forms`) rejeita arquivado — semeá-lo o ressuscitaria pela porta dos fundos.
+  - **A tela `/corretores` reclassifica:** "Inativos" passa a ser quem foi desativado, não quem está sem meio de repasse. Um rascunho desativado caía em "Pendentes", com alerta amarelo pedindo para completar o cadastro de alguém que já tinha sido tirado de circulação.
+
 ### Nota — formulários em circulação
 
 Até esta mudança os dados bancários viviam SÓ no `SplitRecipient` e o `dataJson` guardava apenas o booleano `recebimentoPendente`. O gate aceita as duas fontes (`linhaSatisfeita`): sem isso, todo formulário aberto antes de 28/08 passaria a acusar pendência num dado que de fato existe, travando negócio em andamento por causa do formato novo. E a linha com `splitRecipientId` mas sem `recebimento` no `dataJson` é reidratada do cadastro na abertura, para membro — senão o bloco apareceria vazio e "obrigatório" para quem já tinha informado tudo.

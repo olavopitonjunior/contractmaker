@@ -170,6 +170,9 @@ export async function POST(request: NextRequest) {
                 id: { in: body.corretorIds },
                 orgId: auth.org.id,
                 kind: "commissioner",
+                // Pré-semear um formulário novo com corretor excluído o
+                // ressuscitaria pela porta dos fundos.
+                archivedAt: null,
               },
             })
           : [];
