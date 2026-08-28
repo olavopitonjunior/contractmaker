@@ -39,6 +39,9 @@ export const PRICING: Record<string, ModelPricing> = {
   // o `effort` no 4.8 antes de trocar de modelo: mesma fatura, mais raciocínio.
   "claude-opus-5": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
   "claude-opus-4-8": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  // Revisor pós-geração de contrato (CONTRACT_REVIEW_MODEL). Preço de tabela
+  // em 2026-08-28 — mais barato que o Sonnet 4.6, apesar de mais novo.
+  "claude-sonnet-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   // Alias sem sufixo de data do mesmo Haiku 4.5 da linha acima — a API atual
   // aceita os dois IDs, e a coluna `model` do AIUsage grava o que foi enviado.
   "claude-haiku-4-5": { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
@@ -253,6 +256,11 @@ export type AIOperation =
   // um plano que precisou ser refeito.
   | "ingest_classify"
   | "ingest_plan"
+  // Revisor pós-geração de contrato (Workstream B): uma chamada por contrato
+  // gerado, conferindo o documento contra o plano de geração + dados do form.
+  // Operação própria: somada em passive_*, o painel não separaria o custo do
+  // revisor (toda geração) do da análise passiva (todo open/edit).
+  | "contract_review"
   // Agente externo (Max, LangGraph fora deste repo) reportando o próprio turn
   // por `POST /api/agents/usage`. O custo dele roda em infra nossa e some do
   // painel se não voltar por aqui.
