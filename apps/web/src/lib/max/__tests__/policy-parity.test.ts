@@ -29,7 +29,10 @@ import { POLITICA_VAZIA, type MaxPolicyDTO } from "../policy";
  * Duas correções que o code review exigiu, e as duas valem registro porque um
  * vetor normativo errado congela o erro nos DOIS repos:
  *
- * 1. **As chaves de `byRole` são valores reais de `OrgMembership.role`** —
+ * 1. **As chaves de `byRole` são CHAVES DE POLÍTICA** — o preset, ou
+ *    `custom:<CustomRole.id>` para papel customizado de tenant, emitido pelo
+ *    `GET /api/agents/user-scope`. `custom` cru e `custom:<id>` são chaves
+ *    DISTINTAS. Antes este texto dizia "valores reais de `OrgMembership.role`" —
  *    `owner | admin | finance | sales | viewer | custom | member`
  *    (`schema.prisma`). A primeira versão usava `"manager"`, que não existe
  *    naquele enum: um vetor assim passa nos testes e mente sobre o contrato.
@@ -42,6 +45,9 @@ export const VETOR_POLITICA = {
   byRole: {
     admin: ["deal.list", "deal.pending"],
     sales: ["deal.list", "deal.detail", "proposal.list"],
+    // Papel customizado de tenant. A chave carrega o `CustomRole.id` — o
+    // literal `custom` sozinho alcançaria todos os papéis customizados da casa.
+    "custom:cr_estagiario": ["deal.pending"],
   },
   byRecipient: {
     sr_wesley: { allow: ["deal.list"], deny: ["deal.detail"] },
@@ -110,7 +116,8 @@ describe("paridade do contrato da política (lado ImobPro)", () => {
    */
   it("serializa exatamente assim", () => {
     expect(JSON.stringify(VETOR_POLITICA)).toBe(
-      '{"byRole":{"admin":["deal.list","deal.pending"],"sales":["deal.list","deal.detail","proposal.list"]},' +
+      '{"byRole":{"admin":["deal.list","deal.pending"],"sales":["deal.list","deal.detail","proposal.list"],' +
+        '"custom:cr_estagiario":["deal.pending"]},' +
         '"byRecipient":{"sr_wesley":{"allow":["deal.list"],"deny":["deal.detail"]}},' +
         '"brokerDefault":["deal.pending"]}'
     );
