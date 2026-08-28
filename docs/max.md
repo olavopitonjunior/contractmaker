@@ -188,6 +188,7 @@ produto: **notificação de sistema por e-mail passa a sair de madrugada**.
 | `GET /api/agents/profile?agentKey=max` | `agents:r` | 1 — modelo, `ragScope`, budget, kill switch · **F5: `maxPolicy`** (§11) |
 | `POST /api/agents/usage` | `agents:rw` (**só Bearer**) | 2 — custo por turn, uma linha **por modelo**. Aceita `costUsd` do provedor quando `provider: "openrouter"` (§9.1) |
 | `POST /api/agents/scope-query` | `agents:rw` (**só Bearer**) | 5 — leitura de negócio com projeção por sujeito (§12). **Sem consumidor até o PR 6** |
+| `GET /api/agents/user-scope?phone=` | `agents:r` | 6 — **chave de política** do usuário, fresca e ciente de papel customizado (§13) |
 | `POST /api/agents/knowledge/search` | `agents:r` | 2 — RAG escopado pelo `ragScope` do perfil |
 | `GET /api/users/by-phone?phone=` | `metrics:r` | 1 — telefone → org/usuário |
 | `POST /api/forms` | `documents:rw` | 3 — form de vendas (já existia) |
@@ -528,15 +529,19 @@ existe.
 São valores de `OrgMembership.role`: `owner | admin | finance | sales | viewer |
 custom | member`.
 
-⚠️ **Papel customizado de tenant carrega o literal `custom`**, com as permissões
-reais em `customRoleId → CustomRole.permissions` — e o `by-phone` **não devolve
-`customRoleId`**. Consequência prática: um tenant com um "Estagiário" e um
-"Diretor" customizados não consegue dar tetos diferentes aos dois; configurar
-`byRole.custom` alcança os dois.
+✅ **RESOLVIDO — as chaves ganharam a forma `custom:<CustomRole.id>`** (§13).
 
-Não bloqueia esta entrega (nada consome a política ainda), mas está congelado no
-contrato e precisa de decisão antes das leituras de negócio: ou o `by-phone`
-passa a devolver `customRoleId`, ou as chaves ganham a forma `custom:<id>`.
+O problema era: `OrgMembership.role` grava o literal `custom` para TODO papel
+customizado, com as permissões reais em `customRoleId`. Um tenant com um
+"Estagiário" e um "Diretor" não conseguia dar tetos diferentes aos dois. Pior,
+o usuário de serviço do próprio Max tem `role = "custom"` (o `upsertMaxRole`
+cria um `CustomRole` "Max (agente)" por org), então aquela chave já estava
+ocupada antes de existir papel customizado humano.
+
+Quem emite a chave é o `GET /api/agents/user-scope`, e **o `by-phone` não
+mudou** — ele tem outros consumidores (duas MCP tools, contrato no
+`openapi.json`). ⚠️ `custom` cru e `custom:<id>` são chaves **DISTINTAS** e não
+se alcançam.
 
 ### 11.4 A política NUNCA alarga — com duas ressalvas
 
@@ -704,3 +709,75 @@ o combinado). Uma metade sozinha não pega divergência.
 
 A comparação é de **fio, byte a byte** — o corpo HTTP preserva ordem de chave,
 ao contrário de `jsonb`.
+
+
+## 13. `GET /api/agents/user-scope` — a chave de política, fresca
+
+**O que resolve.** O Max carregava `role` no candidato de identidade, e isso
+tinha dois defeitos que eram o mesmo defeito: um atributo de autorização
+derivado, transportado e guardado por quem não pode mantê-lo correto.
+
+| defeito | como se manifestava |
+|---|---|
+| **Congelava** | O candidato é gravado na `phone_org_choice`, que **não tem TTL** — é escolha da pessoa, não cache. O papel travava na hora da PERGUNTA de desambiguação: rebaixar alguém na plataforma **não revogava** o que o Max oferecia. |
+| **Não distinguia papel customizado** | Todo papel customizado vira o literal `custom` em `OrgMembership.role`. Ver §11.3. |
+
+### 13.1 Contrato
+
+```jsonc
+// GET /api/agents/user-scope?phone=%2B5511987654321
+{ "userId": "cm...", "roleKey": "sales" }
+{ "userId": "cm...", "roleKey": "custom:cmxyz..." }   // papel customizado
+{ "userId": "cm...", "roleKey": null }                // membership degenerada
+```
+
+**Auth:** Bearer `agents:r` + `maxAgentRouteGate` — igual ao `broker-scope`.
+**400** para telefone não normalizável; **404** para desconhecido, apagado ou de
+outro tenant (um 404 só: distinguir confirmaria a existência do cadastro).
+
+### 13.2 O que ela NÃO faz, de propósito
+
+**Não resolve capabilities.** O catálogo é canônico em
+`max-agent/src/graph/policy.ts`, e uma segunda lista aqui existiria para
+divergir (§11.2) — obrigaria deploy coordenado a cada capability nova. O
+servidor emite a **chave**; a álgebra da política (deny vence allow, capability
+desconhecida ignorada) fica com uma implementação só, do outro lado.
+
+**Não substitui o `/api/users/by-phone`.** Aquela rota tem outros consumidores
+e **seu shape não mudou**. As duas compartilham a mesma resolução
+(`lib/max/user-identity.ts`), extraída para não divergirem em silêncio — o que
+divergiria é a política de 404, que é decisão de segurança.
+
+### 13.3 A chave é o ID, não o nome
+
+`CustomRole` tem `@@unique([orgId, name])`, e o nome seria mais legível — mas
+renomear o papel apagaria a configuração em silêncio. Chave por id sobrevive à
+renomeação; **a tela resolve o id para o nome na hora de exibir**, que é onde a
+legibilidade importa. O editor da política (PR 6) deve fazer isso.
+
+`roleKey: null` é **fail-closed** e é o caso degenerado de propósito: `role` é
+`String` livre no banco, então existe linha com `role: "custom"` e
+`customRoleId` nulo. Devolver `"custom"` ali faria essa pessoa herdar o que quer
+que a org conceda a papéis customizados.
+
+### 13.4 Degradação: menor privilégio, nunca o último valor conhecido
+
+Buscar por turn troca "papel congelado" por "papel indisponível". Rota fora do
+ar, org sem config ou telefone que não resolve caem em `null` → **nenhuma
+capability**. Guardar o último valor conhecido para usar na falha
+reintroduziria exatamente o congelamento que esta entrega remove, e com pior
+sincronismo.
+
+O teste que trava isso é `max-agent/src/lib/__tests__/cm-role-key.test.ts`, e
+ele existe por um motivo que vale registrar: todo teste que passa pelo `gate`
+mocka `@/lib/cm` inteiro, então o corpo de `chaveDePolitica` **nunca rodava**.
+Uma versão anterior desta seção já afirmava "há teste travando isso" quando o
+que existia era só um teste de que `resolverPolitica` reage a um `null`
+fabricado à mão — outra coisa. Inverter o `!res.ok` ou deixar de capturar o
+timeout não deixaria nada vermelho.
+
+### 13.5 Paridade
+
+O vetor fixo dos dois lados (§11.5) ganhou uma chave `custom:cr_estagiario`, com
+asserção de que ela é lida **e** de que `custom` cru não a alcança. Sem a
+segunda metade, o vetor carregaria a chave nova sem provar nada.
