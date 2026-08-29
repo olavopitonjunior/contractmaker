@@ -59,7 +59,22 @@ function sanitizePapel(raw: string | null | undefined): string | null {
  */
 export async function findCommissionerMatch(
   orgId: string,
-  input: CommissionerInput
+  input: CommissionerInput,
+  opts?: {
+    /**
+     * Cadastros que o USUÁRIO já disse não serem a mesma pessoa, no diálogo de
+     * duplicidade. Sem isto, o "Não, é outra" era desfeito aqui: o servidor
+     * reaplicava o match por e-mail/telefone/nome, achava o mesmo cadastro e
+     * devolvia `existed: true` — a linha ficava vinculada justamente a quem o
+     * usuário acabara de recusar. Achado no smoke de staging em 28/08.
+     *
+     * NÃO afrouxa o dedupe por DOCUMENTO: mesmo CPF/CNPJ é a mesma pessoa
+     * jurídica ou natural, e o partial unique do banco continua barrando. O que
+     * a recusa dispensa são os sinais mais fracos, que podem coincidir
+     * legitimamente (e-mail e telefone de imobiliária, homônimos).
+     */
+    ignorarIds?: readonly string[];
+  }
 ): Promise<SplitRecipient | null> {
   if (input.splitRecipientId) {
     const byId = await prisma.splitRecipient.findFirst({
@@ -68,11 +83,16 @@ export async function findCommissionerMatch(
     if (byId) return byId;
   }
 
+  const ignorados = opts?.ignorarIds?.length ? [...opts.ignorarIds] : null;
   const base = {
     orgId,
     kind: "commissioner",
     archivedAt: null,
   } satisfies Prisma.SplitRecipientWhereInput;
+  // O documento é identidade forte e ignora a recusa; os demais sinais, não.
+  const baseFraco: Prisma.SplitRecipientWhereInput = ignorados
+    ? { ...base, id: { notIn: ignorados } }
+    : base;
   // Cadastro pagável ganha do rascunho; empate pelo mais antigo.
   const preferencia = [{ active: "desc" as const }, { createdAt: "asc" as const }];
 
@@ -88,7 +108,7 @@ export async function findCommissionerMatch(
   const email = normalizeEmail(input.email);
   if (email) {
     const byEmail = await prisma.splitRecipient.findFirst({
-      where: { ...base, email },
+      where: { ...baseFraco, email },
       orderBy: preferencia,
     });
     if (byEmail) return byEmail;
@@ -99,7 +119,7 @@ export async function findCommissionerMatch(
   const phone = normalizePhoneForStorage(input.mobile_phone, { soft: true }).value;
   if (phone && phone.replace(/\D/g, "").length >= 10) {
     const byPhone = await prisma.splitRecipient.findFirst({
-      where: { ...base, phone },
+      where: { ...baseFraco, phone },
       orderBy: preferencia,
     });
     if (byPhone) return byPhone;
@@ -111,7 +131,7 @@ export async function findCommissionerMatch(
     // normalização (diacríticos/espaços) em código. Roster de corretores é
     // pequeno (dezenas), o take cobre com folga.
     const candidates = await prisma.splitRecipient.findMany({
-      where: base,
+      where: baseFraco,
       orderBy: preferencia,
       take: 200,
     });

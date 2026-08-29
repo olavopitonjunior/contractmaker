@@ -286,6 +286,10 @@ const createSchema = z.object({
     .optional()
     .or(z.literal("")),
   phone: z.string().trim().max(30).optional(),
+  // Cadastros que o usuário recusou no diálogo "é a mesma pessoa?". Sem isto o
+  // "Não, é outra" era desfeito no servidor, que reaplicava o match por
+  // e-mail/telefone/nome e devolvia justamente quem foi recusado.
+  ignorarIds: z.array(z.string().trim().min(1).max(40)).max(10).optional(),
   // Dados de recebimento (opcionais — quando faltam, vira rascunho)
   pix: z
     .object({
@@ -406,7 +410,9 @@ export async function POST(
     creci: data.creci ?? null,
     papel: data.papel,
   };
-  const preexisting = await findCommissionerMatch(form.orgId, registryInput);
+  const preexisting = await findCommissionerMatch(form.orgId, registryInput, {
+    ignorarIds: data.ignorarIds,
+  });
   if (preexisting) {
     // Cadastro que JÁ existe. A regra depende de quem está preenchendo:
     //
@@ -516,7 +522,9 @@ export async function POST(
       // Corrida: outra criação venceu (partial unique de cpfCnpj, walletId
       // ou pixAddressKey). Retornar o existente pra UI prosseguir sem erro.
       const existing =
-        (await findCommissionerMatch(form.orgId, registryInput)) ??
+        (await findCommissionerMatch(form.orgId, registryInput, {
+          ignorarIds: data.ignorarIds,
+        })) ??
         (data.pix?.chave
           ? await prisma.splitRecipient.findFirst({
               where: { orgId: form.orgId, pixAddressKey: data.pix.chave },

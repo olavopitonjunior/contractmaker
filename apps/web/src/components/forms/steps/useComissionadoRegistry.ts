@@ -161,6 +161,10 @@ export function useComissionadoRegistry({
     (v: ReturnType<typeof ler>) => {
       const chavePix = texto(v.recebimento?.pix_chave);
       return {
+        // Quem o usuário já recusou no diálogo vai junto: o POST refaz o match
+        // no servidor e, sem esta lista, devolveria justamente o cadastro que
+        // acabou de ser recusado — desfazendo o "Não, é outra".
+        ignorarIds: Array.from(dispensados.current),
         label: v.nome,
         tipoPessoa: v.tipoPessoa,
         cpfCnpj: v.docDigits.length === 11 || v.docDigits.length === 14 ? v.doc : undefined,
