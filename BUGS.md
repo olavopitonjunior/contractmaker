@@ -45,11 +45,12 @@
 - **Solucao:** mesmo fix da venda — `cpf: ""`, `cnpj: ""`, vinculo real pelo `splitRecipientId`. No mesmo passe, `materialize-parties.ts` deixou de hardcodar `tipoPessoa: "fisica"` (angariador PJ nascia como pessoa fisica com CNPJ em campo de CPF).
 
 ### [ALTA] Lookup de corretores estourava o rate limit e aparecia como "nenhum corretor cadastrado"
-- **Status:** corrigido no codigo (pendente deploy) — branch feat/form-fixes-ativa
+- **Status:** resolvido em prod (PR #442, 2026-08-28) — a metade de LOCACAO so fechou ali
 - **Encontrado em:** 2026-08-27
 - **Descricao:** `CorretorCombobox` tem `fetchOptions` nas dependencias do seu `useEffect` de busca. Os dois call-sites (`ComissaoConfigStep.tsx` e `forms/new/page.tsx`) declaravam a funcao solta no corpo do componente, sem `useCallback` — identidade nova a cada render, efeito re-rodando, novo debounce de 300ms, novo fetch. Cerca de 1 request a cada 300ms contra o teto de 30/min da rota: o limite estourava em ~9s e todo 429 seguinte era engolido por um `catch(() => setOptions([]))`, virando "Nenhum corretor encontrado".
 - **Impacto:** ALTO — a listagem de corretores cadastrados simplesmente nao aparecia (queixa direta do usuario), sem nenhum sinal de erro. Atingia inclusive o corretor logado.
 - **Solucao:** `useCallback` nos dois call-sites; o fetch agora lanca em HTTP != 2xx com `console.warn`, e o combobox tem estado de falha proprio ("Nao foi possivel carregar os corretores") em vez de se disfarcar de lista vazia.
+- **Nota (2026-08-28, PR #442):** o conserto de 27/08 cobriu so as telas que usavam o `CorretorCombobox`. A etapa Comissao de LOCACAO tinha um `<datalist>` artesanal com `r.ok ? r.json() : { items: [] }` — o MESMO disfarce, num call-site que o fix nao alcancava. Passou a usar o combobox compartilhado, com `useCallback`. Verificado na tela em staging: os 4 cadastros carregam na esteira de locacao.
 
 ### [MEDIA] OCR gravava o CEP no campo "numero" do endereco
 - **Status:** corrigido no codigo (pendente deploy) — branch feat/form-fixes-ativa
@@ -160,6 +161,30 @@
 - **Solucao:** Implementar useAutoSave no ContractEditorPage com endpoint /api/contracts/{id}/auto-save
 
 ## Bugs Resolvidos
+
+### [ALTA] Picker de corretor do formulario oferecia 2 dos 42 cadastrados
+- **Status:** resolvido
+- **Encontrado em:** 2026-08-28 (relato: "o dropdown nao esta trazendo a lista completa de corretores cadastrados")
+- **Resolvido em:** 2026-08-28 (PR #442, prod; verificado no banco de producao apos deploy: 37 visiveis, 5 arquivados, e o picker na tela listando os 37)
+- **Descricao:** `SplitRecipient.active` acumulava dois sentidos incompativeis: (1) RASCUNHO sem meio de repasse — `createCommissioner` grava `pendingFields` e `active:false`, e o `splitDispatcher` depende disso; (2) EXCLUIDO pelo admin — o DELETE fazia soft delete com o mesmo booleano. `GET /api/forms/[token]/commissioners` filtrava `active: true` e engolia os dois juntos. Medido em producao: 42 comissionados na org, 36 rascunhos e 4 inativos completos escondidos, contra apenas 5 exclusoes reais no AuditLog. A tela `/corretores` nao filtra `active`, dai a divergencia que o usuario enxergava entre as duas telas.
+- **Impacto:** O corretor cadastrado pelo proprio formulario (que nasce rascunho) nunca voltava a ser oferecido; cada negocio recomecava do zero. Afetava venda e locacao.
+- **Solucao:** Coluna `archivedAt` responde "este cadastro existe?", separada de `active` (pagabilidade). O soft delete e o "Desativar" da tela `/corretores` (que usa PATCH, nao DELETE) passam a grava-la; "Reativar" limpa. Toda listagem de ESCOLHA de corretor filtra por `archivedAt`, nunca por `active` — inclusive notificacoes do processo, anexar corretor a negocio/formulario novo e a classificacao "Inativos" da tela. Backfill em duas fontes: rastro `SPLIT_RECIPIENT_DELETED` no AuditLog, e duplicatas que a migration 20260724120000 desativou.
+
+### [MEDIA] "Nao, e outra" do dialogo de duplicidade era desfeito pelo servidor
+- **Status:** resolvido
+- **Encontrado em:** 2026-08-29 (smoke em staging do proprio PR #442 — nenhum teste pegava)
+- **Resolvido em:** 2026-08-29 (PR #443, prod; provado nos dois sentidos em staging: COM `ignorarIds` -> existed:false com id novo; SEM -> existed:true, dedupe intacto)
+- **Descricao:** O dialogo de duplicidade oferece "Nao, e outra", mas o POST `/api/forms/[token]/commissioners` refaz o match server-side — de proposito, porque e ele que fecha a corrida entre duas abas. Sem saber da recusa, `findCommissionerMatch` reencontrava pelo E-MAIL exatamente o cadastro recusado e devolvia `existed: true`: a linha ficava vinculada a quem o humano acabara de dizer que NAO era.
+- **Impacto:** Duas pessoas distintas que compartilham e-mail ou telefone de imobiliaria eram fundidas num cadastro so, contra a escolha explicita do usuario. A comissao de uma iria para os dados bancarios da outra.
+- **Solucao:** A recusa viaja no corpo (`ignorarIds`) e vale para os sinais FRACOS — e-mail, telefone e nome. O DOCUMENTO segue ignorando a recusa: mesmo CPF/CNPJ e a mesma pessoa, e o partial unique do banco barraria de qualquer forma. Teste-guarda em `commissioner-registry.test.ts`.
+
+### [BAIXA] Selo dizia "sem dados bancarios" em cadastro com conta bancaria preenchida
+- **Status:** resolvido
+- **Encontrado em:** 2026-08-28 (smoke em staging)
+- **Resolvido em:** 2026-08-28 (PR #442, prod)
+- **Descricao:** O selo do `CorretorCombobox` e a linha do dialogo de duplicidade liam `receivingPending`, derivado de `SplitRecipient.pendingFields` — que e PAGABILIDADE da esteira de repasse e segue verdadeiro sem chave PIX de proposito, porque conta bancaria e TED manual. Virou rotulo errado justamente por causa da mudanca que fez a conta bancaria valer para a exigencia.
+- **Impacto:** Cosmetico, mas enganoso na hora de escolher a quem pagar: sugeria que faltava dado num cadastro completo.
+- **Solucao:** `cadastroSemDadosBancarios` usa o `recebimento` real quando o leitor e membro da org (e a quem o servidor o manda) e cai no booleano para os demais, onde ele e o melhor sinal disponivel.
 
 ### [ALTA] Certidoes: E-Proc 600 "erro inesperado" virava "Negativa - nada consta" (falso-positivo) + "Retentar erros" inflado por endpoints sem PDF
 - **Status:** resolvido
