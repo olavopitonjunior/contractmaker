@@ -5,10 +5,11 @@
  * resolvedor de destinatários de notificação (lib/notifications).
  *
  * Dedupe em duas camadas:
- *  - Código: match por splitRecipientId > cpfCnpj normalizado > nome
- *    normalizado, considerando TAMBÉM rascunhos inativos (pendingFields) —
- *    o matcher heurístico do wizard (`commissionados-matcher.ts`) só olha
- *    ativos porque o contexto dele é split financeiro.
+ *  - Código: match por splitRecipientId > cpfCnpj > e-mail > telefone > nome,
+ *    todos normalizados, considerando TAMBÉM rascunhos inativos
+ *    (pendingFields) — o matcher heurístico do wizard
+ *    (`commissionados-matcher.ts`) só olha ativos porque o contexto dele é
+ *    split financeiro. Cadastro EXCLUÍDO (`archivedAt`) fica fora.
  *  - Banco: partial unique (orgId, cpfCnpj) WHERE kind='commissioner' AND
  *    active=true (migration 20260724120000). Cobre corrida entre criações
  *    ativas; rascunhos dependem da camada de código.
@@ -45,8 +46,16 @@ function sanitizePapel(raw: string | null | undefined): string | null {
 
 /**
  * Procura um commissioner existente na org pra este comissionado do form.
- * Preferência: id explícito > doc (ativo antes de inativo) > nome exato
- * normalizado (ativo antes de inativo). Retorna null quando não há match.
+ *
+ * Ordem de confiança: id explícito > documento > e-mail > telefone > nome exato
+ * normalizado. E-mail e telefone entraram em 08/2026 junto com a criação
+ * automática de cadastro: sem eles, quem digitasse o mesmo corretor com o nome
+ * escrito de outro jeito e sem CPF criava uma duplicata silenciosa — e o dedupe
+ * do banco (partial unique em `cpfCnpj`) não pega o que não tem documento.
+ *
+ * `archivedAt` exclui cadastro EXCLUÍDO: casar com ele ressuscitaria o que o
+ * admin apagou. Rascunho (`active: false` com `pendingFields`) continua sendo
+ * candidato legítimo — é o estado normal de quem nasceu pelo formulário.
  */
 export async function findCommissionerMatch(
   orgId: string,
@@ -59,13 +68,41 @@ export async function findCommissionerMatch(
     if (byId) return byId;
   }
 
+  const base = {
+    orgId,
+    kind: "commissioner",
+    archivedAt: null,
+  } satisfies Prisma.SplitRecipientWhereInput;
+  // Cadastro pagável ganha do rascunho; empate pelo mais antigo.
+  const preferencia = [{ active: "desc" as const }, { createdAt: "asc" as const }];
+
   const doc = normalizeDoc(input.cpf || input.cnpj);
   if (doc.length >= 11) {
     const byDoc = await prisma.splitRecipient.findFirst({
-      where: { orgId, kind: "commissioner", cpfCnpj: doc },
-      orderBy: [{ active: "desc" }, { createdAt: "asc" }],
+      where: { ...base, cpfCnpj: doc },
+      orderBy: preferencia,
     });
     if (byDoc) return byDoc;
+  }
+
+  const email = normalizeEmail(input.email);
+  if (email) {
+    const byEmail = await prisma.splitRecipient.findFirst({
+      where: { ...base, email },
+      orderBy: preferencia,
+    });
+    if (byEmail) return byEmail;
+  }
+
+  // `soft` porque o telefone entra cru do formulário; sem E.164 não há o que
+  // comparar com a coluna, que é gravada normalizada.
+  const phone = normalizePhoneForStorage(input.mobile_phone, { soft: true }).value;
+  if (phone && phone.replace(/\D/g, "").length >= 10) {
+    const byPhone = await prisma.splitRecipient.findFirst({
+      where: { ...base, phone },
+      orderBy: preferencia,
+    });
+    if (byPhone) return byPhone;
   }
 
   const name = normalizeName(input.nome);
@@ -74,8 +111,8 @@ export async function findCommissionerMatch(
     // normalização (diacríticos/espaços) em código. Roster de corretores é
     // pequeno (dezenas), o take cobre com folga.
     const candidates = await prisma.splitRecipient.findMany({
-      where: { orgId, kind: "commissioner" },
-      orderBy: [{ active: "desc" }, { createdAt: "asc" }],
+      where: base,
+      orderBy: preferencia,
       take: 200,
     });
     const byName = candidates.find(

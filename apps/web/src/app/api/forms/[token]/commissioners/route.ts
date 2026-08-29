@@ -9,9 +9,18 @@ import { detectPixKeyType } from "@/lib/asaas/pix";
 import {
   createCommissioner,
   findCommissionerMatch,
+  type CommissionerReceivingExtras,
 } from "@/lib/asaas/commissioner-registry";
+import {
+  RECEBIMENTO_SELECT,
+  recebimentoFromRecipient,
+} from "@/lib/forms/commissioner-receiving";
 
 export const runtime = "nodejs";
+
+/** Teto da listagem. O roster de uma imobiliária é de dezenas; 200 cobre com
+ *  folga e `hasMore` diz a verdade quando não cobrir. */
+const LIST_LIMIT = 200;
 
 /**
  * Endpoint público (sem auth) sob o token do form — serve as DUAS esteiras:
@@ -21,19 +30,97 @@ export const runtime = "nodejs";
  * cliente) escolha um comissionado já cadastrado OU cadastre um novo inline.
  *
  * Resolve `orgId` via `SalesForm.token` e filtra `SplitRecipient` por
- * `{ orgId, kind:"commissioner", active:true }`. Nunca expõe PII bancária
- * (walletId/pixAddressKey/bankAccount/bankHolderDoc/ownerCpfCnpj completo).
+ * `{ orgId, kind:"commissioner", archivedAt: null }` — por EXISTÊNCIA, não por
+ * pagabilidade. Filtrar `active: true`, como era até 08/2026, escondia todo
+ * cadastro sem meio de repasse, que é o estado em que nasce quem é cadastrado
+ * pelo próprio formulário: 42 comissionados na org de produção, 2 aqui.
  *
- * O POST aceita dados de recebimento (`pix`, `banco`) — write-only: entram no
- * SplitRecipient e o GET acima não os devolve. Duas travas, porque aqui se
- * grava para onde o dinheiro vai:
+ * PII bancária no GET: **só para membro da org** (`viewerIsOrgMember`), e é o
+ * que permite autocompletar o formulário ao reconhecer um corretor existente.
+ * Para anônimo o shape é o de sempre — sem `recebimento`, com o documento
+ * mascarado, para que o token do form não vire ferramenta de scraping.
+ *
+ * O POST aceita dados de recebimento (`pix`, `banco`). Duas travas, porque aqui
+ * se grava para onde o dinheiro vai:
  *
  *  1. Só de MEMBRO da org (`viewerIsOrgMember`). De anônimo vêm descartados
  *     (`receivingRejected`) — o link costuma estar com o cliente, e a UI já
  *     esconde os campos pra ele. Sem esta checagem, esconder seria fachada.
- *  2. Num cadastro que JÁ existe são ignorados (`receivingIgnored`), de quem
- *     quer que venham: sobrescrever chave PIX alheia desviaria repasse.
+ *  2. Num cadastro que JÁ existe, membro PREENCHE o que está vazio e nunca
+ *     sobrescreve valor já gravado (`receivingFilled`); de anônimo continua
+ *     integralmente ignorado (`receivingIgnored`), que é o que impede desviar
+ *     repasse trocando a chave PIX alheia com o link na mão.
  */
+
+/**
+ * Preenche APENAS as colunas de recebimento que estão vazias no cadastro, e
+ * devolve os nomes das que foram gravadas (para o audit e para a UI).
+ *
+ * Nunca sobrescreve: um valor já lá foi posto por alguém com mais prova de
+ * posse do que quem está com o link de um formulário — o admin em `/corretores`
+ * ou o próprio corretor pelo magic link. A regra "só o vazio" é o que permite
+ * relaxar a trava sem reabrir o desvio de repasse que ela existe para impedir.
+ *
+ * Só é chamada quando o autor é membro da org.
+ */
+async function fillEmptyReceiving(
+  current: {
+    id: string;
+    recipientType: string;
+    pixAddressKey: string | null;
+    pixKeyType: string | null;
+    ownerName: string | null;
+    ownerCpfCnpj: string | null;
+    bankName: string | null;
+    bankBranch: string | null;
+    bankAccount: string | null;
+    bankAccountType: string | null;
+    bankHolderName: string | null;
+    bankHolderDoc: string | null;
+  },
+  extras: CommissionerReceivingExtras
+): Promise<string[]> {
+  const patch: Prisma.SplitRecipientUpdateInput = {};
+  const filled: string[] = [];
+  const put = (
+    key: keyof Prisma.SplitRecipientUpdateInput & string,
+    existingValue: string | null,
+    incoming: string | null | undefined
+  ) => {
+    const v = typeof incoming === "string" ? incoming.trim() : "";
+    if (!v || (existingValue ?? "").trim()) return;
+    (patch as Record<string, unknown>)[key] = v;
+    filled.push(key);
+  };
+
+  put("pixAddressKey", current.pixAddressKey, extras.pix?.chave);
+  // Tipo e titular só acompanham a chave: gravá-los sem ela deixaria o cadastro
+  // dizendo "PIX tipo EMAIL" sem PIX nenhum.
+  if (filled.includes("pixAddressKey")) {
+    put("pixKeyType", current.pixKeyType, extras.pix?.keyType);
+    put("ownerName", current.ownerName, extras.pix?.titularNome);
+    put("ownerCpfCnpj", current.ownerCpfCnpj, extras.pix?.titularCpfCnpj);
+  }
+  put("bankName", current.bankName, extras.banco?.nome);
+  put("bankBranch", current.bankBranch, extras.banco?.agencia);
+  put("bankAccount", current.bankAccount, extras.banco?.conta);
+  put("bankAccountType", current.bankAccountType, extras.banco?.tipoConta);
+  put("bankHolderName", current.bankHolderName, extras.banco?.titularNome);
+  put("bankHolderDoc", current.bankHolderDoc, extras.banco?.titularDoc);
+
+  if (filled.length === 0) return [];
+
+  // Ganhar uma chave PIX faz do cadastro um `pix_external`. Ele NÃO sai de
+  // rascunho aqui: a confirmação de posse continua sendo do admin em
+  // /corretores ou do próprio corretor pelo magic link — a mesma razão pela
+  // qual `createCommissioner` marca `unverifiedSource`.
+  if (filled.includes("pixAddressKey") && current.recipientType !== "pix_external") {
+    patch.recipientType = "pix_external";
+  }
+
+  await prisma.splitRecipient.update({ where: { id: current.id }, data: patch });
+  return filled;
+}
 
 // Máscara mínima: mantém 3 primeiros e 2 últimos dígitos.
 function maskDoc(doc: string | null | undefined): string | null {
@@ -79,24 +166,45 @@ export async function GET(
   const closed = await formClosedResponse(form);
   if (closed) return closed;
 
+  // Filtra por EXISTÊNCIA (`archivedAt`), não por pagabilidade (`active`).
+  // Filtrar `active: true` escondia todo cadastro sem meio de repasse — que é o
+  // estado em que nasce quem é cadastrado pelo próprio formulário. Medido em
+  // produção antes do conserto: 42 comissionados na org, 2 oferecidos aqui.
   const where: Prisma.SplitRecipientWhereInput = {
     orgId: form.orgId,
     kind: "commissioner",
-    active: true,
+    archivedAt: null,
   };
   if (q) {
+    const digits = q.replace(/\D/g, "");
     where.OR = [
       { label: { contains: q, mode: "insensitive" } },
-      { cpfCnpj: { contains: q.replace(/\D/g, "") } },
-      { ownerCpfCnpj: { contains: q.replace(/\D/g, "") } },
       { creci: { contains: q, mode: "insensitive" } },
+      // Busca livre inclui contato: quem procura "joao@" ou o telefone não
+      // deveria precisar acertar a grafia do nome.
+      { email: { contains: q, mode: "insensitive" } },
+      ...(digits
+        ? [
+            { cpfCnpj: { contains: digits } },
+            { ownerCpfCnpj: { contains: digits } },
+            { phone: { contains: digits } },
+          ]
+        : []),
     ];
   }
+
+  // Membro da imobiliária recebe também os dados de recebimento já cadastrados
+  // — é o que permite autocompletar o formulário ao reconhecer um corretor que
+  // já existe. Para anônimo o shape continua exatamente o de antes.
+  const viewerIsMember = await viewerIsOrgMember(form.orgId);
 
   const recipients = await prisma.splitRecipient.findMany({
     where,
     orderBy: [{ label: "asc" }],
-    take: 50,
+    // +1 pra saber se truncou sem uma segunda query. Sem este sinal a lista
+    // cheia era indistinguível da lista completa, e quem não achava o corretor
+    // concluía que ele não estava cadastrado.
+    take: LIST_LIMIT + 1,
     select: {
       id: true,
       label: true,
@@ -110,12 +218,16 @@ export async function GET(
       // Booleano derivado — o front precisa saber se o cadastro tem meio de
       // repasse para o gate da etapa Comissão. NUNCA os campos bancários em si.
       pendingFields: true,
+      ...(viewerIsMember ? RECEBIMENTO_SELECT : {}),
     },
   });
 
+  const hasMore = recipients.length > LIST_LIMIT;
+  const page = hasMore ? recipients.slice(0, LIST_LIMIT) : recipients;
+
   // Whitelist explícita do shape exposto. Documento mascarado pra evitar
   // que o form público vire ferramenta de scraping de CPFs/CNPJs.
-  const items = recipients.map((r) => ({
+  const items = page.map((r) => ({
     id: r.id,
     label: r.label,
     tipoPessoa: r.tipoPessoa ?? null,
@@ -125,18 +237,26 @@ export async function GET(
     email: r.email ?? null,
     phone: r.phone ?? null,
     receivingPending: r.pendingFields.length > 0,
+    ...(viewerIsMember ? { recebimento: recebimentoFromRecipient(r) } : {}),
   }));
 
-  return NextResponse.json({ items });
+  return NextResponse.json({ items, hasMore });
 }
 
 const createSchema = z.object({
   label: z.string().trim().min(1).max(120),
   tipoPessoa: z.enum(["fisica", "juridica"]),
-  // Dígitos, não só comprimento: `normalizeDoc` descarta não-dígitos, então
-  // um doc alfabético de 11+ chars passava no Zod, normalizava pra "" e fazia
-  // `findCommissionerMatch` PULAR o dedupe por documento — caindo no match só
-  // por nome, que é mais fraco. Era um jeito barato de forçar cadastro novo.
+  // OPCIONAL desde 08/2026, quando a criação do cadastro virou automática: a
+  // etapa Comissão não pede CPF/CNPJ antes de e-mail e telefone, e exigi-lo
+  // aqui faria toda linha identificada só por contato ficar sem cadastro — o
+  // oposto do que a automação existe para resolver. O `superRefine` abaixo
+  // continua exigindo ALGUM identificador.
+  //
+  // Quando vem, a validação é a de sempre — dígitos, não só comprimento:
+  // `normalizeDoc` descarta não-dígitos, então um doc alfabético de 11+ chars
+  // passava no Zod, normalizava pra "" e fazia `findCommissionerMatch` PULAR o
+  // dedupe por documento, caindo no match só por nome, que é mais fraco. Era um
+  // jeito barato de forçar cadastro novo.
   cpfCnpj: z
     .string()
     .trim()
@@ -145,7 +265,8 @@ const createSchema = z.object({
     .refine((v) => {
       const d = v.replace(/\D/g, "").length;
       return d === 11 || d === 14;
-    }, "CPF/CNPJ inválido — informe 11 (CPF) ou 14 (CNPJ) dígitos"),
+    }, "CPF/CNPJ inválido — informe 11 (CPF) ou 14 (CNPJ) dígitos")
+    .optional(),
   creci: z.string().trim().max(50).optional(),
   papel: z
     .enum([
@@ -183,6 +304,17 @@ const createSchema = z.object({
       titularDoc: z.string().trim().max(18).optional(),
     })
     .optional(),
+}).superRefine((v, ctx) => {
+  // Algum identificador é obrigatório. Sem nenhum, o dedupe cai no match por
+  // nome exato — o elo mais fraco da escala — e um cadastro criado só com nome
+  // vira lixo que ninguém consegue reconhecer nem reusar depois.
+  if (!v.cpfCnpj && !v.email && !v.phone) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["cpfCnpj"],
+      message: "Informe CPF/CNPJ, e-mail ou telefone do corretor",
+    });
+  }
 });
 
 export async function POST(
@@ -276,14 +408,33 @@ export async function POST(
   };
   const preexisting = await findCommissionerMatch(form.orgId, registryInput);
   if (preexisting) {
-    // Dados de recebimento de um cadastro que JÁ existe são deliberadamente
-    // ignorados: este endpoint é anônimo, e deixá-lo gravar chave PIX num
-    // corretor existente seria um vetor de desvio de repasse. Devolvemos o
-    // flag pra UI dizer a verdade em vez de fingir que salvou.
-    const receivingIgnored = sentPix || sentBank;
-    if (receivingIgnored) {
-      // Tentativa repetida daqui é sinal de ataque (ou de corretor legítimo
-      // batendo na trava). Sem esta linha o evento não existe em lugar nenhum.
+    // Cadastro que JÁ existe. A regra depende de quem está preenchendo:
+    //
+    //  - ANÔNIMO: nada é gravado (`receivingIgnored`). Deixar quem tem só o
+    //    link trocar a chave PIX de um corretor existente é desvio de repasse.
+    //  - MEMBRO da org: PREENCHE o que está vazio e nunca sobrescreve
+    //    (`receivingFilled`). Descartar em silêncio o que a imobiliária digitou
+    //    num cadastro que ela própria mantém era a trava batendo em quem ela
+    //    não deveria pegar — e a queixa que motivou esta mudança.
+    const receivingIgnored = !viewerIsMember && (sentPix || sentBank);
+    const receivingFilled = viewerIsMember
+      ? await fillEmptyReceiving(preexisting, {
+          pix: hasPix
+            ? {
+                chave: data.pix!.chave!,
+                keyType: pixKeyType!,
+                titularNome: data.pix?.titularNome ?? null,
+                titularCpfCnpj: data.pix?.titularCpfCnpj ?? null,
+              }
+            : undefined,
+          banco: hasBank ? data.banco : undefined,
+        })
+      : [];
+
+    if (receivingIgnored || receivingFilled.length > 0) {
+      // Rastro nos dois sentidos: a tentativa barrada é sinal de ataque (ou de
+      // corretor legítimo batendo na trava), e o preenchimento é escrita de PII
+      // bancária — precisa dizer QUAIS campos, nunca os valores.
       await audit(
         {
           orgId: form.orgId,
@@ -293,35 +444,53 @@ export async function POST(
         },
         {
           action: "SPLIT_RECIPIENT_UPDATED",
-          result: "DENIED",
+          result: receivingIgnored ? "DENIED" : "SUCCESS",
           resourceType: "split_recipient",
           resource: `split_recipient:${preexisting.id}`,
           metadata: {
             source: "public_form",
             formId: form.id,
-            reason: "receiving_data_ignored_on_existing_recipient",
+            reason: receivingIgnored
+              ? "receiving_data_ignored_on_existing_recipient"
+              : "receiving_data_filled_empty_fields",
             viewerIsMember,
             sentPix,
             sentBank,
+            filledFields: receivingFilled,
           },
         }
       );
     }
+
+    // Relê só quando houve escrita — o `preexisting` em mãos está defasado.
+    const current =
+      receivingFilled.length > 0
+        ? ((await prisma.splitRecipient.findUnique({
+            where: { id: preexisting.id },
+          })) ?? preexisting)
+        : preexisting;
+
     return NextResponse.json(
       {
         recipient: {
-          id: preexisting.id,
-          label: preexisting.label,
-          tipoPessoa: preexisting.tipoPessoa,
-          doc: maskDoc(preexisting.cpfCnpj),
-          creci: preexisting.creci,
-          papel: preexisting.papel,
-          email: preexisting.email,
-          phone: preexisting.phone,
+          id: current.id,
+          label: current.label,
+          tipoPessoa: current.tipoPessoa,
+          doc: maskDoc(current.cpfCnpj),
+          creci: current.creci,
+          papel: current.papel,
+          email: current.email,
+          phone: current.phone,
+          // Para membro, o que o cadastro tem hoje — é o que a UI usa para
+          // autocompletar o formulário depois do "sim, é a mesma pessoa".
+          ...(viewerIsMember
+            ? { recebimento: recebimentoFromRecipient(current) }
+            : {}),
         },
         existed: true,
-        isDraft: preexisting.pendingFields.length > 0,
+        isDraft: current.pendingFields.length > 0,
         receivingIgnored,
+        receivingFilled,
       },
       { status: 200 }
     );

@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 import { MoneyInput } from "@/components/forms/MoneyInput";
 import { UF_LIST } from "@/components/forms/UFSelect";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DEFAULT_CONTRACT_SETTINGS,
   DEFAULT_LOCACAO_COMISSAO,
@@ -19,6 +18,7 @@ import {
   type LocacaoComissaoDefaults,
   type LocacaoSettings,
 } from "@/lib/contracts/default-config";
+import { useEsteira } from "./EsteiraTabs";
 
 /**
  * Padrão de configurações contratuais da imobiliária.
@@ -26,10 +26,14 @@ import {
  * Vale para contratos NOVOS: a geração aplica este padrão onde o negócio não
  * definiu nada. Contrato já criado se ajusta na aba "Configurações" do editor.
  *
- * Uma aba por esteira: os vocabulários não se traduzem (em venda `foro` é um
+ * Uma esteira por vez: os vocabulários não se traduzem (em venda `foro` é um
  * enum que troca a cláusula inteira; em locação é a comarca em texto, e a multa
- * rescisória é contada em meses de aluguel). A aba Locação só aparece pra org
- * que tem o módulo — o gating vem do server component.
+ * rescisória é contada em meses de aluguel). Locação só aparece pra org que tem
+ * o módulo — o gating vem do server component.
+ *
+ * Quem escolhe a esteira é o seletor ÚNICO da página (`EsteiraTabs`). Este card
+ * tinha `Tabs` próprias, e uma página com dois seletores discordando entre si
+ * foi o que fez o catálogo de seguradoras aparecer com "Vendas" selecionado.
  *
  * Local de assinatura: em VENDA continua fora (o formulário público ainda
  * pergunta). Em LOCAÇÃO entrou em 2026-07-30 — a etapa de Confirmação saiu do
@@ -48,11 +52,14 @@ export function ContractDefaultsCard({
   initialComissaoLocacao: LocacaoComissaoDefaults;
   locacaoEnabled?: boolean;
 }) {
+  const esteira = useEsteira();
   if (!locacaoEnabled) return <VendaDefaults initial={initial} />;
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Padrão contratual</CardTitle>
+        <CardTitle className="text-base">
+          Padrão contratual · {esteira === "venda" ? "Vendas" : "Locação"}
+        </CardTitle>
         <p className="text-sm text-muted-foreground">
           Condições aplicadas aos contratos novos desta imobiliária. Cada
           contrato pode sobrescrevê-las na aba <strong>Configurações</strong> do
@@ -60,21 +67,14 @@ export function ContractDefaultsCard({
         </p>
       </CardHeader>
       <CardContent>
-        <Tabs defaultValue="venda">
-          <TabsList>
-            <TabsTrigger value="venda">Vendas</TabsTrigger>
-            <TabsTrigger value="locacao">Locação</TabsTrigger>
-          </TabsList>
-          <TabsContent value="venda" className="mt-4">
-            <VendaDefaults initial={initial} embedded />
-          </TabsContent>
-          <TabsContent value="locacao" className="mt-4">
-            <LocacaoDefaults
-              initial={initialLocacao}
-              initialComissao={initialComissaoLocacao}
-            />
-          </TabsContent>
-        </Tabs>
+        {esteira === "venda" ? (
+          <VendaDefaults initial={initial} embedded />
+        ) : (
+          <LocacaoDefaults
+            initial={initialLocacao}
+            initialComissao={initialComissaoLocacao}
+          />
+        )}
       </CardContent>
     </Card>
   );

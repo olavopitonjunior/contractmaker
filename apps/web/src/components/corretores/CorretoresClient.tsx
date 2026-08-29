@@ -86,9 +86,15 @@ export default function CorretoresClient({ pagadoriaEnabled }: CorretoresClientP
 
   // Classificação NÃO muda com a lente — active/pendingFields são semântica
   // de backend. O que muda é como agrupamos/alarmamos visualmente abaixo.
-  const pendentes = filtered.filter((c) => !c.active && (c.pendingFields ?? []).length > 0);
-  const ativos = filtered.filter((c) => c.active);
-  const inativos = filtered.filter((c) => !c.active && (c.pendingFields ?? []).length === 0);
+  // "Inativo" é quem foi DESATIVADO aqui (`archivedAt`), não quem está sem meio
+  // de repasse. Os dois moravam no mesmo `active` e o rascunho desativado caía
+  // em "Pendentes", como se ainda estivesse em circulação — e é justamente ele
+  // que o picker do formulário precisa deixar de oferecer.
+  const inativos = filtered.filter((c) => c.archivedAt);
+  const pendentes = filtered.filter(
+    (c) => !c.archivedAt && !c.active && (c.pendingFields ?? []).length > 0
+  );
+  const ativos = filtered.filter((c) => !c.archivedAt && c.active);
   // Lente de cadastro (pagadoria off): corretor sem meio de recebimento não é
   // motivo de alarme — entra junto dos "ativos" em vez de uma seção separada.
   const cadastroList = pagadoriaEnabled ? ativos : [...ativos, ...pendentes];

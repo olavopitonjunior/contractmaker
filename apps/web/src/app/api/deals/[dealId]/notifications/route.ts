@@ -152,6 +152,9 @@ export async function PATCH(
         id: { in: parsed.data.brokerIds },
         orgId: org.id,
         kind: "commissioner",
+        // Excluído não pode ser anexado a negócio novo — a contagem abaixo
+        // rejeita o lote inteiro, que é o comportamento já dado a id de outra org.
+        archivedAt: null,
       },
     });
     if (count !== parsed.data.brokerIds.length) {

@@ -88,10 +88,11 @@ export function ChargePaidOwnerEmail({
         ]}
       />
       <p style={{ fontSize: 13, color: "#737373", marginTop: 16 }}>
-        Splits para destinatários PIX externos foram disparados automaticamente.
+        Os repasses para destinatários PIX externos foram disparados
+        automaticamente.
       </p>
       <div style={{ marginTop: 24 }}>
-        <ActionButton href={linkUrl} label="Ver detalhes e splits" />
+        <ActionButton href={linkUrl} label="Ver detalhes e repasses" />
       </div>
     </EmailLayout>
   );
@@ -181,7 +182,7 @@ export function ChargePaidRecipientEmail({
 }) {
   const isPixExternal = recipientType === "pix_external";
   return (
-    <EmailLayout title="Você recebeu um split">
+    <EmailLayout title="Você recebeu um repasse">
       <h1 style={{ fontSize: 22, fontWeight: 600, marginTop: 0, color: "#15803d" }}>
         Pagamento recebido
       </h1>
@@ -196,7 +197,7 @@ export function ChargePaidRecipientEmail({
           ...(dealTitle ? [{ label: "Negócio", value: dealTitle }] : []),
           {
             label: "Modalidade",
-            value: isPixExternal ? "PIX externo" : "Conta Asaas (split nativo)",
+            value: isPixExternal ? "PIX externo" : "Conta Asaas (repasse nativo)",
           },
         ]}
       />

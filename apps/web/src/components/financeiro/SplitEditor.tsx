@@ -252,7 +252,7 @@ export default function SplitEditor({
     <div className="space-y-3 border rounded-md p-3 bg-muted/30">
       {value.length === 0 && (
         <p className="text-xs text-muted-foreground italic">
-          Nenhum split. Cadastre destinatários em{" "}
+          Nenhum repasse. Cadastre destinatários em{" "}
           <b>Configurações → Pagamentos</b>.
         </p>
       )}
@@ -501,7 +501,7 @@ export default function SplitEditor({
       <div className="flex items-center justify-between text-sm border-t pt-2">
         <div className="space-y-1">
           <div className="text-xs text-muted-foreground">
-            Soma dos splits: {sumTotal.toFixed(1)}% ·{" "}
+            Soma dos repasses: {sumTotal.toFixed(1)}% ·{" "}
             {overflow ? (
               <span className="text-red-600 font-medium">excede 100%</span>
             ) : (

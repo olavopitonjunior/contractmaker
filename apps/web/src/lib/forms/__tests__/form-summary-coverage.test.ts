@@ -236,6 +236,48 @@ const OMITIDOS_COM_MOTIVO: Record<string, string> = {
   pix_tipo_chave: "entra dentro da linha 'Recebimento'",
   tipo_chave: "entra dentro da linha da parcela",
   titular_cpf_cnpj: "entra dentro da linha da parcela",
+
+  // --- Dados bancários do CORRETOR: ficam no formulário, nunca no resumo ---
+  //
+  // Motivo único para todas as linhas abaixo: são PII bancária de terceiro. O
+  // resumo é impresso em PDF, enviado por e-mail para fora da imobiliária e
+  // também vira o texto que alimenta o LLM de revisão de contrato. O dado vive
+  // no `dataJson` (o corretor reabre o formulário e encontra o que digitou) e
+  // no cadastro do corretor — e é redigido por leitor em toda superfície de
+  // leitura, ver `lib/forms/redact-datajson.ts`.
+  //
+  // Chaves em PATH COMPLETO de propósito: `omitido()` casa também pelo último
+  // segmento, e `banco`/`agencia`/`conta`/`pix_chave` são os MESMOS nomes que o
+  // `recebimento` das PARTES usa — aquele é exibido no resumo, e uma chave
+  // curta aqui desligaria a cobertura dele em silêncio.
+  "comissao.comissionados.0.recebimento.pix_chave":
+    "dado bancário do corretor — no formulário e no cadastro, nunca no resumo",
+  "comissao.comissionados.0.recebimento.banco":
+    "dado bancário do corretor — no formulário e no cadastro, nunca no resumo",
+  "comissao.comissionados.0.recebimento.agencia":
+    "dado bancário do corretor — no formulário e no cadastro, nunca no resumo",
+  "comissao.comissionados.0.recebimento.conta":
+    "dado bancário do corretor — no formulário e no cadastro, nunca no resumo",
+  "comissao.comissionados.0.recebimento.tipo_conta":
+    "dado bancário do corretor — no formulário e no cadastro, nunca no resumo",
+  "comissao.comissionados.0.recebimento.titular_nome":
+    "dado bancário do corretor — no formulário e no cadastro, nunca no resumo",
+  "comissao.comissionados.0.recebimento.titular_doc":
+    "dado bancário do corretor — no formulário e no cadastro, nunca no resumo",
+  "comissao.angariadores.0.recebimento.pix_chave":
+    "dado bancário do corretor — no formulário e no cadastro, nunca no resumo",
+  "comissao.angariadores.0.recebimento.banco":
+    "dado bancário do corretor — no formulário e no cadastro, nunca no resumo",
+  "comissao.angariadores.0.recebimento.agencia":
+    "dado bancário do corretor — no formulário e no cadastro, nunca no resumo",
+  "comissao.angariadores.0.recebimento.conta":
+    "dado bancário do corretor — no formulário e no cadastro, nunca no resumo",
+  "comissao.angariadores.0.recebimento.tipo_conta":
+    "dado bancário do corretor — no formulário e no cadastro, nunca no resumo",
+  "comissao.angariadores.0.recebimento.titular_nome":
+    "dado bancário do corretor — no formulário e no cadastro, nunca no resumo",
+  "comissao.angariadores.0.recebimento.titular_doc":
+    "dado bancário do corretor — no formulário e no cadastro, nunca no resumo",
 };
 
 function omitido(path: string): boolean {

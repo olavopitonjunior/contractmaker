@@ -1,21 +1,24 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { UseFormReturn } from "react-hook-form";
 import { toast } from "sonner";
 import { summarizeCompletion } from "@/components/corretores/completion-toast";
+import { DuplicataCorretorDialog } from "@/components/corretores/DuplicataCorretorDialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Landmark, Mail } from "lucide-react";
 import { NativeSelect } from "@/components/forms/NativeSelect";
+import { temRecebimento } from "@/lib/forms/commissioner-receiving";
+import { useComissionadoRegistry } from "@/components/forms/steps/useComissionadoRegistry";
 
 function FormField({
   label,
   children,
   className = "",
 }: {
-  label: string;
+  label: React.ReactNode;
   children: React.ReactNode;
   className?: string;
 }) {
@@ -27,59 +30,29 @@ function FormField({
   );
 }
 
-interface RecebimentoState {
-  pixAddressKey: string;
-  bankName: string;
-  bankBranch: string;
-  bankAccount: string;
-  bankAccountType: string;
-  bankHolderName: string;
-  bankHolderDoc: string;
-}
-
-const EMPTY_RECEBIMENTO: RecebimentoState = {
-  pixAddressKey: "",
-  bankName: "",
-  bankBranch: "",
-  bankAccount: "",
-  bankAccountType: "corrente",
-  bankHolderName: "",
-  bankHolderDoc: "",
-};
-
-function hasAnyRecebimento(r: RecebimentoState): boolean {
-  return !!(
-    r.pixAddressKey.trim() ||
-    r.bankName.trim() ||
-    r.bankBranch.trim() ||
-    r.bankAccount.trim() ||
-    r.bankHolderName.trim() ||
-    r.bankHolderDoc.trim()
-  );
-}
-
 /**
- * Dados de recebimento da comissão (PIX + conta bancária) e o botão que
- * persiste o comissionado como SplitRecipient. Compartilhado entre o form de
- * VENDA (`comissao.comissionados[i]`) e o de LOCAÇÃO (`comissao.angariadores[i]`)
- * — os campos de qualificação têm os mesmos nomes nos dois schemas.
+ * Dados bancários do comissionado e o cadastro dele no roster da imobiliária.
+ * Compartilhado entre o form de VENDA (`comissao.comissionados[i]`) e o de
+ * LOCAÇÃO (`comissao.angariadores[i]`) — os campos de qualificação têm os
+ * mesmos nomes nos dois schemas.
  *
- * Este estado NÃO vive no react-hook-form DE PROPÓSITO. O que está no RHF é
- * autossalvo em `SalesForm.dataJson`, e o dataJson é devolvido inteiro por
- * GET /api/forms/[token] pra qualquer portador do link — que inclui o cliente,
- * e o resumo enviado por e-mail. Chave PIX e conta do corretor não podem
- * trafegar por aí. Aqui os campos são write-only: sobem no POST, ficam no
- * SplitRecipient (cuja whitelist no GET público nunca expõe PII bancária) e
- * saem da tela.
+ * Duas mudanças de 08/2026, e as duas vieram do uso real:
  *
- * Só chave PIX torna o cadastro pagável pela esteira (`pix_external`). Conta
- * bancária é TED manual: fica guardada pro repasse fora da esteira e o
- * cadastro segue rascunho — mesma convenção do cadastro admin.
+ *  - **Os campos vivem no react-hook-form**, em `${basePath}.recebimento.*`, e
+ *    portanto no `dataJson`. Antes eram estado local write-only, para não
+ *    trafegar PII bancária no GET público; agora o dado fica salvo no
+ *    formulário (produto: quem preenche reabre e encontra o que digitou) e a
+ *    proteção passou a ser a redação por leitor no servidor
+ *    (`lib/forms/redact-datajson.ts`), aplicada em toda superfície de leitura,
+ *    mais a ausência no resumo.
+ *  - **Não há botão de salvar.** O cadastro é criado sozinho quando a linha
+ *    tem nome e algum identificador, com o diálogo "é a mesma pessoa?" quando o
+ *    servidor reconhece alguém — ver `useComissionadoRegistry`. O botão antigo
+ *    ("Salvar como cadastro reutilizável") era um passo que ninguém dava, e sem
+ *    ele o corretor não entrava no roster.
  *
- * Cadastro JÁ vinculado (splitRecipientId presente): membros ganham o botão
- * "Pedir dados ao corretor", que reusa o magic link de completion
- * (/api/financeiro/split-recipients/[id]/request-completion) — o corretor
- * preenche PIX/banco num link próprio e seguro, por e-mail.
+ * Cadastro já vinculado: membro ganha "Pedir dados ao corretor", que reusa o
+ * magic link de completion — o corretor preenche num link próprio, por e-mail.
  */
 export function CadastroRecebimento({
   form,
@@ -96,28 +69,59 @@ export function CadastroRecebimento({
   endpoint: string;
   /** Papel enviado quando a linha não tem campo próprio (locação = captador). */
   papelDefault: string;
-  /** Visitante é membro da imobiliária — só então PIX/banco aparecem. */
+  /** Visitante é membro da imobiliária — só então os campos aparecem. */
   showReceiving: boolean;
   /**
    * A imobiliária exige estes dados para concluir a etapa
-   * (OrgFormSettings.requireCommissionerReceiving). Abre o bloco já expandido e
-   * destaca o botão — o padrão fechado escondia o passo de quem precisava dele.
+   * (OrgFormSettings.requireCommissionerReceiving). Abre o bloco e marca os
+   * campos — o padrão fechado escondia o passo de quem precisava dele.
    */
   required?: boolean;
 }) {
-  const [saving, setSaving] = useState(false);
   const [requesting, setRequesting] = useState(false);
-  // Aberto de saída quando a imobiliária exige os dados: o bloco fechado, atrás
-  // de um botão discreto, era o motivo de o passo passar despercebido.
+  // Exigido = sempre aberto, sem botão de mostrar/ocultar: um bloco recolhido
+  // atrás de um botão discreto era o motivo de o passo passar despercebido.
   const [open, setOpen] = useState(required);
-  const [receb, setReceb] = useState<RecebimentoState>(EMPTY_RECEBIMENTO);
+  useEffect(() => {
+    if (required) setOpen(true);
+  }, [required]);
   const fieldId = useId();
 
   const splitRecipientId = form.watch(`${basePath}.splitRecipientId`) as
     | string
     | undefined;
+  const recebimento = form.watch(`${basePath}.recebimento`) as
+    | Record<string, string | undefined>
+    | undefined;
+  // Os campos de IDENTIFICAÇÃO ficam nas etapas (venda e locação desenham a
+  // linha de formas diferentes), mas é a mudança deles que dispara o
+  // reconhecimento. Observar aqui evita ter de pendurar um `onBlur` em cada
+  // input das duas telas — e esquecer um deles seria uma linha que nunca vira
+  // cadastro, que é exatamente o defeito que este fluxo veio corrigir.
+  const nome = form.watch(`${basePath}.nome`);
+  const cpf = form.watch(`${basePath}.cpf`);
+  const cnpj = form.watch(`${basePath}.cnpj`);
+  const email = form.watch(`${basePath}.email`);
+  const telefone = form.watch(`${basePath}.mobile_phone`);
 
-  const set = (patch: Partial<RecebimentoState>) => setReceb((r) => ({ ...r, ...patch }));
+  const registry = useComissionadoRegistry({
+    form,
+    basePath,
+    endpoint,
+    matchEndpoint: `${endpoint}/match`,
+    papelDefault,
+    viewerIsMember: showReceiving,
+  });
+
+  // Reidrata linha antiga (dados só no cadastro), reconhece duplicata e cria o
+  // que faltar. O hook decide o que fazer; aqui só se diz "os campos mudaram".
+  // O debounce espera a digitação parar; o hook ainda ignora repetição da mesma
+  // identidade, então rodar de novo à toa não gera request.
+  const { avaliar } = registry;
+  useEffect(() => {
+    const t = setTimeout(() => void avaliar(), 900);
+    return () => clearTimeout(t);
+  }, [avaliar, nome, cpf, cnpj, email, telefone, splitRecipientId]);
 
   const handleRequestCompletion = async () => {
     if (!splitRecipientId) return;
@@ -137,7 +141,9 @@ export function CadastroRecebimento({
       }
       const { message, anySent } = summarizeCompletion(body);
       if (anySent) {
-        toast.success(`Pedido enviado — ${message}. O corretor preenche os dados num link seguro.`);
+        toast.success(
+          `Pedido enviado — ${message}. O corretor preenche os dados num link seguro.`
+        );
       } else {
         toast.error(message);
       }
@@ -149,173 +155,49 @@ export function CadastroRecebimento({
     }
   };
 
-  const handleSave = async () => {
-    const tipoPessoa = (form.getValues(`${basePath}.tipo_pessoa`) || "juridica") as
-      | "fisica"
-      | "juridica";
-    const nome = String(form.getValues(`${basePath}.nome`) || "").trim();
-    const doc = String(
-      form.getValues(tipoPessoa === "fisica" ? `${basePath}.cpf` : `${basePath}.cnpj`) || ""
-    ).trim();
-    if (!nome || !doc) {
-      toast.error("Preencha pelo menos Nome e CPF/CNPJ antes de salvar.");
-      return;
-    }
-
-    const chavePix = receb.pixAddressKey.trim();
-    // `titularCpfCnpj` tem min(11) no schema da rota — mandar um doc curto
-    // reprovaria o body inteiro. Sem doc válido, o titular fica implícito.
-    const docDigits = doc.replace(/\D/g, "");
-    const pix = chavePix
-      ? {
-          chave: chavePix,
-          titularNome: nome,
-          titularCpfCnpj: docDigits.length >= 11 ? doc : undefined,
-        }
-      : undefined;
-
-    const banco =
-      receb.bankName.trim() ||
-      receb.bankBranch.trim() ||
-      receb.bankAccount.trim() ||
-      receb.bankHolderName.trim() ||
-      receb.bankHolderDoc.trim()
-        ? {
-            nome: receb.bankName.trim() || undefined,
-            agencia: receb.bankBranch.trim() || undefined,
-            conta: receb.bankAccount.trim() || undefined,
-            tipoConta: receb.bankAccount.trim()
-              ? (receb.bankAccountType as "corrente" | "poupanca")
-              : undefined,
-            titularNome: receb.bankHolderName.trim() || undefined,
-            titularDoc: receb.bankHolderDoc.trim() || undefined,
-          }
-        : undefined;
-
-    setSaving(true);
-    try {
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          label: nome,
-          tipoPessoa,
-          cpfCnpj: doc,
-          creci: String(form.getValues(`${basePath}.creci`) || "") || undefined,
-          papel: form.getValues(`${basePath}.papel`) || papelDefault,
-          email: String(form.getValues(`${basePath}.email`) || "") || undefined,
-          phone: String(form.getValues(`${basePath}.mobile_phone`) || "") || undefined,
-          pix,
-          banco,
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        toast.error(body?.error ?? "Falha ao salvar cadastro.");
-        return;
-      }
-      const data = await res.json();
-      const recipientId = data?.recipient?.id;
-      if (recipientId) {
-        form.setValue(`${basePath}.splitRecipientId`, recipientId, { shouldDirty: true });
-      }
-      // Booleano de ESTADO — o gate da etapa (quando a imobiliária exige os
-      // dados de recebimento) precisa saber se sobrou pendência. O dado
-      // bancário em si continua fora do formulário.
-      form.setValue(`${basePath}.recebimentoPendente`, data?.isDraft === true, {
-        shouldDirty: true,
-      });
-      // Some da tela: o dado agora vive no cadastro, e este formulário não é
-      // lugar pra guardar chave PIX/conta.
-      setReceb(EMPTY_RECEBIMENTO);
-      setOpen(false);
-      if (data?.existed && data?.receivingIgnored) {
-        // Não mentir: a rota ignora dados de recebimento de cadastro existente.
-        toast.warning(
-          "Cadastro já existia e foi vinculado. Por segurança, os dados de recebimento não foram alterados — peça à imobiliária para atualizá-los."
-        );
-      } else if (data?.existed) {
-        toast.success("Cadastro já existia e foi vinculado.");
-      } else if (chavePix) {
-        toast.success(
-          "Cadastro salvo com a chave PIX. A imobiliária confirma o meio de repasse antes do primeiro pagamento."
-        );
-      } else if (data?.isDraft) {
-        toast.success(
-          "Cadastro salvo. Sem chave PIX ele fica como rascunho — a imobiliária completa o meio de repasse depois."
-        );
-      } else {
-        toast.success("Cadastro salvo. Próximos negócios podem reusá-lo.");
-      }
-    } catch (err) {
-      console.error("[CadastroRecebimento]", err);
-      toast.error("Erro ao salvar cadastro.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const preenchido = hasAnyRecebimento(receb);
-
-  // Cadastro já vinculado: nada a salvar aqui. Membro ganha o pedido por
-  // magic link; cliente vê só a nota de que o dado é mantido pela imobiliária.
-  if (splitRecipientId) {
-    if (!showReceiving) {
-      return (
-        <p className="pt-2 border-t border-dashed text-xs text-muted-foreground">
-          Dados de recebimento deste cadastro são mantidos pela imobiliária.
-        </p>
-      );
-    }
+  // Cliente com o link não vê nem envia estes campos: o servidor os redige na
+  // leitura e os recusa na escrita, então mostrá-los seria pedir dado bancário
+  // de terceiro a quem não tem o que fazer com ele.
+  if (!showReceiving) {
     return (
-      <div className="pt-2 border-t border-dashed flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <p className="text-sm font-semibold flex items-center gap-1.5">
-            <Landmark className="h-4 w-4" /> Dados para recebimento da comissão
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Mantidos no cadastro do corretor. Sem chave PIX, o repasse automático não sai.
-          </p>
-        </div>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={handleRequestCompletion}
-          disabled={requesting}
-        >
-          <Mail className="h-3.5 w-3.5 mr-1.5" />
-          {requesting ? "Enviando…" : "Pedir dados ao corretor"}
-        </Button>
-      </div>
+      <p className="pt-2 border-t border-dashed text-xs text-muted-foreground">
+        Os dados bancários deste corretor são mantidos pela imobiliária.
+      </p>
     );
   }
 
+  const completo = temRecebimento(recebimento ?? null);
+  const marca = required ? <span className="text-primary"> *</span> : null;
+
   return (
     <div className="pt-2 border-t border-dashed space-y-3">
-      {showReceiving && (
-        <div
-          className={
-            required
-              ? "flex items-center justify-between flex-wrap gap-2 rounded-md border border-primary/40 bg-primary/5 p-3"
-              : "flex items-center justify-between flex-wrap gap-2"
-          }
-        >
-          <div>
-            <p className="text-sm font-semibold flex items-center gap-1.5">
-              <Landmark className="h-4 w-4" /> Dados para recebimento da comissão
-              {required && (
-                <span className="text-xs font-normal text-primary">
-                  · obrigatório
-                </span>
-              )}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Chave PIX habilita o repasse automático. Vão direto pro cadastro da
-              imobiliária — não ficam salvos neste formulário nem aparecem pra quem
-              mais tem o link.
-            </p>
-          </div>
+      <DuplicataCorretorDialog
+        candidato={registry.candidato}
+        onConfirmar={registry.confirmarMesmaPessoa}
+        onNegar={registry.negarMesmaPessoa}
+      />
+
+      <div
+        className={
+          required && !completo
+            ? "flex items-center justify-between flex-wrap gap-2 rounded-md border border-primary/40 bg-primary/5 p-3"
+            : "flex items-center justify-between flex-wrap gap-2"
+        }
+      >
+        <div>
+          <p className="text-sm font-semibold flex items-center gap-1.5">
+            <Landmark className="h-4 w-4" /> Dados bancários do corretor
+            {required && (
+              <span className="text-xs font-normal text-primary">· obrigatório</span>
+            )}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {required
+              ? "Informe a chave PIX ou os dados da conta. Ficam salvos no formulário e no cadastro do corretor — não aparecem no resumo nem para quem mais tiver o link."
+              : "Ficam salvos no formulário e no cadastro do corretor — não aparecem no resumo nem para quem mais tiver o link."}
+          </p>
+        </div>
+        {!required && (
           <Button
             type="button"
             size="sm"
@@ -325,54 +207,68 @@ export function CadastroRecebimento({
             <Landmark className="h-3.5 w-3.5 mr-1.5" />
             {open ? "Ocultar" : "Preencher dados bancários"}
           </Button>
-        </div>
-      )}
+        )}
+        {splitRecipientId && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={handleRequestCompletion}
+            disabled={requesting}
+          >
+            <Mail className="h-3.5 w-3.5 mr-1.5" />
+            {requesting ? "Enviando…" : "Pedir dados ao corretor"}
+          </Button>
+        )}
+      </div>
 
-      {showReceiving && open && (
+      {open && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 rounded-md border border-dashed bg-background/60 p-3">
-          <FormField label="Chave PIX" className="md:col-span-2">
+          <FormField label={<>Chave PIX{marca}</>} className="md:col-span-2">
             <Input
               id={`${fieldId}-pix`}
-              value={receb.pixAddressKey}
-              onChange={(e) => set({ pixAddressKey: e.target.value })}
+              {...form.register(`${basePath}.recebimento.pix_chave`)}
+              onBlur={() => void registry.avaliar()}
               maxLength={200}
               placeholder="CPF, CNPJ, e-mail, telefone ou chave aleatória"
             />
             <p className="text-xs text-muted-foreground">
-              É o que permite o repasse automático da comissão. A imobiliária
-              confirma a chave antes do primeiro pagamento.
+              Se preferir, deixe em branco e informe a conta bancária abaixo —
+              qualquer um dos dois atende.
             </p>
           </FormField>
 
-          <FormField label="Banco">
+          <FormField label={<>Banco{marca}</>}>
             <Input
-              value={receb.bankName}
-              onChange={(e) => set({ bankName: e.target.value })}
+              {...form.register(`${basePath}.recebimento.banco`)}
               maxLength={80}
               placeholder="Ex: Itaú"
             />
           </FormField>
-          <FormField label="Agência">
+          <FormField label={<>Agência{marca}</>}>
             <Input
-              value={receb.bankBranch}
-              onChange={(e) => set({ bankBranch: e.target.value })}
+              {...form.register(`${basePath}.recebimento.agencia`)}
               maxLength={20}
               placeholder="0000"
             />
           </FormField>
-          <FormField label="Conta">
+          <FormField label={<>Conta{marca}</>}>
             <Input
-              value={receb.bankAccount}
-              onChange={(e) => set({ bankAccount: e.target.value })}
+              {...form.register(`${basePath}.recebimento.conta`)}
               maxLength={30}
               placeholder="00000-0"
             />
           </FormField>
-          <FormField label="Tipo de conta">
+          <FormField label={<>Tipo de conta{marca}</>}>
             <NativeSelect
-              value={receb.bankAccountType}
-              onChange={(v) => set({ bankAccountType: v })}
+              value={recebimento?.tipo_conta ?? ""}
+              onChange={(v) =>
+                form.setValue(`${basePath}.recebimento.tipo_conta`, v || undefined, {
+                  shouldDirty: true,
+                })
+              }
               options={[
+                { value: "", label: "Selecione..." },
                 { value: "corrente", label: "Corrente" },
                 { value: "poupanca", label: "Poupança" },
               ]}
@@ -380,45 +276,27 @@ export function CadastroRecebimento({
           </FormField>
           <FormField label="Titular da conta">
             <Input
-              value={receb.bankHolderName}
-              onChange={(e) => set({ bankHolderName: e.target.value })}
+              {...form.register(`${basePath}.recebimento.titular_nome`)}
               maxLength={200}
               placeholder="Se for diferente do comissionado"
             />
           </FormField>
           <FormField label="CPF/CNPJ do titular">
             <Input
-              value={receb.bankHolderDoc}
-              onChange={(e) => set({ bankHolderDoc: e.target.value })}
+              {...form.register(`${basePath}.recebimento.titular_doc`)}
               maxLength={18}
               placeholder="000.000.000-00"
             />
           </FormField>
+
+          {required && !completo && (
+            <p className="md:col-span-2 text-xs text-amber-700 dark:text-amber-500">
+              Falta a chave PIX ou os quatro campos da conta (banco, agência,
+              conta e tipo).
+            </p>
+          )}
         </div>
       )}
-
-      <div className="flex items-center gap-3 flex-wrap">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={handleSave}
-          disabled={saving}
-          className="text-xs"
-        >
-          {saving
-            ? "Salvando..."
-            : preenchido
-              ? "Salvar cadastro e dados de recebimento"
-              : "Salvar como cadastro reutilizável"}
-        </Button>
-        {preenchido && (
-          <p className="text-xs text-amber-700 dark:text-amber-500">
-            Clique em salvar — os dados de recebimento se perdem se você sair
-            sem salvar.
-          </p>
-        )}
-      </div>
     </div>
   );
 }

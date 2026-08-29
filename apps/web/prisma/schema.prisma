@@ -3191,7 +3191,17 @@ model SplitRecipient {
   // valida e marca active: true + esvazia pendingFields.
   completionToken    String?   @db.Text
   completionTokenExp DateTime?
+  // `active` é PAGABILIDADE, não existência: nasce false enquanto houver
+  // `pendingFields` (o splitDispatcher pula quem não tem meio de repasse).
+  // Ele NÃO serve para saber se o cadastro foi excluído — o soft delete
+  // gravava só `active: false` e os dois sentidos ficaram indistinguíveis:
+  // o picker do formulário filtrava `active: true` e escondia 40 dos 42
+  // corretores da org, dos quais só 5 tinham sido de fato excluídos.
+  // Quem responde "este cadastro ainda existe?" é `archivedAt`.
   active             Boolean   @default(true)
+  // Soft delete. Null = cadastro vivo (mesmo sem meio de repasse). Toda
+  // listagem de ESCOLHA de corretor filtra por este campo, nunca por `active`.
+  archivedAt         DateTime?
   // Cadastro reutilizável de comissionado (2026-05-16). Quando kind="commissioner"
   // o recipient pode ser escolhido por autocomplete na etapa Comissão do form
   // público (/api/forms/[token]/commissioners). kind="other" mantém uso pré-existente.
@@ -3241,6 +3251,7 @@ model SplitRecipient {
   @@index([orgId, active])
   @@index([orgId, recipientType])
   @@index([orgId, kind, active])
+  @@index([orgId, kind, archivedAt])
 }
 
 // Rascunho do wizard de geração de cobrança (Pagadoria v2 2026-05-09).

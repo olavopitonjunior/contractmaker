@@ -47,6 +47,7 @@ import {
 import { collectPartyFormatIssues } from "@/lib/forms/field-formats";
 import { findMissingRequired, getByPath } from "@/lib/forms/party-required";
 import { resolveAllRequiredFields } from "@/lib/forms/presets";
+import { stripCommissionerReceiving } from "@/lib/forms/redact-datajson";
 import {
   GoogleDocsGenerationError,
   googleDocsFailureMessage,
@@ -860,10 +861,17 @@ export async function generateContractForDeal(
     include: { form: true },
   });
 
-  // Get form data from deal or form
-  const dataJson = deal.form
-    ? (deal.form.dataJson as Record<string, unknown>)
-    : (deal.dataJson as Record<string, unknown>) || {};
+  // Get form data from deal or form.
+  // `stripCommissionerReceiving`: os dados bancários do corretor NÃO entram no
+  // Contract.dataJson. Ele é a cópia enriquecida de onde leem o prompt do LLM
+  // de análise (`dataJsonToMarkdown` serializa quase tudo), o ClickSign e o
+  // DIMOB — nenhum deles precisa da chave PIX do corretor, e o caminho não tem
+  // gate de leitor nenhum. A fonte segue sendo o formulário e o cadastro.
+  const dataJson = stripCommissionerReceiving(
+    deal.form
+      ? (deal.form.dataJson as Record<string, unknown>)
+      : (deal.dataJson as Record<string, unknown>) || {}
+  );
 
   // Seleção DETERMINÍSTICA de template por categoria (forma de pagamento →
   // template). Substitui a antiga detecção heurística de modalidade, que lia
@@ -1286,9 +1294,12 @@ export async function generateLocacaoContractForDeal(
     include: { form: true },
   });
 
-  const dataJson = deal.form
-    ? (deal.form.dataJson as Record<string, unknown>)
-    : (deal.dataJson as Record<string, unknown>) || {};
+  // Sem os dados bancários do corretor — ver a nota em generateContractForDeal.
+  const dataJson = stripCommissionerReceiving(
+    deal.form
+      ? (deal.form.dataJson as Record<string, unknown>)
+      : (deal.dataJson as Record<string, unknown>) || {}
+  );
   const schemaType = deal.form?.schemaType ?? "locacao_residencial_v1";
 
   // dataJson entra na seleção: além da modalidade, garantia e PF/PJ (locatário e
@@ -1659,9 +1670,12 @@ export async function generateAdministracaoContractForDeal(
     include: { form: true },
   });
 
-  const dataJson = deal.form
-    ? (deal.form.dataJson as Record<string, unknown>)
-    : (deal.dataJson as Record<string, unknown>) || {};
+  // Sem os dados bancários do corretor — ver a nota em generateContractForDeal.
+  const dataJson = stripCommissionerReceiving(
+    deal.form
+      ? (deal.form.dataJson as Record<string, unknown>)
+      : (deal.dataJson as Record<string, unknown>) || {}
+  );
 
   const selection = await selectAdministracaoTemplate(orgId);
   if (!selection) {

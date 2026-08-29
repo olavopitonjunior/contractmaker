@@ -13,6 +13,10 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  cadastroSemDadosBancarios,
+  type RecebimentoData,
+} from "@/lib/forms/commissioner-receiving";
 
 /** Shape mínimo comum às duas fontes de dados (admin autenticado e form
  *  público token-scoped) — cada caller mapeia sua resposta pra este formato. */
@@ -27,17 +31,33 @@ export interface CorretorComboboxOption {
   phone?: string | null;
   /**
    * Cadastro sem meio de repasse (`SplitRecipient.pendingFields` não vazio).
-   * Booleano derivado — o endpoint token-scoped NUNCA devolve os campos
-   * bancários em si.
+   * Booleano derivado, e o único sinal que o visitante ANÔNIMO recebe sobre
+   * dados bancários.
    */
   receivingPending?: boolean;
+  /**
+   * Dados bancários do cadastro. Só chegam quando quem preenche é MEMBRO da
+   * imobiliária (o endpoint token-scoped decide) — é o que permite escolher um
+   * corretor da lista e já vir com PIX/conta preenchidos.
+   */
+  recebimento?: RecebimentoData | null;
 }
+
+/**
+ * A fonte pode devolver só a lista (telas antigas) ou a PÁGINA com `hasMore`.
+ * O sinal de truncamento importa desde que a listagem passou a incluir os
+ * cadastros sem meio de repasse: uma lista cheia era indistinguível de uma
+ * lista completa, e quem não achava o corretor concluía que ele não existia.
+ */
+export type CorretorComboboxPage =
+  | CorretorComboboxOption[]
+  | { items: CorretorComboboxOption[]; hasMore?: boolean };
 
 interface CorretorComboboxProps {
   /** Opção atualmente selecionada (controlado pelo pai) — null = nada exibido no trigger. */
   value?: CorretorComboboxOption | null;
   onSelect: (recipient: CorretorComboboxOption) => void;
-  fetchOptions: (q: string) => Promise<CorretorComboboxOption[]>;
+  fetchOptions: (q: string) => Promise<CorretorComboboxPage>;
   placeholder?: string;
   /** Quando definido, mostra um item de rodapé pra cadastrar um novo corretor com a query atual. */
   allowCreate?: (query: string) => void;
@@ -67,6 +87,7 @@ export function CorretorCombobox({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState<CorretorComboboxOption[]>([]);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   // Falha de rede/HTTP tem estado próprio: engolir num `setOptions([])` fazia um
   // 429 (ou um 403 de form vinculado) se disfarçar de "Nenhum corretor
@@ -85,14 +106,18 @@ export function CorretorCombobox({
     const timer = setTimeout(() => {
       fetchOptions(q)
         .then((results) => {
-          if (requestId.current === id) {
-            setOptions(results);
-            setFailed(false);
-          }
+          if (requestId.current !== id) return;
+          const page = Array.isArray(results)
+            ? { items: results, hasMore: false }
+            : results;
+          setOptions(page.items ?? []);
+          setHasMore(page.hasMore === true);
+          setFailed(false);
         })
         .catch(() => {
           if (requestId.current === id) {
             setOptions([]);
+            setHasMore(false);
             setFailed(true);
           }
         })
@@ -108,6 +133,7 @@ export function CorretorCombobox({
     setOpen(false);
     setQuery("");
     setOptions([]);
+    setHasMore(false);
     setFailed(false);
   }
 
@@ -157,7 +183,19 @@ export function CorretorCombobox({
                       className={cn("h-4 w-4", value?.id === o.id ? "opacity-100" : "opacity-0")}
                     />
                     <div className="flex flex-col overflow-hidden">
-                      <span className="truncate font-medium">{o.label}</span>
+                      <span className="truncate font-medium">
+                        {o.label}
+                        {/* A lista passou a incluir cadastro sem meio de
+                            repasse (antes o filtro `active` escondia 40 dos 42
+                            corretores da org). Dizer quais estão incompletos é
+                            o que impede a lista maior de virar surpresa lá na
+                            frente, na hora de pagar. */}
+                        {cadastroSemDadosBancarios(o) && (
+                          <span className="ml-1.5 text-xs font-normal text-amber-700 dark:text-amber-500">
+                            · sem dados bancários
+                          </span>
+                        )}
+                      </span>
                       <span className="truncate text-xs text-muted-foreground">
                         {[
                           o.tipoPessoa === "fisica"
@@ -175,6 +213,11 @@ export function CorretorCombobox({
                   </CommandItem>
                 ))}
               </CommandGroup>
+            )}
+            {!loading && !failed && hasMore && (
+              <p className="px-3 py-2 text-xs text-muted-foreground border-t">
+                Mostrando os primeiros resultados — digite para refinar a busca.
+              </p>
             )}
             {allowCreate && query.trim().length > 0 && (
               <CommandGroup>

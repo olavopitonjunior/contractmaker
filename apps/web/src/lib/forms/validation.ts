@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { collectPartyFormatIssues } from "@/lib/forms/field-formats";
 import { isMarried } from "@/lib/forms/estado-civil";
+import { comissionadoRecebimentoSchema } from "@/lib/forms/commissioner-receiving";
 
 /**
  * Teto das observações gerais do formulário. Existe por dois motivos além de
@@ -358,12 +359,18 @@ export const step7Schema = z.object({
       // e usam o id direto. Setado pelo form ao escolher "Selecionar
       // cadastrado" ou após criar inline via POST /api/forms/[token]/commissioners.
       splitRecipientId: z.string().optional(),
-      // Estado do cadastro de recebimento do corretor, para o gate da etapa
-      // Comissão (OrgFormSettings.requireCommissionerReceiving). É um BOOLEANO
-      // — nunca a chave PIX nem a conta, que seguem fora do dataJson por
-      // serem devolvidas a qualquer portador do link. `true` = cadastro sem
-      // meio de repasse (SplitRecipient.pendingFields não vazio).
+      // Estado do cadastro no registry: `true` = SplitRecipient sem meio de
+      // repasse (`pendingFields` não vazio). Continua sendo só um BOOLEANO, e
+      // segue servindo aos formulários em circulação, cujos dados bancários
+      // vivem apenas no cadastro (ver `linhaSatisfeita`).
       recebimentoPendente: z.boolean().optional(),
+      // Dados bancários do corretor. Ficam no formulário a pedido de produto —
+      // quem preenche reabre e encontra o que digitou. Isso os põe dentro de um
+      // `dataJson` que o GET público devolve a qualquer portador do link, então
+      // vêm com duas obrigações inseparáveis: a redação por leitor em toda
+      // superfície de leitura (`lib/forms/redact-datajson.ts`) e a exclusão do
+      // resumo (tela, PDF, e-mail e o texto que vai ao LLM de revisão).
+      recebimento: comissionadoRecebimentoSchema.optional(),
     })).optional(),
   }).optional(),
   // `desistencia`, `foro`, `assinatura` e `config` SAÍRAM do formulário público

@@ -123,8 +123,13 @@ export async function resolveDealBrokers(params: {
   const comissionados = comissionadosOf(formDataJson);
   if (comissionados.length === 0 && brokerIds.length === 0) return [];
 
+  // `archivedAt: null` — corretor EXCLUÍDO não recebe aviso de processo.
+  // `active` continua de fora de propósito: ele é pagabilidade da esteira de
+  // repasse, e um corretor sem chave PIX segue tendo direito a saber que o
+  // contrato dele foi assinado. Até 08/2026 os dois sentidos moravam no mesmo
+  // booleano e não havia como separar — excluir o cadastro não silenciava nada.
   const roster = await prisma.splitRecipient.findMany({
-    where: { orgId, kind: "commissioner" },
+    where: { orgId, kind: "commissioner", archivedAt: null },
   });
 
   return pickBrokers(indexRoster(roster), comissionados, brokerIds).map(
@@ -160,7 +165,11 @@ export async function resolveBrokerDeals(params: {
   const limit = Math.min(Math.max(params.limit ?? 200, 1), 500);
 
   const [roster, deals] = await Promise.all([
-    prisma.splitRecipient.findMany({ where: { orgId, kind: "commissioner" } }),
+    // Mesma regra da direção direta: excluído não participa de negócio nenhum,
+    // e é este roster que decide sobre o que o corretor pode falar com o Max.
+    prisma.splitRecipient.findMany({
+      where: { orgId, kind: "commissioner", archivedAt: null },
+    }),
     prisma.deal.findMany({
       where: { pipeline: { orgId } },
       select: {

@@ -23,7 +23,10 @@ export interface Corretor {
   bankHolderName: string | null;
   bankHolderDoc: string | null;
   pendingFields: string[];
+  /** Pagabilidade da esteira de repasse — NÃO diz se o cadastro existe. */
   active: boolean;
+  /** Desativado nesta tela (ou excluído). É o que tira do picker do formulário. */
+  archivedAt: string | null;
   notifyByEmail: boolean;
   notifyByWhatsapp: boolean;
   notifyOptOut: boolean;
