@@ -25,6 +25,18 @@ export interface UseSettingsAutoSaveOptions<T extends SettingsFields> {
    */
   isValid?: (fields: T) => boolean;
   debounceMs?: number;
+  /**
+   * Chaves que entram em TODO PATCH, mesmo sem terem mudado.
+   *
+   * Existe para o campo que é constante na instância mas **obrigatório** no
+   * schema da rota — o caso do `kind` em `/api/org/sla-policies`, que é
+   * `.strict()` e exige `kind` junto das políticas. Sem isto, o diff por chave
+   * suja nunca o incluiria (ele nasce igual à baseline e nunca muda) e todo
+   * save voltaria 400 por corpo inválido.
+   *
+   * Não conta para o dirty: sozinho, não dispara nada.
+   */
+  alwaysInclude?: Record<string, unknown>;
   /** Desliga o agendamento (seção somente-leitura / sem permissão). */
   enabled?: boolean;
   /**
@@ -77,6 +89,7 @@ export function useSettingsAutoSave<T extends SettingsFields>(
     debounceMs = 800,
     enabled = true,
     onSaved,
+    alwaysInclude,
   } = options;
 
   const [status, setStatus] = useState<SettingsSaveStatus>("idle");
@@ -86,6 +99,11 @@ export function useSettingsAutoSave<T extends SettingsFields>(
   const mountedRef = useRef(true);
   const stoppedRef = useRef(false);
   const inFlightRef = useRef(false);
+  /**
+   * Há uma gravação agendada e ainda não disparada. Existe só para o unmount
+   * saber que precisa gravar antes de sumir — ver o cleanup abaixo.
+   */
+  const pendingRef = useRef(false);
 
   // Verdade do servidor, por chave. Nasce do valor inicial — que a page RSC leu
   // do banco —, logo montar a tela não dispara save nenhum.
@@ -101,12 +119,25 @@ export function useSettingsAutoSave<T extends SettingsFields>(
   validRef.current = isValid;
   const onSavedRef = useRef(onSaved);
   onSavedRef.current = onSaved;
+  const alwaysIncludeRef = useRef(alwaysInclude);
+  alwaysIncludeRef.current = alwaysInclude;
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       if (timerRef.current) clearTimeout(timerRef.current);
+      // Desmontar no meio do debounce NÃO pode descartar a edição. Este é o
+      // caminho comum, não o exótico: em `ContractDefaultsCard` trocar a aba
+      // Vendas↔Locação desmonta o formulário inteiro, então digitar um valor e
+      // trocar de aba dentro da janela de debounce perdia o que foi digitado —
+      // em silêncio, e sem o botão "Salvar" que antes dava a chance de notar.
+      // O fetch sobrevive ao unmount; só os setState é que não podem rodar,
+      // e `mountedRef` já cuida disso.
+      if (pendingRef.current) {
+        pendingRef.current = false;
+        void persistRef.current();
+      }
     };
   }, []);
 
@@ -144,11 +175,18 @@ export function useSettingsAutoSave<T extends SettingsFields>(
       return false;
     }
 
-    const payload = Object.fromEntries(dirty.map((k) => [k, current[k]]));
+    const payload = {
+      ...(alwaysIncludeRef.current ?? {}),
+      ...Object.fromEntries(dirty.map((k) => [k, current[k]])),
+    };
 
     inFlightRef.current = true;
-    setStatus("saving");
-    setError(null);
+    // O save de unmount roda com o componente já fora da árvore: o fetch vale,
+    // o setState não.
+    if (mountedRef.current) {
+      setStatus("saving");
+      setError(null);
+    }
     try {
       const res = await fetch(endpoint, {
         method: "PATCH",
@@ -216,14 +254,30 @@ export function useSettingsAutoSave<T extends SettingsFields>(
   persistRef.current = persist;
 
   useEffect(() => {
-    if (!enabled || stoppedRef.current) return;
-    if (dirtySignature === "") return;
+    // Todo caminho que NÃO agenda precisa zerar `pendingRef`: ele é o que
+    // autoriza o unmount a gravar, e deixá-lo preso em `true` faria uma seção
+    // já desabilitada (ou inválida) disparar um PATCH ao desmontar.
+    if (!enabled || stoppedRef.current) {
+      pendingRef.current = false;
+      return;
+    }
+    if (dirtySignature === "") {
+      pendingRef.current = false;
+      return;
+    }
     // Seção incoerente: fica pendente e NÃO agenda. Volta a agendar sozinho
     // assim que a próxima edição tornar o conjunto válido.
-    if (validRef.current && !validRef.current(fieldsRef.current)) return;
+    if (validRef.current && !validRef.current(fieldsRef.current)) {
+      pendingRef.current = false;
+      return;
+    }
 
     if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => void persist(), debounceMs);
+    pendingRef.current = true;
+    timerRef.current = setTimeout(() => {
+      pendingRef.current = false;
+      void persist();
+    }, debounceMs);
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
@@ -232,6 +286,7 @@ export function useSettingsAutoSave<T extends SettingsFields>(
   /** Flush imediato — usar no `blur` de campo de texto. */
   const flush = useCallback(async (): Promise<boolean> => {
     if (timerRef.current) clearTimeout(timerRef.current);
+    pendingRef.current = false;
     return persist();
   }, [persist]);
 

@@ -384,6 +384,173 @@ describe("useSettingsAutoSave", () => {
     expect(bodyOf(spy, 1).summaryRecipientEmail).toBe("c@d.com");
   });
 
+  it("desmontar no meio do debounce GRAVA, não descarta", async () => {
+    // Regressão de produção (fase 1): o cleanup só fazia clearTimeout, então
+    // digitar um valor no Padrão contratual e trocar a aba Vendas↔Locação
+    // dentro da janela de debounce perdia a edição em silêncio — e sem o botão
+    // "Salvar", nada dava ao usuário a chance de perceber. Trocar de aba é o
+    // caminho comum, não o exótico: `ContractDefaultsCard` renderiza
+    // `esteira === "venda" ? <VendaDefaults/> : <LocacaoDefaults/>`, ou seja,
+    // desmonta o formulário inteiro.
+    const spy = mockFetch(() => ({ ok: true }));
+    const { rerender, unmount } = renderHook(
+      ({ v }) =>
+        useSettingsAutoSave(v, { endpoint: ENDPOINT, debounceMs: 5_000 }),
+      { initialProps: { v: { prazo: 15 } } },
+    );
+
+    rerender({ v: { prazo: 20 } });
+    // Desmonta ANTES do debounce vencer.
+    unmount();
+
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    expect(bodyOf(spy).prazo).toBe(20);
+  });
+
+  it("desmontar sem nada pendente não dispara PATCH", async () => {
+    const spy = mockFetch(() => ({ ok: true }));
+    const { unmount } = renderHook(() =>
+      useSettingsAutoSave(
+        { prazo: 15 },
+        { endpoint: ENDPOINT, debounceMs: 10 },
+      ),
+    );
+
+    unmount();
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("desmontar com estado inválido não grava lixo", async () => {
+    const spy = mockFetch(() => ({ ok: true }));
+    const isValid = (f: { email: string }) =>
+      f.email === "" || f.email.includes("@");
+    const { rerender, unmount } = renderHook(
+      ({ v }) =>
+        useSettingsAutoSave(v, {
+          endpoint: ENDPOINT,
+          isValid,
+          debounceMs: 5_000,
+        }),
+      { initialProps: { v: { email: "" } } },
+    );
+
+    rerender({ v: { email: "invalido" } });
+    unmount();
+
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("alwaysInclude entra em todo PATCH, mesmo sem ter mudado", async () => {
+    // Regressão: `kind` é constante na instância do editor de SLA (o pai
+    // remonta por `key={kind}`), então NUNCA fica sujo e o diff por chave nunca
+    // o incluiria — mas o schema da rota é `.strict()` e o exige. Sem isto,
+    // todo save de SLA voltava 400 "Body inválido".
+    const spy = mockFetch(() => ({ ok: true }));
+    const { rerender } = renderHook(
+      ({ v }) =>
+        useSettingsAutoSave(v, {
+          endpoint: ENDPOINT,
+          alwaysInclude: { kind: "venda" },
+          debounceMs: 10,
+        }),
+      { initialProps: { v: { policies: [] as unknown[] } } },
+    );
+
+    rerender({ v: { policies: [{ stageId: "s1", warnDays: 5 }] } });
+    await act(async () => {
+      vi.advanceTimersByTime(100);
+    });
+
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    const sent = bodyOf(spy);
+    expect(sent.kind).toBe("venda");
+    expect(sent.policies).toEqual([{ stageId: "s1", warnDays: 5 }]);
+  });
+
+  it("alwaysInclude sozinho NÃO dispara save", async () => {
+    const spy = mockFetch(() => ({ ok: true }));
+    renderHook(() =>
+      useSettingsAutoSave(
+        { policies: [] as unknown[] },
+        {
+          endpoint: ENDPOINT,
+          alwaysInclude: { kind: "venda" },
+          debounceMs: 10,
+        },
+      ),
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("campo derivado que ESVAZIA depois de salvar não dispara segundo PATCH", async () => {
+    // Regressão pega só no QA, depois de passar por review e por toda a suíte.
+    // No SLA, o campo observado era a lista de etapas ALTERADAS. Salvava (200),
+    // o refresh trazia as linhas novas, a lista esvaziava — e `[]` difere da
+    // baseline `[{...}]`, então o hook lia isso como uma alteração nova e
+    // mandava um segundo PATCH com lista vazia, que a rota rejeita (min(1)).
+    // Era 200 + 400 a cada edição.
+    //
+    // A lição é do hook, não da tela: o valor observado tem que ser estável
+    // depois do save. Aqui isso é verificado pelo lado de fora — quem observa
+    // um derivado que esvazia continua tendo o problema; quem observa o estado
+    // completo, não.
+    const spy = mockFetch(() => ({ ok: true }));
+    const { rerender } = renderHook(
+      ({ v }) => useSettingsAutoSave(v, { endpoint: ENDPOINT, debounceMs: 10 }),
+      { initialProps: { v: { policies: [{ id: "s1", warn: 5 }] } } },
+    );
+
+    // Edita: a lista completa muda de valor.
+    rerender({ v: { policies: [{ id: "s1", warn: 4 }] } });
+    await act(async () => {
+      vi.advanceTimersByTime(100);
+    });
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    expect(bodyOf(spy).policies).toEqual([{ id: "s1", warn: 4 }]);
+
+    // O "refresh" do servidor devolve exatamente o que foi gravado: o valor
+    // observado volta a bater com a baseline e NADA é reagendado.
+    rerender({ v: { policies: [{ id: "s1", warn: 4 }] } });
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("enabled:false zera o pendente — unmount não grava depois", async () => {
+    // Sem zerar `pendingRef` nos caminhos que não agendam, uma seção que
+    // perdeu permissão (enabled → false) ainda dispararia PATCH ao desmontar,
+    // porque `persist` não checa `enabled`.
+    const spy = mockFetch(() => ({ ok: true }));
+    const { rerender, unmount } = renderHook(
+      ({ v, on }) =>
+        useSettingsAutoSave(v, {
+          endpoint: ENDPOINT,
+          enabled: on,
+          debounceMs: 5_000,
+        }),
+      { initialProps: { v: { prazo: 15 }, on: true } },
+    );
+
+    rerender({ v: { prazo: 20 }, on: true });
+    rerender({ v: { prazo: 20 }, on: false });
+    unmount();
+
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it("enabled:false não agenda nada", async () => {
     const spy = mockFetch(() => ({ ok: true }));
     const { rerender } = renderHook(
