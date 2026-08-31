@@ -9,6 +9,8 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
+import { SaveStatusPill } from "@/components/settings/SaveStatusPill";
+import { useSettingsAutoSave } from "@/hooks/use-settings-auto-save";
 
 const AUTH_METHODS = ["email", "whatsapp", "selfie", "icp_brasil"] as const;
 type AuthMethod = (typeof AUTH_METHODS)[number];
@@ -34,17 +36,43 @@ interface Settings {
   proposalOwnerDeadlineDays: number | null;
 }
 
+/** Limites do Zod da rota (`signature-preferences/route.ts`). */
+const MAX_ASSUNTO = 200;
+const MAX_MENSAGEM = 2000;
+const MAX_PRAZO = 365;
+
+/**
+ * Campo de prazo vazio significa "sem prazo" (null). Fora isso tem que ser
+ * inteiro de 1 a 365 — a faixa que a rota aceita.
+ *
+ * O código antigo fazia `Math.max(1, Number(x))`, que tem dois furos: texto
+ * não-numérico virava `NaN` e era serializado como `null`, apagando o prazo em
+ * silêncio; e não havia teto, então "9999" ia para a rota e voltava 400.
+ */
+function erroDePrazo(raw: string): string | null {
+  const t = raw.trim();
+  if (t === "") return null;
+  const n = Number(t);
+  if (!Number.isInteger(n)) return "Use um número inteiro de dias.";
+  if (n < 1 || n > MAX_PRAZO) return `Use de 1 a ${MAX_PRAZO} dias.`;
+  return null;
+}
+
+function prazoParaApi(raw: string): number | null {
+  const t = raw.trim();
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isInteger(n) ? n : null;
+}
+
 /**
  * Preferências de assinatura por org: tipos de assinatura habilitados + método
  * padrão e padrões de envelope. Valem para todos os envios (contrato, locação,
  * avulso). Sem orçamento nem custo — ver lib/clicksign/quota.ts.
  */
 export function SignaturePreferencesForm() {
-  const [s, setS] = useState<Settings | null>(null);
+  const [inicial, setInicial] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [deadline, setDeadline] = useState("");
-  const [ownerDeadline, setOwnerDeadline] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -52,23 +80,46 @@ export function SignaturePreferencesForm() {
         const res = await fetch("/api/settings/signature-preferences");
         if (res.ok) {
           const { settings } = await res.json();
-          setS(settings);
-          setDeadline(
-            settings.defaultDeadlineDays == null
-              ? ""
-              : String(settings.defaultDeadlineDays)
-          );
-          setOwnerDeadline(
-            settings.proposalOwnerDeadlineDays == null
-              ? ""
-              : String(settings.proposalOwnerDeadlineDays)
-          );
+          setInicial(settings);
         }
       } finally {
         setLoading(false);
       }
     })();
   }, []);
+
+  if (loading || !inicial) {
+    return (
+      <Card>
+        <CardContent className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Carregando preferências…
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // O editor só monta com os dados JÁ carregados. É condição do auto-save: a
+  // baseline do hook é capturada no primeiro render, e montá-lo com `s = null`
+  // fazia toda a configuração parecer "suja" assim que o GET voltava — um
+  // PATCH fantasma reescrevia 6-8 campos sem ninguém ter tocado em nada, e
+  // ainda deixava rastro no audit log de uma tela sensível.
+  return <SignaturePreferencesEditor inicial={inicial} />;
+}
+
+function SignaturePreferencesEditor({ inicial }: { inicial: Settings }) {
+  const [s, setS] = useState<Settings>(inicial);
+  const [busy, setBusy] = useState(false);
+  const [deadline, setDeadline] = useState(
+    inicial.defaultDeadlineDays == null
+      ? ""
+      : String(inicial.defaultDeadlineDays),
+  );
+  const [ownerDeadline, setOwnerDeadline] = useState(
+    inicial.proposalOwnerDeadlineDays == null
+      ? ""
+      : String(inicial.proposalOwnerDeadlineDays),
+  );
 
   function toggleAllowed(m: AuthMethod) {
     if (!s) return;
@@ -87,54 +138,53 @@ export function SignaturePreferencesForm() {
     setS({ ...s, allowedAuthMethods: next, defaultAuthMethod });
   }
 
-  async function save() {
-    if (!s) return;
-    setBusy(true);
-    try {
-      const res = await fetch("/api/settings/signature-preferences", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          defaultAuthMethod: s.defaultAuthMethod,
-          allowedAuthMethods: s.allowedAuthMethods,
-          defaultLocale: s.defaultLocale,
-          autoClose: s.autoClose,
-          refusable: s.refusable,
-          defaultDeadlineDays:
-            deadline.trim() === "" ? null : Math.max(1, Number(deadline)),
-          defaultSequential: s.defaultSequential,
-          proposalEmailSubject: s.proposalEmailSubject || null,
-          proposalEmailMessage: s.proposalEmailMessage || null,
-          proposalAutoChainVendedor: s.proposalAutoChainVendedor,
-          proposalOwnerDeadlineDays:
-            ownerDeadline.trim() === "" ? null : Math.max(1, Number(ownerDeadline)),
-        }),
-      });
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(d.error ?? "Falha ao salvar");
-      toast.success("Preferências de assinatura salvas.");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Falha ao salvar");
-    } finally {
-      setBusy(false);
-    }
-  }
+  const deadlineErro = erroDePrazo(deadline);
+  const ownerDeadlineErro = erroDePrazo(ownerDeadline);
+  const assuntoLongo = (s.proposalEmailSubject?.length ?? 0) > MAX_ASSUNTO;
+  const mensagemLonga = (s.proposalEmailMessage?.length ?? 0) > MAX_MENSAGEM;
 
-  if (loading || !s) {
-    return (
-      <Card>
-        <CardContent className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> Carregando…
-        </CardContent>
-      </Card>
-    );
-  }
+  // UMA instância para a tela inteira, de propósito. `allowedAuthMethods` e
+  // `defaultAuthMethod` têm invariante cruzada checada no servidor contra a
+  // linha atual (TOCTOU): separá-los em instâncias diferentes faria desmarcar
+  // da lista o método que é o padrão virar 400 no meio da edição. Na mesma
+  // instância eles viajam no mesmo corpo sempre que ambos mudam — que é
+  // exatamente o que `toggleAllowed` faz ao rebaixar o padrão.
+  const autoSave = useSettingsAutoSave(
+    {
+      defaultAuthMethod: s.defaultAuthMethod,
+      allowedAuthMethods: s.allowedAuthMethods,
+      defaultLocale: s.defaultLocale,
+      autoClose: s.autoClose,
+      refusable: s.refusable,
+      defaultSequential: s.defaultSequential,
+      defaultDeadlineDays: prazoParaApi(deadline),
+      proposalEmailSubject: s.proposalEmailSubject || null,
+      proposalEmailMessage: s.proposalEmailMessage || null,
+      proposalAutoChainVendedor: s.proposalAutoChainVendedor,
+      proposalOwnerDeadlineDays: prazoParaApi(ownerDeadline),
+    },
+    {
+      endpoint: "/api/settings/signature-preferences",
+      isValid: () =>
+        !deadlineErro &&
+        !ownerDeadlineErro &&
+        !assuntoLongo &&
+        !mensagemLonga &&
+        s.allowedAuthMethods.length > 0 &&
+        s.allowedAuthMethods.includes(s.defaultAuthMethod),
+    },
+  );
 
   return (
     <div className="space-y-4">
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Tipos de assinatura</CardTitle>
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-base">Tipos de assinatura</CardTitle>
+            {/* Uma pill só: as três seções compartilham a mesma unidade de
+                salvamento (ver o comentário do hook acima). */}
+            <SaveStatusPill status={autoSave.status} isDirty={autoSave.isDirty} />
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
@@ -231,8 +281,15 @@ export function SignaturePreferencesForm() {
               inputMode="numeric"
               value={deadline}
               onChange={(e) => setDeadline(e.target.value)}
+              onBlur={() => void autoSave.flush()}
               placeholder="Ex.: 15"
+              aria-invalid={!!deadlineErro}
             />
+            {deadlineErro && (
+              <p className="text-xs text-destructive mt-1">
+                {deadlineErro} Ainda não foi salvo.
+              </p>
+            )}
           </div>
           <div className="space-y-1 border-t pt-3">
             <Label htmlFor="propSubject" className="text-xs">
@@ -289,8 +346,15 @@ export function SignaturePreferencesForm() {
               inputMode="numeric"
               value={ownerDeadline}
               onChange={(e) => setOwnerDeadline(e.target.value)}
+              onBlur={() => void autoSave.flush()}
               placeholder="7"
+              aria-invalid={!!ownerDeadlineErro}
             />
+            {ownerDeadlineErro && (
+              <p className="text-xs text-destructive mt-1">
+                {ownerDeadlineErro} Ainda não foi salvo.
+              </p>
+            )}
             <p className="text-xs text-muted-foreground">
               A via do proprietário ganha prazo próprio: o maior entre a validade
               da proposta e hoje + este prazo.
@@ -322,15 +386,6 @@ export function SignaturePreferencesForm() {
           }}
         >
           Reverificar recursos (WhatsApp)
-        </Button>
-        <Button onClick={save} disabled={busy}>
-          {busy ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Salvando…
-            </>
-          ) : (
-            "Salvar preferências"
-          )}
         </Button>
       </div>
     </div>
