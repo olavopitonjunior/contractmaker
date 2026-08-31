@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { SaveStatusPill } from "@/components/settings/SaveStatusPill";
+import type { SettingsSaveStatus } from "@/hooks/use-settings-auto-save";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -75,6 +77,7 @@ export function GarantiaOptionsCard({ initial, clauseSlugsByTipo = {} }: Props) 
   const [options, setOptions] = useState<GarantiaOptionLike[]>(initial);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SettingsSaveStatus>("idle");
   const [draftTipo, setDraftTipo] = useState<GarantiaTipo>("seguro_fianca");
   const [draftProvider, setDraftProvider] = useState("");
   // Cláusulas criadas NESTA sessão da tela — flipam o estado sem reload.
@@ -130,6 +133,9 @@ export function GarantiaOptionsCard({ initial, clauseSlugsByTipo = {} }: Props) 
     setOptions((prev) =>
       prev.map((o) => (o.id === id ? { ...o, ...body } : o)),
     );
+    // O toggle desta lista já salvava sozinho; o que faltava era dizer isso ao
+    // usuário do mesmo jeito que os outros cards da página dizem.
+    setSaveStatus("saving");
     const res = await fetch(`/api/org/garantia-options/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -138,8 +144,15 @@ export function GarantiaOptionsCard({ initial, clauseSlugsByTipo = {} }: Props) 
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       setOptions(before);
+      setSaveStatus("error");
       toast.error(data.error || "Falha ao salvar");
+      return;
     }
+    setSaveStatus("saved");
+    setTimeout(
+      () => setSaveStatus((s) => (s === "saved" ? "idle" : s)),
+      2500,
+    );
   }
 
   async function removeOption(id: string) {
@@ -160,7 +173,10 @@ export function GarantiaOptionsCard({ initial, clauseSlugsByTipo = {} }: Props) 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Seguradoras e prestadoras de garantia</CardTitle>
+        <div className="flex items-center justify-between gap-3">
+          <CardTitle>Seguradoras e prestadoras de garantia</CardTitle>
+          <SaveStatusPill status={saveStatus} />
+        </div>
         <CardDescription>
           Aqui você cadastra as empresas com que a imobiliária trabalha — os
           tipos de garantia (fiador, caução, seguro fiança…) são fixos do
