@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { requireAuth } from "@/lib/auth/context";
 import { audit } from "@/lib/security/audit";
-import { isApprover } from "@/lib/auth/invitations";
+import { canApproveInvitations } from "@/lib/auth/invitations";
 
 const rejectSchema = z.object({
   reason: z.string().trim().max(500).optional(),
@@ -11,7 +11,8 @@ const rejectSchema = z.object({
 
 /**
  * POST /api/org/invitations/:id/reject — rejeita convite. Mesmo gate de
- * approve: apenas INVITE_APPROVER_EMAILS.
+ * approve: permissão `org.members.approve` (owner/admin) ou a allowlist
+ * INVITE_APPROVER_EMAILS.
  */
 export async function POST(
   req: NextRequest,
@@ -22,9 +23,18 @@ export async function POST(
   const { ctx } = authResult;
   const { id } = await params;
 
-  if (!isApprover(ctx.userEmail)) {
+  // Sem teto de papel aqui, de propósito: reprovar não CONCEDE nada, então não
+  // há papel a comparar. O teto vive só no approve.
+  const allowed = await canApproveInvitations({
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    email: ctx.userEmail,
+    impersonatedByUserId: ctx.impersonatedByUserId,
+    impersonatedByEmail: ctx.impersonatedByEmail,
+  });
+  if (!allowed) {
     return NextResponse.json(
-      { error: "Apenas o aprovador designado pode rejeitar convites" },
+      { error: "Você não tem permissão para reprovar acessos" },
       { status: 403 }
     );
   }
@@ -58,7 +68,11 @@ export async function POST(
       status: "rejected",
       rejectedAt: new Date(),
       rejectionReason: parsed.data.reason ?? null,
-      approvedById: ctx.userId, // quem decidiu (mesmo sendo reject)
+      // Quem decidiu (mesmo sendo reject) — e sob impersonation de tenant quem
+      // decidiu é o operador da plataforma, não o dono, que é só quem o RBAC
+      // resolve. Mesmo motivo e mesma forma do approve; esta rota ficou para
+      // trás na primeira passada e o gate novo tornou o caminho alcançável.
+      approvedById: ctx.impersonatedByUserId ?? ctx.userId,
     },
   });
 
