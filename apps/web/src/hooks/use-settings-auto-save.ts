@@ -25,38 +25,6 @@ export interface UseSettingsAutoSaveOptions<T extends SettingsFields> {
    */
   isValid?: (fields: T) => boolean;
   debounceMs?: number;
-  /**
-   * Chaves que entram em TODO PATCH, mesmo sem terem mudado.
-   *
-   * Existe para o campo que é constante na instância mas **obrigatório** no
-   * schema da rota — o caso do `kind` em `/api/org/sla-policies`, que é
-   * `.strict()` e exige `kind` junto das políticas. Sem isto, o diff por chave
-   * suja nunca o incluiria (ele nasce igual à baseline e nunca muda) e todo
-   * save voltaria 400 por corpo inválido.
-   *
-   * Não conta para o dirty: sozinho, não dispara nada.
-   */
-  alwaysInclude?: Record<string, unknown>;
-  /**
-   * Separa O QUE É COMPARADO do QUE É ENVIADO.
-   *
-   * Por padrão o corpo do PATCH são as próprias chaves sujas. Isso só funciona
-   * quando a forma do estado coincide com a forma que a rota espera. Quando não
-   * coincide, observe o estado numa forma **estável** (uma chave por item) e
-   * use isto para montar o corpo a partir de `sujos`.
-   *
-   * O SLA é o caso: a rota quer `{ kind, policies: [...] }`. Observar a lista
-   * de etapas alteradas parecia natural, mas ela ESVAZIA depois de salvar — e
-   * `[]` difere da baseline, o que disparava um segundo PATCH vazio. Observar a
-   * lista COMPLETA consertava isso e criava algo pior: como a rota grava por
-   * `stageId` tudo que recebe, toda gravação reescrevia também as etapas
-   * intocadas, transformando "padrão" em "personalizado" para sempre e
-   * ressuscitando 5/10 por cima dos valores reais de etapas desligadas.
-   *
-   * Com uma chave por etapa cada baseline converge sozinha depois do save, e
-   * `buildPayload` manda no corpo só as etapas que mudaram de fato.
-   */
-  buildPayload?: (dirtyFields: Partial<T>, allFields: T) => Record<string, unknown>;
   /** Desliga o agendamento (seção somente-leitura / sem permissão). */
   enabled?: boolean;
   /**
@@ -109,8 +77,6 @@ export function useSettingsAutoSave<T extends SettingsFields>(
     debounceMs = 800,
     enabled = true,
     onSaved,
-    alwaysInclude,
-    buildPayload,
   } = options;
 
   const [status, setStatus] = useState<SettingsSaveStatus>("idle");
@@ -140,10 +106,6 @@ export function useSettingsAutoSave<T extends SettingsFields>(
   validRef.current = isValid;
   const onSavedRef = useRef(onSaved);
   onSavedRef.current = onSaved;
-  const buildPayloadRef = useRef(buildPayload);
-  buildPayloadRef.current = buildPayload;
-  const alwaysIncludeRef = useRef(alwaysInclude);
-  alwaysIncludeRef.current = alwaysInclude;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -198,15 +160,7 @@ export function useSettingsAutoSave<T extends SettingsFields>(
       return false;
     }
 
-    const sujos = Object.fromEntries(
-      dirty.map((k) => [k, current[k]]),
-    ) as Partial<T>;
-    const payload = {
-      ...(alwaysIncludeRef.current ?? {}),
-      ...(buildPayloadRef.current
-        ? buildPayloadRef.current(sujos, current)
-        : sujos),
-    };
+    const payload = Object.fromEntries(dirty.map((k) => [k, current[k]]));
 
     inFlightRef.current = true;
     // O save de unmount roda com o componente já fora da árvore: o fetch vale,
