@@ -13,8 +13,26 @@ export async function GET(req: NextRequest) {
   if (!authResult.ok) return authResult.response;
   const { ctx } = authResult;
 
+  // Ator humano: sob impersonation o gate de plataforma é sobre o admin real,
+  // não sobre o dono do tenant que o RBAC resolve.
+  const platformApprover = isApprover(ctx.impersonatedByEmail ?? ctx.userEmail);
+
   const effective = await getEffectivePermissions(ctx.userId, ctx.orgId);
   if (!effective) {
+    // Sem membership, mas na allowlist de env: é exatamente o caso que a porta
+    // de emergência existe para servir, e `canApproveInvitations` aceitaria o
+    // POST. Devolver 403 aqui deixaria o servidor aberto e a UI fechada —
+    // `usePermissions` cai para `false` em resposta não-ok e o botão some.
+    if (platformApprover) {
+      return NextResponse.json({
+        userId: ctx.userId,
+        orgId: ctx.orgId,
+        role: null,
+        customRoleName: null,
+        permissions: {},
+        isInvitationApprover: true,
+      });
+    }
     return NextResponse.json(
       { error: "Membership não encontrada" },
       { status: 403 }
@@ -32,7 +50,6 @@ export async function GET(req: NextRequest) {
     // aplicam, inclusive lendo o ator real sob impersonation. Divergir aqui
     // só esconde o botão de quem pode clicar.
     isInvitationApprover:
-      isApprover(ctx.impersonatedByEmail ?? ctx.userEmail) ||
-      can(effective, PERMISSION.ORG_MEMBERS_APPROVE),
+      platformApprover || can(effective, PERMISSION.ORG_MEMBERS_APPROVE),
   });
 }

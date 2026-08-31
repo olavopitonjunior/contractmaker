@@ -17,6 +17,7 @@ vi.mock("@/lib/auth/context", () => ({
 vi.mock("@/lib/auth/invitations", () => ({
   isApprover: vi.fn(() => true),
   canApproveInvitations: vi.fn(async () => true),
+  canGrantRole: vi.fn(async () => true),
 }));
 vi.mock("@/lib/auth/password-reset", () => ({
   createPasswordResetToken: vi
@@ -37,7 +38,7 @@ vi.mock("@/lib/security/audit", () => ({
 
 import { POST } from "../route";
 import { requireAuth } from "@/lib/auth/context";
-import { canApproveInvitations } from "@/lib/auth/invitations";
+import { canApproveInvitations, canGrantRole } from "@/lib/auth/invitations";
 import { createPasswordResetToken } from "@/lib/auth/password-reset";
 import { sendEmail } from "@/lib/email/client";
 import { InvitationApprovedEmail } from "@/lib/email/templates/invitation-approved";
@@ -48,6 +49,7 @@ const createTokenMock = createPasswordResetToken as unknown as MockFn;
 const sendEmailMock = sendEmail as unknown as MockFn;
 const emailTemplateMock = InvitationApprovedEmail as unknown as MockFn;
 const canApproveMock = canApproveInvitations as unknown as MockFn;
+const canGrantRoleMock = canGrantRole as unknown as MockFn;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const p = prisma as any;
 
@@ -142,6 +144,31 @@ describe("POST /api/org/invitations/[id]/approve — quem pode decidir", () => {
         impersonatedByEmail: "olavo.piton@gmail.com",
       })
     );
+  });
+
+  // Passar no gate não basta: aprovar CONCEDE o papel, e quem tem
+  // invite+approve concederia `admin` a si mesmo sem o teto.
+  it("consulta o teto com o papel DO CONVITE, não com o do ator", async () => {
+    p.user.findUnique = vi.fn().mockResolvedValue(null);
+
+    await POST(req(), { params });
+
+    expect(canGrantRoleMock).toHaveBeenCalledWith(
+      expect.objectContaining({ orgId: "org-1", targetRole: "member" })
+    );
+  });
+
+  it("fora do teto devolve 403 e não cria User nem membership", async () => {
+    canGrantRoleMock.mockResolvedValueOnce(false);
+    p.user.findUnique = vi.fn().mockResolvedValue(null);
+
+    const res = await POST(req(), { params });
+
+    expect(res.status).toBe(403);
+    expect(p.user.create).not.toHaveBeenCalled();
+    expect(p.orgMembership.create).not.toHaveBeenCalled();
+    expect(p.orgInvitation.update).not.toHaveBeenCalled();
+    expect(sendEmailMock).not.toHaveBeenCalled();
   });
 
   it("sem permissão devolve 403 e não cria User nem membership", async () => {

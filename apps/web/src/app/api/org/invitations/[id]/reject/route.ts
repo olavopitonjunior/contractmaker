@@ -65,7 +65,11 @@ export async function POST(
       status: "rejected",
       rejectedAt: new Date(),
       rejectionReason: parsed.data.reason ?? null,
-      approvedById: ctx.userId, // quem decidiu (mesmo sendo reject)
+      // Quem decidiu (mesmo sendo reject) — e sob impersonation de tenant quem
+      // decidiu é o operador da plataforma, não o dono, que é só quem o RBAC
+      // resolve. Mesmo motivo e mesma forma do approve; esta rota ficou para
+      // trás na primeira passada e o gate novo tornou o caminho alcançável.
+      approvedById: ctx.impersonatedByUserId ?? ctx.userId,
     },
   });
 

@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { prisma } from "@/lib/db/prisma";
 import {
   canApproveInvitations,
+  canGrantRole,
   getOrgApproverEmails,
   isApprover,
 } from "@/lib/auth/invitations";
@@ -210,6 +211,99 @@ describe("canApproveInvitations", () => {
         })
       ).resolves.toBe(true);
     });
+  });
+});
+
+// Sem teto, `org.members.invite` + `org.members.approve` viram primitiva de
+// escalação: a CustomRole convida `admin`, aprova pelo e-mail que controla e
+// sai com acesso quase total sem nunca ter tido `org.members.change_role`.
+describe("canGrantRole — teto de papel", () => {
+  it("BLOQUEIA CustomRole com só invite+approve concedendo admin", async () => {
+    membership("custom", {
+      [PERMISSION.ORG_MEMBERS_INVITE]: true,
+      [PERMISSION.ORG_MEMBERS_APPROVE]: true,
+    });
+
+    await expect(
+      canGrantRole({
+        userId: "u-escalador",
+        orgId: ORG,
+        email: "escalador@imobiliaria.com",
+        targetRole: "admin",
+      })
+    ).resolves.toBe(false);
+  });
+
+  it("admin concede admin — igualdade é subconjunto", async () => {
+    membership("admin");
+
+    await expect(
+      canGrantRole({
+        userId: "u-admin",
+        orgId: ORG,
+        email: "admin@imobiliaria.com",
+        targetRole: "admin",
+      })
+    ).resolves.toBe(true);
+  });
+
+  it.each(["finance", "sales", "viewer", "member"])(
+    "admin concede %s, que é estritamente menor",
+    async (role) => {
+      membership("admin");
+
+      await expect(
+        canGrantRole({
+          userId: "u-admin",
+          orgId: ORG,
+          email: "admin@imobiliaria.com",
+          targetRole: role,
+        })
+      ).resolves.toBe(true);
+    }
+  );
+
+  it("a mesma CustomRole ainda concede papel menor que ela", async () => {
+    membership("custom", {
+      [PERMISSION.ORG_MEMBERS_INVITE]: true,
+      [PERMISSION.ORG_MEMBERS_APPROVE]: true,
+    });
+
+    // `member` resolve para {} — subconjunto de qualquer coisa.
+    await expect(
+      canGrantRole({
+        userId: "u-custom",
+        orgId: ORG,
+        email: "custom@imobiliaria.com",
+        targetRole: "member",
+      })
+    ).resolves.toBe(true);
+  });
+
+  it("operador da allowlist de env não tem teto", async () => {
+    p.orgMembership.findUnique.mockResolvedValue(null);
+
+    await expect(
+      canGrantRole({
+        userId: "u-ops",
+        orgId: ORG,
+        email: ENV_APPROVER,
+        targetRole: "admin",
+      })
+    ).resolves.toBe(true);
+  });
+
+  it("sem membership e fora da allowlist não concede nada", async () => {
+    p.orgMembership.findUnique.mockResolvedValue(null);
+
+    await expect(
+      canGrantRole({
+        userId: "u-estranho",
+        orgId: ORG,
+        email: "estranho@exemplo.com",
+        targetRole: "member",
+      })
+    ).resolves.toBe(false);
   });
 });
 

@@ -1,7 +1,18 @@
 import { prisma } from "@/lib/db/prisma";
 import { can, getEffectivePermissions } from "@/lib/security/rbac/check";
-import { PERMISSION, type PermissionMap } from "@/lib/security/rbac/permissions";
-import { resolvePermissions, type RolePreset } from "@/lib/security/rbac/roles";
+import {
+  PERMISSION,
+  type PermissionKey,
+  type PermissionMap,
+} from "@/lib/security/rbac/permissions";
+import {
+  ROLE_PRESETS,
+  resolvePermissions,
+  type RolePreset,
+} from "@/lib/security/rbac/roles";
+
+/** Teto de e-mails por convite — ver `getOrgApproverEmails`. */
+const MAX_APPROVER_NOTIFICATIONS = 25;
 
 const DEFAULT_EXPIRY_DAYS = 14;
 const APPROVER_FALLBACK = "olavo.piton@gmail.com";
@@ -70,6 +81,46 @@ export async function canApproveInvitations(params: {
 }
 
 /**
+ * Teto de papel: ninguém admite alguém mais poderoso que si mesmo.
+ *
+ * Sem isto o par `org.members.invite` + `org.members.approve` vira primitiva de
+ * ESCALAÇÃO. `POST /api/org/invitations` só exige INVITE e não checa teto,
+ * `INVITATION_ROLE_VALUES` inclui `admin`, e o approve passou a aceitar quem
+ * tem APPROVE — então uma CustomRole com só essas duas chaves convidaria
+ * `admin`, aprovaria a si mesma pelo e-mail que controla e sairia com acesso
+ * quase total, sem nunca ter tido `org.members.change_role`. Antes o segundo
+ * passo exigia a allowlist de env e o laço não fechava; o gate novo é que o
+ * fecha, então o teto entra junto.
+ *
+ * Regra: as permissões do papel alvo têm de ser SUBCONJUNTO das de quem
+ * decide. `admin` aprovando `admin` passa (igualdade); a CustomRole acima
+ * reprova. Quem está na allowlist de env é operador de plataforma e não tem
+ * teto — a allowlist já é a fronteira de confiança dele.
+ *
+ * Resolve o alvo pelo preset base (sem overrides de `gerente`): um preset que
+ * ganhe permissão por OrgManagerSettings ficaria subestimado aqui, o que erra
+ * para o lado restritivo.
+ */
+export async function canGrantRole(params: {
+  userId: string;
+  orgId: string;
+  email?: string | null;
+  impersonatedByEmail?: string | null;
+  targetRole: string;
+}): Promise<boolean> {
+  if (isApprover(params.impersonatedByEmail ?? params.email)) return true;
+
+  const effective = await getEffectivePermissions(params.userId, params.orgId);
+  if (!effective) return false;
+
+  const target = resolvePermissions(params.targetRole as RolePreset, null);
+  return Object.entries(target).every(
+    ([key, granted]) =>
+      granted !== true || effective.permissions[key as PermissionKey] === true
+  );
+}
+
+/**
  * E-mails dos membros da org que podem decidir — os que agora recebem o CTA de
  * "aguarda aprovação", já que o botão passou a ser deles. Resolve a permissão
  * em vez de casar `role` na string: uma CustomRole com `org.members.approve`
@@ -92,9 +143,17 @@ export async function getOrgApproverEmails(orgId: string): Promise<string[]> {
     },
   });
 
-  return memberships
+  const approvers = memberships
     .filter((m) => {
       if (!m.user?.email || m.user.deletedAt !== null) return false;
+      // `resolvePermissions` faz console.warn em role fora do catálogo, e
+      // `member` — o default de OrgMembership.role E de createInvitationSchema
+      // — é justamente um desses. Sem esta guarda, cada criação de convite
+      // emitia um warn por membro comum e transformava ação de rotina em spam
+      // de log. Role desconhecido não tem permissão nenhuma de qualquer forma.
+      if (m.role !== "custom" && !ROLE_PRESETS[m.role as Exclude<RolePreset, "custom">]) {
+        return false;
+      }
       const permissions = resolvePermissions(
         m.role as RolePreset,
         (m.customRole?.permissions as PermissionMap | undefined) ?? null
@@ -102,6 +161,19 @@ export async function getOrgApproverEmails(orgId: string): Promise<string[]> {
       return permissions[PERMISSION.ORG_MEMBERS_APPROVE] === true;
     })
     .map((m) => m.user.email.toLowerCase());
+
+  // Teto no fan-out: cada e-mail é um `sendEmail` em paralelo, e um provedor
+  // com rate limit responde a um lote grande derrubando parte dele — sob
+  // `Promise.allSettled` isso é falha silenciosa, e o efeito prático é
+  // aprovador que não fica sabendo da fila. Truncar é ruim, truncar em
+  // silêncio é pior, então avisa.
+  if (approvers.length > MAX_APPROVER_NOTIFICATIONS) {
+    console.warn(
+      `[invitations] org ${orgId} tem ${approvers.length} aprovadores; notificando os ${MAX_APPROVER_NOTIFICATIONS} primeiros`
+    );
+    return approvers.slice(0, MAX_APPROVER_NOTIFICATIONS);
+  }
+  return approvers;
 }
 
 export function defaultInvitationExpiry(): Date {

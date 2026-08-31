@@ -4,7 +4,7 @@ import { requireAuth } from "@/lib/auth/context";
 import { audit } from "@/lib/security/audit";
 import { sendEmail } from "@/lib/email/client";
 import { InvitationApprovedEmail } from "@/lib/email/templates/invitation-approved";
-import { canApproveInvitations } from "@/lib/auth/invitations";
+import { canApproveInvitations, canGrantRole } from "@/lib/auth/invitations";
 import { createPasswordResetToken } from "@/lib/auth/password-reset";
 
 /**
@@ -53,6 +53,25 @@ export async function POST(
       { status: 409 }
     );
   }
+  // Teto de papel, DEPOIS de conhecer o convite: aprovar concede o papel, e sem
+  // isto quem tem invite+approve concederia `admin` a si mesmo. Ver
+  // `canGrantRole`. Fica aqui e não no gate porque depende de `invitation.role`.
+  const withinCeiling = await canGrantRole({
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    email: ctx.userEmail,
+    impersonatedByEmail: ctx.impersonatedByEmail,
+    targetRole: invitation.role,
+  });
+  if (!withinCeiling) {
+    return NextResponse.json(
+      {
+        error: `Você não pode conceder o papel "${invitation.role}" — ele tem permissões que você não possui`,
+      },
+      { status: 403 }
+    );
+  }
+
   if (invitation.expiresAt.getTime() < Date.now()) {
     await prisma.orgInvitation.update({
       where: { id },
