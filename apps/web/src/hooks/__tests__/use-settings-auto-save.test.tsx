@@ -491,6 +491,41 @@ describe("useSettingsAutoSave", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
+  it("campo derivado que ESVAZIA depois de salvar não dispara segundo PATCH", async () => {
+    // Regressão pega só no QA, depois de passar por review e por toda a suíte.
+    // No SLA, o campo observado era a lista de etapas ALTERADAS. Salvava (200),
+    // o refresh trazia as linhas novas, a lista esvaziava — e `[]` difere da
+    // baseline `[{...}]`, então o hook lia isso como uma alteração nova e
+    // mandava um segundo PATCH com lista vazia, que a rota rejeita (min(1)).
+    // Era 200 + 400 a cada edição.
+    //
+    // A lição é do hook, não da tela: o valor observado tem que ser estável
+    // depois do save. Aqui isso é verificado pelo lado de fora — quem observa
+    // um derivado que esvazia continua tendo o problema; quem observa o estado
+    // completo, não.
+    const spy = mockFetch(() => ({ ok: true }));
+    const { rerender } = renderHook(
+      ({ v }) => useSettingsAutoSave(v, { endpoint: ENDPOINT, debounceMs: 10 }),
+      { initialProps: { v: { policies: [{ id: "s1", warn: 5 }] } } },
+    );
+
+    // Edita: a lista completa muda de valor.
+    rerender({ v: { policies: [{ id: "s1", warn: 4 }] } });
+    await act(async () => {
+      vi.advanceTimersByTime(100);
+    });
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    expect(bodyOf(spy).policies).toEqual([{ id: "s1", warn: 4 }]);
+
+    // O "refresh" do servidor devolve exatamente o que foi gravado: o valor
+    // observado volta a bater com a baseline e NADA é reagendado.
+    rerender({ v: { policies: [{ id: "s1", warn: 4 }] } });
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
   it("enabled:false zera o pendente — unmount não grava depois", async () => {
     // Sem zerar `pendingRef` nos caminhos que não agendam, uma seção que
     // perdeu permissão (enabled → false) ainda dispararia PATCH ao desmontar,

@@ -141,8 +141,8 @@ function SlaKindEditor({
   const terminals = rows.filter((p) => p.terminal);
 
   // Só as etapas que mudaram viajam. O upsert da rota é por `stageId`, então
-  // etapa ausente do corpo fica intacta — e uma linha inválida deixa de
-  // arrastar as outras para o 400.
+  // Usado só para a mensagem de erro inline: o payload leva todas as linhas
+  // (ver o comentário de `policies` abaixo).
   const sujas = editable.filter((p) => {
     const d = draft[p.stageId];
     if (!d) return false;
@@ -154,11 +154,21 @@ function SlaKindEditor({
     );
   });
 
-  // Sem `useMemo`: o hook já compara por serialização, então memoizar aqui só
-  // acrescentaria uma dependência auto-referente (a chave sairia do próprio
-  // `sujas`) que quebraria em silêncio se alguém memoizasse `rows`/`draft`.
-  const policies = sujas.map((p) => {
-    const d = draft[p.stageId]!;
+  // TODAS as etapas editáveis, não só as sujas.
+  //
+  // Mandar só as sujas parecia melhor (payload menor, uma linha ruim não
+  // derruba as outras), mas o array ESVAZIA depois de salvar: o `refresh` do
+  // `onSaved` traz as linhas novas, `sujas` fica vazio, e `policies: []` passa
+  // a diferir da baseline — o hook lê isso como alteração e dispara um segundo
+  // PATCH com lista vazia, que o `.min(1)` da rota rejeita com 400. Era um
+  // 200 seguido de um 400 a cada edição.
+  //
+  // Com a lista completa o valor é estável: depois do refresh ele volta a
+  // bater com o que foi gravado e nada é reagendado. A proteção contra a linha
+  // ruim continua existindo, mas no `isValid` — que valida todas as linhas
+  // antes de qualquer envio, como o Zod da rota faz.
+  const policies = editable.map((p) => {
+    const d = draft[p.stageId] ?? toDraft(p);
     return {
       stageId: p.stageId,
       warnDays: Number(d.warnDays),
@@ -188,7 +198,11 @@ function SlaKindEditor({
       // rota é `.strict()` e o exige. Sem `alwaysInclude`, todo save voltaria
       // 400 "Body inválido".
       alwaysInclude: { kind },
-      isValid: () => sujas.every((p) => linhaValida(draft[p.stageId]!)),
+      // Toda linha enviada precisa passar — inclusive as desligadas, que o Zod
+      // da rota valida do mesmo jeito.
+      isValid: () =>
+        policies.length > 0 &&
+        editable.every((p) => linhaValida(draft[p.stageId] ?? toDraft(p))),
       onSaved: () => {
         // A rota devolve o lote recalculado; sem re-sincronizar, o selo
         // "Personalizado" e o botão de restaurar ficariam desatualizados.
