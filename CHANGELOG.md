@@ -4,6 +4,24 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-08-31 - O perfil de administrador passa a aprovar e reprovar usuários
+
+### Adicionado
+
+- **Permissão `org.members.approve`.** Os presets `owner` e `admin` a carregam por padrão (vêm de `fullAccess`); `finance`, `sales`, `viewer` e os presets de locação, que são allowlists explícitas, não. Aparece em "Organização e membros" no editor de CustomRole, então uma função personalizada também pode receber a decisão.
+
+### Alterado
+
+- **Aprovar e reprovar acesso deixou de ser exclusividade da allowlist de env.** `POST /api/org/invitations/:id/{approve,reject}` decidiam por `isApprover(email)` — só os e-mails de `INVITE_APPROVER_EMAILS`, cujo default é uma conta pessoal. Um administrador da imobiliária não tinha como liberar ninguém: o convite ficava pendente até o aprovador designado aparecer. O gate virou `canApproveInvitations`, que é o OR de duas fontes: a permissão nova **ou** a allowlist de env.
+  - **A allowlist continua valendo, de propósito.** Ela é a única porta que não depende de membership — se a última membership de admin/owner sair por engano, é por ela que a org volta a conseguir admitir gente. Tirá-la trocaria um problema de acesso por outro, pior.
+  - **A UI já obedecia a um flag do servidor** (`isInvitationApprover`, em `GET /api/auth/permissions`), que também era só a env. Ele passou a espelhar o mesmo OR — divergir ali esconderia o botão justamente de quem pode clicar, e o 403 nunca chegaria a acontecer porque o clique não existiria.
+- **Quem decide passa a ser avisado.** A criação de convite mandava o e-mail de "aguarda aprovação" só para `INVITE_APPROVER_EMAILS`; o administrador ganharia o botão e nunca saberia que há fila. Agora o CTA vai também para os membros com `org.members.approve`. A lista é resolvida **pela permissão, não casando `role` na string**: uma CustomRole que carregue a chave decide e por isso precisa saber. Uma query só, resolvendo o preset em memória — `getEffectivePermissions` custaria uma query por membro. Membership de serviço (`isSystem`) e usuário em soft delete ficam fora.
+
+### Notas
+
+- Sem migration: `OrgInvitation` já tinha `status`/`approvedById`/`rejectedAt`/`rejectionReason`, e a permissão é derivada do preset em memória (não há linha de permissão no banco para presets).
+- O convite continua nascendo `pending` e nenhum `User` existe antes da aprovação — o fluxo não afrouxou, só deixou de depender de uma pessoa específica.
+
 ## [Unreleased] - 2026-08-28 - Seguradoras fora de vendas, dados bancários abertos e o picker que só mostrava 2 de 42
 
 Três queixas do uso real, todas na etapa Comissão e na tela de configuração do

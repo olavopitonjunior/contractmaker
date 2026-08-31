@@ -16,6 +16,7 @@ vi.mock("@/lib/auth/context", () => ({
 }));
 vi.mock("@/lib/auth/invitations", () => ({
   isApprover: vi.fn(() => true),
+  canApproveInvitations: vi.fn(async () => true),
 }));
 vi.mock("@/lib/auth/password-reset", () => ({
   createPasswordResetToken: vi
@@ -36,6 +37,7 @@ vi.mock("@/lib/security/audit", () => ({
 
 import { POST } from "../route";
 import { requireAuth } from "@/lib/auth/context";
+import { canApproveInvitations } from "@/lib/auth/invitations";
 import { createPasswordResetToken } from "@/lib/auth/password-reset";
 import { sendEmail } from "@/lib/email/client";
 import { InvitationApprovedEmail } from "@/lib/email/templates/invitation-approved";
@@ -45,6 +47,7 @@ const requireAuthMock = requireAuth as unknown as MockFn;
 const createTokenMock = createPasswordResetToken as unknown as MockFn;
 const sendEmailMock = sendEmail as unknown as MockFn;
 const emailTemplateMock = InvitationApprovedEmail as unknown as MockFn;
+const canApproveMock = canApproveInvitations as unknown as MockFn;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const p = prisma as any;
 
@@ -95,6 +98,33 @@ beforeEach(() => {
     email: "convidado@teste.com",
     name: "Convidado",
     passwordHash: null,
+  });
+});
+
+describe("POST /api/org/invitations/[id]/approve — quem pode decidir", () => {
+  it("pergunta pela org+usuário da sessão, não só pelo e-mail", async () => {
+    p.user.findUnique = vi.fn().mockResolvedValue(null);
+
+    await POST(req(), { params });
+
+    expect(canApproveMock).toHaveBeenCalledWith({
+      userId: "approver-1",
+      orgId: "org-1",
+      email: "olavo.piton@gmail.com",
+    });
+  });
+
+  it("sem permissão devolve 403 e não cria User nem membership", async () => {
+    canApproveMock.mockResolvedValueOnce(false);
+    p.user.findUnique = vi.fn().mockResolvedValue(null);
+
+    const res = await POST(req(), { params });
+
+    expect(res.status).toBe(403);
+    expect(p.user.create).not.toHaveBeenCalled();
+    expect(p.orgMembership.create).not.toHaveBeenCalled();
+    expect(p.orgInvitation.update).not.toHaveBeenCalled();
+    expect(sendEmailMock).not.toHaveBeenCalled();
   });
 });
 

@@ -1,4 +1,7 @@
 import { prisma } from "@/lib/db/prisma";
+import { can, getEffectivePermissions } from "@/lib/security/rbac/check";
+import { PERMISSION, type PermissionMap } from "@/lib/security/rbac/permissions";
+import { resolvePermissions, type RolePreset } from "@/lib/security/rbac/roles";
 
 const DEFAULT_EXPIRY_DAYS = 14;
 const APPROVER_FALLBACK = "olavo.piton@gmail.com";
@@ -28,6 +31,65 @@ export function getNotifyEmails(): string[] {
 export function isApprover(email: string | null | undefined): boolean {
   if (!email) return false;
   return getApproverEmails().includes(email.toLowerCase());
+}
+
+/**
+ * Quem pode decidir (aprovar/reprovar) um convite nesta org.
+ *
+ * Duas fontes, em OR:
+ *  - a allowlist de env `INVITE_APPROVER_EMAILS` — o aprovador designado, que
+ *    existe desde antes do RBAC e continua valendo mesmo sem membership;
+ *  - a permissão `org.members.approve`, que os presets `owner` e `admin`
+ *    carregam por padrão (`fullAccess`). É por aqui que o perfil de
+ *    administrador passou a aprovar/reprovar usuários.
+ *
+ * Manter as duas é deliberado: a env é a porta de emergência de quem opera a
+ * plataforma, e derrubá-la trancaria a org caso a última membership de
+ * admin/owner saia por engano.
+ */
+export async function canApproveInvitations(params: {
+  userId: string;
+  orgId: string;
+  email?: string | null;
+}): Promise<boolean> {
+  if (isApprover(params.email)) return true;
+  const effective = await getEffectivePermissions(params.userId, params.orgId);
+  return can(effective, PERMISSION.ORG_MEMBERS_APPROVE);
+}
+
+/**
+ * E-mails dos membros da org que podem decidir — os que agora recebem o CTA de
+ * "aguarda aprovação", já que o botão passou a ser deles. Resolve a permissão
+ * em vez de casar `role` na string: uma CustomRole com `org.members.approve`
+ * também decide, e um allowlist por role a deixaria de fora.
+ *
+ * Uma query só, resolvendo o preset em memória — `getEffectivePermissions`
+ * daria uma query por membro. Não aplica os overrides de `gerente`
+ * (OrgManagerSettings): `org.members.approve` não está em
+ * MANAGER_CONFIGURABLE_PERMISSIONS, então gerente nunca a ganha.
+ *
+ * Ignora membership de serviço (`isSystem`) e usuário em soft delete (LGPD).
+ */
+export async function getOrgApproverEmails(orgId: string): Promise<string[]> {
+  const memberships = await prisma.orgMembership.findMany({
+    where: { orgId, isSystem: false },
+    select: {
+      role: true,
+      customRole: { select: { permissions: true } },
+      user: { select: { email: true, deletedAt: true } },
+    },
+  });
+
+  return memberships
+    .filter((m) => {
+      if (!m.user?.email || m.user.deletedAt !== null) return false;
+      const permissions = resolvePermissions(
+        m.role as RolePreset,
+        (m.customRole?.permissions as PermissionMap | undefined) ?? null
+      );
+      return permissions[PERMISSION.ORG_MEMBERS_APPROVE] === true;
+    })
+    .map((m) => m.user.email.toLowerCase());
 }
 
 export function defaultInvitationExpiry(): Date {

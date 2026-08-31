@@ -4,7 +4,7 @@ import { requireAuth } from "@/lib/auth/context";
 import { audit } from "@/lib/security/audit";
 import { sendEmail } from "@/lib/email/client";
 import { InvitationApprovedEmail } from "@/lib/email/templates/invitation-approved";
-import { isApprover } from "@/lib/auth/invitations";
+import { canApproveInvitations } from "@/lib/auth/invitations";
 import { createPasswordResetToken } from "@/lib/auth/password-reset";
 
 /**
@@ -15,8 +15,9 @@ import { createPasswordResetToken } from "@/lib/auth/password-reset";
  * /reset-password?token= com reason `welcome` e DEFINE a senha na hora. Quem
  * já tinha conta com senha recebe só o link de login.
  *
- * Gate: apenas emails listados em INVITE_APPROVER_EMAILS (default
- * olavo.piton@gmail.com) podem aprovar.
+ * Gate: quem tem a permissão `org.members.approve` na org — presets `owner` e
+ * `admin` a carregam — ou um email da allowlist INVITE_APPROVER_EMAILS
+ * (default olavo.piton@gmail.com). Ver `canApproveInvitations`.
  */
 export async function POST(
   req: NextRequest,
@@ -27,9 +28,14 @@ export async function POST(
   const { ctx } = authResult;
   const { id } = await params;
 
-  if (!isApprover(ctx.userEmail)) {
+  const allowed = await canApproveInvitations({
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    email: ctx.userEmail,
+  });
+  if (!allowed) {
     return NextResponse.json(
-      { error: "Apenas o aprovador designado pode aprovar convites" },
+      { error: "Você não tem permissão para aprovar acessos" },
       { status: 403 }
     );
   }

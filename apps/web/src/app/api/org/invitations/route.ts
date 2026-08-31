@@ -15,6 +15,7 @@ import {
   findPendingInvitation,
   getApproverEmails,
   getNotifyEmails,
+  getOrgApproverEmails,
 } from "@/lib/auth/invitations";
 import {
   createInvitationSchema,
@@ -152,10 +153,19 @@ export async function POST(req: NextRequest) {
     }
   );
 
-  // Notificações: approvers recebem CTA; notify-only só ciência.
+  // Notificações: quem decide recebe CTA; notify-only só ciência.
+  //
+  // "Quem decide" é a mesma união que `canApproveInvitations` aplica no gate:
+  // a allowlist de env MAIS os membros com `org.members.approve` (owner/admin).
+  // Sem os segundos, o admin ganharia o botão e nunca saberia que há fila.
   const baseUrl = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
   const reviewUrl = `${baseUrl}/settings/membros?tab=convites`;
-  const approverEmails = getApproverEmails();
+  const approverEmails = Array.from(
+    new Set([
+      ...getApproverEmails(),
+      ...(await getOrgApproverEmails(ctx.orgId)),
+    ])
+  );
   const notifyEmails = getNotifyEmails().filter(
     (e) => !approverEmails.includes(e)
   );
