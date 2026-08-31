@@ -1,0 +1,462 @@
+/**
+ * Quem aprova/reprova acesso de usuário.
+ *
+ * Antes, só os e-mails de `INVITE_APPROVER_EMAILS` decidiam — o perfil de
+ * administrador ganhava o botão em lugar nenhum, e um convite ficava pendente
+ * até o aprovador designado aparecer. Agora a permissão `org.members.approve`
+ * (presets `owner` e `admin`) decide, e a allowlist de env continua valendo
+ * como porta de emergência.
+ */
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { prisma } from "@/lib/db/prisma";
+import {
+  canApproveInvitationForRole,
+  canApproveInvitations,
+  getOrgApproverEmails,
+  isApprover,
+} from "@/lib/auth/invitations";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const p = prisma as any;
+
+const ORG = "org-1";
+const ENV_APPROVER = "aprovador@exemplo.com";
+
+/** Faz `getEffectivePermissions` resolver esta membership. */
+function membership(role: string, customPermissions?: Record<string, boolean>) {
+  p.orgMembership.findUnique.mockResolvedValue({
+    role,
+    customRole: customPermissions ? { permissions: customPermissions } : null,
+  });
+}
+
+const originalEnv = process.env.INVITE_APPROVER_EMAILS;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  process.env.INVITE_APPROVER_EMAILS = ENV_APPROVER;
+});
+
+afterEach(() => {
+  if (originalEnv === undefined) delete process.env.INVITE_APPROVER_EMAILS;
+  else process.env.INVITE_APPROVER_EMAILS = originalEnv;
+});
+
+describe("canApproveInvitations", () => {
+  it("libera o perfil de administrador, que não está na allowlist de env", async () => {
+    membership("admin");
+
+    await expect(
+      canApproveInvitations({
+        userId: "u-admin",
+        orgId: ORG,
+        email: "admin@imobiliaria.com",
+      })
+    ).resolves.toBe(true);
+  });
+
+  it("libera o owner", async () => {
+    membership("owner");
+
+    await expect(
+      canApproveInvitations({
+        userId: "u-owner",
+        orgId: ORG,
+        email: "owner@imobiliaria.com",
+      })
+    ).resolves.toBe(true);
+  });
+
+  it.each(["sales", "finance", "viewer"])(
+    "recusa o preset %s",
+    async (role) => {
+      membership(role);
+
+      await expect(
+        canApproveInvitations({
+          userId: "u-1",
+          orgId: ORG,
+          email: "pessoa@imobiliaria.com",
+        })
+      ).resolves.toBe(false);
+    }
+  );
+
+  it("recusa `member`, o role legado do signup público — resolve como sem permissões", async () => {
+    membership("member");
+
+    await expect(
+      canApproveInvitations({
+        userId: "u-legado",
+        orgId: ORG,
+        email: "legado@imobiliaria.com",
+      })
+    ).resolves.toBe(false);
+  });
+
+  it("libera CustomRole que carregue org.members.approve", async () => {
+    membership("custom", { [PERMISSION.ORG_MEMBERS_APPROVE]: true });
+
+    await expect(
+      canApproveInvitations({
+        userId: "u-custom",
+        orgId: ORG,
+        email: "custom@imobiliaria.com",
+      })
+    ).resolves.toBe(true);
+  });
+
+  it("recusa CustomRole sem a chave", async () => {
+    membership("custom", { [PERMISSION.ORG_MEMBERS_INVITE]: true });
+
+    await expect(
+      canApproveInvitations({
+        userId: "u-custom",
+        orgId: ORG,
+        email: "custom@imobiliaria.com",
+      })
+    ).resolves.toBe(false);
+  });
+
+  it("mantém a allowlist de env mesmo sem membership na org — a porta de emergência", async () => {
+    p.orgMembership.findUnique.mockResolvedValue(null);
+
+    await expect(
+      canApproveInvitations({
+        userId: "u-ops",
+        orgId: ORG,
+        email: ENV_APPROVER,
+      })
+    ).resolves.toBe(true);
+    // Curto-circuito: nem consulta a membership.
+    expect(p.orgMembership.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("recusa quem não é membro nem está na allowlist", async () => {
+    p.orgMembership.findUnique.mockResolvedValue(null);
+
+    await expect(
+      canApproveInvitations({
+        userId: "u-estranho",
+        orgId: ORG,
+        email: "estranho@exemplo.com",
+      })
+    ).resolves.toBe(false);
+  });
+
+  it("recusa sessão sem e-mail e sem membership", async () => {
+    p.orgMembership.findUnique.mockResolvedValue(null);
+
+    await expect(
+      canApproveInvitations({ userId: "u-1", orgId: ORG, email: null })
+    ).resolves.toBe(false);
+  });
+
+  // Sob "trocar de tenant", userId/email são os do DONO do tenant. A allowlist
+  // é gate de PLATAFORMA, então comparar contra o e-mail do cliente nunca casa
+  // — a porta de emergência ficava soldada exatamente sob impersonação.
+  describe("sob impersonation", () => {
+    it("casa a allowlist pelo admin REAL, não pelo dono do tenant", async () => {
+      // Dono sem a permissão: é o caso que só a allowlist recupera.
+      membership("viewer");
+
+      await expect(
+        canApproveInvitations({
+          userId: "owner-do-tenant",
+          orgId: ORG,
+          email: "dono@remaxtrio.com",
+          impersonatedByUserId: "admin-real",
+          impersonatedByEmail: ENV_APPROVER,
+        })
+      ).resolves.toBe(true);
+    });
+
+    it("recusa quando nem o admin real está na allowlist nem o ator tem permissão", async () => {
+      membership("viewer");
+
+      await expect(
+        canApproveInvitations({
+          userId: "owner-do-tenant",
+          orgId: ORG,
+          email: "dono@remaxtrio.com",
+          impersonatedByUserId: "admin-real",
+          impersonatedByEmail: "outro-admin@exemplo.com",
+        })
+      ).resolves.toBe(false);
+    });
+
+    it("o e-mail do dono NÃO é consultado quando há impersonação", async () => {
+      membership("viewer");
+
+      // O dono está na allowlist, o impersonador não. Quem decide é o humano
+      // que agiu — o impersonador —, então isto recusa.
+      await expect(
+        canApproveInvitations({
+          userId: "owner-do-tenant",
+          orgId: ORG,
+          email: ENV_APPROVER,
+          impersonatedByUserId: "admin-real",
+          impersonatedByEmail: "nao-aprovador@exemplo.com",
+        })
+      ).resolves.toBe(false);
+    });
+
+    it("cai no ramo RBAC quando o dono do tenant tem a permissão", async () => {
+      membership("owner");
+
+      await expect(
+        canApproveInvitations({
+          userId: "owner-do-tenant",
+          orgId: ORG,
+          email: "dono@remaxtrio.com",
+          impersonatedByUserId: "admin-real",
+          impersonatedByEmail: "nao-aprovador@exemplo.com",
+        })
+      ).resolves.toBe(true);
+    });
+  });
+});
+
+// Sem teto, `org.members.invite` + `org.members.approve` viram primitiva de
+// escalação: a CustomRole convida `admin`, aprova pelo e-mail que controla e
+// sai com acesso quase total sem nunca ter tido `org.members.change_role`.
+describe("canApproveInvitationForRole — teto de papel", () => {
+  const ESCALADOR = {
+    [PERMISSION.ORG_MEMBERS_INVITE]: true,
+    [PERMISSION.ORG_MEMBERS_APPROVE]: true,
+  };
+
+  it("BLOQUEIA CustomRole com só invite+approve concedendo admin", async () => {
+    membership("custom", ESCALADOR);
+
+    await expect(
+      canApproveInvitationForRole({
+        userId: "u-escalador",
+        orgId: ORG,
+        email: "escalador@imobiliaria.com",
+        targetRole: "admin",
+      })
+    ).resolves.toEqual({ allowed: false, reason: "role_ceiling" });
+  });
+
+  it("distingue 'não pode decidir' de 'não pode conceder ESTE papel'", async () => {
+    membership("viewer");
+
+    await expect(
+      canApproveInvitationForRole({
+        userId: "u-viewer",
+        orgId: ORG,
+        email: "viewer@imobiliaria.com",
+        targetRole: "member",
+      })
+    ).resolves.toEqual({ allowed: false, reason: "forbidden" });
+  });
+
+  it("admin concede admin — igualdade é subconjunto", async () => {
+    membership("admin");
+
+    await expect(
+      canApproveInvitationForRole({
+        userId: "u-admin",
+        orgId: ORG,
+        email: "admin@imobiliaria.com",
+        targetRole: "admin",
+      })
+    ).resolves.toEqual({ allowed: true });
+  });
+
+  it.each(["finance", "sales", "viewer", "member"])(
+    "admin concede %s, que é estritamente menor",
+    async (role) => {
+      membership("admin");
+
+      await expect(
+        canApproveInvitationForRole({
+          userId: "u-admin",
+          orgId: ORG,
+          email: "admin@imobiliaria.com",
+          targetRole: role,
+        })
+      ).resolves.toEqual({ allowed: true });
+    }
+  );
+
+  it("a mesma CustomRole ainda concede papel menor que ela", async () => {
+    membership("custom", ESCALADOR);
+
+    // `member` está fora do catálogo de presets: resolve para {}, subconjunto
+    // de qualquer coisa.
+    await expect(
+      canApproveInvitationForRole({
+        userId: "u-custom",
+        orgId: ORG,
+        email: "custom@imobiliaria.com",
+        targetRole: "member",
+      })
+    ).resolves.toEqual({ allowed: true });
+  });
+
+  // `custom` depende de um customRoleId que este fluxo não carrega. Resolver
+  // para {} passaria o subconjunto VACUAMENTE e liberaria conceder qualquer
+  // CustomRole da org. Hoje INVITATION_ROLE_VALUES não aceita `custom`, mas a
+  // função é exportada e o conserto de POST /api/org/members passa por ela.
+  it("NEGA targetRole 'custom' em vez de passar vacuamente", async () => {
+    membership("owner");
+
+    await expect(
+      canApproveInvitationForRole({
+        userId: "u-owner",
+        orgId: ORG,
+        email: "owner@imobiliaria.com",
+        targetRole: "custom",
+      })
+    ).resolves.toEqual({ allowed: false, reason: "role_ceiling" });
+  });
+
+  it("aplica os overrides de OrgManagerSettings ao ALVO gerente", async () => {
+    // Org liberou CONTRACT_CREATE pra gerentes. O ator tem o preset base de
+    // gerente + as chaves de convite, mas NÃO tem CONTRACT_CREATE. Sem aplicar
+    // o override o alvo ficaria subestimado e o teto passaria — errando para o
+    // lado permissivo, que é o contraintuitivo aqui.
+    membership("custom", ESCALADOR);
+    p.orgManagerSettings.findUnique.mockResolvedValue({
+      permissionsJson: { [PERMISSION.CONTRACT_CREATE]: true },
+    });
+
+    await expect(
+      canApproveInvitationForRole({
+        userId: "u-custom",
+        orgId: ORG,
+        email: "custom@imobiliaria.com",
+        targetRole: "gerente",
+      })
+    ).resolves.toEqual({ allowed: false, reason: "role_ceiling" });
+  });
+
+  it("operador da allowlist de env não tem teto", async () => {
+    p.orgMembership.findUnique.mockResolvedValue(null);
+
+    await expect(
+      canApproveInvitationForRole({
+        userId: "u-ops",
+        orgId: ORG,
+        email: ENV_APPROVER,
+        targetRole: "admin",
+      })
+    ).resolves.toEqual({ allowed: true });
+  });
+
+  it("sem membership e fora da allowlist não concede nada", async () => {
+    p.orgMembership.findUnique.mockResolvedValue(null);
+
+    await expect(
+      canApproveInvitationForRole({
+        userId: "u-estranho",
+        orgId: ORG,
+        email: "estranho@exemplo.com",
+        targetRole: "member",
+      })
+    ).resolves.toEqual({ allowed: false, reason: "forbidden" });
+  });
+});
+
+// Decidir o ramo por ESTADO de impersonação, e não por "o e-mail do
+// impersonador resolveu": com `??`, sessão impersonada sem e-mail do ator real
+// cairia no e-mail do DONO — o bug que este PR conserta, pela porta dos fundos.
+describe("ator humano é escolhido por estado, não por e-mail resolver", () => {
+  it("impersonação sem e-mail do ator real NÃO cai no e-mail do dono", async () => {
+    membership("viewer");
+
+    await expect(
+      canApproveInvitations({
+        userId: "owner-do-tenant",
+        orgId: ORG,
+        email: ENV_APPROVER, // o dono está na allowlist
+        impersonatedByUserId: "admin-real",
+        impersonatedByEmail: null, // mas o ator real não tem e-mail resolvido
+      })
+    ).resolves.toBe(false);
+  });
+
+  it("sem impersonação usa o e-mail da própria sessão", async () => {
+    membership("viewer");
+
+    await expect(
+      canApproveInvitations({
+        userId: "u-1",
+        orgId: ORG,
+        email: ENV_APPROVER,
+        impersonatedByUserId: null,
+        impersonatedByEmail: null,
+      })
+    ).resolves.toBe(true);
+  });
+});
+
+describe("getOrgApproverEmails", () => {
+  it("devolve só quem tem a permissão, em minúsculas", async () => {
+    p.orgMembership.findMany.mockResolvedValue([
+      { role: "owner", customRole: null, user: { email: "Owner@Org.com", deletedAt: null } },
+      { role: "admin", customRole: null, user: { email: "Admin@Org.com", deletedAt: null } },
+      { role: "sales", customRole: null, user: { email: "corretor@org.com", deletedAt: null } },
+      { role: "viewer", customRole: null, user: { email: "leitor@org.com", deletedAt: null } },
+    ]);
+
+    await expect(getOrgApproverEmails(ORG)).resolves.toEqual([
+      "owner@org.com",
+      "admin@org.com",
+    ]);
+  });
+
+  it("inclui CustomRole com a permissão e exclui CustomRole sem ela", async () => {
+    p.orgMembership.findMany.mockResolvedValue([
+      {
+        role: "custom",
+        customRole: { permissions: { [PERMISSION.ORG_MEMBERS_APPROVE]: true } },
+        user: { email: "aprova@org.com", deletedAt: null },
+      },
+      {
+        role: "custom",
+        customRole: { permissions: { [PERMISSION.ORG_MEMBERS_INVITE]: true } },
+        user: { email: "so-convida@org.com", deletedAt: null },
+      },
+    ]);
+
+    await expect(getOrgApproverEmails(ORG)).resolves.toEqual(["aprova@org.com"]);
+  });
+
+  it("ignora usuário em soft delete (LGPD)", async () => {
+    p.orgMembership.findMany.mockResolvedValue([
+      { role: "admin", customRole: null, user: { email: "ativo@org.com", deletedAt: null } },
+      {
+        role: "admin",
+        customRole: null,
+        user: { email: "removido@org.com", deletedAt: new Date() },
+      },
+    ]);
+
+    await expect(getOrgApproverEmails(ORG)).resolves.toEqual(["ativo@org.com"]);
+  });
+
+  it("filtra membership de serviço na própria query", async () => {
+    p.orgMembership.findMany.mockResolvedValue([]);
+
+    await getOrgApproverEmails(ORG);
+
+    expect(p.orgMembership.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { orgId: ORG, isSystem: false },
+      })
+    );
+  });
+});
+
+describe("isApprover", () => {
+  it("é case-insensitive e ignora e-mail ausente", () => {
+    expect(isApprover(ENV_APPROVER.toUpperCase())).toBe(true);
+    expect(isApprover("outro@exemplo.com")).toBe(false);
+    expect(isApprover(null)).toBe(false);
+    expect(isApprover(undefined)).toBe(false);
+  });
+});

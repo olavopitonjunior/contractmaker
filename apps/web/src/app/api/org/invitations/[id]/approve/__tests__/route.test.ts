@@ -16,6 +16,8 @@ vi.mock("@/lib/auth/context", () => ({
 }));
 vi.mock("@/lib/auth/invitations", () => ({
   isApprover: vi.fn(() => true),
+  canApproveInvitations: vi.fn(async () => true),
+  canApproveInvitationForRole: vi.fn(async () => ({ allowed: true })),
 }));
 vi.mock("@/lib/auth/password-reset", () => ({
   createPasswordResetToken: vi
@@ -36,6 +38,7 @@ vi.mock("@/lib/security/audit", () => ({
 
 import { POST } from "../route";
 import { requireAuth } from "@/lib/auth/context";
+import { canApproveInvitationForRole } from "@/lib/auth/invitations";
 import { createPasswordResetToken } from "@/lib/auth/password-reset";
 import { sendEmail } from "@/lib/email/client";
 import { InvitationApprovedEmail } from "@/lib/email/templates/invitation-approved";
@@ -45,6 +48,7 @@ const requireAuthMock = requireAuth as unknown as MockFn;
 const createTokenMock = createPasswordResetToken as unknown as MockFn;
 const sendEmailMock = sendEmail as unknown as MockFn;
 const emailTemplateMock = InvitationApprovedEmail as unknown as MockFn;
+const canApproveMock = canApproveInvitationForRole as unknown as MockFn;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const p = prisma as any;
 
@@ -95,6 +99,115 @@ beforeEach(() => {
     email: "convidado@teste.com",
     name: "Convidado",
     passwordHash: null,
+  });
+});
+
+describe("POST /api/org/invitations/[id]/approve — quem pode decidir", () => {
+  it("pergunta pela org+usuário da sessão e pelo papel DO CONVITE", async () => {
+    p.user.findUnique = vi.fn().mockResolvedValue(null);
+
+    await POST(req(), { params });
+
+    expect(canApproveMock).toHaveBeenCalledWith({
+      userId: "approver-1",
+      orgId: "org-1",
+      email: "olavo.piton@gmail.com",
+      impersonatedByUserId: undefined,
+      impersonatedByEmail: undefined,
+      // Aprovar CONCEDE o papel: o teto é sobre o alvo, não sobre o ator.
+      targetRole: "member",
+    });
+  });
+
+  // A allowlist de env é gate de PLATAFORMA. Sob impersonation `userEmail` é o
+  // do DONO do tenant, então sem repassar o ator real ela nunca casa — e a
+  // porta de emergência fica soldada justamente quando é necessária.
+  it("repassa o ator real sob impersonation", async () => {
+    requireAuthMock.mockResolvedValue({
+      ok: true,
+      ctx: {
+        userId: "owner-do-tenant",
+        userEmail: "dono@remaxtrio.com",
+        orgId: "org-1",
+        orgName: "Imobiliária Teste",
+        ipAddress: "1.2.3.4",
+        userAgent: "vitest",
+        impersonatedByUserId: "approver-1",
+        impersonatedByEmail: "olavo.piton@gmail.com",
+      },
+    });
+    p.user.findUnique = vi.fn().mockResolvedValue(null);
+
+    await POST(req(), { params });
+
+    expect(canApproveMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: "dono@remaxtrio.com",
+        impersonatedByUserId: "approver-1",
+        impersonatedByEmail: "olavo.piton@gmail.com",
+      })
+    );
+  });
+
+  it("sem permissão devolve 403 e não cria User nem membership", async () => {
+    canApproveMock.mockResolvedValueOnce({
+      allowed: false,
+      reason: "forbidden",
+    });
+    p.user.findUnique = vi.fn().mockResolvedValue(null);
+
+    const res = await POST(req(), { params });
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({
+      error: "Você não tem permissão para aprovar acessos",
+    });
+    expect(p.user.create).not.toHaveBeenCalled();
+    expect(p.orgMembership.create).not.toHaveBeenCalled();
+    expect(p.orgInvitation.update).not.toHaveBeenCalled();
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  it("acima do teto devolve 403 nomeando o papel, não a permissão", async () => {
+    canApproveMock.mockResolvedValueOnce({
+      allowed: false,
+      reason: "role_ceiling",
+    });
+    p.user.findUnique = vi.fn().mockResolvedValue(null);
+
+    const res = await POST(req(), { params });
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({
+      error: expect.stringContaining("member"),
+    });
+    expect(p.user.create).not.toHaveBeenCalled();
+    expect(p.orgMembership.create).not.toHaveBeenCalled();
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  // O teto veio DEPOIS da expiração de propósito: antes, convite vencido acima
+  // do teto levava 403, nunca virava `expired` e envenenava todo reconvite
+  // daquele e-mail com 409 "já existe um convite pendente".
+  it("convite expirado devolve 410 e marca expired mesmo acima do teto", async () => {
+    p.orgInvitation.findFirst = vi.fn().mockResolvedValue({
+      id: INVITE_ID,
+      orgId: "org-1",
+      email: "convidado@teste.com",
+      name: "Convidado",
+      role: "admin",
+      status: "pending",
+      invitedById: "approver-1",
+      expiresAt: new Date(Date.now() - 1000),
+    });
+    const res = await POST(req(), { params });
+
+    expect(res.status).toBe(410);
+    expect(p.orgInvitation.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: "expired" } })
+    );
+    // Nem chega a consultar o teto: a expiração resolve antes.
+    expect(canApproveMock).not.toHaveBeenCalled();
   });
 });
 
@@ -170,5 +283,52 @@ describe("POST /api/org/invitations/[id]/approve — e-mail de primeiro acesso",
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({ emailSent: false });
+  });
+});
+
+describe("POST /api/org/invitations/[id]/approve — quem fica registrado como aprovador", () => {
+  it("sem impersonation: o aprovador é o próprio ator", async () => {
+    p.user.findUnique = vi.fn().mockResolvedValue(null);
+
+    await POST(req(), { params });
+
+    expect(p.orgInvitation.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "approved",
+          approvedById: "approver-1",
+        }),
+      })
+    );
+  });
+
+  it("sob impersonation: grava o ADMIN REAL, não o dono do tenant", async () => {
+    // Espelha o ctx que requireAuth monta sob "trocar de tenant": o ator
+    // efetivo é o DONO (é ele que resolve membership/RBAC) e o admin real
+    // sobra em impersonatedBy*.
+    requireAuthMock.mockResolvedValue({
+      ok: true,
+      ctx: {
+        userId: "owner-do-tenant",
+        userEmail: "dono@remaxtrio.com",
+        orgId: "org-1",
+        orgName: "Imobiliária Teste",
+        ipAddress: "1.2.3.4",
+        userAgent: "vitest",
+        impersonatedByUserId: "approver-1",
+        impersonatedByEmail: "olavo.piton@gmail.com",
+      },
+    });
+    p.user.findUnique = vi.fn().mockResolvedValue(null);
+
+    await POST(req(), { params });
+
+    // O bug: sem isto ficava registrado que o dono do tenant admitiu o
+    // próprio membro, quando quem admitiu foi o operador da plataforma.
+    expect(p.orgInvitation.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ approvedById: "approver-1" }),
+      })
+    );
   });
 });

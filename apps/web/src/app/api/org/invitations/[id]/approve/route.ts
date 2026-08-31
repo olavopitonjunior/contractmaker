@@ -4,7 +4,7 @@ import { requireAuth } from "@/lib/auth/context";
 import { audit } from "@/lib/security/audit";
 import { sendEmail } from "@/lib/email/client";
 import { InvitationApprovedEmail } from "@/lib/email/templates/invitation-approved";
-import { isApprover } from "@/lib/auth/invitations";
+import { canApproveInvitationForRole } from "@/lib/auth/invitations";
 import { createPasswordResetToken } from "@/lib/auth/password-reset";
 
 /**
@@ -15,8 +15,16 @@ import { createPasswordResetToken } from "@/lib/auth/password-reset";
  * /reset-password?token= com reason `welcome` e DEFINE a senha na hora. Quem
  * já tinha conta com senha recebe só o link de login.
  *
- * Gate: apenas emails listados em INVITE_APPROVER_EMAILS (default
- * olavo.piton@gmail.com) podem aprovar.
+ * Gate: quem tem a permissão `org.members.approve` na org — presets `owner` e
+ * `admin` a carregam — ou um email da allowlist INVITE_APPROVER_EMAILS
+ * (default olavo.piton@gmail.com), MAIS o teto de papel. Ver
+ * `canApproveInvitationForRole`.
+ *
+ * As duas checagens são uma chamada só, depois de carregar o convite: o teto
+ * precisa de `invitation.role`, e separá-las custava dois lookups idênticos de
+ * permissões efetivas por aprovação. O preço é que quem não pode aprovar
+ * distingue convite inexistente (404) de existente (403) dentro da PRÓPRIA org
+ * — informação de valor desprezível para quem já é membro autenticado dela.
  */
 export async function POST(
   req: NextRequest,
@@ -26,13 +34,6 @@ export async function POST(
   if (!authResult.ok) return authResult.response;
   const { ctx } = authResult;
   const { id } = await params;
-
-  if (!isApprover(ctx.userEmail)) {
-    return NextResponse.json(
-      { error: "Apenas o aprovador designado pode aprovar convites" },
-      { status: 403 }
-    );
-  }
 
   const invitation = await prisma.orgInvitation.findFirst({
     where: { id, orgId: ctx.orgId },
@@ -52,6 +53,33 @@ export async function POST(
       data: { status: "expired" },
     });
     return NextResponse.json({ error: "Convite expirado" }, { status: 410 });
+  }
+
+  // Teto de papel, DEPOIS da expiração de propósito: aprovar concede o papel, e
+  // sem isto quem tem invite+approve concederia `admin` a si mesmo. Mas pôr o
+  // teto ANTES prenderia convite vencido acima do teto em `pending` para
+  // sempre — 403 em vez de 410, `status` nunca vira `expired`, e daí
+  // `findPendingInvitation` passa a devolver 409 em todo reconvite daquele
+  // e-mail, inclusive com papel menor. Depende de `invitation.role`, por isso
+  // não cabe no gate lá em cima.
+  const ceiling = await canApproveInvitationForRole({
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    email: ctx.userEmail,
+    impersonatedByUserId: ctx.impersonatedByUserId,
+    impersonatedByEmail: ctx.impersonatedByEmail,
+    targetRole: invitation.role,
+  });
+  if (!ceiling.allowed) {
+    return NextResponse.json(
+      {
+        error:
+          ceiling.reason === "role_ceiling"
+            ? `Você não pode conceder o papel "${invitation.role}" — ele tem permissões que você não possui`
+            : "Você não tem permissão para aprovar acessos",
+      },
+      { status: 403 }
+    );
   }
 
   // Cria User + OrgMembership atomicamente. User existente (caso raro:
@@ -92,7 +120,13 @@ export async function POST(
       where: { id },
       data: {
         status: "approved",
-        approvedById: ctx.userId,
+        // Quem DECIDIU, não quem o RBAC resolveu. Sob impersonation de tenant
+        // `ctx.userId` é o DONO do tenant (ele é quem resolve membership/RBAC),
+        // então gravá-lo aqui registraria que o cliente admitiu o próprio
+        // membro quando na verdade foi o operador da plataforma. O AuditLog
+        // carimba `impersonatedBy` no metadata, mas esta coluna não tem esse
+        // par — sem isto, o "aprovado por" mente e não há de onde recuperar.
+        approvedById: ctx.impersonatedByUserId ?? ctx.userId,
         approvedAt: new Date(),
       },
     });

@@ -15,6 +15,8 @@ import {
   findPendingInvitation,
   getApproverEmails,
   getNotifyEmails,
+  getOrgApproverEmails,
+  isApprover,
 } from "@/lib/auth/invitations";
 import {
   createInvitationSchema,
@@ -29,20 +31,30 @@ export async function GET(req: NextRequest) {
   if (!authResult.ok) return authResult.response;
   const { ctx } = authResult;
 
-  try {
-    await requirePermission({
-      userId: ctx.userId,
-      orgId: ctx.orgId,
-      permission: PERMISSION.ORG_MEMBERS_INVITE,
-    });
-  } catch (err) {
-    if (
-      err instanceof PermissionDeniedError ||
-      err instanceof MembershipRequiredError
-    ) {
-      return NextResponse.json({ error: err.code }, { status: err.status });
+  // O operador da allowlist de env pode não ter membership nenhuma nesta org —
+  // é o caso que a porta de emergência existe para servir, e `/api/auth/
+  // permissions` já lhe acende o botão de aprovar. Sem esta saída ele veria a
+  // aba renderizar e a lista responder 403: porta aberta no gate de decisão e
+  // fechada na leitura, que é meia porta.
+  const platformOperator = isApprover(
+    ctx.impersonatedByUserId ? ctx.impersonatedByEmail : ctx.userEmail
+  );
+  if (!platformOperator) {
+    try {
+      await requirePermission({
+        userId: ctx.userId,
+        orgId: ctx.orgId,
+        permission: PERMISSION.ORG_MEMBERS_INVITE,
+      });
+    } catch (err) {
+      if (
+        err instanceof PermissionDeniedError ||
+        err instanceof MembershipRequiredError
+      ) {
+        return NextResponse.json({ error: err.code }, { status: err.status });
+      }
+      throw err;
     }
-    throw err;
   }
 
   const status = req.nextUrl.searchParams.get("status");
@@ -131,7 +143,11 @@ export async function POST(req: NextRequest) {
       name: name ?? null,
       role,
       status: "pending",
-      invitedById: ctx.userId,
+      // Mesma razão de `approvedById` no approve: sob impersonation `ctx.userId`
+      // é o DONO do tenant, e a coluna vira "Convidado por" na tela de membros.
+      // Depois deste PR `approvedById` diz a verdade; deixar a metade irmã
+      // mentindo seria inconsistência conhecida na mesma linha da mesma tabela.
+      invitedById: ctx.impersonatedByUserId ?? ctx.userId,
       expiresAt: defaultInvitationExpiry(),
     },
   });
@@ -152,12 +168,48 @@ export async function POST(req: NextRequest) {
     }
   );
 
-  // Notificações: approvers recebem CTA; notify-only só ciência.
+  // Notificações: quem decide recebe CTA; notify-only só ciência.
+  //
+  // "Quem decide" é a mesma união que `canApproveInvitations` aplica no gate:
+  // a allowlist de env MAIS os membros com `org.members.approve` (owner/admin).
+  // Sem os segundos, o admin ganharia o botão e nunca saberia que há fila.
   const baseUrl = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
   const reviewUrl = `${baseUrl}/settings/membros?tab=convites`;
-  const approverEmails = getApproverEmails();
+
+  // O convite JÁ está commitado a esta altura. Antes deste bloco só ler env,
+  // ele não podia lançar; agora há um round-trip ao banco, e deixá-lo estourar
+  // devolveria 500 com o convite gravado como `pending` e ninguém avisado — o
+  // `allSettled` abaixo nem chegaria a rodar. Na retentativa o admin levaria
+  // 409 "já existe um convite pendente". Notificação é best-effort: degradar
+  // para a allowlist de env é pior que o ideal e muito melhor que encalhar.
+  let orgApprovers: string[] = [];
+  try {
+    orgApprovers = await getOrgApproverEmails(ctx.orgId);
+  } catch (err) {
+    console.error(
+      "[invitations] falha ao resolver aprovadores da org — notificando só a allowlist de env",
+      { orgId: ctx.orgId, invitationId: invitation.id, error: err }
+    );
+  }
+
+  // Fora o criador: ele acabou de agir e já está na tela; mandar-lhe um CTA
+  // "aguarda aprovação" sobre a própria ação é ruído que este PR introduziria
+  // (owner/admin carregam invite E approve, então ele cairia sempre na lista).
+  //
+  // O ator real, pela mesma razão de `invitedById` acima. Usar `ctx.userEmail`
+  // aqui INVERTIA a intenção sob impersonação: removia o dono do tenant, que
+  // não agiu e é justamente quem precisa saber que há fila na org dele, e
+  // mandava o CTA ao operador, que acabou de criar o convite.
+  const inviterEmail = (ctx.impersonatedByEmail ?? ctx.userEmail)?.toLowerCase();
+  // `ctx.userName` é o nome do DONO sob impersonação, e não há `...ByName` no
+  // ctx. Sem isto o e-mail diria que o dono convidou enquanto a tela de membros
+  // (que lê `invitedById`) diz que foi o operador — duas versões do mesmo fato.
+  const inviterLabel = ctx.impersonatedByEmail ?? ctx.userName;
+  const approverEmails = Array.from(
+    new Set([...getApproverEmails(), ...orgApprovers])
+  ).filter((e) => e !== inviterEmail);
   const notifyEmails = getNotifyEmails().filter(
-    (e) => !approverEmails.includes(e)
+    (e) => !approverEmails.includes(e) && e !== inviterEmail
   );
 
   await Promise.allSettled([
@@ -166,7 +218,7 @@ export async function POST(req: NextRequest) {
         to,
         subject: `Novo convite aguarda aprovação — ${ctx.orgName}`,
         react: InvitationPendingEmail({
-          inviterName: ctx.userName,
+          inviterName: inviterLabel,
           inviteeName: name ?? null,
           inviteeEmail: email,
           orgName: ctx.orgName,
@@ -180,7 +232,7 @@ export async function POST(req: NextRequest) {
         to,
         subject: `Novo convite criado em ${ctx.orgName}`,
         react: InvitationPendingEmail({
-          inviterName: ctx.userName,
+          inviterName: inviterLabel,
           inviteeName: name ?? null,
           inviteeEmail: email,
           orgName: ctx.orgName,
