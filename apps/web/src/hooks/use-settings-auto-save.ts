@@ -25,38 +25,6 @@ export interface UseSettingsAutoSaveOptions<T extends SettingsFields> {
    */
   isValid?: (fields: T) => boolean;
   debounceMs?: number;
-  /**
-   * Chaves que entram em TODO PATCH, mesmo sem terem mudado.
-   *
-   * Existe para o campo que é constante na instância mas **obrigatório** no
-   * schema da rota — o caso do `kind` em `/api/org/sla-policies`, que é
-   * `.strict()` e exige `kind` junto das políticas. Sem isto, o diff por chave
-   * suja nunca o incluiria (ele nasce igual à baseline e nunca muda) e todo
-   * save voltaria 400 por corpo inválido.
-   *
-   * Não conta para o dirty: sozinho, não dispara nada.
-   */
-  alwaysInclude?: Record<string, unknown>;
-  /**
-   * Separa O QUE É COMPARADO do QUE É ENVIADO.
-   *
-   * Por padrão o corpo do PATCH são as próprias chaves sujas. Isso só funciona
-   * quando a forma do estado coincide com a forma que a rota espera. Quando não
-   * coincide, observe o estado numa forma **estável** (uma chave por item) e
-   * use isto para montar o corpo a partir de `sujos`.
-   *
-   * O SLA é o caso: a rota quer `{ kind, policies: [...] }`. Observar a lista
-   * de etapas alteradas parecia natural, mas ela ESVAZIA depois de salvar — e
-   * `[]` difere da baseline, o que disparava um segundo PATCH vazio. Observar a
-   * lista COMPLETA consertava isso e criava algo pior: como a rota grava por
-   * `stageId` tudo que recebe, toda gravação reescrevia também as etapas
-   * intocadas, transformando "padrão" em "personalizado" para sempre e
-   * ressuscitando 5/10 por cima dos valores reais de etapas desligadas.
-   *
-   * Com uma chave por etapa cada baseline converge sozinha depois do save, e
-   * `buildPayload` manda no corpo só as etapas que mudaram de fato.
-   */
-  buildPayload?: (dirtyFields: Partial<T>, allFields: T) => Record<string, unknown>;
   /** Desliga o agendamento (seção somente-leitura / sem permissão). */
   enabled?: boolean;
   /**
@@ -109,14 +77,10 @@ export function useSettingsAutoSave<T extends SettingsFields>(
     debounceMs = 800,
     enabled = true,
     onSaved,
-    alwaysInclude,
-    buildPayload,
   } = options;
 
   const [status, setStatus] = useState<SettingsSaveStatus>("idle");
   const [error, setError] = useState<string | null>(null);
-  /** Sobe a cada `resync` para o memo do dirty reavaliar a baseline nova. */
-  const [baselineVersao, setBaselineVersao] = useState(0);
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
@@ -142,10 +106,6 @@ export function useSettingsAutoSave<T extends SettingsFields>(
   validRef.current = isValid;
   const onSavedRef = useRef(onSaved);
   onSavedRef.current = onSaved;
-  const buildPayloadRef = useRef(buildPayload);
-  buildPayloadRef.current = buildPayload;
-  const alwaysIncludeRef = useRef(alwaysInclude);
-  alwaysIncludeRef.current = alwaysInclude;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -172,13 +132,7 @@ export function useSettingsAutoSave<T extends SettingsFields>(
       Object.keys(fields).filter(
         (k) => serialize(fields[k]) !== baselineRef.current[k],
       ),
-    // `baselineVersao` entra aqui porque a baseline vive numa ref: quando o
-    // `resync` a reescreve, nada mais avisaria este memo, e a pill continuaria
-    // dizendo "Alterações não salvas" sobre um estado que já é o do servidor.
-    // O lint a chama de desnecessária porque não a vê sendo lida no corpo — ela
-    // é exatamente isso: um sinal de invalidação, não um valor.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [fields, baselineVersao],
+    [fields],
   );
   // Inclui o VALOR, não só o nome da chave. Com a lista de chaves apenas, um
   // campo que continua sujo mas mudou de conteúdo não re-agendava o save — era
@@ -206,15 +160,7 @@ export function useSettingsAutoSave<T extends SettingsFields>(
       return false;
     }
 
-    const sujos = Object.fromEntries(
-      dirty.map((k) => [k, current[k]]),
-    ) as Partial<T>;
-    const payload = {
-      ...(alwaysIncludeRef.current ?? {}),
-      ...(buildPayloadRef.current
-        ? buildPayloadRef.current(sujos, current)
-        : sujos),
-    };
+    const payload = Object.fromEntries(dirty.map((k) => [k, current[k]]));
 
     inFlightRef.current = true;
     // O save de unmount roda com o componente já fora da árvore: o fetch vale,
@@ -326,28 +272,5 @@ export function useSettingsAutoSave<T extends SettingsFields>(
     return persist();
   }, [persist]);
 
-  /**
-   * Declara que os valores atuais JÁ são o que o servidor tem, sem mandar nada.
-   *
-   * Serve para a mutação que acontece POR FORA do auto-save e muda o mesmo
-   * estado — no SLA é o botão "Restaurar padrão", que faz um DELETE direto e
-   * reseta o draft para o default. Sem isto o hook enxerga aquele reset como
-   * uma edição do usuário e, 800ms depois, manda um PATCH que **recria a linha
-   * que o DELETE acabou de apagar** — desfazendo o restore em silêncio e
-   * deixando a etapa presa em "personalizado" com os valores do default.
-   *
-   * Cancela também o que estiver agendado: o que veio do servidor vence.
-   */
-  const resync = useCallback(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    pendingRef.current = false;
-    const current = fieldsRef.current;
-    for (const k of Object.keys(current)) {
-      baselineRef.current[k] = serialize(current[k]);
-    }
-    setBaselineVersao((v) => v + 1);
-    setStatus((s) => (s === "saving" ? s : "idle"));
-  }, []);
-
-  return { status, error, isDirty: dirtyKeys.length > 0, flush, resync };
+  return { status, error, isDirty: dirtyKeys.length > 0, flush };
 }

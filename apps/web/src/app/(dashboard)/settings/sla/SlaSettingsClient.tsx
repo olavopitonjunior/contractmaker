@@ -1,10 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, RotateCcw } from "lucide-react";
-import { SaveStatusPill } from "@/components/settings/SaveStatusPill";
-import { useSettingsAutoSave } from "@/hooks/use-settings-auto-save";
+import { Loader2, RotateCcw, Save } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -43,32 +41,11 @@ function toDraft(p: PolicyRow): DraftRow {
   };
 }
 
-/**
- * Faixa que o servidor aceita para todo prazo (`min(1).max(365)` + o refine
- * `dangerDays >= warnDays` em `api/org/sla-policies`).
- *
- * Vale para TODA linha enviada, inclusive as com o SLA desligado — o Zod não
- * abre exceção para elas. O botão antigo só validava as ligadas e mandava o
- * lote inteiro, então apagar um prazo e desligar a etapa em seguida fazia o
- * PATCH voltar 400 e derrubava junto as etapas que estavam corretas.
- */
-function linhaValida(d: DraftRow): boolean {
-  const warn = Number(d.warnDays);
-  const danger = Number(d.dangerDays);
-  return (
-    Number.isInteger(warn) &&
-    Number.isInteger(danger) &&
-    warn >= 1 &&
-    danger >= 1 &&
-    warn <= 365 &&
-    danger <= 365 &&
-    danger >= warn
-  );
-}
-
 export default function SlaSettingsClient() {
   const [kind, setKind] = useState<Kind>("venda");
   const [rows, setRows] = useState<PolicyRow[] | null>(null);
+  const [draft, setDraft] = useState<Record<string, DraftRow>>({});
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async (k: Kind) => {
     setRows(null);
@@ -77,6 +54,11 @@ export default function SlaSettingsClient() {
       if (!res.ok) throw new Error();
       const data = (await res.json()) as { policies: PolicyRow[] };
       setRows(data.policies);
+      setDraft(
+        Object.fromEntries(
+          data.policies.filter((p) => !p.terminal).map((p) => [p.stageId, toDraft(p)])
+        )
+      );
     } catch {
       toast.error("Falha ao carregar as políticas de SLA");
       setRows([]);
@@ -86,6 +68,109 @@ export default function SlaSettingsClient() {
   useEffect(() => {
     void load(kind);
   }, [kind, load]);
+
+  const editable = (rows ?? []).filter((p) => !p.terminal);
+  const terminals = (rows ?? []).filter((p) => p.terminal);
+
+  const dirty = editable.some((p) => {
+    const d = draft[p.stageId];
+    if (!d) return false;
+    const base = toDraft(p);
+    return (
+      d.warnDays !== base.warnDays ||
+      d.dangerDays !== base.dangerDays ||
+      d.enabled !== base.enabled
+    );
+  });
+
+  const invalid = editable.some((p) => {
+    const d = draft[p.stageId];
+    if (!d || !d.enabled) return false;
+    const warn = Number(d.warnDays);
+    const danger = Number(d.dangerDays);
+    return (
+      !Number.isInteger(warn) ||
+      !Number.isInteger(danger) ||
+      warn < 1 ||
+      danger < 1 ||
+      warn > 365 ||
+      danger > 365 ||
+      danger < warn
+    );
+  });
+
+  async function save() {
+    if (invalid) {
+      toast.error("Revise os prazos: atenção ≥ 1 dia e atrasado ≥ atenção");
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/org/sla-policies", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind,
+          policies: editable.map((p) => {
+            const d = draft[p.stageId]!;
+            return {
+              stageId: p.stageId,
+              warnDays: Number(d.warnDays),
+              dangerDays: Number(d.dangerDays),
+              enabled: d.enabled,
+            };
+          }),
+        }),
+      });
+      if (res.status === 403) {
+        toast.error("Sem permissão pra editar configurações da organização");
+        return;
+      }
+      if (!res.ok) throw new Error();
+      const data = (await res.json()) as { policies: PolicyRow[] };
+      setRows(data.policies);
+      setDraft(
+        Object.fromEntries(
+          data.policies.filter((p) => !p.terminal).map((p) => [p.stageId, toDraft(p)])
+        )
+      );
+      toast.success("SLA salvo — prazos dos negócios ativos recalculados");
+    } catch {
+      toast.error("Falha ao salvar a política de SLA");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function restoreDefault(stageId?: string) {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/org/sla-policies", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, ...(stageId ? { stageId } : {}) }),
+      });
+      if (res.status === 403) {
+        toast.error("Sem permissão pra editar configurações da organização");
+        return;
+      }
+      if (!res.ok) throw new Error();
+      const data = (await res.json()) as { policies: PolicyRow[] };
+      setRows(data.policies);
+      setDraft(
+        Object.fromEntries(
+          data.policies.filter((p) => !p.terminal).map((p) => [p.stageId, toDraft(p)])
+        )
+      );
+      toast.success(
+        stageId ? "Etapa restaurada pro padrão (5/10)" : "Todas as etapas no padrão (5/10)"
+      );
+    } catch {
+      toast.error("Falha ao restaurar o padrão");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -106,183 +191,8 @@ export default function SlaSettingsClient() {
           pra esta organização.
         </p>
       ) : (
-        // `key={kind}` remonta o editor ao trocar de esteira: cada aba tem a
-        // própria baseline de auto-save, e o que estava em vias de ser salvo é
-        // gravado no unmount em vez de sumir (ver `use-settings-auto-save`).
-        <SlaKindEditor
-          key={kind}
-          kind={kind}
-          initialRows={rows}
-          onRowsChange={setRows}
-        />
-      )}
-    </div>
-  );
-}
-
-function SlaKindEditor({
-  kind,
-  initialRows,
-  onRowsChange,
-}: {
-  kind: Kind;
-  initialRows: PolicyRow[];
-  onRowsChange: (rows: PolicyRow[]) => void;
-}) {
-  const [rows, setRows] = useState<PolicyRow[]>(initialRows);
-  const [draft, setDraft] = useState<Record<string, DraftRow>>(() =>
-    Object.fromEntries(
-      initialRows.filter((p) => !p.terminal).map((p) => [p.stageId, toDraft(p)]),
-    ),
-  );
-  const [saving, setSaving] = useState(false);
-  /** Ver `restoreDefault`: o DELETE muda o estado por fora do auto-save. */
-  const resyncPendenteRef = useRef(false);
-
-  const editable = rows.filter((p) => !p.terminal);
-  const terminals = rows.filter((p) => p.terminal);
-
-  const sujas = editable.filter((p) => {
-    const d = draft[p.stageId];
-    if (!d) return false;
-    const base = toDraft(p);
-    return (
-      d.warnDays !== base.warnDays ||
-      d.dangerDays !== base.dangerDays ||
-      d.enabled !== base.enabled
-    );
-  });
-
-  // UMA CHAVE POR ETAPA — e não uma lista.
-  //
-  // As duas formas óbvias falham, cada uma de um jeito:
-  //
-  //  - Lista das etapas ALTERADAS: ela esvazia depois de salvar (o `refresh`
-  //    traz as linhas novas), e `[]` difere da baseline `[{...}]` → o hook lia
-  //    como alteração nova e mandava um PATCH vazio, que a rota recusa
-  //    (`.min(1)`). Era 200 + 400 a cada edição.
-  //  - Lista COMPLETA: consertava aquilo e criava coisa pior. A rota faz upsert
-  //    por `stageId` de tudo que recebe, então toda gravação reescrevia também
-  //    as etapas intocadas: elas viravam "personalizado" para sempre (deixando
-  //    de acompanhar o default do código) e, pior, etapa DESLIGADA volta do GET
-  //    com prazos `null`, que `toDraft` preenche com 5/10 — logo um save de
-  //    outra etapa apagava os valores reais dela, em silêncio, com 200.
-  //
-  // Com uma chave por etapa cada baseline converge sozinha após o save (o draft
-  // já bate com o que o servidor gravou) e não há assimetria de lista vazia. O
-  // `buildPayload` monta o corpo só com as etapas realmente alteradas.
-  const fields = Object.fromEntries(
-    editable.map((p) => {
-      const d = draft[p.stageId] ?? toDraft(p);
-      return [`policy_${p.stageId}`, d];
-    }),
-  );
-
-  const refresh = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/org/sla-policies?kind=${kind}`);
-      if (!res.ok) return;
-      const data = (await res.json()) as { policies: PolicyRow[] };
-      setRows(data.policies);
-      onRowsChange(data.policies);
-    } catch {
-      /* a tela segue com o que tem; o próximo save reconcilia */
-    }
-  }, [kind, onRowsChange]);
-
-  const autoSave = useSettingsAutoSave(fields, {
-    endpoint: "/api/org/sla-policies",
-    // `kind` é constante nesta instância (o pai remonta por `key={kind}`),
-    // então nunca ficaria "sujo" e nunca entraria no diff — mas o schema da
-    // rota é `.strict()` e o exige.
-    alwaysInclude: { kind },
-    // Só as etapas sujas viajam: a rota grava por `stageId`, e etapa ausente
-    // do corpo fica intacta.
-    buildPayload: (sujos) => ({
-      policies: Object.entries(sujos).map(([chave, d]) => {
-        const row = d as DraftRow;
-        return {
-          stageId: chave.replace(/^policy_/, ""),
-          warnDays: Number(row.warnDays),
-          dangerDays: Number(row.dangerDays),
-          enabled: row.enabled,
-        };
-      }),
-    }),
-    // Toda linha ENVIADA precisa passar — inclusive as desligadas, que o Zod da
-    // rota valida do mesmo jeito. Só as sujas são enviadas, então só elas
-    // seguram o save: uma linha intocada com valor estranho vindo do banco não
-    // trava a seção inteira.
-    isValid: () => sujas.every((p) => linhaValida(draft[p.stageId]!)),
-    onSaved: () => {
-      // A rota devolve o lote recalculado; sem re-sincronizar, o selo
-      // "Personalizado" e o botão de restaurar ficariam desatualizados.
-      void refresh();
-    },
-  });
-
-  const invalido = sujas.some((p) => !linhaValida(draft[p.stageId]!));
-
-  // Roda depois de TODO render: só age quando `restoreDefault` marcou, e aí já
-  // é o render que aplicou o draft novo — que é o estado que o servidor tem.
-  useEffect(() => {
-    if (!resyncPendenteRef.current) return;
-    resyncPendenteRef.current = false;
-    autoSave.resync();
-  });
-
-  async function restoreDefault(stageId?: string) {
-    setSaving(true);
-    try {
-      const res = await fetch("/api/org/sla-policies", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind, ...(stageId ? { stageId } : {}) }),
-      });
-      if (res.status === 403) {
-        toast.error("Sem permissão pra editar configurações da organização");
-        return;
-      }
-      if (!res.ok) throw new Error();
-      const data = (await res.json()) as { policies: PolicyRow[] };
-      setRows(data.policies);
-      onRowsChange(data.policies);
-      setDraft(
-        Object.fromEntries(
-          data.policies.filter((p) => !p.terminal).map((p) => [p.stageId, toDraft(p)])
-        )
-      );
-      // O DELETE acontece POR FORA do auto-save e reseta o draft. Sem avisar o
-      // hook, ele leria esse reset como edição do usuário e, 800ms depois,
-      // mandaria um PATCH recriando a linha que o DELETE apagou — desfazendo o
-      // restore e deixando a etapa presa em "personalizado" com os valores do
-      // próprio default. Marcamos aqui e ressincronizamos no efeito abaixo,
-      // depois do render que aplica o draft novo.
-      resyncPendenteRef.current = true;
-      toast.success(
-        stageId ? "Etapa restaurada pro padrão (5/10)" : "Todas as etapas no padrão (5/10)"
-      );
-    } catch {
-      toast.error("Falha ao restaurar o padrão");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-end gap-3">
-        {invalido && (
-          <p className="text-xs text-destructive">
-            Revise os prazos: atenção ≥ 1 dia, atrasado ≥ atenção, até 365 —
-            ainda não foi salvo.
-          </p>
-        )}
-        <SaveStatusPill status={autoSave.status} isDirty={autoSave.isDirty} />
-      </div>
-
-      <Card>
-        <CardContent className="p-0 divide-y">
+        <Card>
+          <CardContent className="p-0 divide-y">
             {editable.map((p) => {
               const d = draft[p.stageId] ?? toDraft(p);
               return (
@@ -380,23 +290,33 @@ function SlaKindEditor({
                 </p>
               </div>
             )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
-      <div className="flex items-center gap-2">
-        <Button
-          variant="outline"
-          disabled={saving || !rows.some((p) => p.source === "custom")}
-          onClick={() => restoreDefault()}
-        >
-          <RotateCcw className="mr-1.5 h-4 w-4" />
-          Restaurar tudo pro padrão
-        </Button>
-        <p className="text-[11px] text-muted-foreground">
-          As alterações valem sozinhas e recalculam os prazos dos negócios
-          ativos em segundo plano.
-        </p>
-      </div>
+      {rows !== null && rows.length > 0 && (
+        <div className="flex items-center gap-2">
+          <Button onClick={save} disabled={saving || !dirty || invalid}>
+            {saving ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="mr-1.5 h-4 w-4" />
+            )}
+            Salvar
+          </Button>
+          <Button
+            variant="outline"
+            disabled={saving || !rows.some((p) => p.source === "custom")}
+            onClick={() => restoreDefault()}
+          >
+            <RotateCcw className="mr-1.5 h-4 w-4" />
+            Restaurar tudo pro padrão
+          </Button>
+          <p className="text-[11px] text-muted-foreground">
+            Salvar recalcula os prazos dos negócios ativos em segundo plano.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
