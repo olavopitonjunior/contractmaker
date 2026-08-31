@@ -384,6 +384,93 @@ describe("useSettingsAutoSave", () => {
     expect(bodyOf(spy, 1).summaryRecipientEmail).toBe("c@d.com");
   });
 
+  it("desmontar no meio do debounce GRAVA, não descarta", async () => {
+    // Regressão de produção (fase 1): o cleanup só fazia clearTimeout, então
+    // digitar um valor no Padrão contratual e trocar a aba Vendas↔Locação
+    // dentro da janela de debounce perdia a edição em silêncio — e sem o botão
+    // "Salvar", nada dava ao usuário a chance de perceber. Trocar de aba é o
+    // caminho comum, não o exótico: `ContractDefaultsCard` renderiza
+    // `esteira === "venda" ? <VendaDefaults/> : <LocacaoDefaults/>`, ou seja,
+    // desmonta o formulário inteiro.
+    const spy = mockFetch(() => ({ ok: true }));
+    const { rerender, unmount } = renderHook(
+      ({ v }) =>
+        useSettingsAutoSave(v, { endpoint: ENDPOINT, debounceMs: 5_000 }),
+      { initialProps: { v: { prazo: 15 } } },
+    );
+
+    rerender({ v: { prazo: 20 } });
+    // Desmonta ANTES do debounce vencer.
+    unmount();
+
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    expect(bodyOf(spy).prazo).toBe(20);
+  });
+
+  it("desmontar sem nada pendente não dispara PATCH", async () => {
+    const spy = mockFetch(() => ({ ok: true }));
+    const { unmount } = renderHook(() =>
+      useSettingsAutoSave(
+        { prazo: 15 },
+        { endpoint: ENDPOINT, debounceMs: 10 },
+      ),
+    );
+
+    unmount();
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("desmontar com estado inválido não grava lixo", async () => {
+    const spy = mockFetch(() => ({ ok: true }));
+    const isValid = (f: { email: string }) =>
+      f.email === "" || f.email.includes("@");
+    const { rerender, unmount } = renderHook(
+      ({ v }) =>
+        useSettingsAutoSave(v, {
+          endpoint: ENDPOINT,
+          isValid,
+          debounceMs: 5_000,
+        }),
+      { initialProps: { v: { email: "" } } },
+    );
+
+    rerender({ v: { email: "invalido" } });
+    unmount();
+
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("enabled:false zera o pendente — unmount não grava depois", async () => {
+    // Sem zerar `pendingRef` nos caminhos que não agendam, uma seção que
+    // perdeu permissão (enabled → false) ainda dispararia PATCH ao desmontar,
+    // porque `persist` não checa `enabled`.
+    const spy = mockFetch(() => ({ ok: true }));
+    const { rerender, unmount } = renderHook(
+      ({ v, on }) =>
+        useSettingsAutoSave(v, {
+          endpoint: ENDPOINT,
+          enabled: on,
+          debounceMs: 5_000,
+        }),
+      { initialProps: { v: { prazo: 15 }, on: true } },
+    );
+
+    rerender({ v: { prazo: 20 }, on: true });
+    rerender({ v: { prazo: 20 }, on: false });
+    unmount();
+
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it("enabled:false não agenda nada", async () => {
     const spy = mockFetch(() => ({ ok: true }));
     const { rerender } = renderHook(
