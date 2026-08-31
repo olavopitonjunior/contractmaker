@@ -4,7 +4,7 @@ import { requireAuth } from "@/lib/auth/context";
 import { audit } from "@/lib/security/audit";
 import { sendEmail } from "@/lib/email/client";
 import { InvitationApprovedEmail } from "@/lib/email/templates/invitation-approved";
-import { canApproveInvitations, canGrantRole } from "@/lib/auth/invitations";
+import { canApproveInvitationForRole } from "@/lib/auth/invitations";
 import { createPasswordResetToken } from "@/lib/auth/password-reset";
 
 /**
@@ -17,7 +17,14 @@ import { createPasswordResetToken } from "@/lib/auth/password-reset";
  *
  * Gate: quem tem a permissão `org.members.approve` na org — presets `owner` e
  * `admin` a carregam — ou um email da allowlist INVITE_APPROVER_EMAILS
- * (default olavo.piton@gmail.com). Ver `canApproveInvitations`.
+ * (default olavo.piton@gmail.com), MAIS o teto de papel. Ver
+ * `canApproveInvitationForRole`.
+ *
+ * As duas checagens são uma chamada só, depois de carregar o convite: o teto
+ * precisa de `invitation.role`, e separá-las custava dois lookups idênticos de
+ * permissões efetivas por aprovação. O preço é que quem não pode aprovar
+ * distingue convite inexistente (404) de existente (403) dentro da PRÓPRIA org
+ * — informação de valor desprezível para quem já é membro autenticado dela.
  */
 export async function POST(
   req: NextRequest,
@@ -27,19 +34,6 @@ export async function POST(
   if (!authResult.ok) return authResult.response;
   const { ctx } = authResult;
   const { id } = await params;
-
-  const allowed = await canApproveInvitations({
-    userId: ctx.userId,
-    orgId: ctx.orgId,
-    email: ctx.userEmail,
-    impersonatedByEmail: ctx.impersonatedByEmail,
-  });
-  if (!allowed) {
-    return NextResponse.json(
-      { error: "Você não tem permissão para aprovar acessos" },
-      { status: 403 }
-    );
-  }
 
   const invitation = await prisma.orgInvitation.findFirst({
     where: { id, orgId: ctx.orgId },
@@ -53,31 +47,39 @@ export async function POST(
       { status: 409 }
     );
   }
-  // Teto de papel, DEPOIS de conhecer o convite: aprovar concede o papel, e sem
-  // isto quem tem invite+approve concederia `admin` a si mesmo. Ver
-  // `canGrantRole`. Fica aqui e não no gate porque depende de `invitation.role`.
-  const withinCeiling = await canGrantRole({
-    userId: ctx.userId,
-    orgId: ctx.orgId,
-    email: ctx.userEmail,
-    impersonatedByEmail: ctx.impersonatedByEmail,
-    targetRole: invitation.role,
-  });
-  if (!withinCeiling) {
-    return NextResponse.json(
-      {
-        error: `Você não pode conceder o papel "${invitation.role}" — ele tem permissões que você não possui`,
-      },
-      { status: 403 }
-    );
-  }
-
   if (invitation.expiresAt.getTime() < Date.now()) {
     await prisma.orgInvitation.update({
       where: { id },
       data: { status: "expired" },
     });
     return NextResponse.json({ error: "Convite expirado" }, { status: 410 });
+  }
+
+  // Teto de papel, DEPOIS da expiração de propósito: aprovar concede o papel, e
+  // sem isto quem tem invite+approve concederia `admin` a si mesmo. Mas pôr o
+  // teto ANTES prenderia convite vencido acima do teto em `pending` para
+  // sempre — 403 em vez de 410, `status` nunca vira `expired`, e daí
+  // `findPendingInvitation` passa a devolver 409 em todo reconvite daquele
+  // e-mail, inclusive com papel menor. Depende de `invitation.role`, por isso
+  // não cabe no gate lá em cima.
+  const ceiling = await canApproveInvitationForRole({
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    email: ctx.userEmail,
+    impersonatedByUserId: ctx.impersonatedByUserId,
+    impersonatedByEmail: ctx.impersonatedByEmail,
+    targetRole: invitation.role,
+  });
+  if (!ceiling.allowed) {
+    return NextResponse.json(
+      {
+        error:
+          ceiling.reason === "role_ceiling"
+            ? `Você não pode conceder o papel "${invitation.role}" — ele tem permissões que você não possui`
+            : "Você não tem permissão para aprovar acessos",
+      },
+      { status: 403 }
+    );
   }
 
   // Cria User + OrgMembership atomicamente. User existente (caso raro:

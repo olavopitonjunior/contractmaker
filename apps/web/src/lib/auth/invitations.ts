@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db/prisma";
 import { can, getEffectivePermissions } from "@/lib/security/rbac/check";
 import {
+  MANAGER_CONFIGURABLE_PERMISSIONS,
   PERMISSION,
   type PermissionKey,
   type PermissionMap,
@@ -66,16 +67,36 @@ export function isApprover(email: string | null | undefined): boolean {
  * a allowlist recupera é o tenant cujo owner PERDEU a permissão — exatamente a
  * situação para a qual a porta de emergência existe.
  */
-export async function canApproveInvitations(params: {
+export interface InvitationDecider {
   userId: string;
   orgId: string;
   email?: string | null;
+  /** `ctx.impersonatedByUserId` — presença dele é o que marca impersonação. */
+  impersonatedByUserId?: string | null;
   /** E-mail do admin real sob impersonation (`ctx.impersonatedByEmail`). */
   impersonatedByEmail?: string | null;
-}): Promise<boolean> {
-  // O ator humano é o impersonador quando há um; só ele faz sentido contra uma
-  // allowlist de operador de plataforma.
-  if (isApprover(params.impersonatedByEmail ?? params.email)) return true;
+}
+
+/**
+ * E-mail do humano que de fato agiu.
+ *
+ * Decide pelo ESTADO de impersonação, não por "o e-mail do impersonador
+ * resolveu". Com `??`, uma sessão impersonada cujo `impersonatedByEmail` viesse
+ * vazio cairia silenciosamente no e-mail do DONO do tenant — que é exatamente o
+ * bug que este PR conserta, reintroduzido pela porta dos fundos. Sob
+ * impersonação sem e-mail do ator real, o certo é não casar com ninguém.
+ */
+function actingEmail(params: InvitationDecider): string | null | undefined {
+  return params.impersonatedByUserId
+    ? params.impersonatedByEmail
+    : params.email;
+}
+
+export async function canApproveInvitations(
+  params: InvitationDecider
+): Promise<boolean> {
+  // Só o ator humano faz sentido contra uma allowlist de operador de plataforma.
+  if (isApprover(actingEmail(params))) return true;
   const effective = await getEffectivePermissions(params.userId, params.orgId);
   return can(effective, PERMISSION.ORG_MEMBERS_APPROVE);
 }
@@ -97,27 +118,87 @@ export async function canApproveInvitations(params: {
  * reprova. Quem está na allowlist de env é operador de plataforma e não tem
  * teto — a allowlist já é a fronteira de confiança dele.
  *
- * Resolve o alvo pelo preset base (sem overrides de `gerente`): um preset que
- * ganhe permissão por OrgManagerSettings ficaria subestimado aqui, o que erra
- * para o lado restritivo.
+ * **Alcance honesto:** isto fecha o caminho de CONVITE, não a org inteira.
+ * `POST /api/org/members` cria membership com papel arbitrário protegido só por
+ * `org.members.invite` mais `requireElevation`, que hoje é no-op deliberado —
+ * quem tem essa chave chega a `admin` por lá, em uma chamada, sem passar por
+ * aqui. É pré-existente e fora deste PR; segue como follow-up.
+ *
+ * Devolve o motivo separado porque "não pode decidir" e "não pode conceder ESTE
+ * papel" são coisas diferentes para quem lê a mensagem de erro.
  */
-export async function canGrantRole(params: {
-  userId: string;
-  orgId: string;
-  email?: string | null;
-  impersonatedByEmail?: string | null;
-  targetRole: string;
-}): Promise<boolean> {
-  if (isApprover(params.impersonatedByEmail ?? params.email)) return true;
+export async function canApproveInvitationForRole(
+  params: InvitationDecider & { targetRole: string }
+): Promise<{ allowed: true } | { allowed: false; reason: "forbidden" | "role_ceiling" }> {
+  if (isApprover(actingEmail(params))) return { allowed: true };
 
+  // Um lookup só: antes o gate e o teto resolviam as mesmas permissões em
+  // chamadas separadas, 2-3 idas ao banco por aprovação.
   const effective = await getEffectivePermissions(params.userId, params.orgId);
-  if (!effective) return false;
+  if (!can(effective, PERMISSION.ORG_MEMBERS_APPROVE)) {
+    return { allowed: false, reason: "forbidden" };
+  }
 
-  const target = resolvePermissions(params.targetRole as RolePreset, null);
-  return Object.entries(target).every(
+  const target = await resolveTargetPermissions(params.orgId, params.targetRole);
+  // `null` = papel cujas permissões não dá para conhecer aqui (`custom`, que
+  // depende de um customRoleId que este fluxo não carrega). Um mapa vazio
+  // passaria o `.every` VACUAMENTE e o teto liberaria conceder qualquer
+  // CustomRole da org — nega em vez de adivinhar.
+  if (target === null) return { allowed: false, reason: "role_ceiling" };
+
+  const withinCeiling = Object.entries(target).every(
     ([key, granted]) =>
-      granted !== true || effective.permissions[key as PermissionKey] === true
+      granted !== true || effective!.permissions[key as PermissionKey] === true
   );
+  return withinCeiling
+    ? { allowed: true }
+    : { allowed: false, reason: "role_ceiling" };
+}
+
+/**
+ * Permissões que o papel alvo REALMENTE terá, incluindo os overrides de org.
+ *
+ * Aplicar os overrides importa e o sentido do erro é contraintuitivo:
+ * subestimar o alvo torna o teste de subconjunto mais FÁCIL de passar, ou seja
+ * erra para o lado PERMISSIVO. Numa org que liberou `CONTRACT_CREATE`/
+ * `PROPOSAL_SEND` para gerentes, resolver `gerente` pelo preset base deixaria
+ * passar um aprovador que não tem essas chaves — e o convidado entraria com
+ * permissão que quem o admitiu nunca teve.
+ */
+async function resolveTargetPermissions(
+  orgId: string,
+  targetRole: string
+): Promise<PermissionMap | null> {
+  // `custom` não é conhecível sem o customRoleId, que este fluxo não carrega.
+  // Devolver `{}` faria o teto passar vacuamente. Hoje é inalcançável pelo
+  // convite (`INVITATION_ROLE_VALUES` não tem `custom`), mas a função é
+  // exportada e o conserto natural da brecha de `POST /api/org/members` é
+  // chamá-la de lá — onde `custom` + customRoleId É aceito.
+  if (targetRole === "custom") return null;
+
+  // Mesma guarda de `getOrgApproverEmails`: `resolvePermissions` faz
+  // console.warn em role fora do catálogo, e `member` é o DEFAULT do
+  // createInvitationSchema — sem isto toda aprovação comum vira ruído de log.
+  // Role desconhecido não concede permissão nenhuma, então `{}` é correto.
+  if (!ROLE_PRESETS[targetRole as Exclude<RolePreset, "custom">]) {
+    return {};
+  }
+
+  let orgOverrides: PermissionMap | null = null;
+  if (targetRole === "gerente") {
+    const settings = await prisma.orgManagerSettings.findUnique({
+      where: { orgId },
+      select: { permissionsJson: true },
+    });
+    const raw = (settings?.permissionsJson ?? {}) as Record<string, unknown>;
+    const filtered: PermissionMap = {};
+    for (const key of MANAGER_CONFIGURABLE_PERMISSIONS) {
+      if (typeof raw[key] === "boolean") filtered[key] = raw[key] as boolean;
+    }
+    orgOverrides = filtered;
+  }
+
+  return resolvePermissions(targetRole as RolePreset, null, orgOverrides);
 }
 
 /**
@@ -141,6 +222,11 @@ export async function getOrgApproverEmails(orgId: string): Promise<string[]> {
       customRole: { select: { permissions: true } },
       user: { select: { email: true, deletedAt: true } },
     },
+    // Sem ordem explícita, "os N primeiros" do corte abaixo é a ordem de heap
+    // do Postgres, que muda entre chamadas: numa org acima do teto, QUEM é
+    // notificado variaria a cada convite, sem nada no log dizendo quem ficou
+    // de fora. Os membros mais antigos primeiro é arbitrário, mas estável.
+    orderBy: { invitedAt: "asc" },
   });
 
   const approvers = memberships

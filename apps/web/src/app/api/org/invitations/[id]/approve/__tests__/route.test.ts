@@ -17,7 +17,7 @@ vi.mock("@/lib/auth/context", () => ({
 vi.mock("@/lib/auth/invitations", () => ({
   isApprover: vi.fn(() => true),
   canApproveInvitations: vi.fn(async () => true),
-  canGrantRole: vi.fn(async () => true),
+  canApproveInvitationForRole: vi.fn(async () => ({ allowed: true })),
 }));
 vi.mock("@/lib/auth/password-reset", () => ({
   createPasswordResetToken: vi
@@ -38,7 +38,7 @@ vi.mock("@/lib/security/audit", () => ({
 
 import { POST } from "../route";
 import { requireAuth } from "@/lib/auth/context";
-import { canApproveInvitations, canGrantRole } from "@/lib/auth/invitations";
+import { canApproveInvitationForRole } from "@/lib/auth/invitations";
 import { createPasswordResetToken } from "@/lib/auth/password-reset";
 import { sendEmail } from "@/lib/email/client";
 import { InvitationApprovedEmail } from "@/lib/email/templates/invitation-approved";
@@ -48,8 +48,7 @@ const requireAuthMock = requireAuth as unknown as MockFn;
 const createTokenMock = createPasswordResetToken as unknown as MockFn;
 const sendEmailMock = sendEmail as unknown as MockFn;
 const emailTemplateMock = InvitationApprovedEmail as unknown as MockFn;
-const canApproveMock = canApproveInvitations as unknown as MockFn;
-const canGrantRoleMock = canGrantRole as unknown as MockFn;
+const canApproveMock = canApproveInvitationForRole as unknown as MockFn;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const p = prisma as any;
 
@@ -104,7 +103,7 @@ beforeEach(() => {
 });
 
 describe("POST /api/org/invitations/[id]/approve — quem pode decidir", () => {
-  it("pergunta pela org+usuário da sessão, não só pelo e-mail", async () => {
+  it("pergunta pela org+usuário da sessão e pelo papel DO CONVITE", async () => {
     p.user.findUnique = vi.fn().mockResolvedValue(null);
 
     await POST(req(), { params });
@@ -113,14 +112,17 @@ describe("POST /api/org/invitations/[id]/approve — quem pode decidir", () => {
       userId: "approver-1",
       orgId: "org-1",
       email: "olavo.piton@gmail.com",
+      impersonatedByUserId: undefined,
       impersonatedByEmail: undefined,
+      // Aprovar CONCEDE o papel: o teto é sobre o alvo, não sobre o ator.
+      targetRole: "member",
     });
   });
 
   // A allowlist de env é gate de PLATAFORMA. Sob impersonation `userEmail` é o
   // do DONO do tenant, então sem repassar o ator real ela nunca casa — e a
   // porta de emergência fica soldada justamente quando é necessária.
-  it("repassa o e-mail do admin real sob impersonation", async () => {
+  it("repassa o ator real sob impersonation", async () => {
     requireAuthMock.mockResolvedValue({
       ok: true,
       ctx: {
@@ -141,47 +143,71 @@ describe("POST /api/org/invitations/[id]/approve — quem pode decidir", () => {
     expect(canApproveMock).toHaveBeenCalledWith(
       expect.objectContaining({
         email: "dono@remaxtrio.com",
+        impersonatedByUserId: "approver-1",
         impersonatedByEmail: "olavo.piton@gmail.com",
       })
     );
   });
 
-  // Passar no gate não basta: aprovar CONCEDE o papel, e quem tem
-  // invite+approve concederia `admin` a si mesmo sem o teto.
-  it("consulta o teto com o papel DO CONVITE, não com o do ator", async () => {
-    p.user.findUnique = vi.fn().mockResolvedValue(null);
-
-    await POST(req(), { params });
-
-    expect(canGrantRoleMock).toHaveBeenCalledWith(
-      expect.objectContaining({ orgId: "org-1", targetRole: "member" })
-    );
-  });
-
-  it("fora do teto devolve 403 e não cria User nem membership", async () => {
-    canGrantRoleMock.mockResolvedValueOnce(false);
-    p.user.findUnique = vi.fn().mockResolvedValue(null);
-
-    const res = await POST(req(), { params });
-
-    expect(res.status).toBe(403);
-    expect(p.user.create).not.toHaveBeenCalled();
-    expect(p.orgMembership.create).not.toHaveBeenCalled();
-    expect(p.orgInvitation.update).not.toHaveBeenCalled();
-    expect(sendEmailMock).not.toHaveBeenCalled();
-  });
-
   it("sem permissão devolve 403 e não cria User nem membership", async () => {
-    canApproveMock.mockResolvedValueOnce(false);
+    canApproveMock.mockResolvedValueOnce({
+      allowed: false,
+      reason: "forbidden",
+    });
     p.user.findUnique = vi.fn().mockResolvedValue(null);
 
     const res = await POST(req(), { params });
 
     expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({
+      error: "Você não tem permissão para aprovar acessos",
+    });
     expect(p.user.create).not.toHaveBeenCalled();
     expect(p.orgMembership.create).not.toHaveBeenCalled();
     expect(p.orgInvitation.update).not.toHaveBeenCalled();
     expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  it("acima do teto devolve 403 nomeando o papel, não a permissão", async () => {
+    canApproveMock.mockResolvedValueOnce({
+      allowed: false,
+      reason: "role_ceiling",
+    });
+    p.user.findUnique = vi.fn().mockResolvedValue(null);
+
+    const res = await POST(req(), { params });
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({
+      error: expect.stringContaining("member"),
+    });
+    expect(p.user.create).not.toHaveBeenCalled();
+    expect(p.orgMembership.create).not.toHaveBeenCalled();
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  // O teto veio DEPOIS da expiração de propósito: antes, convite vencido acima
+  // do teto levava 403, nunca virava `expired` e envenenava todo reconvite
+  // daquele e-mail com 409 "já existe um convite pendente".
+  it("convite expirado devolve 410 e marca expired mesmo acima do teto", async () => {
+    p.orgInvitation.findFirst = vi.fn().mockResolvedValue({
+      id: INVITE_ID,
+      orgId: "org-1",
+      email: "convidado@teste.com",
+      name: "Convidado",
+      role: "admin",
+      status: "pending",
+      invitedById: "approver-1",
+      expiresAt: new Date(Date.now() - 1000),
+    });
+    const res = await POST(req(), { params });
+
+    expect(res.status).toBe(410);
+    expect(p.orgInvitation.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: "expired" } })
+    );
+    // Nem chega a consultar o teto: a expiração resolve antes.
+    expect(canApproveMock).not.toHaveBeenCalled();
   });
 });
 

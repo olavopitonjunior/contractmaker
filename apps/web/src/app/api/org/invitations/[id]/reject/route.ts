@@ -23,10 +23,13 @@ export async function POST(
   const { ctx } = authResult;
   const { id } = await params;
 
+  // Sem teto de papel aqui, de propósito: reprovar não CONCEDE nada, então não
+  // há papel a comparar. O teto vive só no approve.
   const allowed = await canApproveInvitations({
     userId: ctx.userId,
     orgId: ctx.orgId,
     email: ctx.userEmail,
+    impersonatedByUserId: ctx.impersonatedByUserId,
     impersonatedByEmail: ctx.impersonatedByEmail,
   });
   if (!allowed) {
