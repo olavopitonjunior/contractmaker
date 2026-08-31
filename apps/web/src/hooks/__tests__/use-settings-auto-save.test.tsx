@@ -446,6 +446,51 @@ describe("useSettingsAutoSave", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
+  it("alwaysInclude entra em todo PATCH, mesmo sem ter mudado", async () => {
+    // Regressão: `kind` é constante na instância do editor de SLA (o pai
+    // remonta por `key={kind}`), então NUNCA fica sujo e o diff por chave nunca
+    // o incluiria — mas o schema da rota é `.strict()` e o exige. Sem isto,
+    // todo save de SLA voltava 400 "Body inválido".
+    const spy = mockFetch(() => ({ ok: true }));
+    const { rerender } = renderHook(
+      ({ v }) =>
+        useSettingsAutoSave(v, {
+          endpoint: ENDPOINT,
+          alwaysInclude: { kind: "venda" },
+          debounceMs: 10,
+        }),
+      { initialProps: { v: { policies: [] as unknown[] } } },
+    );
+
+    rerender({ v: { policies: [{ stageId: "s1", warnDays: 5 }] } });
+    await act(async () => {
+      vi.advanceTimersByTime(100);
+    });
+
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    const sent = bodyOf(spy);
+    expect(sent.kind).toBe("venda");
+    expect(sent.policies).toEqual([{ stageId: "s1", warnDays: 5 }]);
+  });
+
+  it("alwaysInclude sozinho NÃO dispara save", async () => {
+    const spy = mockFetch(() => ({ ok: true }));
+    renderHook(() =>
+      useSettingsAutoSave(
+        { policies: [] as unknown[] },
+        {
+          endpoint: ENDPOINT,
+          alwaysInclude: { kind: "venda" },
+          debounceMs: 10,
+        },
+      ),
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it("enabled:false zera o pendente — unmount não grava depois", async () => {
     // Sem zerar `pendingRef` nos caminhos que não agendam, uma seção que
     // perdeu permissão (enabled → false) ainda dispararia PATCH ao desmontar,

@@ -25,6 +25,18 @@ export interface UseSettingsAutoSaveOptions<T extends SettingsFields> {
    */
   isValid?: (fields: T) => boolean;
   debounceMs?: number;
+  /**
+   * Chaves que entram em TODO PATCH, mesmo sem terem mudado.
+   *
+   * Existe para o campo que é constante na instância mas **obrigatório** no
+   * schema da rota — o caso do `kind` em `/api/org/sla-policies`, que é
+   * `.strict()` e exige `kind` junto das políticas. Sem isto, o diff por chave
+   * suja nunca o incluiria (ele nasce igual à baseline e nunca muda) e todo
+   * save voltaria 400 por corpo inválido.
+   *
+   * Não conta para o dirty: sozinho, não dispara nada.
+   */
+  alwaysInclude?: Record<string, unknown>;
   /** Desliga o agendamento (seção somente-leitura / sem permissão). */
   enabled?: boolean;
   /**
@@ -77,6 +89,7 @@ export function useSettingsAutoSave<T extends SettingsFields>(
     debounceMs = 800,
     enabled = true,
     onSaved,
+    alwaysInclude,
   } = options;
 
   const [status, setStatus] = useState<SettingsSaveStatus>("idle");
@@ -106,6 +119,8 @@ export function useSettingsAutoSave<T extends SettingsFields>(
   validRef.current = isValid;
   const onSavedRef = useRef(onSaved);
   onSavedRef.current = onSaved;
+  const alwaysIncludeRef = useRef(alwaysInclude);
+  alwaysIncludeRef.current = alwaysInclude;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -160,7 +175,10 @@ export function useSettingsAutoSave<T extends SettingsFields>(
       return false;
     }
 
-    const payload = Object.fromEntries(dirty.map((k) => [k, current[k]]));
+    const payload = {
+      ...(alwaysIncludeRef.current ?? {}),
+      ...Object.fromEntries(dirty.map((k) => [k, current[k]])),
+    };
 
     inFlightRef.current = true;
     // O save de unmount roda com o componente já fora da árvore: o fetch vale,
