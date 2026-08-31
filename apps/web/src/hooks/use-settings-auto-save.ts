@@ -115,6 +115,8 @@ export function useSettingsAutoSave<T extends SettingsFields>(
 
   const [status, setStatus] = useState<SettingsSaveStatus>("idle");
   const [error, setError] = useState<string | null>(null);
+  /** Sobe a cada `resync` para o memo do dirty reavaliar a baseline nova. */
+  const [baselineVersao, setBaselineVersao] = useState(0);
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
@@ -170,7 +172,13 @@ export function useSettingsAutoSave<T extends SettingsFields>(
       Object.keys(fields).filter(
         (k) => serialize(fields[k]) !== baselineRef.current[k],
       ),
-    [fields],
+    // `baselineVersao` entra aqui porque a baseline vive numa ref: quando o
+    // `resync` a reescreve, nada mais avisaria este memo, e a pill continuaria
+    // dizendo "Alterações não salvas" sobre um estado que já é o do servidor.
+    // O lint a chama de desnecessária porque não a vê sendo lida no corpo — ela
+    // é exatamente isso: um sinal de invalidação, não um valor.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fields, baselineVersao],
   );
   // Inclui o VALOR, não só o nome da chave. Com a lista de chaves apenas, um
   // campo que continua sujo mas mudou de conteúdo não re-agendava o save — era
@@ -318,5 +326,28 @@ export function useSettingsAutoSave<T extends SettingsFields>(
     return persist();
   }, [persist]);
 
-  return { status, error, isDirty: dirtyKeys.length > 0, flush };
+  /**
+   * Declara que os valores atuais JÁ são o que o servidor tem, sem mandar nada.
+   *
+   * Serve para a mutação que acontece POR FORA do auto-save e muda o mesmo
+   * estado — no SLA é o botão "Restaurar padrão", que faz um DELETE direto e
+   * reseta o draft para o default. Sem isto o hook enxerga aquele reset como
+   * uma edição do usuário e, 800ms depois, manda um PATCH que **recria a linha
+   * que o DELETE acabou de apagar** — desfazendo o restore em silêncio e
+   * deixando a etapa presa em "personalizado" com os valores do default.
+   *
+   * Cancela também o que estiver agendado: o que veio do servidor vence.
+   */
+  const resync = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    pendingRef.current = false;
+    const current = fieldsRef.current;
+    for (const k of Object.keys(current)) {
+      baselineRef.current[k] = serialize(current[k]);
+    }
+    setBaselineVersao((v) => v + 1);
+    setStatus((s) => (s === "saving" ? s : "idle"));
+  }, []);
+
+  return { status, error, isDirty: dirtyKeys.length > 0, flush, resync };
 }

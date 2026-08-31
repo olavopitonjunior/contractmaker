@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, RotateCcw } from "lucide-react";
 import { SaveStatusPill } from "@/components/settings/SaveStatusPill";
@@ -136,6 +136,8 @@ function SlaKindEditor({
     ),
   );
   const [saving, setSaving] = useState(false);
+  /** Ver `restoreDefault`: o DELETE muda o estado por fora do auto-save. */
+  const resyncPendenteRef = useRef(false);
 
   const editable = rows.filter((p) => !p.terminal);
   const terminals = rows.filter((p) => p.terminal);
@@ -221,6 +223,14 @@ function SlaKindEditor({
 
   const invalido = sujas.some((p) => !linhaValida(draft[p.stageId]!));
 
+  // Roda depois de TODO render: só age quando `restoreDefault` marcou, e aí já
+  // é o render que aplicou o draft novo — que é o estado que o servidor tem.
+  useEffect(() => {
+    if (!resyncPendenteRef.current) return;
+    resyncPendenteRef.current = false;
+    autoSave.resync();
+  });
+
   async function restoreDefault(stageId?: string) {
     setSaving(true);
     try {
@@ -242,6 +252,13 @@ function SlaKindEditor({
           data.policies.filter((p) => !p.terminal).map((p) => [p.stageId, toDraft(p)])
         )
       );
+      // O DELETE acontece POR FORA do auto-save e reseta o draft. Sem avisar o
+      // hook, ele leria esse reset como edição do usuário e, 800ms depois,
+      // mandaria um PATCH recriando a linha que o DELETE apagou — desfazendo o
+      // restore e deixando a etapa presa em "personalizado" com os valores do
+      // próprio default. Marcamos aqui e ressincronizamos no efeito abaixo,
+      // depois do render que aplica o draft novo.
+      resyncPendenteRef.current = true;
       toast.success(
         stageId ? "Etapa restaurada pro padrão (5/10)" : "Todas as etapas no padrão (5/10)"
       );

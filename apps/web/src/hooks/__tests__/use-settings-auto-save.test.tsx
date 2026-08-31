@@ -555,6 +555,40 @@ describe("useSettingsAutoSave", () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
+  it("resync: mutação feita POR FORA não vira PATCH", async () => {
+    // O botão "Restaurar padrão" do SLA faz um DELETE direto e reseta o draft
+    // para o default. Sem avisar o hook, ele lê esse reset como edição do
+    // usuário e manda um PATCH que RECRIA a linha que o DELETE apagou — o
+    // restore é desfeito em silêncio e a etapa fica presa em "personalizado"
+    // com os valores do próprio default.
+    const spy = mockFetch(() => ({ ok: true }));
+    const { result, rerender } = renderHook(
+      ({ v }) => useSettingsAutoSave(v, { endpoint: ENDPOINT, debounceMs: 20 }),
+      { initialProps: { v: { policy_s1: { warnDays: "15" } } } },
+    );
+
+    // O DELETE já aconteceu lá fora; a tela reseta o draft para o default.
+    rerender({ v: { policy_s1: { warnDays: "5" } } });
+    // E avisa o hook de que isso JÁ é o estado do servidor.
+    act(() => {
+      result.current.resync();
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+    });
+    expect(spy).not.toHaveBeenCalled();
+    expect(result.current.isDirty).toBe(false);
+
+    // E a tela continua viva: uma edição de verdade depois disso salva normal.
+    rerender({ v: { policy_s1: { warnDays: "8" } } });
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    expect(bodyOf(spy)).toEqual({ policy_s1: { warnDays: "8" } });
+  });
+
   it("enabled:false zera o pendente — unmount não grava depois", async () => {
     // Sem zerar `pendingRef` nos caminhos que não agendam, uma seção que
     // perdeu permissão (enabled → false) ainda dispararia PATCH ao desmontar,
