@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { toast } from "sonner";
-import { Loader2, RotateCcw, Save } from "lucide-react";
+import { RotateCcw } from "lucide-react";
+import { SaveStatusPill } from "@/components/settings/SaveStatusPill";
+import { useSettingsAutoSave } from "@/hooks/use-settings-auto-save";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -80,6 +81,19 @@ export function ContractDefaultsCard({
   );
 }
 
+/** Faixa aceita pelo schema para todo prazo em dias (`min(1).max(365)`). */
+function diaValido(n: number): boolean {
+  return Number.isInteger(n) && n >= 1 && n <= 365;
+}
+
+function diasNaFaixa(v: ContractSettings): boolean {
+  return (
+    diaValido(v.desistencia.prazo_dias) &&
+    diaValido(v.config.prazo_atraso_rescisao) &&
+    diaValido(v.config.prazo_multa_rescisoria)
+  );
+}
+
 function VendaDefaults({
   initial,
   embedded = false,
@@ -88,43 +102,36 @@ function VendaDefaults({
   embedded?: boolean;
 }) {
   const [values, setValues] = useState<ContractSettings>(initial);
-  const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
+
+  // O branch inteiro é a unidade de salvamento, não o campo: `desistencia.
+  // prazo_dias` só faz sentido junto com `desistencia.permite`, e a rota mescla
+  // por branch — mandar `venda` não toca no padrão de locação.
+  const autoSave = useSettingsAutoSave(
+    { contractDefaults: { venda: values } },
+    {
+      endpoint: "/api/org/form-settings",
+      // Espelha os `min(1).max(365)` de `contractSettingsSchema`: enquanto um
+      // prazo estiver fora de faixa, a seção fica pendente em vez de mandar um
+      // corpo que a rota recusaria.
+      isValid: () => diasNaFaixa(values),
+    },
+  );
 
   function patch(next: Partial<ContractSettings>) {
     setValues((v) => ({ ...v, ...next }));
-    setDirty(true);
   }
   function patchConfig(next: Partial<ContractSettings["config"]>) {
     setValues((v) => ({ ...v, config: { ...v.config, ...next } }));
-    setDirty(true);
   }
   const num = (raw: string, fallback: number) => {
+    // `Number("")` é 0, e 0 é finito — sem este guard, apagar o campo para
+    // digitar outro valor gravava 0, que viola o `min(1)` do schema. Com
+    // auto-save isso vira PATCH 400 no meio da digitação; campo vazio é
+    // "ainda não digitou", não zero.
+    if (raw.trim() === "") return fallback;
     const n = Number(raw);
     return Number.isFinite(n) ? n : fallback;
   };
-
-  async function save() {
-    setSaving(true);
-    try {
-      const res = await fetch("/api/org/form-settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contractDefaults: { venda: values } }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        toast.error(body?.error ?? "Não foi possível salvar o padrão.");
-        return;
-      }
-      toast.success("Padrão salvo — vale para os próximos contratos.");
-      setDirty(false);
-    } catch {
-      toast.error("Erro de rede ao salvar.");
-    } finally {
-      setSaving(false);
-    }
-  }
 
   const body = (
     <div className="space-y-4">
@@ -290,32 +297,17 @@ function VendaDefaults({
           </div>
         </div>
 
-      <div className="flex items-center gap-2 pt-2">
-        <Button onClick={save} disabled={saving || !dirty}>
-          {saving ? (
-            <>
-              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-              Salvando…
-            </>
-          ) : (
-            <>
-              <Save className="mr-1.5 h-4 w-4" />
-              Salvar padrão
-            </>
-          )}
-        </Button>
+      <div className="flex items-center gap-3 pt-2">
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => {
-            setValues(DEFAULT_CONTRACT_SETTINGS);
-            setDirty(true);
-          }}
-          disabled={saving}
+          onClick={() => setValues(DEFAULT_CONTRACT_SETTINGS)}
+          disabled={autoSave.status === "saving"}
         >
           <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
           Restaurar sugerido
         </Button>
+        <SaveStatusPill status={autoSave.status} isDirty={autoSave.isDirty} />
       </div>
     </div>
   );
@@ -341,6 +333,26 @@ function VendaDefaults({
  * Padrão de locação. Vocabulário próprio (ver `locacaoSettingsSchema`): a
  * comarca é texto livre e a multa rescisória é contada em MESES de aluguel.
  */
+function naFaixa(n: number, min: number, max: number): boolean {
+  return Number.isFinite(n) && n >= min && n <= max;
+}
+
+function locacaoNaFaixa(
+  v: LocacaoSettings,
+  c: LocacaoComissaoDefaults,
+): boolean {
+  return (
+    naFaixa(v.config.multa_atraso_percent, 0, 100) &&
+    naFaixa(v.config.juros_mensais_atraso, 0, 100) &&
+    naFaixa(v.config.multa_rescisoria_meses, 0, 120) &&
+    naFaixa(v.config.honorarios_advocaticios_percent, 0, 100) &&
+    naFaixa(c.taxa_locacao_percent, 0, 100) &&
+    c.taxa_locacao_valor >= 0 &&
+    v.foro.length <= 160 &&
+    v.assinatura.cidade.length <= 120
+  );
+}
+
 function LocacaoDefaults({
   initial,
   initialComissao,
@@ -351,52 +363,41 @@ function LocacaoDefaults({
   const [values, setValues] = useState<LocacaoSettings>(initial);
   const [comissao, setComissao] =
     useState<LocacaoComissaoDefaults>(initialComissao);
-  const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
+
+  // Só os branches de locação: o PATCH mescla por branch, então o padrão de
+  // venda não é tocado.
+  const autoSave = useSettingsAutoSave(
+    {
+      contractDefaults: { locacao: values, locacao_comissao: comissao },
+    },
+    {
+      endpoint: "/api/org/form-settings",
+      // Espelha as faixas de `locacaoSettingsSchema` e
+      // `locacaoComissaoDefaultsSchema`: percentual digitado grande demais
+      // (999 a caminho de 99) não pode virar PATCH recusado.
+      isValid: () => locacaoNaFaixa(values, comissao),
+    },
+  );
 
   function patchComissao(next: Partial<LocacaoComissaoDefaults>) {
     setComissao((c) => ({ ...c, ...next }));
-    setDirty(true);
   }
 
   function patchConfig(next: Partial<LocacaoSettings["config"]>) {
     setValues((v) => ({ ...v, config: { ...v.config, ...next } }));
-    setDirty(true);
   }
   function patchAssinatura(next: Partial<LocacaoSettings["assinatura"]>) {
     setValues((v) => ({ ...v, assinatura: { ...v.assinatura, ...next } }));
-    setDirty(true);
   }
   const num = (raw: string, fallback: number) => {
+    // `Number("")` é 0, e 0 é finito — sem este guard, apagar o campo para
+    // digitar outro valor gravava 0, que viola o `min(1)` do schema. Com
+    // auto-save isso vira PATCH 400 no meio da digitação; campo vazio é
+    // "ainda não digitou", não zero.
+    if (raw.trim() === "") return fallback;
     const n = Number(raw);
     return Number.isFinite(n) ? n : fallback;
   };
-
-  async function save() {
-    setSaving(true);
-    try {
-      const res = await fetch("/api/org/form-settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        // Só o branch de locação: o PATCH mescla por branch, então o padrão de
-        // venda não é tocado.
-        body: JSON.stringify({
-          contractDefaults: { locacao: values, locacao_comissao: comissao },
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        toast.error(body?.error ?? "Não foi possível salvar o padrão.");
-        return;
-      }
-      toast.success("Padrão salvo — vale para os próximos contratos.");
-      setDirty(false);
-    } catch {
-      toast.error("Erro de rede ao salvar.");
-    } finally {
-      setSaving(false);
-    }
-  }
 
   return (
     <div className="space-y-4">
@@ -406,10 +407,9 @@ function LocacaoDefaults({
           <Input
             value={values.foro}
             placeholder="Ex.: São Paulo/SP"
-            onChange={(e) => {
-              setValues((v) => ({ ...v, foro: e.target.value }));
-              setDirty(true);
-            }}
+            onChange={(e) =>
+              setValues((v) => ({ ...v, foro: e.target.value }))
+            }
           />
           <p className="text-xs text-muted-foreground">
             Em branco, o contrato usa a comarca de localização do imóvel.
@@ -577,33 +577,20 @@ function LocacaoDefaults({
         </div>
       </div>
 
-      <div className="flex items-center gap-2 pt-2">
-        <Button onClick={save} disabled={saving || !dirty}>
-          {saving ? (
-            <>
-              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-              Salvando…
-            </>
-          ) : (
-            <>
-              <Save className="mr-1.5 h-4 w-4" />
-              Salvar padrão
-            </>
-          )}
-        </Button>
+      <div className="flex items-center gap-3 pt-2">
         <Button
           variant="ghost"
           size="sm"
           onClick={() => {
             setValues(DEFAULT_LOCACAO_SETTINGS);
             setComissao(DEFAULT_LOCACAO_COMISSAO);
-            setDirty(true);
           }}
-          disabled={saving}
+          disabled={autoSave.status === "saving"}
         >
           <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
           Restaurar sugerido
         </Button>
+        <SaveStatusPill status={autoSave.status} isDirty={autoSave.isDirty} />
       </div>
     </div>
   );
