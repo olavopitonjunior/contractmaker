@@ -32,6 +32,7 @@ export async function POST(
     userId: ctx.userId,
     orgId: ctx.orgId,
     email: ctx.userEmail,
+    impersonatedByEmail: ctx.impersonatedByEmail,
   });
   if (!allowed) {
     return NextResponse.json(
@@ -98,7 +99,13 @@ export async function POST(
       where: { id },
       data: {
         status: "approved",
-        approvedById: ctx.userId,
+        // Quem DECIDIU, não quem o RBAC resolveu. Sob impersonation de tenant
+        // `ctx.userId` é o DONO do tenant (ele é quem resolve membership/RBAC),
+        // então gravá-lo aqui registraria que o cliente admitiu o próprio
+        // membro quando na verdade foi o operador da plataforma. O AuditLog
+        // carimba `impersonatedBy` no metadata, mas esta coluna não tem esse
+        // par — sem isto, o "aprovado por" mente e não há de onde recuperar.
+        approvedById: ctx.impersonatedByUserId ?? ctx.userId,
         approvedAt: new Date(),
       },
     });

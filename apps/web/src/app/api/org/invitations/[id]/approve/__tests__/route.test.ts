@@ -111,7 +111,37 @@ describe("POST /api/org/invitations/[id]/approve — quem pode decidir", () => {
       userId: "approver-1",
       orgId: "org-1",
       email: "olavo.piton@gmail.com",
+      impersonatedByEmail: undefined,
     });
+  });
+
+  // A allowlist de env é gate de PLATAFORMA. Sob impersonation `userEmail` é o
+  // do DONO do tenant, então sem repassar o ator real ela nunca casa — e a
+  // porta de emergência fica soldada justamente quando é necessária.
+  it("repassa o e-mail do admin real sob impersonation", async () => {
+    requireAuthMock.mockResolvedValue({
+      ok: true,
+      ctx: {
+        userId: "owner-do-tenant",
+        userEmail: "dono@remaxtrio.com",
+        orgId: "org-1",
+        orgName: "Imobiliária Teste",
+        ipAddress: "1.2.3.4",
+        userAgent: "vitest",
+        impersonatedByUserId: "approver-1",
+        impersonatedByEmail: "olavo.piton@gmail.com",
+      },
+    });
+    p.user.findUnique = vi.fn().mockResolvedValue(null);
+
+    await POST(req(), { params });
+
+    expect(canApproveMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: "dono@remaxtrio.com",
+        impersonatedByEmail: "olavo.piton@gmail.com",
+      })
+    );
   });
 
   it("sem permissão devolve 403 e não cria User nem membership", async () => {
@@ -200,5 +230,52 @@ describe("POST /api/org/invitations/[id]/approve — e-mail de primeiro acesso",
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({ emailSent: false });
+  });
+});
+
+describe("POST /api/org/invitations/[id]/approve — quem fica registrado como aprovador", () => {
+  it("sem impersonation: o aprovador é o próprio ator", async () => {
+    p.user.findUnique = vi.fn().mockResolvedValue(null);
+
+    await POST(req(), { params });
+
+    expect(p.orgInvitation.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "approved",
+          approvedById: "approver-1",
+        }),
+      })
+    );
+  });
+
+  it("sob impersonation: grava o ADMIN REAL, não o dono do tenant", async () => {
+    // Espelha o ctx que requireAuth monta sob "trocar de tenant": o ator
+    // efetivo é o DONO (é ele que resolve membership/RBAC) e o admin real
+    // sobra em impersonatedBy*.
+    requireAuthMock.mockResolvedValue({
+      ok: true,
+      ctx: {
+        userId: "owner-do-tenant",
+        userEmail: "dono@remaxtrio.com",
+        orgId: "org-1",
+        orgName: "Imobiliária Teste",
+        ipAddress: "1.2.3.4",
+        userAgent: "vitest",
+        impersonatedByUserId: "approver-1",
+        impersonatedByEmail: "olavo.piton@gmail.com",
+      },
+    });
+    p.user.findUnique = vi.fn().mockResolvedValue(null);
+
+    await POST(req(), { params });
+
+    // O bug: sem isto ficava registrado que o dono do tenant admitiu o
+    // próprio membro, quando quem admitiu foi o operador da plataforma.
+    expect(p.orgInvitation.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ approvedById: "approver-1" }),
+      })
+    );
   });
 });

@@ -158,6 +158,12 @@ describe("requireAuth — impersonation de tenant (super_admin trocou de tenant)
     expect(result.ctx.orgId).toBe("org-tenant");
     // Rastro do admin real preservado pro audit.
     expect(result.ctx.impersonatedByUserId).toBe("user-1");
+    // E o e-mail do admin real também: `userEmail` aqui é o do DONO, então
+    // gate de plataforma que compara e-mail (allowlist de env) precisa deste.
+    expect(result.ctx.userEmail).toBe("dono@remaxtrio.com");
+    expect(result.ctx.impersonatedByEmail).toBe("test@example.com");
+    // Sem query extra pra descobrir o e-mail do admin: só o lookup do dono.
+    expect(mockPrisma.user.findUnique).toHaveBeenCalledTimes(1);
     // Org vem da impersonation, não da 1ª membership do dono.
     expect(mockGetUserOrg).not.toHaveBeenCalled();
     // Heartbeat não carimba a membership do dono com acesso que não foi dele.
@@ -178,6 +184,23 @@ describe("requireAuth — impersonation de tenant (super_admin trocou de tenant)
     if (!result.ok) throw new Error("unreachable");
     expect(result.ctx.orgId).toBe("org-1");
     expect(result.ctx.impersonatedByUserId).toBeUndefined();
+    expect(result.ctx.impersonatedByEmail).toBeUndefined();
     expect(mockGetImpersonationFor).not.toHaveBeenCalled();
+  });
+
+  it("sessão SEM impersonation não carrega ator real (o próprio já é o ator)", async () => {
+    mockAuth.mockResolvedValueOnce(createMockSession() as never);
+    mockGetUserOrg.mockResolvedValueOnce({ id: "org-1", name: "Org" } as never);
+
+    const result = await requireAuth(
+      new Request("http://localhost/api/financeiro/charges")
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect(result.ctx.userEmail).toBe("test@example.com");
+    // Nunca preenchido fora de impersonation: quem lê este campo está
+    // perguntando "há alguém POR TRÁS deste ator?", e a resposta é não.
+    expect(result.ctx.impersonatedByEmail).toBeUndefined();
   });
 });

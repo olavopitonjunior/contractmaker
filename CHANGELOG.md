@@ -6,6 +6,11 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
 ## [Unreleased] - 2026-08-31 - O perfil de administrador passa a aprovar e reprovar usuários
 
+### Corrigido
+
+- **Sob impersonação de tenant, "aprovado por" registrava o dono do tenant, não o operador da plataforma.** `context.ts` faz o ator efetivo virar o dono (`ctx.userId = imp.ownerUserId`) de propósito — sem isso o super_admin entra na org sem membership e todo `requirePermission` nega. Mas `approvedById: ctx.userId` herdava esse ator e gravava que o cliente admitiu o próprio membro. Passa a gravar `ctx.impersonatedByUserId ?? ctx.userId`. O `AuditLog` já carimbava `impersonatedBy` no metadata; esta coluna é que não tinha par recuperável. **Sem backfill**: as linhas já gravadas seguem com o dono, e a auditoria do período anterior sai do `AuditLog`.
+- **A porta de emergência ficava soldada exatamente sob impersonação.** A allowlist `INVITE_APPROVER_EMAILS` é gate de PLATAFORMA, mas era comparada contra `ctx.userEmail`, que sob impersonação é o e-mail do DONO do tenant — nunca casava. `AuthContext` ganha `impersonatedByEmail` (aditivo, sem query nova: impersonação só existe no ramo `session`, onde `ident.email` já é o do admin real) e os três gates de convite passam a ler o ator real. No caso comum o ramo RBAC já cobria (o dono tem preset `owner`); o que isto recupera é o tenant cujo owner PERDEU a permissão — a situação para a qual a porta de emergência existe.
+
 ### Adicionado
 
 - **Permissão `org.members.approve`.** Os presets `owner` e `admin` a carregam por padrão (vêm de `fullAccess`); `finance`, `sales`, `viewer` e os presets de locação, que são allowlists explícitas, não. Aparece em "Organização e membros" no editor de CustomRole, então uma função personalizada também pode receber a decisão.
@@ -21,6 +26,8 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
 - Sem migration: `OrgInvitation` já tinha `status`/`approvedById`/`rejectedAt`/`rejectionReason`, e a permissão é derivada do preset em memória (não há linha de permissão no banco para presets).
 - O convite continua nascendo `pending` e nenhum `User` existe antes da aprovação — o fluxo não afrouxou, só deixou de depender de uma pessoa específica.
+- **Dívida deixada em aberto:** `lib/api/require-auth.ts` espelha a lógica de impersonação e NÃO ganhou `impersonatedByEmail`. As 4 rotas de convite usam `lib/auth/context`, então nada quebra hoje — mas o campo passa a existir em só metade da superfície de auth. Quem for ler `impersonatedByEmail` a partir do outro caminho vai encontrar `undefined` sem aviso.
+- **Isto é mudança de política, não bug fix.** Antes, convidar (`org.members.invite`, que o admin já tinha) e aprovar eram poderes separados — quatro olhos. Agora o admin faz os dois. O teto é lateral: `INVITATION_ROLE_VALUES` não inclui `owner`, então um admin admite no máximo outro admin, e não alcança `ORG_DELETE`/`ORG_TRANSFER_OWNERSHIP`/`API_KEY_ROTATE`/`ACCOUNT_*`. Não foi adicionada regra impedindo que quem criou o convite o aprove — o sistema também não a tem hoje, e ela travaria uma org de um admin só.
 
 ## [Unreleased] - 2026-08-28 - Seguradoras fora de vendas, dados bancários abertos e o picker que só mostrava 2 de 42
 

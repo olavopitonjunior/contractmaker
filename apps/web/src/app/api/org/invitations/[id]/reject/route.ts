@@ -27,6 +27,7 @@ export async function POST(
     userId: ctx.userId,
     orgId: ctx.orgId,
     email: ctx.userEmail,
+    impersonatedByEmail: ctx.impersonatedByEmail,
   });
   if (!allowed) {
     return NextResponse.json(

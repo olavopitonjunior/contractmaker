@@ -29,9 +29,10 @@ export async function GET(req: NextRequest) {
     permissions: effective.permissions,
     // Espelha `canApproveInvitations` do servidor — o mesmo OR (allowlist de
     // env OU `org.members.approve`) que os endpoints de approve/reject
-    // aplicam. Divergir aqui só esconde o botão de quem pode clicar.
+    // aplicam, inclusive lendo o ator real sob impersonation. Divergir aqui
+    // só esconde o botão de quem pode clicar.
     isInvitationApprover:
-      isApprover(ctx.userEmail) ||
+      isApprover(ctx.impersonatedByEmail ?? ctx.userEmail) ||
       can(effective, PERMISSION.ORG_MEMBERS_APPROVE),
   });
 }

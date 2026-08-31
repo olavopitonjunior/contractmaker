@@ -68,6 +68,14 @@ export interface AuthContext {
    * impersonation.
    */
   impersonatedByUserId?: string;
+  /**
+   * E-mail do admin REAL sob impersonation — par de `impersonatedByUserId`.
+   * `userEmail` nesse caso é o do dono do tenant, então gates de PLATAFORMA
+   * (que comparam e-mail contra allowlist de env, não contra membership) leem
+   * daqui. Sem query extra: impersonation só existe para `via === "session"`,
+   * e nesse ramo `ident.email` já é o do admin. `undefined` fora dela.
+   */
+  impersonatedByEmail?: string;
 }
 
 export type AuthResult =
@@ -345,8 +353,18 @@ export async function requireAuth(
   const imp =
     ident.via === "session" ? await getImpersonationFor(ident.userId) : null;
   let impersonatedByUserId: string | undefined;
+  let impersonatedByEmail: string | undefined;
   if (imp) {
     impersonatedByUserId = ident.userId;
+    // `ident` continua sendo a identidade do admin real — `imp` é derivado dela
+    // (getImpersonationFor(ident.userId)), e impersonation só existe no ramo
+    // session, onde `ident.email` está preenchido. Guardar aqui evita o lookup
+    // que `userEmail` faz logo abaixo, que resolve o DONO do tenant.
+    //
+    // O `ident.via === "session"` NÃO é redundante apesar de `imp` só existir
+    // nesse ramo: `ResolvedAuth` é união discriminada e o ramo `bearer` não tem
+    // `email`, então sem a checagem o tsc reprova. Não "simplificar".
+    impersonatedByEmail = ident.via === "session" ? (ident.email ?? undefined) : undefined;
     effectiveActor = { ...effectiveActor, effectiveUserId: imp.ownerUserId };
   }
 
@@ -430,6 +448,7 @@ export async function requireAuth(
       actor: effectiveActor,
       delegatedFromUserId,
       impersonatedByUserId,
+      impersonatedByEmail,
     },
   };
 }

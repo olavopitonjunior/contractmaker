@@ -151,6 +151,66 @@ describe("canApproveInvitations", () => {
       canApproveInvitations({ userId: "u-1", orgId: ORG, email: null })
     ).resolves.toBe(false);
   });
+
+  // Sob "trocar de tenant", userId/email são os do DONO do tenant. A allowlist
+  // é gate de PLATAFORMA, então comparar contra o e-mail do cliente nunca casa
+  // — a porta de emergência ficava soldada exatamente sob impersonação.
+  describe("sob impersonation", () => {
+    it("casa a allowlist pelo admin REAL, não pelo dono do tenant", async () => {
+      // Dono sem a permissão: é o caso que só a allowlist recupera.
+      membership("viewer");
+
+      await expect(
+        canApproveInvitations({
+          userId: "owner-do-tenant",
+          orgId: ORG,
+          email: "dono@remaxtrio.com",
+          impersonatedByEmail: ENV_APPROVER,
+        })
+      ).resolves.toBe(true);
+    });
+
+    it("recusa quando nem o admin real está na allowlist nem o ator tem permissão", async () => {
+      membership("viewer");
+
+      await expect(
+        canApproveInvitations({
+          userId: "owner-do-tenant",
+          orgId: ORG,
+          email: "dono@remaxtrio.com",
+          impersonatedByEmail: "outro-admin@exemplo.com",
+        })
+      ).resolves.toBe(false);
+    });
+
+    it("o e-mail do dono NÃO é consultado quando há impersonação", async () => {
+      membership("viewer");
+
+      // O dono está na allowlist, o impersonador não. Quem decide é o humano
+      // que agiu — o impersonador —, então isto recusa.
+      await expect(
+        canApproveInvitations({
+          userId: "owner-do-tenant",
+          orgId: ORG,
+          email: ENV_APPROVER,
+          impersonatedByEmail: "nao-aprovador@exemplo.com",
+        })
+      ).resolves.toBe(false);
+    });
+
+    it("cai no ramo RBAC quando o dono do tenant tem a permissão", async () => {
+      membership("owner");
+
+      await expect(
+        canApproveInvitations({
+          userId: "owner-do-tenant",
+          orgId: ORG,
+          email: "dono@remaxtrio.com",
+          impersonatedByEmail: "nao-aprovador@exemplo.com",
+        })
+      ).resolves.toBe(true);
+    });
+  });
 });
 
 describe("getOrgApproverEmails", () => {
