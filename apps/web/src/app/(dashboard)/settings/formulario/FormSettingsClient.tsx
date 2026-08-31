@@ -1,13 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { Loader2, Settings2, Lock, Mail } from "lucide-react";
+import { Settings2, Lock, Mail } from "lucide-react";
+import { SaveStatusPill } from "@/components/settings/SaveStatusPill";
+import { useSettingsAutoSave } from "@/hooks/use-settings-auto-save";
 import {
   VENDA_FIELD_CATALOG,
   LOCACAO_FIELD_CATALOG,
@@ -38,6 +39,9 @@ interface CustomPathItem {
   step: number;
   path: string;
 }
+
+const ENDPOINT = "/api/org/form-settings";
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 type StepCatalog = ReadonlyArray<FieldCatalogGroup>;
 
@@ -150,7 +154,47 @@ export function FormSettingsClient({ initial }: FormSettingsClientProps) {
   const [includeAttachments, setIncludeAttachments] = useState(
     initial.summaryIncludeAttachments ?? true,
   );
-  const [saving, setSaving] = useState(false);
+
+  // Três seções independentes de auto-save, uma por card. Independentes de
+  // propósito: o save único que existia aqui mandava TUDO no mesmo corpo, e um
+  // path customizado órfão (campo renomeado) fazia a rota reprovar o PATCH
+  // inteiro — os toggles de segurança falhavam junto, sob um toast genérico.
+  const campos = useSettingsAutoSave(
+    {
+      preset: vendaPreset,
+      customRequiredPaths: vendaPaths,
+      locacaoPreset,
+      locacaoCustomRequiredPaths: locacaoPaths,
+    },
+    { endpoint: ENDPOINT },
+  );
+
+  const seguranca = useSettingsAutoSave(
+    {
+      autoLockFormOnFinalize: autoLock,
+      requireCommissionerReceiving: requireReceiving,
+    },
+    { endpoint: ENDPOINT },
+  );
+
+  const trimmedEmail = summaryEmail.trim();
+  const emailValido = trimmedEmail === "" || EMAIL_RE.test(trimmedEmail);
+  const resumo = useSettingsAutoSave(
+    {
+      summaryRecipientEmail: trimmedEmail,
+      autoSendSummaryOnComplete: autoSend,
+      summaryIncludeAttachments: includeAttachments,
+    },
+    {
+      endpoint: ENDPOINT,
+      // E-mail pela metade não pode ir pra rota: o Zod devolveria 400 e a pill
+      // travaria em erro no meio da digitação.
+      isValid: (f) => {
+        const v = String(f.summaryRecipientEmail ?? "");
+        return v === "" || EMAIL_RE.test(v);
+      },
+    },
+  );
 
   const isVenda = esteira === "venda";
   const preset = isVenda ? vendaPreset : locacaoPreset;
@@ -194,48 +238,16 @@ export function FormSettingsClient({ initial }: FormSettingsClientProps) {
     });
   }
 
-  async function save() {
-    setSaving(true);
-    try {
-      const res = await fetch("/api/org/form-settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          preset: vendaPreset,
-          customRequiredPaths: vendaPaths,
-          // Os dois módulos vão sempre no mesmo PATCH, cada um com o valor que
-          // está na tela — inclusive "legado"/valores antigos, que o servidor
-          // aceita e que significam "não mexer no comportamento atual".
-          locacaoPreset,
-          locacaoCustomRequiredPaths: locacaoPaths,
-          autoLockFormOnFinalize: autoLock,
-          requireCommissionerReceiving: requireReceiving,
-          summaryRecipientEmail: summaryEmail.trim(),
-          autoSendSummaryOnComplete: autoSend,
-          summaryIncludeAttachments: includeAttachments,
-        }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        toast.error(data?.error ?? "Falha ao salvar configurações");
-        return;
-      }
-      toast.success("Configurações salvas");
-    } catch {
-      toast.error("Erro de rede ao salvar");
-    } finally {
-      setSaving(false);
-    }
-  }
-
   return (
     <div className="space-y-6">
       <Card>
         <CardHeader className="space-y-3">
-          <CardTitle className="text-base">
-            Campos obrigatórios · {MODULE_LABEL[esteira]}
-          </CardTitle>
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-base">
+              Campos obrigatórios · {MODULE_LABEL[esteira]}
+            </CardTitle>
+            <SaveStatusPill status={campos.status} isDirty={campos.isDirty} />
+          </div>
         </CardHeader>
         <CardContent className="space-y-3">
           {!isVenda && selectedCard === null && (
@@ -309,14 +321,19 @@ export function FormSettingsClient({ initial }: FormSettingsClientProps) {
             <Settings2 className="h-4 w-4" />
             Campos adicionais — {MODULE_LABEL[esteira]}
           </CardTitle>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowOverride((v) => !v)}
-          >
-            {showOverride ? "Ocultar" : "Personalizar"}
-          </Button>
+          <div className="flex items-center gap-3">
+            {/* Mesma seção de salvamento do card acima: os dois editam o par
+                preset + paths customizados, então compartilham o estado. */}
+            <SaveStatusPill status={campos.status} isDirty={campos.isDirty} />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowOverride((v) => !v)}
+            >
+              {showOverride ? "Ocultar" : "Personalizar"}
+            </Button>
+          </div>
         </CardHeader>
         {showOverride && (
           <CardContent className="space-y-5">
@@ -361,12 +378,18 @@ export function FormSettingsClient({ initial }: FormSettingsClientProps) {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Lock className="h-4 w-4" />
-            Segurança do link
-          </CardTitle>
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Lock className="h-4 w-4" />
+              Segurança do link
+            </CardTitle>
+            <SaveStatusPill
+              status={seguranca.status}
+              isDirty={seguranca.isDirty}
+            />
+          </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <label className="flex items-start justify-between gap-4 cursor-pointer">
             <div className="flex-1">
               <p className="text-sm font-medium">
@@ -405,10 +428,13 @@ export function FormSettingsClient({ initial }: FormSettingsClientProps) {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Mail className="h-4 w-4" />
-            Resumo do formulário por e-mail
-          </CardTitle>
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Mail className="h-4 w-4" />
+              Resumo do formulário por e-mail
+            </CardTitle>
+            <SaveStatusPill status={resumo.status} isDirty={resumo.isDirty} />
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-xs text-muted-foreground">
@@ -424,7 +450,21 @@ export function FormSettingsClient({ initial }: FormSettingsClientProps) {
               placeholder="juridico@suaimobiliaria.com"
               value={summaryEmail}
               onChange={(e) => setSummaryEmail(e.target.value)}
+              onBlur={() => void resumo.flush()}
+              aria-invalid={!emailValido}
+              aria-describedby={!emailValido ? "summary-email-erro" : undefined}
             />
+            {!emailValido && (
+              <p id="summary-email-erro" className="text-xs text-destructive">
+                E-mail inválido — ainda não foi salvo.
+              </p>
+            )}
+            {emailValido && trimmedEmail === "" && autoSend && (
+              <p className="text-xs text-amber-700 dark:text-amber-500">
+                O envio automático está ligado, mas sem destinatário nada é
+                enviado.
+              </p>
+            )}
           </div>
           <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
             <div>
@@ -448,18 +488,6 @@ export function FormSettingsClient({ initial }: FormSettingsClientProps) {
         </CardContent>
       </Card>
 
-      <div className="flex justify-end">
-        <Button onClick={save} disabled={saving}>
-          {saving ? (
-            <>
-              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-              Salvando...
-            </>
-          ) : (
-            "Salvar"
-          )}
-        </Button>
-      </div>
     </div>
   );
 }

@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { toast } from "sonner";
+import { useMemo, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { SaveStatusPill } from "@/components/settings/SaveStatusPill";
+import { useSettingsAutoSave } from "@/hooks/use-settings-auto-save";
 import { STEP_LABELS } from "@/lib/forms/validation";
 import { LOCACAO_STEP_LABELS } from "@/lib/forms/validation-locacao";
 import {
@@ -37,6 +38,24 @@ function rolesOf(esteira: FormEsteira): ParticipantRole[] {
 
 type Matrix = Record<string, number[]>;
 
+/**
+ * Persiste SÓ os papéis que divergem do default de código. Papel igual ao
+ * default fica fora do Json → segue o default VIVO (se o produto mudar o
+ * default amanhã, a org acompanha). Gravar a matriz inteira congelaria o
+ * default de hoje pra sempre; branch vazio = "tudo default" (o parse do
+ * servidor descarta branch vazio, limpando a config da esteira).
+ */
+function diffOf(matrix: Matrix): Matrix {
+  const diff: Matrix = {};
+  for (const [role, steps] of Object.entries(matrix)) {
+    const def = DEFAULT_ROLE_STEPS[role as ParticipantRole] ?? [];
+    if (steps.length !== def.length || steps.some((s, i) => s !== def[i])) {
+      diff[role] = steps;
+    }
+  }
+  return diff;
+}
+
 function matrixFor(
   esteira: FormEsteira,
   config: ParticipantVisibilityConfig
@@ -64,9 +83,31 @@ export function ParticipantVisibilityCard({
   const config = parseParticipantVisibilityJson(initial);
   const [venda, setVenda] = useState<Matrix>(() => matrixFor("venda", config));
   const [locacao, setLocacao] = useState<Matrix>(() => matrixFor("locacao", config));
-  const [saving, setSaving] = useState<FormEsteira | null>(null);
 
   const esteiras: FormEsteira[] = locacaoEnabled ? ["venda", "locacao"] : ["venda"];
+
+  // UM auto-save para as duas esteiras, não um por tabela.
+  //
+  // Este card mostra Venda e Locação simultaneamente (não há aba aqui), então
+  // dois hooks independentes deixariam dois PATCHes concorrentes voando contra
+  // a MESMA coluna `participantVisibilityJson`. O merge no servidor é
+  // leitura-e-escrita sem transação: se o segundo request lesse a linha antes
+  // de o primeiro gravar, ele sobrescreveria o branch recém-salvo do outro —
+  // marcar um checkbox em cada tabela bastava para perder um dos dois.
+  // Com um payload só, as duas esteiras viajam juntas e não há corrida.
+  const autoSave = useSettingsAutoSave(
+    useMemo(
+      () => ({
+        participantVisibility: locacaoEnabled
+          ? { venda: diffOf(venda), locacao: diffOf(locacao) }
+          : // Sem o módulo, a tabela de locação nem é renderizada: mandar o
+            // branch dela seria gravar um estado que o usuário não editou.
+            { venda: diffOf(venda) },
+      }),
+      [venda, locacao, locacaoEnabled],
+    ),
+    { endpoint: "/api/org/form-settings" },
+  );
 
   const toggle = (esteira: FormEsteira, role: string, step: number) => {
     const set = esteira === "venda" ? setVenda : setLocacao;
@@ -82,42 +123,6 @@ export function ParticipantVisibilityCard({
   const restore = (esteira: FormEsteira) => {
     const set = esteira === "venda" ? setVenda : setLocacao;
     set(() => matrixFor(esteira, {}));
-  };
-
-  const save = async (esteira: FormEsteira) => {
-    setSaving(esteira);
-    try {
-      const matrix = esteira === "venda" ? venda : locacao;
-      // Persiste SÓ os papéis que divergem do default de código. Papel igual ao
-      // default fica fora do Json → segue o default VIVO (se o produto mudar o
-      // default amanhã, a org acompanha). Gravar a matriz inteira congelaria o
-      // default de hoje pra sempre; branch vazio = "tudo default" (o parse do
-      // servidor descarta branch vazio, limpando a config da esteira).
-      const diff: Matrix = {};
-      for (const [role, steps] of Object.entries(matrix)) {
-        const def = DEFAULT_ROLE_STEPS[role as ParticipantRole] ?? [];
-        if (steps.length !== def.length || steps.some((s, i) => s !== def[i])) {
-          diff[role] = steps;
-        }
-      }
-      const res = await fetch("/api/org/form-settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ participantVisibility: { [esteira]: diff } }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        toast.error(body?.error ?? "Falha ao salvar visibilidade.");
-        return;
-      }
-      toast.success(
-        "Visibilidade salva — vale imediatamente, inclusive pra links já enviados."
-      );
-    } catch {
-      toast.error("Erro ao salvar visibilidade.");
-    } finally {
-      setSaving(null);
-    }
   };
 
   return (
@@ -176,22 +181,19 @@ export function ParticipantVisibilityCard({
                   </tbody>
                 </table>
               </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  onClick={() => save(esteira)}
-                  disabled={saving !== null}
-                >
-                  {saving === esteira ? "Salvando…" : "Salvar"}
-                </Button>
+              <div className="flex items-center gap-3">
                 <Button
                   size="sm"
                   variant="ghost"
                   onClick={() => restore(esteira)}
-                  disabled={saving !== null}
+                  disabled={autoSave.status === "saving"}
                 >
                   Restaurar padrão
                 </Button>
+                <SaveStatusPill
+                  status={autoSave.status}
+                  isDirty={autoSave.isDirty}
+                />
               </div>
             </div>
           );

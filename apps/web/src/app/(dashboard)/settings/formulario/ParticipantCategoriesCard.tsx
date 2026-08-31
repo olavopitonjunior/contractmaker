@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { SaveStatusPill } from "@/components/settings/SaveStatusPill";
+import { useSettingsAutoSave } from "@/hooks/use-settings-auto-save";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -157,6 +159,11 @@ export function ParticipantCategoriesCard({ initial, locacaoEnabled }: Props) {
             locacaoEnabled={locacaoEnabled}
             onPatch={patchCategory}
             onDelete={removeCategory}
+            onSyncFields={(id, fields) =>
+              setCategories((prev) =>
+                prev.map((c) => (c.id === id ? { ...c, fields } : c)),
+              )
+            }
           />
         ))}
 
@@ -248,6 +255,7 @@ function CategoryRow({
   locacaoEnabled,
   onPatch,
   onDelete,
+  onSyncFields,
 }: {
   category: ParticipantCategory;
   locacaoEnabled: boolean;
@@ -257,10 +265,11 @@ function CategoryRow({
     optimistic: (c: ParticipantCategory) => ParticipantCategory,
   ) => Promise<boolean>;
   onDelete: (id: string) => void;
+  /** Reflete no pai os campos já gravados (o contador "N campo(s)"). */
+  onSyncFields: (id: string, fields: CategoryFieldDef[]) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [fields, setFields] = useState<CategoryFieldDef[]>(category.fields);
-  const [saving, setSaving] = useState(false);
 
   function updateField(idx: number, patch: Partial<CategoryFieldDef>) {
     setFields((prev) =>
@@ -268,36 +277,37 @@ function CategoryRow({
     );
   }
 
-  async function saveFields() {
-    // Chave vazia é derivada do label (o usuário não precisa pensar nela);
-    // duplicata é rejeitada pelo Zod do servidor, então avisamos antes.
-    const normalized = fields.map((f) => ({
-      ...f,
-      key: f.key.trim() || slugifyCategoryLabel(f.label).replace(/-/g, "_"),
-      label: f.label.trim(),
-    }));
-    if (normalized.some((f) => !f.label || !f.key)) {
-      toast.error("Todo campo precisa de um nome");
-      return;
-    }
-    if (new Set(normalized.map((f) => f.key)).size !== normalized.length) {
-      toast.error("Há campos com o mesmo identificador");
-      return;
-    }
-    setSaving(true);
-    try {
-      const ok = await onPatch(category.id, { fields: normalized }, (c) => ({
-        ...c,
-        fields: normalized,
-      }));
-      if (ok) {
+  // Chave vazia é derivada do label (o usuário não precisa pensar nela).
+  const normalized = useMemo(
+    () =>
+      fields.map((f) => ({
+        ...f,
+        key: f.key.trim() || slugifyCategoryLabel(f.label).replace(/-/g, "_"),
+        label: f.label.trim(),
+      })),
+    [fields],
+  );
+
+  const camposValidos =
+    normalized.every((f) => f.label && f.key) &&
+    new Set(normalized.map((f) => f.key)).size === normalized.length;
+
+  const autoSave = useSettingsAutoSave(
+    { fields: normalized },
+    {
+      endpoint: `/api/org/participant-categories/${category.id}`,
+      // Nome vazio ou identificador repetido: o Zod do servidor recusaria, e
+      // no meio da digitação isso é estado transitório, não erro do usuário.
+      isValid: () => camposValidos,
+      // Congela a `key` derivada assim que ela é gravada — sem isto, continuar
+      // digitando o rótulo renomearia um identificador já persistido, e
+      // identificador é o que amarra as respostas já enviadas pelos links.
+      onSaved: () => {
         setFields(normalized);
-        toast.success("Campos salvos");
-      }
-    } finally {
-      setSaving(false);
-    }
-  }
+        onSyncFields(category.id, normalized);
+      },
+    },
+  );
 
   return (
     <div className="rounded-lg border p-4 space-y-3">
@@ -409,7 +419,7 @@ function CategoryRow({
             </div>
           ))}
 
-          <div className="flex gap-2">
+          <div className="flex items-center gap-3">
             <Button
               size="sm"
               variant="outline"
@@ -418,10 +428,18 @@ function CategoryRow({
               <Plus className="h-4 w-4 mr-1" />
               Adicionar campo
             </Button>
-            <Button size="sm" onClick={saveFields} disabled={saving}>
-              {saving ? "Salvando…" : "Salvar campos"}
-            </Button>
+            <SaveStatusPill
+              status={autoSave.status}
+              isDirty={autoSave.isDirty}
+            />
           </div>
+          {!camposValidos && (
+            <p className="text-xs text-destructive">
+              {normalized.some((f) => !f.label || !f.key)
+                ? "Todo campo precisa de um nome — ainda não foi salvo."
+                : "Há campos com o mesmo identificador — ainda não foi salvo."}
+            </p>
+          )}
           <p className="text-xs text-muted-foreground">
             Campos marcados como obrigatórios bloqueiam o envio do link daquela
             pessoa.
