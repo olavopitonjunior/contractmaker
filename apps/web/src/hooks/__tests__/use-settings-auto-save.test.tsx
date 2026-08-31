@@ -491,37 +491,66 @@ describe("useSettingsAutoSave", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("campo derivado que ESVAZIA depois de salvar não dispara segundo PATCH", async () => {
-    // Regressão pega só no QA, depois de passar por review e por toda a suíte.
-    // No SLA, o campo observado era a lista de etapas ALTERADAS. Salvava (200),
-    // o refresh trazia as linhas novas, a lista esvaziava — e `[]` difere da
-    // baseline `[{...}]`, então o hook lia isso como uma alteração nova e
-    // mandava um segundo PATCH com lista vazia, que a rota rejeita (min(1)).
-    // Era 200 + 400 a cada edição.
+  it("buildPayload: observa por item, envia só o que mudou", async () => {
+    // Substitui um teste anterior que passava por acidente: ele rerenderizava
+    // com o MESMO valor já salvo, o que o hook sempre suprimiu — não exercitava
+    // o ciclo salvar → refresh → reavaliar, que era onde o bug vivia.
     //
-    // A lição é do hook, não da tela: o valor observado tem que ser estável
-    // depois do save. Aqui isso é verificado pelo lado de fora — quem observa
-    // um derivado que esvazia continua tendo o problema; quem observa o estado
-    // completo, não.
+    // Aqui a forma observada (uma chave por item) é diferente da forma enviada
+    // (a lista que a rota espera), e o teste prova as duas coisas que a versão
+    // "manda tudo" quebrava: só o item alterado viaja, e depois do save nada
+    // é reagendado.
     const spy = mockFetch(() => ({ ok: true }));
+    const buildPayload = (sujos: Record<string, unknown>) => ({
+      policies: Object.entries(sujos).map(([k, v]) => ({
+        stageId: k.replace(/^policy_/, ""),
+        ...(v as Record<string, unknown>),
+      })),
+    });
+
     const { rerender } = renderHook(
-      ({ v }) => useSettingsAutoSave(v, { endpoint: ENDPOINT, debounceMs: 10 }),
-      { initialProps: { v: { policies: [{ id: "s1", warn: 5 }] } } },
+      ({ v }) =>
+        useSettingsAutoSave(v, {
+          endpoint: ENDPOINT,
+          alwaysInclude: { kind: "venda" },
+          buildPayload,
+          debounceMs: 10,
+        }),
+      {
+        initialProps: {
+          v: {
+            policy_s1: { warnDays: "5" },
+            policy_s2: { warnDays: "5" },
+            policy_s3: { warnDays: "5" },
+          },
+        },
+      },
     );
 
-    // Edita: a lista completa muda de valor.
-    rerender({ v: { policies: [{ id: "s1", warn: 4 }] } });
+    // Mexe só em s2.
+    rerender({
+      v: {
+        policy_s1: { warnDays: "5" },
+        policy_s2: { warnDays: "9" },
+        policy_s3: { warnDays: "5" },
+      },
+    });
     await act(async () => {
       vi.advanceTimersByTime(100);
     });
     await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
-    expect(bodyOf(spy).policies).toEqual([{ id: "s1", warn: 4 }]);
 
-    // O "refresh" do servidor devolve exatamente o que foi gravado: o valor
-    // observado volta a bater com a baseline e NADA é reagendado.
-    rerender({ v: { policies: [{ id: "s1", warn: 4 }] } });
+    const body = bodyOf(spy);
+    expect(body.kind).toBe("venda");
+    // A etapa intocada NÃO pode viajar: a rota grava por stageId o que recebe,
+    // e reescrever s1/s3 os tornaria "personalizado" para sempre, além de
+    // ressuscitar valores default por cima dos reais.
+    expect(body.policies).toEqual([{ stageId: "s2", warnDays: "9" }]);
+
+    // Depois do save o valor observado continua o mesmo (o draft já bate com o
+    // que o servidor gravou): nada é reagendado, nenhum PATCH vazio.
     await act(async () => {
-      vi.advanceTimersByTime(300);
+      vi.advanceTimersByTime(500);
     });
     expect(spy).toHaveBeenCalledTimes(1);
   });
