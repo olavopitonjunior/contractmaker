@@ -122,10 +122,11 @@ export async function POST(req: NextRequest) {
   // checagens ficavam depois do `user.create` — um 400/403 aqui deixava para
   // trás um `User` órfão com senha placeholder, conta criada para um acesso que
   // nunca foi concedido.
+  let customRoleName: string | null = null;
   if (customRoleId) {
     const customRole = await prisma.customRole.findFirst({
       where: { id: customRoleId, orgId: ctx.orgId },
-      select: { id: true },
+      select: { id: true, name: true },
     });
     if (!customRole) {
       return NextResponse.json(
@@ -133,6 +134,7 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+    customRoleName = customRole.name;
   }
 
   // Teto de papel: ninguém concede papel mais poderoso que o próprio. Sem isto
@@ -155,9 +157,17 @@ export async function POST(req: NextRequest) {
     targetCustomRoleId: customRoleId ?? null,
   });
   if (!ceiling.allowed) {
+    // Nomeia o papel de verdade: com `role` cru a mensagem dizia `o papel
+    // "custom"` para QUALQUER CustomRole, e numa org com várias delas o
+    // operador não descobria qual foi negada. Mensagem de segurança que não
+    // diz o que foi negado não é acionável.
+    //
+    // Não nomeia a PERMISSÃO que faltou, de propósito: isso descreveria o
+    // conteúdo de um papel a quem não pode concedê-lo, e quem recebe o 403 é
+    // exatamente quem não deveria enumerá-lo.
     return NextResponse.json(
       {
-        error: `Você não pode conceder o papel "${role}" — ele tem permissões que você não possui`,
+        error: `Você não pode conceder o papel "${customRoleName ?? role}" — ele tem permissões que você não possui`,
       },
       { status: 403 }
     );
