@@ -1,17 +1,25 @@
 /**
- * Recorte: a edição sobrevive à troca de esteira.
+ * Recorte: o que sobrevive à troca de esteira.
  *
- * Trocar Vendas↔Locação é render CONDICIONAL — o formulário da esteira que sai
- * desmonta. Enquanto cada filho tinha o próprio `useState(initial)`, remontar
- * ressemeava do snapshot que a RSC leu no carregamento da página: depois de um
- * save bem-sucedido, o campo voltava a mostrar o valor PRÉ-edição com o
- * servidor já correto. Para o usuário é a cara do bug de perda de edição que o
- * flush no unmount corrigiu — só que agora com a UI atrás do servidor.
+ * Trocar Vendas↔Locação é render CONDICIONAL. Enquanto cada filho tinha o
+ * próprio `useState(initial)` E o próprio `useSettingsAutoSave`, remontar
+ * recomeçava os dois do zero, e isso quebrava de duas formas:
  *
- * O estado passou a viver no pai, que NÃO desmonta na troca.
+ * 1. O estado ressemeava do snapshot que a RSC leu no carregamento da página:
+ *    depois de um save bem-sucedido o campo voltava a mostrar o valor
+ *    PRÉ-edição, com o servidor já correto.
+ *
+ * 2. Pior, e silencioso: se o flush do unmount FALHASSE, o hook novo semeava
+ *    `baselineRef` a partir do estado já editado, `dirtyKeys` nascia vazio e a
+ *    pill sumia — afirmando "sem pendências" enquanto o servidor seguia no
+ *    valor velho. O `catch` do hook só publica erro `if (mountedRef.current)`,
+ *    e no flush de unmount o componente já morreu: nem status, nem toast.
+ *
+ * Estado e hook vivem no pai, que NÃO desmonta na troca. O segundo teste é o
+ * que trava o item 2 — ele usa o hook REAL, não um mock.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import {
   DEFAULT_CONTRACT_SETTINGS,
   DEFAULT_LOCACAO_SETTINGS,
@@ -23,14 +31,8 @@ vi.mock("../EsteiraTabs", () => ({
   useEsteira: () => esteira,
 }));
 
-// O auto-save real dispara fetch com debounce; aqui só o estado importa.
-vi.mock("@/hooks/use-settings-auto-save", () => ({
-  useSettingsAutoSave: () => ({
-    status: "idle",
-    error: null,
-    isDirty: false,
-    flush: vi.fn(),
-  }),
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn(), message: vi.fn() },
 }));
 
 import { ContractDefaultsCard } from "../ContractDefaultsCard";
@@ -49,15 +51,32 @@ const checkbox = () =>
 
 beforeEach(() => {
   esteira = "venda";
+  vi.useFakeTimers();
 });
 
-describe("ContractDefaultsCard — estado sobrevive à troca de esteira", () => {
-  it("edição em Vendas continua lá depois de ir a Locação e voltar", () => {
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+describe("ContractDefaultsCard — troca de esteira", () => {
+  it("a edição continua na tela depois de ir a Locação e voltar", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) })
+    );
     const { rerender } = render(<ContractDefaultsCard {...props} />);
 
     const antes = checkbox().checked;
     fireEvent.click(checkbox());
     expect(checkbox().checked).toBe(!antes);
+
+    // Deixa o debounce vencer DENTRO do teste: sem isto o timer sobrevive ao
+    // `afterEach`, os timers voltam a ser reais e o PATCH escapa para a rede
+    // de verdade (ECONNREFUSED no log de quem rodar a suíte).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1200);
+    });
 
     // Sai de Vendas: o formulário desmonta de verdade (render condicional).
     esteira = "locacao";
@@ -70,5 +89,31 @@ describe("ContractDefaultsCard — estado sobrevive à troca de esteira", () => 
     esteira = "venda";
     rerender(<ContractDefaultsCard {...props} />);
     expect(checkbox().checked).toBe(!antes);
+  });
+
+  // Hook REAL: é o ciclo baseline/flush que está sob teste, não o estado.
+  it("save que FALHA continua sinalizado depois da troca de esteira — não vira 'limpo'", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("rede caiu")));
+
+    const { rerender } = render(<ContractDefaultsCard {...props} />);
+    fireEvent.click(checkbox());
+
+    // Deixa o debounce (800ms) vencer e o PATCH falhar.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1200);
+    });
+    expect(fetch).toHaveBeenCalled();
+
+    esteira = "locacao";
+    rerender(<ContractDefaultsCard {...props} />);
+    esteira = "venda";
+    rerender(<ContractDefaultsCard {...props} />);
+
+    // A pill só some quando está `idle` E sem sujeira — exatamente o estado
+    // que mentiria aqui. Ela tem de continuar dizendo alguma coisa.
+    const pill =
+      screen.queryByText(/não foi possível salvar/i) ??
+      screen.queryByText(/alterações não salvas/i);
+    expect(pill).not.toBeNull();
   });
 });

@@ -3,7 +3,10 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { RotateCcw } from "lucide-react";
 import { SaveStatusPill } from "@/components/settings/SaveStatusPill";
-import { useSettingsAutoSave } from "@/hooks/use-settings-auto-save";
+import {
+  useSettingsAutoSave,
+  type SettingsFields,
+} from "@/hooks/use-settings-auto-save";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -45,6 +48,9 @@ import { useEsteira } from "./EsteiraTabs";
 /** Par do `useState`, para o pai poder ceder o estado ao filho inteiro. */
 type SettingsState<T> = [T, Dispatch<SetStateAction<T>>];
 
+/** O que o filho precisa do auto-save do pai: só status e sujeira, pra pill. */
+type AutoSave = ReturnType<typeof useSettingsAutoSave<SettingsFields>>;
+
 export function ContractDefaultsCard({
   initial,
   initialLocacao,
@@ -58,24 +64,69 @@ export function ContractDefaultsCard({
 }) {
   const esteira = useEsteira();
 
-  // O estado das duas esteiras vive AQUI, não dentro de cada formulário.
-  // Trocar de esteira DESMONTA o filho (é render condicional, logo abaixo), e
-  // um `useState(initial)` no filho ressemeia do snapshot que a RSC leu no
-  // carregamento da PÁGINA. Depois de um save bem-sucedido isso mostrava o
-  // valor PRÉ-edição de volta no campo, com o servidor já correto: a mesma
-  // cara do bug de perda de edição que o flush no unmount corrigiu, só que
-  // agora com a UI atrás do servidor em vez do contrário.
+  // O estado das duas esteiras E o auto-save de cada uma vivem AQUI, não
+  // dentro de cada formulário. Trocar de esteira DESMONTA o filho (é render
+  // condicional, logo abaixo), e isso quebrava de duas formas:
   //
-  // Este componente NÃO desmonta na troca de esteira, então o estado
-  // sobrevive e o filho remonta já com o valor corrente. O baseline do
-  // auto-save nasce dos `fields` na primeira renderização do hook — como eles
-  // agora chegam atuais, remontar não dispara PATCH espúrio.
+  // 1. `useState(initial)` no filho ressemeava do snapshot que a RSC leu no
+  //    carregamento da PÁGINA. Depois de um save bem-sucedido, o campo voltava
+  //    a mostrar o valor PRÉ-edição com o servidor já correto.
+  //
+  // 2. Com o estado aqui mas o HOOK ainda no filho, sobrava um buraco pior:
+  //    o flush no unmount podia FALHAR (rede, 5xx) e ninguém saberia. O `catch`
+  //    do hook só publica erro `if (mountedRef.current)`, e nesse instante o
+  //    componente já morreu — nem status, nem toast. Ao remontar, o hook novo
+  //    semeia `baselineRef` a partir dos `fields` ATUAIS, que já são o valor
+  //    editado: `dirtyKeys` nasce vazio, a pill diz "limpo" e o servidor segue
+  //    no valor velho. Perda SILENCIOSA — pior que o bug 1, que ao menos era
+  //    visível no campo.
+  //
+  // Com o hook aqui, o baseline e o `pendingRef` sobrevivem à troca de esteira:
+  // o debounce simplesmente continua e grava. Não há unmount, então o flush de
+  // unmount nem entra em cena — ele volta a ser só o que sempre deveria ter
+  // sido, a rede de segurança de quem SAI da página. E uma falha deixa a chave
+  // suja, então a pill mostra "Alterações não salvas" em vez de mentir.
   const vendaState = useState<ContractSettings>(initial);
   const locacaoState = useState<LocacaoSettings>(initialLocacao);
   const comissaoState =
     useState<LocacaoComissaoDefaults>(initialComissaoLocacao);
 
-  if (!locacaoEnabled) return <VendaDefaults state={vendaState} />;
+  // O branch inteiro é a unidade de salvamento, não o campo: `desistencia.
+  // prazo_dias` só faz sentido junto com `desistencia.permite`, e a rota mescla
+  // por branch — mandar `venda` não toca no padrão de locação.
+  const vendaAutoSave = useSettingsAutoSave(
+    { contractDefaults: { venda: vendaState[0] } },
+    {
+      endpoint: "/api/org/form-settings",
+      // Espelha os `min(1).max(365)` de `contractSettingsSchema`: enquanto um
+      // prazo estiver fora de faixa, a seção fica pendente em vez de mandar um
+      // corpo que a rota recusaria.
+      isValid: () => diasNaFaixa(vendaState[0]),
+    },
+  );
+  // Só os branches de locação: o PATCH mescla por branch, então o padrão de
+  // venda não é tocado. `enabled` desliga o agendamento para org sem o módulo —
+  // o hook precisa ser chamado incondicionalmente (regra dos hooks), mas não
+  // pode agendar PATCH de uma esteira que a org nem tem.
+  const locacaoAutoSave = useSettingsAutoSave(
+    {
+      contractDefaults: {
+        locacao: locacaoState[0],
+        locacao_comissao: comissaoState[0],
+      },
+    },
+    {
+      endpoint: "/api/org/form-settings",
+      // Espelha as faixas de `locacaoSettingsSchema` e
+      // `locacaoComissaoDefaultsSchema`: percentual digitado grande demais
+      // (999 a caminho de 99) não pode virar PATCH recusado.
+      isValid: () => locacaoNaFaixa(locacaoState[0], comissaoState[0]),
+      enabled: locacaoEnabled,
+    },
+  );
+
+  if (!locacaoEnabled)
+    return <VendaDefaults state={vendaState} autoSave={vendaAutoSave} />;
   return (
     <Card>
       <CardHeader>
@@ -90,9 +141,17 @@ export function ContractDefaultsCard({
       </CardHeader>
       <CardContent>
         {esteira === "venda" ? (
-          <VendaDefaults state={vendaState} embedded />
+          <VendaDefaults
+            state={vendaState}
+            autoSave={vendaAutoSave}
+            embedded
+          />
         ) : (
-          <LocacaoDefaults state={locacaoState} comissaoState={comissaoState} />
+          <LocacaoDefaults
+            state={locacaoState}
+            comissaoState={comissaoState}
+            autoSave={locacaoAutoSave}
+          />
         )}
       </CardContent>
     </Card>
@@ -114,26 +173,14 @@ function diasNaFaixa(v: ContractSettings): boolean {
 
 function VendaDefaults({
   state,
+  autoSave,
   embedded = false,
 }: {
   state: SettingsState<ContractSettings>;
+  autoSave: AutoSave;
   embedded?: boolean;
 }) {
   const [values, setValues] = state;
-
-  // O branch inteiro é a unidade de salvamento, não o campo: `desistencia.
-  // prazo_dias` só faz sentido junto com `desistencia.permite`, e a rota mescla
-  // por branch — mandar `venda` não toca no padrão de locação.
-  const autoSave = useSettingsAutoSave(
-    { contractDefaults: { venda: values } },
-    {
-      endpoint: "/api/org/form-settings",
-      // Espelha os `min(1).max(365)` de `contractSettingsSchema`: enquanto um
-      // prazo estiver fora de faixa, a seção fica pendente em vez de mandar um
-      // corpo que a rota recusaria.
-      isValid: () => diasNaFaixa(values),
-    },
-  );
 
   function patch(next: Partial<ContractSettings>) {
     setValues((v) => ({ ...v, ...next }));
@@ -374,27 +421,14 @@ function locacaoNaFaixa(
 function LocacaoDefaults({
   state,
   comissaoState,
+  autoSave,
 }: {
   state: SettingsState<LocacaoSettings>;
   comissaoState: SettingsState<LocacaoComissaoDefaults>;
+  autoSave: AutoSave;
 }) {
   const [values, setValues] = state;
   const [comissao, setComissao] = comissaoState;
-
-  // Só os branches de locação: o PATCH mescla por branch, então o padrão de
-  // venda não é tocado.
-  const autoSave = useSettingsAutoSave(
-    {
-      contractDefaults: { locacao: values, locacao_comissao: comissao },
-    },
-    {
-      endpoint: "/api/org/form-settings",
-      // Espelha as faixas de `locacaoSettingsSchema` e
-      // `locacaoComissaoDefaultsSchema`: percentual digitado grande demais
-      // (999 a caminho de 99) não pode virar PATCH recusado.
-      isValid: () => locacaoNaFaixa(values, comissao),
-    },
-  );
 
   function patchComissao(next: Partial<LocacaoComissaoDefaults>) {
     setComissao((c) => ({ ...c, ...next }));
