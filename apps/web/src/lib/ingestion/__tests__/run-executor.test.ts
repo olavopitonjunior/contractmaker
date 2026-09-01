@@ -15,7 +15,12 @@ import type { StructuredCallInput } from "@/lib/ai/shared/anthropic-structured";
  * de escalação — chega na API de verdade a partir da suíte.
  */
 const runStructuredMock = vi.fn();
-vi.mock("@/lib/ai/shared/anthropic-structured", () => ({
+// PARCIAL: só a chamada de rede é dublada. O módulo também exporta helpers de
+// SCHEMA (`nullableEnum`, `nullableString`) que os classificadores usam no topo
+// do arquivo — um mock total os esconde e o import quebra antes de qualquer
+// teste rodar.
+vi.mock("@/lib/ai/shared/anthropic-structured", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/ai/shared/anthropic-structured")>()),
   runStructured: (...args: unknown[]) => runStructuredMock(...args),
 }));
 

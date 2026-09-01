@@ -136,8 +136,16 @@ export function ClauseClassifyReview({
           )}
 
           {!loading && proposals.length === 0 && (
-            <div className="rounded-md border border-dashed py-12 text-center text-sm text-muted-foreground">
-              Nada a alterar — as cláusulas selecionadas já estão classificadas.
+            <div
+              className={`rounded-md border border-dashed py-12 text-center text-sm ${
+                failures.length > 0 ? "border-destructive/40 text-destructive" : "text-muted-foreground"
+              }`}
+            >
+              {failures.length > 0
+                ? // Sem isto a tela dizia "já estão classificadas" com as falhas
+                  // listadas logo abaixo — mentira que esconde o erro.
+                  `Não foi possível analisar ${failures.length} cláusula(s). Nada foi alterado.`
+                : "Nada a alterar — as cláusulas selecionadas já estão classificadas."}
             </div>
           )}
 
