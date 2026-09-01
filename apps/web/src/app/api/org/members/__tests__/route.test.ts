@@ -168,8 +168,12 @@ describe("POST /api/org/members — teto de papel (#452)", () => {
 
     expect(res.status).toBe(403);
     const body = await res.json();
+    // Só a asserção positiva: ela já é a prova de regressão — voltar a
+    // interpolar `role` cru faz a mensagem perder o nome e este `toContain`
+    // falha sozinho (verificado por mutação). Um `not.toContain('"custom"')`
+    // seria redundante e ainda ficaria acoplado às aspas: um futuro
+    // `o papel custom (${nome})` passaria por ele sem ser notado.
     expect(body.error).toContain("QA Acima do Admin");
-    expect(body.error).not.toContain('"custom"');
   });
 
   // Quando "já é membro" e "fora do teto" coexistem, o 403 vence — decisão, não
