@@ -11,6 +11,8 @@
  */
 import {
   runStructured,
+  nullableEnum,
+  nullableString,
   type StructuredRunner,
   type SystemBlock,
 } from "@/lib/ai/shared/anthropic-structured";
@@ -37,7 +39,10 @@ import {
   CLAUSE_ESTEIRAS,
   esteiraForModalidade,
 } from "@/lib/clauses/taxonomy";
-import { CLAUSE_SUBCATEGORY_SUGGESTIONS } from "@/lib/clauses/schema";
+import {
+  CLAUSE_SUBCATEGORY_SUGGESTIONS,
+  CLAUSE_GROUP_CODES,
+} from "@/lib/clauses/schema";
 import type { FormModule } from "@/lib/forms/presets";
 
 /** Corte do conteúdo enviado ao modelo. Cláusula é curta; texto gigante é anomalia. */
@@ -49,22 +54,20 @@ export const CLAUSE_CLASSIFICATION_SCHEMA: Record<string, unknown> = {
   additionalProperties: false,
   required: ["esteira", "subcategory", "tags", "agentNotes", "mappings", "reason"],
   properties: {
-    esteira: {
-      type: ["string", "null"],
-      enum: [...CLAUSE_ESTEIRAS, null],
-      description:
-        "A que esteira a cláusula pertence. 'ambas' só para cláusula genuinamente comum (foro, assinatura eletrônica, LGPD). null se não der para decidir pelo texto.",
-    },
-    groupCode: {
-      type: ["string", "null"],
-      enum: ["G1", "G2", "G3", "G4", "G5", "G6", null],
-      description:
-        "SÓ quando esteira='venda'. Em locação, sempre null — grupos G1–G6 não existem lá.",
-    },
-    subcategory: {
-      type: ["string", "null"],
-      description: "Um valor da lista de temas fornecida para a esteira escolhida.",
-    },
+    // `nullableEnum`, e NÃO `{type:["string","null"], enum:[...,null]}` — este
+    // segundo formato é recusado com 400 pelo validador de `output_config`
+    // (o helper carrega o porquê). Custou um smoke em staging pra reaprender.
+    esteira: nullableEnum(
+      CLAUSE_ESTEIRAS,
+      "A que esteira a cláusula pertence. 'ambas' só para cláusula genuinamente comum (foro, assinatura eletrônica, LGPD). null se não der para decidir pelo texto."
+    ),
+    groupCode: nullableEnum(
+      CLAUSE_GROUP_CODES,
+      "SÓ quando esteira='venda'. Em locação, sempre null — grupos G1–G6 não existem lá."
+    ),
+    subcategory: nullableString(
+      "Um valor da lista de temas fornecida para a esteira escolhida."
+    ),
     tags: {
       type: "array",
       maxItems: 8,
@@ -72,11 +75,9 @@ export const CLAUSE_CLASSIFICATION_SCHEMA: Record<string, unknown> = {
       description:
         "Somente tags do vocabulário fornecido. NUNCA use os prefixos slot:, garantia:, provider: ou cobertura:.",
     },
-    agentNotes: {
-      type: ["string", "null"],
-      description:
-        "Em PT-BR, no máximo 3 frases, dizendo QUANDO o agente deve usar esta cláusula.",
-    },
+    agentNotes: nullableString(
+      "Em PT-BR, no máximo 3 frases, dizendo QUANDO o agente deve usar esta cláusula."
+    ),
     mappings: {
       type: "array",
       maxItems: 12,

@@ -42,6 +42,7 @@ import {
 import { INGEST_CLASSIFY_MODEL } from "@/lib/ai/shared/models";
 import {
   runStructured,
+  nullableEnum,
   type StructuredRunner,
 } from "@/lib/ai/shared/anthropic-structured";
 import { detectPii, type ExternalEntity } from "@/lib/ingestion/pii";
@@ -105,30 +106,6 @@ interface RawClassification {
   piiEntities: Array<{ kind: string; excerpt: string }>;
   confidence: number;
   reason: string;
-}
-
-/**
- * Campo de vocabulário fechado que também aceita `null`.
- *
- * NÃO use `{ type: ["string","null"], enum: [...valores, null] }`: o validador
- * de `output_config.format` checa cada valor do enum contra o `type` DECLARADO
- * e não destrincha a união — responde 400 ("Enum value 'fiador' does not match
- * declared type '['string','null']'") e derruba o run. Com `anyOf` cada ramo é
- * consistente consigo mesmo, que é o subconjunto padrão que a API aceita.
- *
- * Plano B, caso `anyOf` também seja recusado um dia: `type: "string"` com um
- * valor-sentinela ("nenhum") no enum, traduzido para `null` no parse. Fica
- * documentado e NÃO implementado — trocar ausência por sentinela obriga todo
- * consumidor a conhecer a convenção.
- */
-function nullableEnum(
-  values: readonly string[],
-  description: string
-): Record<string, unknown> {
-  return {
-    anyOf: [{ type: "string", enum: [...values] }, { type: "null" }],
-    description,
-  };
 }
 
 /** JSON Schema da saída — objeto fechado, enums nos valores canônicos. */
