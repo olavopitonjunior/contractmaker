@@ -6,6 +6,7 @@ import { classifyOneClause } from "@/lib/clauses/classifier-llm";
 import type { ClauseSnapshot, ClauseClassificationProposal } from "@/lib/clauses/classify";
 import { getOrgAiBudgetStatus } from "@/lib/ai/budget";
 import { detectPii } from "@/lib/ingestion/pii";
+import { visibleEsteiras } from "@/lib/clauses/taxonomy";
 import { logError } from "@/lib/observability/log";
 
 // Handlebars (via catálogo de chaves) e Anthropic rodam em node.
@@ -29,6 +30,11 @@ const CONCURRENCY = 4;
 
 const bodySchema = z.object({
   clauseIds: z.array(z.string().min(1)).min(1).max(MAX_BATCH),
+  // OPCIONAL de propósito. Ausente = comportamento de antes: nenhum recorte.
+  // A tela passa a informá-la para que um lote disparado numa esteira não leve
+  // junto cláusula da outra (issue #479) — a limpeza de seleção conserta a
+  // tela, isto fecha o mesmo furo para quem chama a rota direto.
+  esteira: z.enum(["venda", "locacao"]).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -91,7 +97,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Nenhuma cláusula elegível." }, { status: 404 });
   }
 
-  const snapshots: ClauseSnapshot[] = rows.map((r) => ({
+  // Recorte por esteira, espelhando o que a TELA mostra
+  // (`ClausesPageClient.visiveis`): a própria, `ambas`, e a SEM esteira — esta
+  // aparece nas duas abas, no balde de triagem, e descartá-la aqui tiraria do
+  // usuário a única ação que a remove de lá.
+  //
+  // Filtra DEPOIS do findMany, não dentro do `where`, de propósito: assim
+  // `ignored` distingue "está em outra esteira" de "não existe / é de
+  // plataforma", que o `where` misturaria num sumiço mudo. O `orgId` — a
+  // fronteira que de fato protege — continua no `where`.
+  const visiveis = parsed.data.esteira
+    ? (visibleEsteiras(parsed.data.esteira) as string[])
+    : null;
+  const naEsteira = (e: string | null) =>
+    visiveis === null || e === null || visiveis.includes(e);
+
+  const elegiveis = rows.filter((r) => naEsteira(r.esteira));
+  const ignored = rows.filter((r) => !naEsteira(r.esteira)).map((r) => r.id);
+
+  // Sem novo status code: lote inteiro fora da esteira volta 200 com
+  // `proposals: []`. O 404 acima continua significando só "nada existe na org",
+  // que é o que ele sempre significou — transformar descarte em erro de lote
+  // mudaria mais comportamento do que o bug corrige.
+  const snapshots: ClauseSnapshot[] = elegiveis.map((r) => ({
     id: r.id,
     title: r.title,
     content: r.content,
@@ -136,5 +164,6 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  return NextResponse.json({ proposals, failures, unchanged });
+  // `ignored` é ADITIVO — nenhum consumidor existente quebra por ele existir.
+  return NextResponse.json({ proposals, failures, unchanged, ignored });
 }
