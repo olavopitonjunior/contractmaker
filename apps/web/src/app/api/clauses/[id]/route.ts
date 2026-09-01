@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { updateKnowledgeItem } from "@/lib/ai/knowledge";
+import { areTagsFrozen } from "@/lib/clauses/tag-vocabulary";
 import {
   clauseWriteSchema,
   normalizeClauseBody,
@@ -72,6 +73,21 @@ export async function PATCH(
     );
   }
   const data = parsed.data;
+
+  // Tags CONGELADAS (origem curada ou tag de identidade) são recusadas aqui, e
+  // não só escondidas na UI: esta é uma rota pública da API, e alterar o
+  // conjunto exato de tags dessas cláusulas muda a identidade delas — a
+  // próxima reingestão passaria a DUPLICAR em vez de arquivar a anterior.
+  if (data.tags !== undefined && areTagsFrozen({ source: clause.source, tags: clause.tags })) {
+    return NextResponse.json(
+      {
+        error:
+          "As tags desta cláusula ligam o formulário ao contrato e não podem ser alteradas.",
+      },
+      { status: 409 }
+    );
+  }
+
   await updateKnowledgeItem(params.id, clause.orgId, {
     title: data.title ?? clause.title,
     content: data.content ?? clause.content,
