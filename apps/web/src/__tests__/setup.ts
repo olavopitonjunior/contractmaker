@@ -197,6 +197,9 @@ vi.mock("@/lib/db/prisma", () => {
     },
     orgMembership: {
       findFirst: vi.fn(),
+      // `POST /api/org/members` cria a membership direto, sem passar pela fila
+      // de convites.
+      create: vi.fn(),
       upsert: vi.fn(),
       findMany: vi.fn().mockResolvedValue([]),
       count: vi.fn().mockResolvedValue(0),
@@ -213,6 +216,9 @@ vi.mock("@/lib/db/prisma", () => {
     // mínimo que ele usa (ver `upsertMaxRole`).
     customRole: {
       findUnique: vi.fn().mockResolvedValue(null),
+      // O teto de papel resolve a CustomRole alvo escopada por org, e `id` +
+      // `orgId` não formam unique — tem de ser findFirst.
+      findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
       upsert: vi.fn().mockResolvedValue({ id: "role-1" }),
       create: vi.fn(),
