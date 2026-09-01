@@ -127,25 +127,56 @@ describe("buildLocacaoPlaceholderMap", () => {
     expect(map.data_local_assinatura).toContain("São Paulo/SP, 9 de junho de 2026");
   });
 
-  it("encargos da 9.1.2: IPTU e condomínio vêm do form em BRL; vazios quando não informados", () => {
-    // Fixture base não informa os itens → chaves existem e ficam vazias (casa
-    // sem condomínio, ou form antigo): nada do imóvel-fonte sobra no contrato.
+  it("encargos: IPTU e condomínio vêm do form em BRL; zero e ausente ficam vazios", () => {
+    // Fixture base não informa os itens → vazio.
     expect(map.iptu_valor).toBe("");
     expect(map.condominio_valor).toBe("");
 
-    const comEncargos = buildLocacaoPlaceholderMap(
+    const build = (aluguel: Record<string, unknown>) =>
+      buildLocacaoPlaceholderMap(
+        enrichLocacaoData(
+          JSON.parse(JSON.stringify({ ...locacaoBase, aluguel: { ...locacaoBase.aluguel, ...aluguel } })),
+          { administradora: { nome: "ImobPro Ltda", creci: "24.342-J/SP", endereco: "Rua X, 1" } }
+        )
+      );
+    const comEncargos = build({ iptu_mensal: 31.67, condominio_mensal: 676.08 });
+    expect(comEncargos.iptu_valor).toMatch(/R\$\s?31,67/);
+    expect(comEncargos.condominio_valor).toMatch(/R\$\s?676,08/);
+
+    // O form grava 0 quando o campo fica em branco (casa sem condomínio):
+    // "R$ 0,00" numa cláusula de encargos seria afirmação falsa.
+    const zerado = build({ iptu_mensal: 0, condominio_mensal: 0 });
+    expect(zerado.iptu_valor).toBe("");
+    expect(zerado.condominio_valor).toBe("");
+    // Valor que não é número (ditado por voz) também não vira "R$ NaN".
+    expect(build({ condominio_mensal: "31,67" }).condominio_valor).toBe("");
+  });
+
+  it("imovel_identificacao: tipo + unidade + condomínio, como a 1.1 do canônico", () => {
+    // Fixture: apartamento, complemento "apto. 121" (o form repete o tipo no
+    // complemento — a composição não pode sair "apartamento apto. 121").
+    expect(map.imovel_identificacao).toBe("apartamento 121");
+
+    const comCondominio = buildLocacaoPlaceholderMap(
       enrichLocacaoData(
         JSON.parse(
           JSON.stringify({
             ...locacaoBase,
-            aluguel: { ...locacaoBase.aluguel, iptu_mensal: 31.67, condominio_mensal: 676.08 },
+            imovel: { ...locacaoBase.imovel, complemento: "33", condominio_nome: "condomínio edifício Siracusa" },
           })
         ),
-        { administradora: { nome: "ImobPro Ltda", creci: "24.342-J/SP", endereco: "Rua X, 1" } }
+        {}
       )
     );
-    expect(comEncargos.iptu_valor).toMatch(/R\$\s?31,67/);
-    expect(comEncargos.condominio_valor).toMatch(/R\$\s?676,08/);
+    expect(comCondominio.imovel_identificacao).toBe("apartamento 33, do condomínio edifício Siracusa");
+
+    const casa = buildLocacaoPlaceholderMap(
+      enrichLocacaoData(
+        JSON.parse(JSON.stringify({ ...locacaoBase, imovel: { ...locacaoBase.imovel, kind: "casa", complemento: "" } })),
+        {}
+      )
+    );
+    expect(casa.imovel_identificacao).toBe("casa");
   });
 
   it("sem administradora cai no fallback e fiador vazio fora da fiança", () => {
@@ -329,16 +360,22 @@ describe("administração de locação — engine google_docs", () => {
   // (o deal de adm é um deal de locação). Se um token do catálogo de adm NÃO
   // existir no mapa, o replacePlaceholdersInDoc não o substitui e o
   // cleanupOrphanPlaceholders APAGA o {{token}} → campo em branco no contrato.
-  it("todo token do catálogo administracao_locacao existe em buildLocacaoPlaceholderMap", () => {
-    const enriched = enrichLocacaoData(locacaoBase as Record<string, unknown>, {});
-    const map = buildLocacaoPlaceholderMap(enriched);
-    const mapKeys = Object.keys(map);
-    const admTokens = catalogForModalidade("administracao_locacao").map((d) => d.token);
-    expect(admTokens.length).toBeGreaterThan(0);
-    for (const token of admTokens) {
-      expect(mapKeys).toContain(token);
+  it.each(["administracao_locacao", "locacao", "locacao_comercial", "temporada"])(
+    "todo token do catálogo %s existe em buildLocacaoPlaceholderMap",
+    (modalidade) => {
+      const enriched = enrichLocacaoData(locacaoBase as Record<string, unknown>, {});
+      const map = buildLocacaoPlaceholderMap(enriched);
+      const mapKeys = Object.keys(map);
+      // `contrato_numero` é injetado na geração (contract-generation.ts), não no mapa.
+      const tokens = catalogForModalidade(modalidade)
+        .map((d) => d.token)
+        .filter((t) => t !== "contrato_numero");
+      expect(tokens.length).toBeGreaterThan(0);
+      for (const token of tokens) {
+        expect(mapKeys).toContain(token);
+      }
     }
-  });
+  );
 
   // O conjunto de adm é intencionalmente mínimo: só CONTRATANTE (proprietário),
   // imóvel e data. Administradora/foro/assinaturas ficam LITERAIS no modelo da

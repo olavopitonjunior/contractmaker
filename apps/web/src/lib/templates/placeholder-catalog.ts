@@ -23,13 +23,6 @@ export interface PlaceholderDef {
   description: string;
   example: string;
   required: boolean;
-  /**
-   * Obrigatório SÓ nestas modalidades (soma-se a `required`). Um token pode
-   * ser opcional na venda e obrigatório na locação sem duplicar a entrada —
-   * `catalogForModalidade` resolve, e é dela que o prompt da IA, o
-   * `requiredTokens` e a revisão leem.
-   */
-  requiredIn?: PlaceholderModalidade[];
   kind: PlaceholderKind;
   modalidades: PlaceholderModalidade[];
 }
@@ -151,18 +144,28 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   {
     token: "imovel_descricao",
     label: "Descrição do imóvel",
-    description:
-      "Descrição narrativa do imóvel preenchida no formulário. Na locação é " +
-      "OBRIGATÓRIA: a cláusula do objeto (1.1) diz 'apartamento 33 do condomínio " +
-      "Siracusa, localizado na…' — sem esta chave, a descrição do imóvel do " +
-      "arquivo-fonte fica literal no modelo e todo contrato sai com ela.",
+    description: "Descrição narrativa opcional do imóvel preenchida no formulário.",
     example: "Apartamento residencial com 3 dormitórios…",
     required: false,
-    // Rebuild da RE/MAX Trio (2026-09-01): 16/16 modelos ficaram com a
-    // descrição do imóvel-fonte na 1.1 porque a IA só tokenizou o endereço.
-    requiredIn: LOCACAO,
     kind: "simple",
     modalidades: TODAS,
+  },
+  // Rebuild da RE/MAX Trio (2026-09-01): 16/16 modelos ingeridos ficaram com
+  // "apartamento 33, do condomínio edifício X" do imóvel-fonte literal na
+  // cláusula do objeto, porque só o endereço tinha chave. Esta é a chave do
+  // trecho que ANTECEDE o endereço — composta de campos que o form sempre tem
+  // (tipo, complemento, nome do condomínio), como faz a 1.1 do modelo canônico.
+  {
+    token: "imovel_identificacao",
+    label: "Identificação do imóvel",
+    description:
+      "Tipo e unidade do imóvel na cláusula do objeto, antes do endereço: " +
+      "'apartamento 33, do condomínio edifício X' ou 'casa'. Mapeie o trecho " +
+      "entre 'proprietária do(a)' e 'localizado(a) na'.",
+    example: "apartamento 33, do condomínio edifício Siracusa",
+    required: true,
+    kind: "composed",
+    modalidades: LOCACAO,
   },
   {
     token: "imovel_matricula",
@@ -186,8 +189,8 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
     token: "iptu_valor",
     label: "IPTU mensal",
     description:
-      "Valor mensal do IPTU informado no formulário, em BRL. Na cláusula de " +
-      "encargos (9.1.2): 'IPTU (R$ 31,67 por mês – referência ano X)'.",
+      "Valor mensal do IPTU na cláusula de encargos/despesas da locação, em BRL. " +
+      "Vazio quando não informado ou zero.",
     example: "R$ 31,67",
     required: false,
     kind: "simple",
@@ -197,10 +200,9 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
     token: "condominio_valor",
     label: "Condomínio mensal",
     description:
-      "Valor mensal das despesas ordinárias de condomínio informado no " +
-      "formulário, em BRL. Na cláusula de encargos (9.1.2): 'despesas ordinárias " +
-      "de condomínio (R$ 676,08 – referência mês X)'. Vazio quando o imóvel não " +
-      "tem condomínio (casa).",
+      "Valor mensal das despesas ordinárias de condomínio na cláusula de " +
+      "encargos/despesas da locação, em BRL. Vazio quando o imóvel não tem " +
+      "condomínio (casa) ou o valor é zero.",
     example: "R$ 676,08",
     required: false,
     kind: "simple",
@@ -362,9 +364,8 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
 ];
 
 export function catalogForModalidade(modalidade: string): PlaceholderDef[] {
-  const m = modalidade as PlaceholderModalidade;
-  return PLACEHOLDER_CATALOG.filter((d) => d.modalidades.includes(m)).map((d) =>
-    d.requiredIn?.includes(m) && !d.required ? { ...d, required: true } : d
+  return PLACEHOLDER_CATALOG.filter((d) =>
+    d.modalidades.includes(modalidade as PlaceholderModalidade)
   );
 }
 

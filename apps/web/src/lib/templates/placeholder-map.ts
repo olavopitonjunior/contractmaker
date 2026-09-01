@@ -40,6 +40,34 @@ function numExtensoPar(data: Record<string, unknown>, path: string): string {
   return `${v} (${hbsExpr(`numeroExtenso ${path}`, data)})`;
 }
 
+/**
+ * BRL ou vazio. Zero e não-número contam como "não informado": o form grava 0
+ * quando o campo fica em branco (casa sem condomínio, IPTU pago à parte), e a
+ * convenção do repo é a mesma — `brl()` do resumo e `{{#if (gt … 0)}}` do
+ * canônico. "R$ 0,00" numa cláusula de encargos é afirmação falsa.
+ */
+function moedaOuVazio(data: Record<string, unknown>, path: string): string {
+  const n = Number(get(data, path));
+  return Number.isFinite(n) && n > 0 ? hbsExpr(`moeda ${path}`, data) : "";
+}
+/**
+ * Trecho da cláusula do objeto que antecede o endereço — "apartamento 33, do
+ * condomínio edifício X" — dos campos que o form sempre tem. Espelha a 1.1 do
+ * modelo canônico (locacao_residencial_v3.hbs): tipo + complemento + condomínio.
+ */
+function imovelIdentificacao(imovel: Record<string, unknown> | undefined): string {
+  if (!imovel) return "";
+  const tipo = str(imovel.tipo_texto) || str(imovel.kind).replace(/_/g, " ");
+  // O complemento do form costuma repetir o tipo ("apto. 121", "casa 2"):
+  // sem isto sairia "apartamento apto. 121".
+  const complemento = str(imovel.complemento)
+    .replace(/^(apto\.?|apartamento|ap\.?|casa|sala|loja|galp[aã]o)\s+/i, "")
+    .trim();
+  const partes: string[] = [];
+  if (tipo) partes.push(tipo + (complemento ? ` ${complemento}` : ""));
+  if (imovel.condominio_nome) partes.push(`do ${str(imovel.condominio_nome)}`);
+  return partes.join(", ");
+}
 function enderecoCompleto(imovel: Record<string, unknown> | undefined): string {
   if (!imovel) return "";
   const partes: string[] = [];
@@ -80,6 +108,7 @@ export function buildLocacaoPlaceholderMap(
 
     // Simples formatados
     imovel_endereco_completo: enderecoCompleto(imovel),
+    imovel_identificacao: imovelIdentificacao(imovel),
     imovel_descricao: str(imovel?.descricao),
     imovel_matricula: imovel?.matricula
       ? `${imovel.matricula}${imovel.cartorio ? ` do ${imovel.cartorio}` : ""}`
@@ -91,14 +120,8 @@ export function buildLocacaoPlaceholderMap(
     aluguel_dia_vencimento: numExtensoPar(enriched, "aluguel.dia_vencimento"),
     // Encargos da 9.1.2, do próprio form (aluguel.iptu_mensal / condominio_mensal).
     // Sem chave, o modelo ingerido guardava o IPTU e o condomínio do imóvel-fonte.
-    iptu_valor:
-      get(enriched, "aluguel.iptu_mensal") != null
-        ? hbsExpr("moeda aluguel.iptu_mensal", enriched)
-        : "",
-    condominio_valor:
-      get(enriched, "aluguel.condominio_mensal") != null
-        ? hbsExpr("moeda aluguel.condominio_mensal", enriched)
-        : "",
+    iptu_valor: moedaOuVazio(enriched, "aluguel.iptu_mensal"),
+    condominio_valor: moedaOuVazio(enriched, "aluguel.condominio_mensal"),
     vigencia_meses: numExtensoPar(enriched, "aluguel.vigencia_meses"),
     vigencia_inicio: str(config.vigencia_inicio_texto),
     vigencia_fim: str(config.vigencia_fim_texto),
