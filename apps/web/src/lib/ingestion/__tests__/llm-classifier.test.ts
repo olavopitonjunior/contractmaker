@@ -6,6 +6,7 @@ import {
   createLlmItemClassifier,
   CLASSIFICATION_SCHEMA,
   CLASSIFY_PLAYBOOK,
+  administracaoExcerpts,
 } from "@/lib/ingestion/llm-classifier";
 import { precomputeItemSignals } from "@/lib/ingestion/classifier";
 import { IngestionAiMeter, IngestionCostCapError } from "@/lib/ingestion/ai-budget";
@@ -129,6 +130,20 @@ describe("classificador LLM — o essencial", () => {
     expect(content).toContain(`docType: ${signals.docType}`);
     expect(content).toContain("TRECHOS QUE FALAM DE GARANTIA");
     expect(content).toContain("Fiança Locatícia");
+  });
+
+  it("anexa os trechos de pagamento e vistoria — a evidência do eixo de administração", () => {
+    const texto =
+      "CONTRATO DE LOCAÇÃO RESIDENCIAL\n" +
+      "1. IMÓVEL\n" +
+      "4.1. Os aluguéis e demais encargos serão cobrados e geridos pela ADMINISTRADORA do imóvel.\n" +
+      "6.3. Reconhecem as partes que será realizado o laudo de vistoria do imóvel.\n" +
+      "8.1. O seguro fiança locatícia contratado junto à seguradora garantirá esta locação.";
+    const content = buildClassifyUserContent(input(texto, "adm.docx"));
+    expect(content).toContain("TRECHOS QUE FALAM DE PAGAMENTO E VISTORIA");
+    expect(content).toContain("geridos pela ADMINISTRADORA");
+    expect(content).toContain("laudo de vistoria");
+    expect(administracaoExcerpts("Texto sem nada disso.")).toBe("");
   });
 });
 

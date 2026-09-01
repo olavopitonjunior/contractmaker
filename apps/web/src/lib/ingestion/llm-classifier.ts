@@ -67,6 +67,24 @@ import type { IngestionAiMeter } from "@/lib/ingestion/ai-budget";
  */
 export const MAX_CLASSIFY_HEAD_CHARS = 12_000;
 export const MAX_CLASSIFY_GARANTIA_CHARS = 6_000;
+/** Trechos de pagamento/vistoria — a evidência do eixo de administração. */
+export const MAX_CLASSIFY_ADMINISTRACAO_CHARS = 3_000;
+
+const ADMINISTRACAO_CONTEXT =
+  /administradora|administra[çc][aã]o da loca|geridos pel|cobrados pel|laudo de vistoria|vistoria|diretamente [àa] parte locadora|diretamente ao locador|cr[ée]dito banc[áa]rio/i;
+
+/**
+ * Parágrafos que decidem o eixo Administração × Não Administração. A cláusula
+ * de pagamento costuma ficar depois do recorte de `MAX_CLASSIFY_HEAD_CHARS`;
+ * sem este anexo o modelo decidiria o eixo sem a evidência.
+ */
+export function administracaoExcerpts(text: string): string {
+  return text
+    .split(/\n+/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 20 && ADMINISTRACAO_CONTEXT.test(p))
+    .join("\n\n");
+}
 
 /** Categorias que o LLM pode apontar — as duas que regex não alcança. */
 const EXTERNAL_PII_KINDS = ["person_name", "address"] as const;
@@ -291,6 +309,7 @@ export function buildClassifyUserContent(input: ClassifyItemInput): string {
   const garantia = garantiaExcerpts(input.text)
     .flatMap((e) => e.paragraphs)
     .join("\n\n");
+  const administracao = administracaoExcerpts(input.text);
 
   return [
     `ARQUIVO: ${input.filename}`,
@@ -306,6 +325,10 @@ export function buildClassifyUserContent(input: ClassifyItemInput): string {
     garantia
       ? `TRECHOS QUE FALAM DE GARANTIA:\n${clip(garantia, MAX_CLASSIFY_GARANTIA_CHARS)}`
       : "TRECHOS QUE FALAM DE GARANTIA: nenhum encontrado.",
+    "",
+    administracao
+      ? `TRECHOS QUE FALAM DE PAGAMENTO E VISTORIA (decidem admImobiliaria):\n${clip(administracao, MAX_CLASSIFY_ADMINISTRACAO_CHARS)}`
+      : "TRECHOS QUE FALAM DE PAGAMENTO E VISTORIA: nenhum encontrado.",
     "",
     `DOCUMENTO (início):\n${clip(input.text, MAX_CLASSIFY_HEAD_CHARS)}`,
   ].join("\n");
@@ -465,8 +488,10 @@ export function createLlmItemClassifier(
       const garantiaTipo = admitsGarantia ? toGarantia(raw.garantiaTipo) : null;
       // Eixo de administração só existe no CONTRATO de locação: na proposta o
       // playbook proíbe (`proposta.ts`), e em venda/administração não faz sentido.
-      const admImobiliaria =
-        docType === "contrato_locacao" ? toNullableBool(raw.admImobiliaria) : null;
+      const admitsAdm = docType
+        ? ingestDocTypeDef(docType).criteria.includes("admImobiliaria")
+        : false;
+      const admImobiliaria = admitsAdm ? toNullableBool(raw.admImobiliaria) : null;
 
       const confidence = toConfidence(raw.confidence);
 
