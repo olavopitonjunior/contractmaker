@@ -413,9 +413,17 @@ describe("useSettingsAutoSave", () => {
     // Save PARCIAL é o único caminho que o contador de baseline (#463) muda
     // fora da pill: só `name` avança a baseline, então `dirtySignature` passa
     // de "name=…|cpf=…" para "cpf=…" e o efeito de agendamento VOLTA a rodar,
-    // onde antes ficava congelado. Ele tem de morrer no guard de `enviaveis`
-    // (a única chave suja é a inválida) — sem isso, o CPF ruim viraria um
-    // PATCH por ciclo contra uma rota que grava audit log a cada gravação.
+    // onde antes ficava congelado.
+    //
+    // Quem impede o PATCH extra são DOIS guards redundantes, ambos por
+    // `enviaveis`: o do efeito (só evita um `setTimeout` inútil) e o de
+    // `persist` — este é o que de fato intercepta antes do `fetch`. Removendo
+    // só um dos dois, esta asserção continua passando; ela só cai com os dois
+    // fora. Ou seja: tem mutação de controle, mas composta, não simples.
+    //
+    // E o estrago sem eles seria **um PATCH vazio a mais**, não um loop: no
+    // round seguinte o `dirtySignature` estabiliza e o efeito para. Ainda vale
+    // travar — a rota grava audit log a cada gravação.
     await act(async () => {
       vi.advanceTimersByTime(5000);
     });
