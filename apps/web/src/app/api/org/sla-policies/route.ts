@@ -141,10 +141,15 @@ export async function PATCH(req: NextRequest) {
   // chamador, não só para /settings/sla.
   //
   // `enabled: false` nunca casa (o default resolve `enabled: true`), então
-  // etapa DESLIGADA sempre cai no upsert e mantém a linha. Isso é deliberado:
-  // o GET mascara os prazos de etapa desligada (devolve `null`, e a tela
-  // preenche 5/10), então tratá-la como "igual ao default" apagaria prazos
-  // reais que o cliente nem sabe que existem.
+  // etapa DESLIGADA sempre cai no upsert e mantém a linha.
+  //
+  // A justificativa MUDOU e a regra continua a mesma. Antes ela existia porque
+  // o GET mascarava os prazos de etapa desligada e tratá-la como "padrão"
+  // apagaria valores reais; esse mascaramento acabou (ver `ResolvedSlaPolicy`).
+  // A razão que sobra é mais forte e independente: **desligar já É uma
+  // divergência** — o default de código resolve `enabled: true`. Apagar a linha
+  // de uma etapa desligada RESSUSCITARIA o SLA dela, que é o oposto do que a
+  // pessoa pediu. Por isso ela nunca é reset, nem quando os prazos são 5/10.
   const isCodeDefault = (p: (typeof policies)[number]) =>
     p.enabled &&
     p.warnDays === AGING_WARN_DAYS &&

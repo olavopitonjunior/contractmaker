@@ -45,7 +45,11 @@ describe("resolveSlaPolicies", () => {
     expect(lost.terminal).toBe(true);
   });
 
-  it("linha da org sobrepõe o default; desabilitada zera os dias", async () => {
+  // ANTES este caso afirmava o contrário ("desabilitada zera os dias"), e era
+  // esse zeramento que destruía dado: a tela não recebia os prazos salvos,
+  // preenchia 5/10 no lugar, e o Salvar seguinte regravava o default por cima.
+  // Desligar e religar apagava a configuração sem ninguém pedir.
+  it("linha da org sobrepõe o default; DESABILITADA preserva os dias salvos", async () => {
     slaFindMany.mockResolvedValue([
       { key: "s0", warnDays: 2, dangerDays: 4, enabled: true },
       { key: "s1", warnDays: 3, dangerDays: 6, enabled: false },
@@ -57,10 +61,28 @@ describe("resolveSlaPolicies", () => {
       source: "custom",
     });
     expect(policies.find((p) => p.stageId === "s1")).toMatchObject({
+      // Os 3/6 continuam vindo: quem quer saber se a etapa envelhece lê
+      // `enabled`, não a ausência dos prazos.
+      warnDays: 3,
+      dangerDays: 6,
+      enabled: false,
+      source: "custom",
+    });
+  });
+
+  // O `null` sobrevive onde ele significa de verdade "não existe SLA": stage
+  // terminal não tem linha e nunca envelhece.
+  it("stage TERMINAL continua sem prazos, mesmo com linha na tabela", async () => {
+    slaFindMany.mockResolvedValue([
+      { key: "s2", warnDays: 9, dangerDays: 9, enabled: true },
+    ]);
+    const policies = await resolveSlaPolicies("org-1", "venda");
+    const terminal = policies.find((p) => p.terminal);
+    expect(terminal).toBeDefined();
+    expect(terminal).toMatchObject({
       warnDays: null,
       dangerDays: null,
       enabled: false,
-      source: "custom",
     });
   });
 

@@ -23,9 +23,19 @@ export interface ResolvedSlaPolicy {
   stageName: string;
   position: number;
   terminal: boolean;
-  /** null = stage sem SLA (terminal ou linha desabilitada). */
+  /**
+   * Prazos ARMAZENADOS, independentemente de `enabled`. `null` só para stage
+   * TERMINAL, que não tem linha nem SLA.
+   *
+   * Já foi `null` também para linha desabilitada, e isso destruía dado: a tela
+   * preenchia o default 5/10 no lugar do que não veio, e o Salvar seguinte
+   * regravava 5/10 por cima dos valores reais. O usuário perdia a configuração
+   * sem ter tocado naquela etapa — bastava desligar, salvar outra coisa e
+   * religar. Quem quer saber se a etapa tem SLA lê `enabled`, não `null`.
+   */
   warnDays: number | null;
   dangerDays: number | null;
+  /** false = etapa não envelhece. Os prazos acima seguem preservados. */
   enabled: boolean;
   /** "custom" quando há linha da org; "default" = 5/10 de código. */
   source: "custom" | "default";
@@ -73,8 +83,11 @@ export async function resolveSlaPolicies(
         stageName: stage.name,
         position: stage.position,
         terminal,
-        warnDays: row.enabled ? row.warnDays : null,
-        dangerDays: row.enabled ? row.dangerDays : null,
+        // Sem máscara: os prazos da linha vêm sempre, ligada ou não. Mascarar
+        // fazia a tela perder a referência do que estava salvo e regravar o
+        // default por cima no Salvar seguinte.
+        warnDays: row.warnDays,
+        dangerDays: row.dangerDays,
         enabled: row.enabled,
         source: "custom" as const,
       };
