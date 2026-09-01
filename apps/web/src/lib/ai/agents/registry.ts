@@ -130,7 +130,9 @@ export const AGENT_REGISTRY: Record<AgentKey, AgentDefinition> = {
     tenantEditable: true,
     // `clause_generate` é o botão "gerar com IA" de /clauses — mesma função do
     // curador (alimentar o acervo), só que disparada pela UI em vez do chat.
-    operations: ["specialist_curator", "clause_generate"],
+    // `clause_classify` é o "analisar e classificar": mesma dona (curadoria do
+    // acervo), aplicada a cláusula que já existe.
+    operations: ["specialist_curator", "clause_generate", "clause_classify"],
     supports: ALL,
   },
   aggregator: {

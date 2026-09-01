@@ -27,6 +27,18 @@ export const OPUS_MODEL = "claude-opus-4-6";
  */
 /** Classificação por documento — barata, uma chamada por item do lote. */
 export const INGEST_CLASSIFY_MODEL = "claude-haiku-4-5";
+
+/**
+ * Classificação de CLÁUSULA já gravada ("Analisar e classificar" de /clauses).
+ *
+ * Haiku, e não Sonnet: a tarefa é rotular 500–2.000 caracteres contra
+ * vocabulário FECHADO (esteira, tema, tags, grupo) — a mesma forma do
+ * {@link INGEST_CLASSIFY_MODEL}, que já roda Haiku sobre documentos inteiros.
+ * Onde o modelo poderia agregar é na tokenização literal→chave, e ali a rede é
+ * determinística (catálogo de chaves + ocorrência única + render de verdade):
+ * um Haiku que erra é BARRADO, não aplicado. Escalar = trocar esta constante.
+ */
+export const CLAUSE_CLASSIFY_MODEL = "claude-haiku-4-5";
 /**
  * Decisão de conjunto (lote inteiro → LibraryPlan) — uma chamada por run.
  *
