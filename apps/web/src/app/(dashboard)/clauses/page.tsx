@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db/prisma";
 import { knowledgeScopeWhere } from "@/lib/ai/knowledge-scope";
 import { findPlatformSlotUpdates } from "@/lib/knowledge/platform-slot-updates";
 import { ClausesPageClient } from "@/components/clauses/ClausesPageClient";
+import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
+import { MODULE } from "@/lib/modules/catalog";
 
 export default async function ClausesPage() {
   const session = await auth();
@@ -38,6 +40,7 @@ export default async function ClausesPage() {
       content: true,
       subcategory: true,
       groupCode: true,
+      esteira: true,
       isVariable: true,
       agentNotes: true,
       tags: true,
@@ -49,6 +52,10 @@ export default async function ClausesPage() {
       updatedAt: true,
     },
     orderBy: [{ subcategory: "asc" }, { title: "asc" }],
+    // Guarda de tamanho: a tela filtra no client, e até aqui não havia teto
+    // nenhum. Acervo de tenant é da ordem de dezenas; se algum estourar isto,
+    // aí vale paginar no servidor — não antes.
+    take: 500,
   });
 
   // Uso POR TENANT (KnowledgeItemUsage) — o usageCount global do KnowledgeItem
@@ -71,10 +78,15 @@ export default async function ClausesPage() {
     updatedAt: c.updatedAt.toISOString(),
   }));
 
+  // Org sem o módulo de locação não vê seletor de esteira e fica em venda —
+  // mesmo comportamento de /settings/formulario.
+  const locacaoEnabled = isModuleEnabled(await getOrgModules(org.id), MODULE.LOCACAO);
+
   return (
     <ClausesPageClient
       clauses={clauses}
       platformUpdates={platformUpdates}
+      locacaoEnabled={locacaoEnabled}
     />
   );
 }

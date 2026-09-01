@@ -14,6 +14,8 @@ export interface Clause {
   category: string;
   subcategory: string | null;
   groupCode: string | null;
+  /** "venda" | "locacao" | "ambas"; `null` = ainda não classificada. */
+  esteira: string | null;
   isVariable: boolean;
   agentNotes: string | null;
   tags: string[];
