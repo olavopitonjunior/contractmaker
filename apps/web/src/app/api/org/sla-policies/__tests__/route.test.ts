@@ -8,6 +8,7 @@ import {
   resolveSlaPolicies,
   recomputeSlaDeadlines,
 } from "@/lib/pipeline/sla-policies";
+import { audit } from "@/lib/security/audit";
 
 vi.mock("@/lib/auth/context", () => ({ requireAuth: vi.fn() }));
 vi.mock("@/lib/security/rbac/guard", async (orig) => ({
@@ -29,6 +30,7 @@ const resolve = vi.mocked(resolveSlaPolicies);
 const recompute = vi.mocked(recomputeSlaDeadlines);
 const upsert = vi.mocked(prisma.slaPolicy.upsert);
 const deleteMany = vi.mocked(prisma.slaPolicy.deleteMany);
+const auditMock = vi.mocked(audit);
 
 const POLICIES = [
   {
@@ -100,6 +102,93 @@ describe("PATCH /api/org/sla-policies", () => {
       })
     );
     expect(recompute).toHaveBeenCalledWith("org-1", "venda");
+  });
+
+  // A tela manda TODAS as etapas editáveis a cada "Salvar". Antes, isso criava
+  // linha para as intocadas: elas viravam "Personalizado" no badge e, pior,
+  // ficavam PINADAS em 5/10 — se o default de código mudasse, a org não
+  // receberia. O contrato da rota ("persistimos SÓ divergências") passou a ser
+  // imposto por ela, e não pela boa vontade do cliente.
+  it("etapa que chega igual ao default de código perde a linha em vez de virar custom", async () => {
+    const res = await PATCH(
+      req("PATCH", {
+        kind: "venda",
+        policies: [{ stageId: "s0", warnDays: 5, dangerDays: 10, enabled: true }],
+      })
+    );
+    expect(res.status).toBe(200);
+    expect(upsert).not.toHaveBeenCalled();
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: { orgId: "org-1", scope: "deal_stage", key: "s0", kind: "venda" },
+    });
+
+    // Um PATCH que só DELETOU ainda precisa re-materializar os deadlines: os
+    // deals ativos voltam ao default e as datas mudam.
+    expect(recompute).toHaveBeenCalledWith("org-1", "venda");
+
+    // E a trilha tem de dizer que foi RESET, não "a org escolheu 5/10". Sem
+    // isso, mudar o default de código torna o log velho enganoso.
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          policies: [expect.objectContaining({ stageId: "s0", effect: "reset" })],
+        }),
+      })
+    );
+  });
+
+  it("salvar UMA etapa divergente não cria linha para as que estão no padrão", async () => {
+    resolve.mockResolvedValue([
+      { ...POLICIES[0] },
+      { ...POLICIES[0], stageId: "s1", stageName: "Confecção", position: 1 },
+      POLICIES[1],
+    ]);
+
+    const res = await PATCH(
+      req("PATCH", {
+        kind: "venda",
+        policies: [
+          { stageId: "s0", warnDays: 3, dangerDays: 7, enabled: true },
+          { stageId: "s1", warnDays: 5, dangerDays: 10, enabled: true },
+        ],
+      })
+    );
+    expect(res.status).toBe(200);
+
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          orgId_scope_key: { orgId: "org-1", scope: "deal_stage", key: "s0" },
+        },
+      })
+    );
+    expect(deleteMany).toHaveBeenCalledTimes(1);
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: { orgId: "org-1", scope: "deal_stage", key: "s1", kind: "venda" },
+    });
+  });
+
+  // Contra-caso que trava a armadilha: o GET MASCARA os prazos de etapa
+  // desligada (`warnDays: row.enabled ? row.warnDays : null`) e a tela preenche
+  // 5/10 no lugar. Se "igual ao default" ignorasse o `enabled`, um Salvar
+  // qualquer APAGARIA os prazos reais de uma etapa desligada — que o usuário
+  // recuperaria ao religá-la. Etapa desligada diverge por definição.
+  it("etapa DESLIGADA em 5/10 é upsert, nunca delete (o GET mascara os prazos dela)", async () => {
+    const res = await PATCH(
+      req("PATCH", {
+        kind: "venda",
+        policies: [{ stageId: "s0", warnDays: 5, dangerDays: 10, enabled: false }],
+      })
+    );
+    expect(res.status).toBe(200);
+    expect(deleteMany).not.toHaveBeenCalled();
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ enabled: false }),
+      })
+    );
   });
 
   it("stage terminal/desconhecido → 400, nada gravado", async () => {
