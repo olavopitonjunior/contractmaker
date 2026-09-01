@@ -1,4 +1,5 @@
 import { flattenForPlaceholders } from "@/lib/google/replace-placeholders";
+import { TIPO_IMOVEL_TEXTO } from "@/lib/locacao/enrich";
 import {
   qualificacaoPessoas,
   qualificacaoPessoasVenda,
@@ -55,18 +56,37 @@ function moedaOuVazio(data: Record<string, unknown>, path: string): string {
  * condomínio edifício X" — dos campos que o form sempre tem. Espelha a 1.1 do
  * modelo canônico (locacao_residencial_v3.hbs): tipo + complemento + condomínio.
  */
+/** Como o form costuma abreviar cada tipo dentro do complemento ("apto. 121"). */
+const TIPO_SINONIMOS: Record<string, string[]> = {
+  apartamento: ["apartamento", "apto", "ap"],
+  casa: ["casa"],
+  comercial_sala: ["sala", "sala comercial", "conj", "conjunto", "cj"],
+  loja: ["loja"],
+  galpao: ["galpão", "galpao"],
+  terreno: ["terreno", "lote"],
+};
 function imovelIdentificacao(imovel: Record<string, unknown> | undefined): string {
   if (!imovel) return "";
-  const tipo = str(imovel.tipo_texto) || str(imovel.kind).replace(/_/g, " ");
-  // O complemento do form costuma repetir o tipo ("apto. 121", "casa 2"):
-  // sem isto sairia "apartamento apto. 121".
-  const complemento = str(imovel.complemento)
-    .replace(/^(apto\.?|apartamento|ap\.?|casa|sala|loja|galp[aã]o)\s+/i, "")
-    .trim();
-  const partes: string[] = [];
-  if (tipo) partes.push(tipo + (complemento ? ` ${complemento}` : ""));
-  if (imovel.condominio_nome) partes.push(`do ${str(imovel.condominio_nome)}`);
-  return partes.join(", ");
+  const kind = str(imovel.kind);
+  const tipo =
+    str(imovel.tipo_texto) || (kind ? (TIPO_IMOVEL_TEXTO[kind] ?? kind.replace(/_/g, " ")) : "");
+  // O complemento do form costuma repetir o PRÓPRIO tipo ("apto. 121", "casa 2"):
+  // sem isto sairia "apartamento apto. 121". Só o sinônimo do tipo atual cai —
+  // "Loja 1" num apartamento (prédio misto) fica como está.
+  let complemento = str(imovel.complemento).trim();
+  // Do mais longo pro mais curto (a alternância é first-match: `conj`
+  // sequestraria "Conjunto") e com separador OBRIGATÓRIO — ponto, espaço ou
+  // dígito à frente. Sem separador, "Apenas fundos" viraria "enas fundos".
+  const sinonimos = [...(TIPO_SINONIMOS[kind] ?? [])].sort((a, b) => b.length - a.length);
+  if (sinonimos.length) {
+    const alt = sinonimos.map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+    complemento = complemento
+      .replace(new RegExp(`^(?:${alt})(?:\\s*\\.\\s*|\\s+|(?=\\d))`, "i"), "")
+      .trim();
+  }
+  const unidade = [tipo, complemento].filter(Boolean).join(" ");
+  const condominio = str(imovel.condominio_nome).trim();
+  return [unidade, condominio && `do ${condominio}`].filter(Boolean).join(", ");
 }
 function enderecoCompleto(imovel: Record<string, unknown> | undefined): string {
   if (!imovel) return "";

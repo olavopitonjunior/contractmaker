@@ -164,7 +164,9 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
       "entre 'proprietária do(a)' e 'localizado(a) na'.",
     example: "apartamento 33, do condomínio edifício Siracusa",
     required: true,
-    kind: "composed",
+    // `simple`, não `composed`: é um trecho DENTRO da frase — "composed" faz o
+    // passe de IA mapear o bloco inteiro, e ele engoliria o endereço.
+    kind: "simple",
     modalidades: LOCACAO,
   },
   {

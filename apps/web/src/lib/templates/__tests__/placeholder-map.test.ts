@@ -177,6 +177,24 @@ describe("buildLocacaoPlaceholderMap", () => {
       )
     );
     expect(casa.imovel_identificacao).toBe("casa");
+
+    // Sinônimo colado ("apto.121") também cai; sinônimo de OUTRO tipo fica
+    // (prédio misto: loja dentro de apartamento não é redundância).
+    const build = (imovel: Record<string, unknown>) =>
+      buildLocacaoPlaceholderMap(
+        enrichLocacaoData(JSON.parse(JSON.stringify({ ...locacaoBase, imovel: { ...locacaoBase.imovel, ...imovel } })), {})
+      );
+    expect(build({ complemento: "apto.121" }).imovel_identificacao).toBe("apartamento 121");
+    expect(build({ complemento: "Loja 1" }).imovel_identificacao).toBe("apartamento Loja 1");
+    expect(build({ kind: "casa", complemento: "Casa 2" }).imovel_identificacao).toBe("casa 2");
+    // Sinônimo como PREFIXO DE PALAVRA não é sinônimo: "Apenas fundos" fica inteiro.
+    expect(build({ complemento: "Apenas fundos" }).imovel_identificacao).toBe("apartamento Apenas fundos");
+    expect(build({ kind: "casa", complemento: "Casarão dos fundos" }).imovel_identificacao).toBe("casa Casarão dos fundos");
+    // Sinônimo curto vs longo: `conj` não pode sequestrar "Conjunto".
+    expect(build({ kind: "comercial_sala", complemento: "Conjunto 5" }).imovel_identificacao).toBe("sala comercial 5");
+    expect(build({ kind: "comercial_sala", complemento: "Sala comercial 5" }).imovel_identificacao).toBe("sala comercial 5");
+    // Condomínio só com espaço não vira ", do ".
+    expect(build({ complemento: "", condominio_nome: "  " }).imovel_identificacao).toBe("apartamento");
   });
 
   it("sem administradora cai no fallback e fiador vazio fora da fiança", () => {
@@ -363,7 +381,8 @@ describe("administração de locação — engine google_docs", () => {
   it.each(["administracao_locacao", "locacao", "locacao_comercial", "temporada"])(
     "todo token do catálogo %s existe em buildLocacaoPlaceholderMap",
     (modalidade) => {
-      const enriched = enrichLocacaoData(locacaoBase as Record<string, unknown>, {});
+      // Clone: enrichLocacaoData muta o imóvel (tipo_texto) e o fixture é compartilhado.
+      const enriched = enrichLocacaoData(JSON.parse(JSON.stringify(locacaoBase)), {});
       const map = buildLocacaoPlaceholderMap(enriched);
       const mapKeys = Object.keys(map);
       // `contrato_numero` é injetado na geração (contract-generation.ts), não no mapa.
