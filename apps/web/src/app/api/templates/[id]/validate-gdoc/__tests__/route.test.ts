@@ -222,6 +222,13 @@ describe("POST /api/templates/[id]/validate-gdoc — espelho do gate de PII", ()
     expect(updateArgs().data.draftReport.pii).toMatchObject({ blocked: false, kinds: [] });
   });
 
+  it("export VAZIO não apaga um blocked:true anterior (não medido ≠ limpo)", async () => {
+    withReport({ pii: { blocked: true, kinds: ["cpf"], count: 1, warnings: [], checkedAt: "x" } });
+    mockDocText.mockResolvedValue("");
+    await POST(new Request("http://localhost"), { params: { id: "t1" } });
+    expect(updateArgs().data.draftReport.pii).toMatchObject({ blocked: true, kinds: ["cpf"] });
+  });
+
   it("modelo legado sem relatório ganha a medida na primeira revalidação", async () => {
     withReport(null);
     mockDocText.mockResolvedValue("Agência 0001, Conta Corrente 682331986-6");

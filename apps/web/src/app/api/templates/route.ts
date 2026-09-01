@@ -10,6 +10,7 @@ import {
   schemaTypeForModalidade,
   templateFamilyForModalidade,
 } from "@/lib/contracts/template-category";
+import { auditTemplateText } from "@/lib/templates/pii-gate";
 
 const createTemplateSchema = z.object({
   name: z.string().min(1),
@@ -88,7 +89,12 @@ export async function POST(req: NextRequest) {
   const isDefault = parsed.data.isDefault ?? false;
 
   // Invariante: um principal por GRUPO (modalidade).
-  if (isDefault) {
+  // Mede ANTES de mexer no principal: modelo que nasce rascunho (source com
+  // dado pessoal) não pode rebaixar o principal ativo da modalidade — a
+  // seleção só enxerga `active`, e a org ficaria sem principal.
+  const pii = auditTemplateText(parsed.data.handlebarsSource);
+  const bornActive = !pii.blocked;
+  if (isDefault && bornActive) {
     await prisma.contractTemplate.updateMany({
       where: { orgId: org.id, modalidade, isDefault: true },
       data: { isDefault: false },
@@ -104,10 +110,14 @@ export async function POST(req: NextRequest) {
       modalidade,
       category,
       matchCriteria: matchCriteriaForWrite(modalidade, parsed.data.matchCriteria),
-      isDefault,
+      isDefault: isDefault && bornActive,
       version: parsed.data.version || "1.0.0",
       schemaType,
-      status: "active",
+      // Criação nasce ativa — mas não com dado pessoal literal: o gate da
+      // ativação vive no PATCH e a criação o contornava. Source handlebars com
+      // CPF/RG/conta nasce RASCUNHO, com o relatório, e passa pelo PATCH.
+      status: bornActive ? "active" : "draft",
+      ...(bornActive ? {} : { draftReport: { pii } as object }),
       engine: parsed.data.engine ?? "handlebars",
       googleTemplateDocId: parsed.data.googleTemplateDocId ?? null,
     },

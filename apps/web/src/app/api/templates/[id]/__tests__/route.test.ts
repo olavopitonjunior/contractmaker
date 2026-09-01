@@ -9,7 +9,16 @@ import { getDocPlainText } from "@/lib/google/docs";
 import { audit } from "@/lib/security/audit";
 
 vi.mock("@/lib/google/docs", () => ({ getDocPlainText: vi.fn() }));
-vi.mock("@/lib/security/audit", () => ({ audit: vi.fn(async () => undefined) }));
+vi.mock("@/lib/security/audit", () => ({
+  audit: vi.fn(async () => undefined),
+  extractAuditContextFromRequest: vi.fn((_req: unknown, orgId: string, userId?: string | null) => ({
+    orgId,
+    userId: userId ?? null,
+  })),
+}));
+vi.mock("@/lib/auth/impersonation", () => ({
+  getEffectiveUserId: vi.fn(async (id: string) => id),
+}));
 const mockDocText = vi.mocked(getDocPlainText);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -310,12 +319,16 @@ describe("DELETE /api/templates/[id]", () => {
  * liberar, de carona, a impressão de CPF de terceiro em todo contrato.
  */
 describe("PATCH /api/templates/[id] — trava da ativação com PII", () => {
+  // google_docs COM Doc: o relatório gravado só é confiado quando nada mudou
+  // (engine handlebars é re-medido pelo próprio source a cada ativação).
   const COM_PII = {
     ...TEMPLATE,
     status: "draft",
     modalidade: "locacao",
     category: null,
     matchCriteria: { garantia: "caucao" },
+    engine: "google_docs",
+    googleTemplateDocId: "doc-1",
     handlebarsSource: "<!-- engine=google_docs: a fonte é o Google Doc -->",
     draftReport: {
       inserted: [],
@@ -349,13 +362,17 @@ describe("PATCH /api/templates/[id] — trava da ativação com PII", () => {
     expect(res.status).toBe(200);
     expect(p.contractTemplate.update).toHaveBeenCalled();
     expect(vi.mocked(audit)).toHaveBeenCalledWith(
-      expect.objectContaining({ orgId: "org-1" }),
+      expect.objectContaining({ orgId: "org-1", userId: expect.any(String) }),
       expect.objectContaining({
         action: "TEMPLATE_ACTIVATE_WITH_PII",
         resource: "t1",
         metadata: expect.objectContaining({ kinds: ["cpf", "bank_account"] }),
       })
     );
+    // O log só afirma o que aconteceu: a auditoria vem DEPOIS do update.
+    const updateOrder = p.contractTemplate.update.mock.invocationCallOrder.at(-1);
+    const auditOrder = vi.mocked(audit).mock.invocationCallOrder[0];
+    expect(auditOrder).toBeGreaterThan(updateOrder);
   });
 
   it("PATCH que não ativa (arquivar, renomear) passa direto", async () => {
@@ -389,6 +406,50 @@ describe("PATCH /api/templates/[id] — trava da ativação com PII", () => {
     expect(res.status).toBe(409);
     expect((await res.json()).code).toBe("PII_LEFTOVER");
     expect(mockDocText).toHaveBeenCalledWith("doc-1");
+  });
+
+  it("handlebars: relatório limpo antigo NÃO vale para source editado no mesmo PATCH", async () => {
+    p.contractTemplate.findFirst = findFirstHonoringWhere({
+      ...COM_PII,
+      engine: "handlebars",
+      handlebarsSource: "<p>limpo</p>",
+      draftReport: { pii: { blocked: false, kinds: [], count: 0, warnings: [], checkedAt: "" } },
+    });
+    const res = await PATCH(
+      req({ status: "active", handlebarsSource: "<p>CPF nº 529.982.247-25</p>" }),
+      { params: { id: "t1" } }
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("PII_LEFTOVER");
+  });
+
+  it("google_docs: troca de Doc no mesmo PATCH mede o Doc NOVO, não o antigo", async () => {
+    p.contractTemplate.findFirst = findFirstHonoringWhere({
+      ...COM_PII,
+      engine: "google_docs",
+      googleTemplateDocId: "doc-velho",
+      draftReport: { pii: { blocked: false, kinds: [], count: 0, warnings: [], checkedAt: "" } },
+    });
+    mockDocText.mockResolvedValueOnce("Agência 0001, Conta Corrente 682331986-6");
+    const res = await PATCH(
+      req({ status: "active", googleTemplateDocId: "doc-novo" }),
+      { params: { id: "t1" } }
+    );
+    expect(mockDocText).toHaveBeenCalledWith("doc-novo");
+    expect(res.status).toBe(409);
+  });
+
+  it("google_docs sem Doc associado não pode ser medido → PII_UNVERIFIED", async () => {
+    p.contractTemplate.findFirst = findFirstHonoringWhere({
+      ...COM_PII,
+      engine: "google_docs",
+      googleTemplateDocId: null,
+      draftReport: null,
+    });
+    const res = await PATCH(req({ status: "active" }), { params: { id: "t1" } });
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("PII_UNVERIFIED");
+    expect(mockDocText).not.toHaveBeenCalled();
   });
 
   it("não conseguiu medir (Doc ilegível) → falha FECHADO com PII_UNVERIFIED", async () => {

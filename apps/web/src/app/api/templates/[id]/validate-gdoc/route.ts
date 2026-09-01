@@ -92,7 +92,9 @@ export async function POST(
     const slotsChanged =
       slotsInDoc.length !== declaredSlots.length ||
       slotsInDoc.some((s) => !declaredSlots.includes(s));
-    const pii = auditTemplateText(text);
+    // Export vazio é "não medido" (como na ingestão, no rerun-ai e no PATCH):
+    // gravar blocked:false sobre texto nenhum apagaria um blocked:true real.
+    const pii = text ? auditTemplateText(text) : null;
 
     // Atualiza o relatório do draft com o estado mais recente da validação.
     const prevReport =
@@ -139,7 +141,7 @@ export async function POST(
           missingRequired,
           // Espelho do Doc, como `slots`: o operador troca o trecho por uma
           // chave, revalida, e a trava de PII da ativação some.
-          pii,
+          ...(pii ? { pii } : {}),
           lastValidatedAt: new Date().toISOString(),
         } as object,
         ...(template.engine === "google_docs" && slotsChanged

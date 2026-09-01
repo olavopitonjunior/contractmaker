@@ -21,7 +21,8 @@ import {
   readDraftReport,
 } from "@/lib/templates/pii-gate";
 import { getDocPlainText } from "@/lib/google/docs";
-import { audit } from "@/lib/security/audit";
+import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { getEffectiveUserId } from "@/lib/auth/impersonation";
 
 /**
  * Escopo multitenant deny-by-default.
@@ -155,21 +156,35 @@ export async function PATCH(
   // Flag PRÓPRIO (`allowPii`), não o `forceActivate` do slot: "aceito o texto
   // padrão da plataforma na garantia" e "aceito imprimir o CPF de um terceiro
   // em todo contrato" são decisões diferentes, e um flag só faria a primeira
-  // liberar a segunda sem ninguém ler. Modelo sem relatório (legado, ou Doc
-  // ilegível na ingestão) passa: a revalidação mede na primeira leitura.
+  // liberar a segunda sem ninguém ler.
   // `=== true`, não truthiness: "allowPii": "não" não pode liberar a trava.
   const allowPii = body.allowPii === true;
+  // O texto a medir é o do modelo DEPOIS deste PATCH: engine e Doc podem
+  // estar mudando na mesma requisição (medir o Doc antigo carimbaria um
+  // relatório limpo num modelo que já aponta para outro Doc).
+  const nextEngine: string = body.engine ?? template.engine;
+  const nextDocId: string | null =
+    body.googleTemplateDocId !== undefined
+      ? (body.googleTemplateDocId as string | null)
+      : template.googleTemplateDocId;
+  const docChanged = nextDocId !== template.googleTemplateDocId;
+  let piiOverride: { measured: boolean; report: ReturnType<typeof parseTemplatePiiReport> } | null =
+    null;
   if (activating) {
     let pii = parseTemplatePiiReport(template.draftReport);
-    if (!pii && !allowPii) {
-      // Nunca medido (legado, from-contract, releitura que falhou na ingestão):
-      // mede AGORA, uma vez, em vez de presumir limpo. Google Docs lê o Doc;
-      // handlebars audita o próprio source. Se nem isso der, falha FECHADO.
+    // Re-mede quando: nunca medido; o source mudou (handlebars); o Doc mudou;
+    // ou o engine é handlebars (o texto está aqui, medir é puro e barato —
+    // relatório antigo não pode valer para um source editado no editor).
+    const stale = !pii || sourceChanged || docChanged || nextEngine !== "google_docs";
+    if (stale) {
       try {
-        const text =
-          template.engine === "google_docs" && template.googleTemplateDocId
-            ? await getDocPlainText(template.googleTemplateDocId)
-            : nextSource;
+        let text: string;
+        if (nextEngine === "google_docs") {
+          if (!nextDocId) throw new Error("modelo google_docs sem Doc associado");
+          text = await getDocPlainText(nextDocId);
+        } else {
+          text = nextSource;
+        }
         if (!text) throw new Error("texto vazio");
         pii = auditTemplateText(text);
         await prisma.contractTemplate.update({
@@ -178,10 +193,13 @@ export async function PATCH(
         });
       } catch (err) {
         console.error("[templates/PATCH] não consegui medir PII antes de ativar:", err);
-        return NextResponse.json(
-          { error: PII_UNVERIFIED_MESSAGE, code: "PII_UNVERIFIED" },
-          { status: 409 }
-        );
+        if (!allowPii) {
+          return NextResponse.json(
+            { error: PII_UNVERIFIED_MESSAGE, code: "PII_UNVERIFIED" },
+            { status: 409 }
+          );
+        }
+        pii = null;
       }
     }
     if (pii?.blocked && !allowPii) {
@@ -195,20 +213,7 @@ export async function PATCH(
       );
     }
     if (allowPii && (!pii || pii.blocked)) {
-      // Quem aceita imprimir o dado em todo contrato assume isso com nome
-      // próprio — e o log é imutável (impersonation carimba o ator efetivo).
-      await audit(
-        { orgId, userId: session.user.id },
-        {
-          action: "TEMPLATE_ACTIVATE_WITH_PII",
-          result: "SUCCESS",
-          resource: params.id,
-          resourceType: "ContractTemplate",
-          metadata: pii
-            ? { kinds: pii.kinds, count: pii.count, checkedAt: pii.checkedAt }
-            : { unmeasured: true },
-        }
-      );
+      piiOverride = { measured: !!pii, report: pii };
     }
   }
 
@@ -250,6 +255,26 @@ export async function PATCH(
         : {}),
     },
   });
+
+  if (piiOverride) {
+    // Quem aceita imprimir o dado em todo contrato assume isso com nome
+    // próprio. DEPOIS do update, para o log não afirmar uma ativação que
+    // não aconteceu; com o ator EFETIVO (impersonation) e IP/user-agent.
+    const effUserId = await getEffectiveUserId(session.user.id);
+    await audit(extractAuditContextFromRequest(req, orgId, effUserId), {
+      action: "TEMPLATE_ACTIVATE_WITH_PII",
+      result: "SUCCESS",
+      resource: params.id,
+      resourceType: "ContractTemplate",
+      metadata: piiOverride.report
+        ? {
+            kinds: piiOverride.report.kinds,
+            count: piiOverride.report.count,
+            checkedAt: piiOverride.report.checkedAt,
+          }
+        : { unmeasured: true },
+    });
+  }
 
   return NextResponse.json(updated);
 }

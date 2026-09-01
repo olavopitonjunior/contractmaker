@@ -215,7 +215,10 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
         setPiiGap(data.error as string);
         return;
       }
-      if (!res.ok) throw new Error(data.error ?? "Falha ao atualizar template");
+      if (!res.ok) {
+        acceptedFlags.current = {};
+        throw new Error(data.error ?? "Falha ao atualizar template");
+      }
       toast.success(okMsg);
       if (body.status === "active") acceptedFlags.current = {};
       if (typeof body.status === "string") setStatus(body.status);
@@ -229,6 +232,9 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
   }
 
   async function activate() {
+    // Nova tentativa = nenhum flag aceito ainda. O ref só sobrevive DENTRO da
+    // cadeia slot → PII de uma mesma tentativa (409 → diálogo → retry).
+    acceptedFlags.current = {};
     if ((validation?.missingRequired ?? []).length > 0 || failedSlots.length > 0) {
       setConfirmOpen(true);
       return;
@@ -317,13 +323,17 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Voltar e aprovar a cláusula</AlertDialogCancel>
+            <AlertDialogCancel onClick={() => (acceptedFlags.current = {})}>
+              Voltar e aprovar a cláusula
+            </AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 setSlotGap(null);
                 // Saída consciente: o texto padrão da plataforma é legítimo pra
                 // quem não tem redação própria — só não pode acontecer sem
-                // ninguém saber.
+                // ninguém saber. O flag SOBREVIVE ao próximo elo (slot → PII):
+                // o AlertDialogAction fecha o diálogo via onOpenChange, por isso
+                // a limpeza do ref vive só no Cancelar e no início da tentativa.
                 acceptedFlags.current.forceActivate = true;
                 void patchTemplate(
                   { status: "active", ...acceptedFlags.current },
@@ -352,7 +362,9 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Voltar e corrigir</AlertDialogCancel>
+            <AlertDialogCancel onClick={() => (acceptedFlags.current = {})}>
+              Voltar e corrigir
+            </AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 setPiiGap(null);
@@ -589,7 +601,7 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
           </Card>
 
           {/* Relato da IA */}
-          {report && (
+          {report && (report.ranAt || report.inserted) && (
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-1.5 text-sm">
