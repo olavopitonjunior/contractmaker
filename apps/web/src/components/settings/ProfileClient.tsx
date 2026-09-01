@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
@@ -36,9 +36,11 @@ import {
   Download,
   Trash2,
 } from "lucide-react";
-import { formatCpf } from "@/lib/validators/cpf";
-import { formatBrPhone } from "@/lib/validators/phone-br";
+import { formatCpf, isValidCpf, onlyDigits } from "@/lib/validators/cpf";
+import { formatBrPhone, normalizeBrPhone } from "@/lib/validators/phone-br";
 import { NotificationChannelsCard } from "@/components/settings/NotificationChannelsCard";
+import { useSettingsAutoSave } from "@/hooks/use-settings-auto-save";
+import { SaveStatusPill } from "@/components/settings/SaveStatusPill";
 
 export interface ProfileInitial {
   id: string;
@@ -72,6 +74,101 @@ interface Props {
 function emptyToNull<T>(v: T | "" | null | undefined): T | null {
   if (v === "" || v === null || v === undefined) return null;
   return v as T;
+}
+
+/**
+ * Renda digitada em reais → centavos, no formato que a rota espera.
+ *
+ * Campo vazio é "não informado" (`null`), NÃO zero — `Number("")` é `0` e passa
+ * em `isFinite`, e gravar 0 aqui diria à subconta Asaas que a pessoa não tem
+ * renda. Texto que ainda não é número devolve `NaN`, que a validação abaixo
+ * reprova: nada sai enquanto o valor não fizer sentido.
+ */
+export function rendaEmCentavos(raw: string): number | null {
+  if (raw.trim() === "") return null;
+  const n = Number(raw.replace(/\./g, "").replace(",", "."));
+  if (!Number.isFinite(n) || n < 0) return Number.NaN;
+  return Math.round(n * 100);
+}
+
+/**
+ * Espelha o Zod de `PATCH /api/me/profile` campo a campo.
+ *
+ * Sem isto o auto-save gravaria o estado intermediário da digitação e tomaria
+ * 400 a cada tecla: `name` é `min(1)`, `addressState` é `length(2)` (e `""` não
+ * é `null` para o Zod), CEP exige 8 dígitos e o CPF passa pelo dígito
+ * verificador. O botão que saiu daqui protegia esses casos por acidente — só
+ * saía requisição quando a pessoa declarava ter terminado.
+ */
+export function erroDePessoais(f: {
+  name: string;
+  phone: string | null;
+  cpf: string | null;
+  birthDate: string | null;
+  incomeValueCents: number | null;
+}): Record<string, string> {
+  // As chaves do retorno são as chaves do PAYLOAD, não rótulos de tela: é assim
+  // que `invalidKeys` consegue remover exatamente o campo ruim do PATCH.
+  const e: Record<string, string> = {};
+  if (f.name.trim() === "") e.name = "Informe seu nome.";
+  else if (f.name.trim().length > 200) e.name = "Nome muito longo (máx. 200).";
+  if (f.cpf && f.cpf.length > 20) e.cpf = "CPF muito longo.";
+  else if (f.cpf && !isValidCpf(f.cpf)) e.cpf = "CPF inválido.";
+  if (f.phone && f.phone.length > 40) e.phone = "Telefone muito longo.";
+  else if (f.phone && !normalizeBrPhone(f.phone))
+    e.phone = "Telefone inválido — use DDD + número.";
+  if (f.birthDate) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(f.birthDate);
+    const ano = m ? Number(m[1]) : 0;
+    // O input `type="date"` produz datas absurdas enquanto se digita o ano
+    // ("0002-01-01"). Ano implausível é digitação em curso, não data.
+    if (!m || ano < 1900 || ano > new Date().getFullYear()) {
+      e.birthDate = "Data de nascimento incompleta.";
+    }
+  }
+  if (f.incomeValueCents !== null) {
+    if (!Number.isFinite(f.incomeValueCents)) e.incomeValueCents = "Renda inválida.";
+    // Teto do Zod da rota. Sem espelhar, um dígito a mais passa daqui e toma
+    // 400 a cada ciclo do debounce, com mensagem genérica.
+    else if (f.incomeValueCents > 2_000_000_000)
+      e.incomeValueCents = "Renda acima do limite.";
+  }
+  return e;
+}
+
+/** Limites `.max()` do Zod para os campos livres de endereço. */
+const MAX_ENDERECO: Record<string, number> = {
+  addressStreet: 200,
+  addressNumber: 40,
+  addressComplement: 100,
+  addressNeighborhood: 100,
+  addressCity: 100,
+  postalCode: 20,
+};
+
+export function erroDeEndereco(
+  f: Record<string, string | null>
+): Record<string, string> {
+  const e: Record<string, string> = {};
+  if (f.postalCode && onlyDigits(f.postalCode).length !== 8) {
+    e.postalCode = "CEP precisa ter 8 dígitos.";
+  }
+  if (f.addressState && f.addressState.trim().length !== 2) {
+    e.addressState = "UF tem 2 letras.";
+  }
+  for (const [chave, max] of Object.entries(MAX_ENDERECO)) {
+    const v = f[chave];
+    if (typeof v === "string" && v.length > max && !e[chave]) {
+      e[chave] = `Texto muito longo (máx. ${max}).`;
+    }
+  }
+  return e;
+}
+
+/** Mensagem inline dos erros acima — some sozinha quando o valor fica válido. */
+function ErroCampo({ msg }: { msg?: string }) {
+  if (!msg) return null;
+  return <p className="mt-1 text-xs text-destructive">{msg}</p>;
 }
 
 export function ProfileClient({ initial, twoFAStatus }: Props) {
@@ -114,42 +211,35 @@ function PersonalCard({ initial }: { initial: ProfileInitial }) {
       ? (initial.incomeValueCents / 100).toFixed(2)
       : ""
   );
-  const [saving, setSaving] = useState(false);
+  // O estado acima é o de EXIBIÇÃO (com máscara). O objeto abaixo é o corpo que
+  // a rota espera — é ele que o auto-save observa e diffa.
+  const fields = useMemo(
+    () => ({
+      name: name.trim(),
+      phone: emptyToNull(phone.trim()),
+      cpf: emptyToNull(cpf.trim()),
+      birthDate: emptyToNull(birthDate.trim()),
+      incomeValueCents: rendaEmCentavos(incomeReais),
+    }),
+    [name, phone, cpf, birthDate, incomeReais]
+  );
 
-  async function handleSubmit() {
-    setSaving(true);
-    try {
-      const body: Record<string, unknown> = {
-        name: name.trim() || undefined,
-        phone: emptyToNull(phone.trim()),
-        cpf: emptyToNull(cpf.trim()),
-        birthDate: emptyToNull(birthDate.trim()),
-      };
-      if (incomeReais.trim() === "") {
-        body.incomeValueCents = null;
-      } else {
-        const n = Number(incomeReais.replace(",", "."));
-        if (Number.isNaN(n) || n < 0) {
-          toast.error("Renda inválida");
-          return;
-        }
-        body.incomeValueCents = Math.round(n * 100);
-      }
-      const res = await fetch("/api/me/profile", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.error ?? "Falha ao salvar perfil");
-        return;
-      }
-      toast.success("Perfil atualizado");
-    } finally {
-      setSaving(false);
-    }
-  }
+  const erros = erroDePessoais(fields);
+
+  // `invalidKeys`, não `isValid`: os campos aqui são INDEPENDENTES (colunas
+  // distintas, sem regra cruzada). Reprovar a seção inteira faria o CPF pela
+  // metade segurar o nome já corrigido — que, sem botão, nunca mais seria
+  // gravado, e sumiria de vez ao sair da página.
+  //
+  // 1500ms em vez dos 800 do padrão porque cada PATCH grava uma linha
+  // `USER_PROFILE_UPDATE` no audit log. Isso ajuda quem pausa a digitação; o
+  // `blur` de cada campo alterado ainda gera uma gravação própria, e isso é
+  // deliberado — perder o que foi digitado é pior que uma auditoria verbosa.
+  const { status, error, isDirty, flush } = useSettingsAutoSave(fields, {
+    endpoint: "/api/me/profile",
+    debounceMs: 1500,
+    invalidKeys: (f) => Object.keys(erroDePessoais(f)),
+  });
 
   return (
     <Card>
@@ -169,7 +259,9 @@ function PersonalCard({ initial }: { initial: ProfileInitial }) {
               id="p-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
+              onBlur={() => void flush()}
             />
+            <ErroCampo msg={erros.name} />
           </div>
           <div>
             <Label htmlFor="p-email">Email</Label>
@@ -184,8 +276,10 @@ function PersonalCard({ initial }: { initial: ProfileInitial }) {
               id="p-cpf"
               value={cpf}
               onChange={(e) => setCpf(e.target.value)}
+              onBlur={() => void flush()}
               placeholder="000.000.000-00"
             />
+            <ErroCampo msg={erros.cpf} />
           </div>
           <div>
             <Label htmlFor="p-phone">Celular</Label>
@@ -193,8 +287,10 @@ function PersonalCard({ initial }: { initial: ProfileInitial }) {
               id="p-phone"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
+              onBlur={() => void flush()}
               placeholder="(11) 9 9999-9999"
             />
+            <ErroCampo msg={erros.phone} />
           </div>
           <div>
             <Label htmlFor="p-dob">Data de nascimento</Label>
@@ -203,7 +299,9 @@ function PersonalCard({ initial }: { initial: ProfileInitial }) {
               type="date"
               value={birthDate}
               onChange={(e) => setBirthDate(e.target.value)}
+              onBlur={() => void flush()}
             />
+            <ErroCampo msg={erros.birthDate} />
           </div>
           <div>
             <Label htmlFor="p-income">Renda mensal (R$)</Label>
@@ -212,14 +310,15 @@ function PersonalCard({ initial }: { initial: ProfileInitial }) {
               inputMode="decimal"
               value={incomeReais}
               onChange={(e) => setIncomeReais(e.target.value)}
+              onBlur={() => void flush()}
               placeholder="0,00"
             />
+            <ErroCampo msg={erros.incomeValueCents} />
           </div>
         </div>
+        {/* Sem botão "Salvar" — a seção grava sozinha e a pill é o retorno. */}
         <div className="flex justify-end">
-          <Button onClick={handleSubmit} disabled={saving}>
-            {saving ? "Salvando..." : "Salvar dados pessoais"}
-          </Button>
+          <SaveStatusPill status={status} isDirty={isDirty} error={error} />
         </div>
       </CardContent>
     </Card>
@@ -236,7 +335,31 @@ function AddressCard({ initial }: { initial: ProfileInitial }) {
   );
   const [city, setCity] = useState(initial.addressCity ?? "");
   const [state, setState] = useState(initial.addressState ?? "");
-  const [saving, setSaving] = useState(false);
+
+  const fields = useMemo(
+    () => ({
+      postalCode: emptyToNull(postalCode.trim()),
+      addressStreet: emptyToNull(street.trim()),
+      addressNumber: emptyToNull(number.trim()),
+      addressComplement: emptyToNull(complement.trim()),
+      addressNeighborhood: emptyToNull(neighborhood.trim()),
+      addressCity: emptyToNull(city.trim()),
+      addressState: emptyToNull(state.trim().toUpperCase()),
+    }),
+    [postalCode, street, number, complement, neighborhood, city, state]
+  );
+
+  const erros = erroDeEndereco(fields);
+
+  // Mesmo endpoint do card de Dados pessoais, e os dois ficam na tela ao mesmo
+  // tempo. Aqui isso é seguro — diferente do merge de JSON de outras telas —
+  // porque a rota monta o `data` do Prisma campo a campo e grava COLUNAS
+  // distintas: um PATCH de endereço não toca em `name`/`cpf`, e vice-versa.
+  const { status, error, isDirty, flush } = useSettingsAutoSave(fields, {
+    endpoint: "/api/me/profile",
+    debounceMs: 1500,
+    invalidKeys: (f) => Object.keys(erroDeEndereco(f)),
+  });
 
   async function lookupCep() {
     const cep = postalCode.replace(/\D/g, "");
@@ -245,40 +368,16 @@ function AddressCard({ initial }: { initial: ProfileInitial }) {
       const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
       const data = await res.json();
       if (data.erro) return;
-      if (!street) setStreet(data.logradouro ?? "");
-      if (!neighborhood) setNeighborhood(data.bairro ?? "");
-      if (!city) setCity(data.localidade ?? "");
-      if (!state) setState((data.uf ?? "").toUpperCase());
+      // Decidir pelo valor ATUAL, não pelo capturado no início do fetch: o
+      // usuário pode ter digitado a rua enquanto a consulta voava, e sobrescrever
+      // agora não seria só um susto na tela — o auto-save gravaria por cima, sem
+      // clique nenhum. Antes, o botão dava a chance de perceber antes de salvar.
+      setStreet((atual) => atual || (data.logradouro ?? ""));
+      setNeighborhood((atual) => atual || (data.bairro ?? ""));
+      setCity((atual) => atual || (data.localidade ?? ""));
+      setState((atual) => atual || (data.uf ?? "").toUpperCase());
     } catch (e) {
       console.warn("[ProfileClient] falha no lookup de CEP", e);
-    }
-  }
-
-  async function handleSubmit() {
-    setSaving(true);
-    try {
-      const body = {
-        postalCode: emptyToNull(postalCode.trim()),
-        addressStreet: emptyToNull(street.trim()),
-        addressNumber: emptyToNull(number.trim()),
-        addressComplement: emptyToNull(complement.trim()),
-        addressNeighborhood: emptyToNull(neighborhood.trim()),
-        addressCity: emptyToNull(city.trim()),
-        addressState: emptyToNull(state.trim().toUpperCase()),
-      };
-      const res = await fetch("/api/me/profile", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.error ?? "Falha ao salvar endereço");
-        return;
-      }
-      toast.success("Endereço atualizado");
-    } finally {
-      setSaving(false);
     }
   }
 
@@ -300,9 +399,16 @@ function AddressCard({ initial }: { initial: ProfileInitial }) {
               id="a-cep"
               value={postalCode}
               onChange={(e) => setPostalCode(e.target.value)}
-              onBlur={lookupCep}
+              onBlur={() => {
+                // O lookup preenche logradouro/bairro/cidade/UF quando estão
+                // vazios; essas mudanças entram no estado e o auto-save as
+                // grava sozinho. Não chamamos `flush` aqui de propósito: ele
+                // rodaria ANTES do `setState` do lookup e gravaria só o CEP.
+                void lookupCep();
+              }}
               placeholder="00000-000"
             />
+            <ErroCampo msg={erros.postalCode} />
           </div>
           <div className="md:col-span-2">
             <Label htmlFor="a-street">Logradouro</Label>
@@ -310,6 +416,7 @@ function AddressCard({ initial }: { initial: ProfileInitial }) {
               id="a-street"
               value={street}
               onChange={(e) => setStreet(e.target.value)}
+              onBlur={() => void flush()}
             />
           </div>
           <div>
@@ -318,6 +425,7 @@ function AddressCard({ initial }: { initial: ProfileInitial }) {
               id="a-num"
               value={number}
               onChange={(e) => setNumber(e.target.value)}
+              onBlur={() => void flush()}
             />
           </div>
           <div>
@@ -326,6 +434,7 @@ function AddressCard({ initial }: { initial: ProfileInitial }) {
               id="a-comp"
               value={complement}
               onChange={(e) => setComplement(e.target.value)}
+              onBlur={() => void flush()}
             />
           </div>
           <div className="md:col-span-2">
@@ -334,6 +443,7 @@ function AddressCard({ initial }: { initial: ProfileInitial }) {
               id="a-neighbor"
               value={neighborhood}
               onChange={(e) => setNeighborhood(e.target.value)}
+              onBlur={() => void flush()}
             />
           </div>
           <div>
@@ -342,6 +452,7 @@ function AddressCard({ initial }: { initial: ProfileInitial }) {
               id="a-city"
               value={city}
               onChange={(e) => setCity(e.target.value)}
+              onBlur={() => void flush()}
             />
           </div>
           <div>
@@ -353,14 +464,15 @@ function AddressCard({ initial }: { initial: ProfileInitial }) {
               onChange={(e) =>
                 setState(e.target.value.toUpperCase().slice(0, 2))
               }
+              onBlur={() => void flush()}
               placeholder="SP"
             />
+            <ErroCampo msg={erros.addressState} />
           </div>
         </div>
+        {/* Sem botão "Salvar" — a seção grava sozinha e a pill é o retorno. */}
         <div className="flex justify-end">
-          <Button onClick={handleSubmit} disabled={saving}>
-            {saving ? "Salvando..." : "Salvar endereço"}
-          </Button>
+          <SaveStatusPill status={status} isDirty={isDirty} error={error} />
         </div>
       </CardContent>
     </Card>
