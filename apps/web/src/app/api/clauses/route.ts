@@ -3,7 +3,11 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { createKnowledgeItem } from "@/lib/ai/knowledge";
 import { knowledgeScopeWhere } from "@/lib/ai/knowledge-scope";
-import { clauseWriteSchema, normalizeClauseBody } from "@/lib/clauses/schema";
+import {
+  clauseWriteSchema,
+  normalizeClauseBody,
+  deriveIsVariable,
+} from "@/lib/clauses/schema";
 
 /**
  * /api/clauses — biblioteca de cláusulas padronizadas da org.
@@ -87,8 +91,10 @@ export async function POST(req: NextRequest) {
     createdBy: session.user.id,
     subcategory: data.subcategory,
     groupCode: data.groupCode ?? null,
+    esteira: data.esteira ?? null,
     agentNotes: data.agentNotes ?? null,
-    isVariable: !!data.isVariable,
+    // Derivado do conteúdo — o client não opina (ver `deriveIsVariable`).
+    isVariable: deriveIsVariable(data.content),
     // Invariante: origem ai-generated SEMPRE nasce pending (revisão humana) —
     // status vindo do client não pode furar o gate (achado de review; approved
     // é filtro duro do RAG/expert-context/resolveClauseSlots).

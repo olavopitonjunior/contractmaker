@@ -51,6 +51,8 @@ export interface CreateKnowledgeItemInput {
   agentNotes?: string | null;
   groupCode?: string | null;
   subcategory?: string | null;
+  /** "venda" | "locacao" | "ambas"; null/ausente = não classificada. */
+  esteira?: string | null;
   isVariable?: boolean;
   status?: string;
   usageCount?: number;
@@ -179,6 +181,7 @@ function clauseExtras(input: CreateKnowledgeItemInput) {
     agentNotes: input.agentNotes ?? null,
     groupCode: input.groupCode ?? null,
     subcategory: input.subcategory ?? null,
+    esteira: input.esteira ?? null,
     isVariable: input.isVariable ?? false,
     status: input.status ?? "approved",
     usageCount: input.usageCount ?? 0,
@@ -391,6 +394,7 @@ export async function updateKnowledgeItem(
         agentNotes: patch.agentNotes !== undefined ? patch.agentNotes : current.agentNotes,
         groupCode: patch.groupCode !== undefined ? patch.groupCode : current.groupCode,
         subcategory: patch.subcategory !== undefined ? patch.subcategory : current.subcategory,
+        esteira: patch.esteira !== undefined ? patch.esteira : current.esteira,
         isVariable: patch.isVariable !== undefined ? patch.isVariable : current.isVariable,
         status: patch.status !== undefined ? patch.status : current.status,
         usageCount: patch.usageCount !== undefined ? patch.usageCount : current.usageCount,

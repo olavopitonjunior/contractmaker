@@ -14,6 +14,7 @@ import { unmetDependencies } from "@/lib/ai/plan-deps";
 import { getDocPlainText } from "@/lib/google/docs";
 import { guardContractScope } from "@/lib/deals/route-helpers";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { esteiraForContext } from "@/lib/clauses/taxonomy";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -70,7 +71,8 @@ export async function POST(
                 },
                 orderBy: { position: "asc" },
               },
-              deal: { select: { pipeline: { select: { orgId: true } } } },
+              // `kind` alimenta a esteira do acervo (venda × locação).
+              deal: { select: { kind: true, pipeline: { select: { orgId: true } } } },
             },
           },
         },
@@ -152,6 +154,12 @@ export async function POST(
     dataJson: contract.dataJson as Record<string, unknown>,
     templateModalidade: contract.template?.modalidade || "a_vista",
     templateName: contract.template?.name ?? "Contrato importado",
+    // Valores CRUS — o `|| "a_vista"` acima faria contrato importado de
+    // locação parecer venda e esconder o acervo certo do agente.
+    esteira: esteiraForContext({
+      dealKind: contract.deal?.kind ?? null,
+      templateModalidade: contract.template?.modalidade ?? null,
+    }),
     activeClauses: contract.clauses.map((cc) => ({
       id: cc.id,
       clauseId: cc.knowledgeItem.id,

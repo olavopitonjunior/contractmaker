@@ -14,6 +14,17 @@ import { z } from "zod";
 
 export const CLAUSE_GROUP_CODES = ["G1", "G2", "G3", "G4", "G5", "G6"] as const;
 
+/**
+ * Esteiras do acervo. Mora aqui — e não em `lib/clauses/taxonomy.ts` — porque
+ * `taxonomy` importa deste módulo (`GROUP_LABELS`), e o inverso fecharia ciclo.
+ * `taxonomy` reexporta o tipo derivado; esta é a fonte única dos VALORES.
+ *
+ * "venda"/"locacao" espelham `FormModule` (lib/forms/presets); "ambas" é o
+ * terceiro estado exclusivo do ACERVO: cláusula comum às duas esteiras (foro,
+ * assinatura eletrônica, LGPD), gravada UMA vez e lida nas duas visões.
+ */
+export const CLAUSE_ESTEIRA_VALUES = ["venda", "locacao", "ambas"] as const;
+
 export const GROUP_LABELS: Record<string, string> = {
   G1: "G1 — Sinal, Arras e Início de Pagamento",
   G2: "G2 — Imissão na Posse",
@@ -75,6 +86,12 @@ export const clauseWriteSchema = z.object({
   content: z.string().trim().min(1, "Conteúdo é obrigatório").max(50_000),
   subcategory: z.string().trim().min(1).max(60),
   groupCode: z.enum(CLAUSE_GROUP_CODES).nullable().optional(),
+  /**
+   * Esteira do acervo. `null` é estado legítimo — "não classificada" — e é como
+   * nasce toda cláusula criada antes da triagem; ela continua sendo lida nas
+   * duas esteiras até alguém decidir. Ver `lib/clauses/taxonomy.ts`.
+   */
+  esteira: z.enum(CLAUSE_ESTEIRA_VALUES).nullable().optional(),
   isVariable: z.boolean().optional(),
   agentNotes: z.string().trim().max(4_000).nullable().optional(),
   tags: z.array(z.string().trim().min(1).max(60)).max(20).optional(),
@@ -83,6 +100,22 @@ export const clauseWriteSchema = z.object({
 });
 
 export type ClauseWriteInput = z.infer<typeof clauseWriteSchema>;
+
+/**
+ * `isVariable` é DERIVADO do conteúdo, não opinião do usuário.
+ *
+ * Antes era um Switch rotulado "Cláusula padronizada (G1–G6)" — nome que não
+ * descrevia o campo (ele só diz "tem placeholders") e que era independente do
+ * Select de Grupo. A conjunção `isVariable && groupCode` era o filtro da aba
+ * "Padronizadas", então cláusula criada à mão ou por IA nunca caía lá, e uma
+ * cláusula marcada sem grupo sumia da partição. Derivar remove a classe inteira
+ * de bug: quem tem `{{chave}}` é variável, e ponto.
+ *
+ * Client-safe (regex pura) pro editor mostrar a contagem ao vivo.
+ */
+export function deriveIsVariable(content: string | null | undefined): boolean {
+  return /\{\{[^{}]+\}\}/.test(content ?? "");
+}
 
 /**
  * Normaliza o body das rotas legadas pro shape do schema: `category` era o
@@ -100,5 +133,8 @@ export function normalizeClauseBody(body: Record<string, unknown>): Record<strin
     out.agentNotes = out.description;
   }
   if (out.groupCode === "" || out.groupCode === "none") out.groupCode = null;
+  // Mesmo tratamento do Select: "sem esteira" é uma opção legítima da UI e
+  // chega como "" ou "none" — sem isto o Zod reprovaria em vez de gravar null.
+  if (out.esteira === "" || out.esteira === "none") out.esteira = null;
   return out;
 }

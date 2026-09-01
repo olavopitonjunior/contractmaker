@@ -89,6 +89,35 @@ function valorPorExtenso(valor: number): string {
   return resultado;
 }
 
+/**
+ * Nomes dos helpers registrados abaixo, em lista consumível sem compilar nada.
+ *
+ * Existe pro extrator de chaves (`lib/clauses/key-catalog.ts`) distinguir
+ * `{{moeda aluguel.valor}}` — helper + caminho — de `{{aluguel.valor}}`. Sem
+ * isso, `moeda` seria lido como um caminho de dado inexistente e a cláusula
+ * inteira seria reprovada.
+ *
+ * A paridade com o que `registerHandlebarsHelpers` de fato registra é travada
+ * por teste — não editar uma sem a outra.
+ */
+export const HANDLEBARS_HELPER_NAMES: readonly string[] = [
+  'moeda',
+  'extenso',
+  'numeroExtenso',
+  'numero',
+  'percentual',
+  'cpf',
+  'cnpj',
+  'cep',
+  'dataExtenso',
+  'subnum',
+  'eq',
+  'or',
+  'gt',
+  'existe',
+  'temConjuge',
+];
+
 export function registerHandlebarsHelpers(): void {
   Handlebars.registerHelper('moeda', (valor: number) => {
     if (valor === null || valor === undefined) return '';

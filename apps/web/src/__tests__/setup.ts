@@ -590,7 +590,12 @@ vi.mock("@/lib/auth/auth", () => ({
 }));
 
 // --- Handlebars render mock ---
-vi.mock("@/lib/render/handlebars", () => ({
+// PARCIAL de propósito: só `renderContratoHTML` é dublado. O mock total escondia
+// os demais exports do módulo (`HANDLEBARS_HELPER_NAMES`,
+// `registerHandlebarsHelpers`), e qualquer arquivo que os importasse quebrava
+// com "No export is defined on the mock" — mesmo sem usar o render.
+vi.mock("@/lib/render/handlebars", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/render/handlebars")>()),
   renderContratoHTML: vi.fn(
     (_template: string, data: Record<string, unknown>) =>
       `<rendered>${JSON.stringify(data)}</rendered>`
