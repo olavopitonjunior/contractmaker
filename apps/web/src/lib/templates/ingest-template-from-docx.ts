@@ -41,6 +41,7 @@ import {
   type DuplicateTemplate,
 } from "@/lib/templates/upload-dedup";
 import { getDocPlainText } from "@/lib/google/docs";
+import { auditTemplateText, type TemplatePiiReport } from "@/lib/templates/pii-gate";
 import {
   slotDeclarationComment,
   slotToken,
@@ -274,17 +275,23 @@ export async function ingestTemplateFromDocx(
   // em `ai-placeholder-insertion` fecha a causa; reler o doc aqui fecha o efeito,
   // inclusive pra qualquer outra mutação futura entre o apply e a declaração.
   const appliedReports = slotReports.filter((r) => r.applied);
+  // Releitura SEMPRE, não só com slot aplicado: o gate de PII (abaixo) mede o
+  // texto que sobrou literal depois da IA — e é exatamente o modelo sem slot,
+  // com a cláusula chumbada, que mais precisa dessa medida.
   let finalDocText: string | null = null;
-  if (appliedReports.length > 0) {
-    try {
-      finalDocText = await getDocPlainText(uploaded.docId);
-    } catch (err) {
-      console.error(
-        "[templates/from-docx] não consegui reler o doc pra declarar os slots:",
-        err
-      );
-    }
+  try {
+    finalDocText = await getDocPlainText(uploaded.docId);
+  } catch (err) {
+    console.error(
+      "[templates/from-docx] não consegui reler o doc (slots e PII ficam sem verificação):",
+      err
+    );
   }
+
+  // ─── GATE DE PII DO MODELO ────────────────────────────────────────────────
+  // Só mede; quem bloqueia é o PATCH de ativação (ver pii-gate.ts). Doc
+  // ilegível → sem relatório, e a revalidação preenche na primeira leitura.
+  const pii: TemplatePiiReport | null = finalDocText !== null ? auditTemplateText(finalDocText) : null;
   // Doc ilegível → não declara (fail-closed): melhor um token órfão, que
   // `cleanupOrphanPlaceholders` limpa na geração, do que uma declaração mentindo.
   const survivingSlots = appliedReports
@@ -338,7 +345,7 @@ export async function ingestTemplateFromDocx(
   // O relatório é gravado FORA do try do pass de IA: os avisos de slot precisam
   // chegar à página de revisão mesmo quando a IA falha (antes, um erro na IA
   // engolia junto o motivo de o slot não ter aberto).
-  if (report || finalSlotReports.length > 0 || neutralization) {
+  if (report || finalSlotReports.length > 0 || neutralization || pii) {
     try {
       await prisma.contractTemplate.update({
         where: { id: template.id },
@@ -347,6 +354,7 @@ export async function ingestTemplateFromDocx(
             ...((report ?? {}) as object),
             ...(finalSlotReports.length ? { slots: finalSlotReports } : {}),
             ...(neutralization ? { neutralization } : {}),
+            ...(pii ? { pii } : {}),
           } as object,
         },
       });

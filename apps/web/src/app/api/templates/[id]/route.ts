@@ -13,6 +13,7 @@ import {
   checkSlotClauseReadiness,
   slotClauseGapMessage,
 } from "@/lib/templates/slot-readiness";
+import { parseTemplatePiiReport, piiGateMessage } from "@/lib/templates/pii-gate";
 
 /**
  * Escopo multitenant deny-by-default.
@@ -133,6 +134,26 @@ export async function PATCH(
           error: slotClauseGapMessage(readiness.gaps),
           code: "SLOT_CLAUSE_MISSING",
           gaps: readiness.gaps,
+        },
+        { status: 409 }
+      );
+    }
+  }
+
+  // ─── TRAVA DA ATIVAÇÃO: dado pessoal literal no texto do modelo ──────────
+  // Flag PRÓPRIO (`allowPii`), não o `forceActivate` do slot: "aceito o texto
+  // padrão da plataforma na garantia" e "aceito imprimir o CPF de um terceiro
+  // em todo contrato" são decisões diferentes, e um flag só faria a primeira
+  // liberar a segunda sem ninguém ler. Modelo sem relatório (legado, ou Doc
+  // ilegível na ingestão) passa: a revalidação mede na primeira leitura.
+  if (body.status === "active" && template.status !== "active" && !body.allowPii) {
+    const pii = parseTemplatePiiReport(template.draftReport);
+    if (pii?.blocked) {
+      return NextResponse.json(
+        {
+          error: piiGateMessage(pii),
+          code: "PII_LEFTOVER",
+          pii: { kinds: pii.kinds, count: pii.count, checkedAt: pii.checkedAt },
         },
         { status: 409 }
       );

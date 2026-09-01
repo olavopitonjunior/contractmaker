@@ -273,3 +273,59 @@ describe("POST /api/templates/from-docx — declaração de slot", () => {
     );
   });
 });
+
+/**
+ * Gate de PII do MODELO (lib/templates/pii-gate.ts): a ingestão mede o texto
+ * FINAL do Doc — depois do passe de IA — e grava `draftReport.pii`. É esse
+ * relatório que a trava da ativação lê. Caso real (Trio, 2026-09-01): 15/16
+ * modelos saíram com CPF/PIX/conta de corretores literais e ninguém bloqueava.
+ */
+describe("POST /api/templates/from-docx — gate de PII do modelo", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authMock.mockResolvedValue({ user: { id: "u1" } });
+    getUserOrgMock.mockResolvedValue({ id: "org1" });
+    membershipFindFirst.mockResolvedValue({ role: "owner" });
+    templateFindFirst.mockResolvedValue(null);
+    templateFindMany.mockResolvedValue([]);
+    templateCreate.mockResolvedValue({ id: "tpl1", name: "Modelo" });
+    templateUpdate.mockResolvedValue({});
+    uploadFileAsGoogleDocMock.mockResolvedValue({
+      docId: "doc1",
+      webViewLink: "http://doc",
+      embedLink: "http://embed",
+    });
+    insertPlaceholdersMock.mockResolvedValue({ inserted: [], missingRequired: [] });
+  });
+
+  it("dado pessoal que sobrou literal → draftReport.pii.blocked = true", async () => {
+    getDocPlainTextMock.mockResolvedValue(
+      "{{locadores_qualificacao}}\nc) R$ 1.315,15 ao corretor, Agência 0001, Conta Corrente 682331986-6."
+    );
+    const res = await POST(req() as never);
+    expect(res.status).toBe(200);
+    const pii = draftReport()?.pii as Record<string, unknown>;
+    expect(pii?.blocked).toBe(true);
+    expect(pii?.kinds).toEqual(expect.arrayContaining(["bank_agency", "bank_account"]));
+  });
+
+  it("modelo SEM slot também é relido e medido (antes só se relia com slot aplicado)", async () => {
+    getDocPlainTextMock.mockResolvedValue("{{locadores_qualificacao}}\nCPF nº 529.982.247-25");
+    await POST(req() as never);
+    expect(getDocPlainTextMock).toHaveBeenCalledWith("doc1");
+    expect((draftReport()?.pii as Record<string, unknown>)?.kinds).toEqual(["cpf"]);
+  });
+
+  it("texto limpo → relatório gravado com blocked = false", async () => {
+    getDocPlainTextMock.mockResolvedValue("{{locadores_qualificacao}} e {{aluguel_valor}}");
+    await POST(req() as never);
+    expect((draftReport()?.pii as Record<string, unknown>)?.blocked).toBe(false);
+  });
+
+  it("Doc ilegível → sem relatório de PII (não afirma o que não mediu)", async () => {
+    getDocPlainTextMock.mockRejectedValue(new Error("429"));
+    const res = await POST(req() as never);
+    expect(res.status).toBe(200);
+    expect(draftReport()?.pii).toBeUndefined();
+  });
+});

@@ -295,3 +295,70 @@ describe("DELETE /api/templates/[id]", () => {
     expect(p.contractTemplate.update.mock.calls[0][0].data.status).toBe("archived");
   });
 });
+
+/**
+ * Trava da ativação por PII no texto do modelo (lib/templates/pii-gate.ts).
+ * O flag de saída é PRÓPRIO (`allowPii`): o `forceActivate` do slot não pode
+ * liberar, de carona, a impressão de CPF de terceiro em todo contrato.
+ */
+describe("PATCH /api/templates/[id] — trava da ativação com PII", () => {
+  const COM_PII = {
+    ...TEMPLATE,
+    status: "draft",
+    modalidade: "locacao",
+    category: null,
+    matchCriteria: { garantia: "caucao" },
+    handlebarsSource: "<!-- engine=google_docs: a fonte é o Google Doc -->",
+    draftReport: {
+      inserted: [],
+      pii: { blocked: true, kinds: ["cpf", "bank_account"], count: 3, warnings: [], checkedAt: "2026-09-01T20:00:00.000Z" },
+    },
+  };
+
+  beforeEach(() => {
+    p.contractTemplate.findFirst = findFirstHonoringWhere(COM_PII);
+    p.knowledgeItem.findMany = vi.fn().mockResolvedValue([]);
+  });
+
+  it("409 PII_LEFTOVER quando o relatório diz que sobrou dado pessoal", async () => {
+    const res = await PATCH(req({ status: "active" }), { params: { id: "t1" } });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.code).toBe("PII_LEFTOVER");
+    expect(body.error).toContain("CPF");
+    expect(body.pii.kinds).toEqual(["cpf", "bank_account"]);
+    expect(p.contractTemplate.update).not.toHaveBeenCalled();
+  });
+
+  it("`forceActivate` (saída do slot) NÃO libera a trava de PII", async () => {
+    const res = await PATCH(req({ status: "active", forceActivate: true }), { params: { id: "t1" } });
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("PII_LEFTOVER");
+  });
+
+  it("`allowPii` é a saída consciente: ativa", async () => {
+    const res = await PATCH(req({ status: "active", allowPii: true }), { params: { id: "t1" } });
+    expect(res.status).toBe(200);
+    expect(p.contractTemplate.update).toHaveBeenCalled();
+  });
+
+  it("PATCH que não ativa (arquivar, renomear) passa direto", async () => {
+    const res = await PATCH(req({ status: "archived" }), { params: { id: "t1" } });
+    expect(res.status).toBe(200);
+  });
+
+  it("modelo legado sem relatório de PII não é bloqueado", async () => {
+    p.contractTemplate.findFirst = findFirstHonoringWhere({ ...COM_PII, draftReport: { inserted: [] } });
+    const res = await PATCH(req({ status: "active" }), { params: { id: "t1" } });
+    expect(res.status).toBe(200);
+  });
+
+  it("relatório limpo (blocked=false) ativa normalmente", async () => {
+    p.contractTemplate.findFirst = findFirstHonoringWhere({
+      ...COM_PII,
+      draftReport: { pii: { blocked: false, kinds: [], count: 0, warnings: ["cnpj"], checkedAt: "" } },
+    });
+    const res = await PATCH(req({ status: "active" }), { params: { id: "t1" } });
+    expect(res.status).toBe(200);
+  });
+});

@@ -60,6 +60,8 @@ interface DraftReport {
   missingRequired?: string[];
   slots?: SlotReport[];
   ranAt?: string;
+  /** Gate de PII do modelo — espelho do último texto lido (ver lib/templates/pii-gate.ts). */
+  pii?: { blocked: boolean; kinds: string[]; count: number; warnings?: string[]; checkedAt?: string };
 }
 interface TemplateInfo {
   id: string;
@@ -121,6 +123,14 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
    * A trava é do servidor; aqui só mostramos o efeito e a saída consciente.
    */
   const [slotGap, setSlotGap] = useState<string | null>(null);
+  /**
+   * Mensagem do 409 `PII_LEFTOVER` do PATCH — o texto do modelo ainda tem dado
+   * pessoal literal (CPF, RG, conta bancária…). Trava do servidor; a saída
+   * consciente aqui é `allowPii`, separada do `forceActivate` do slot.
+   */
+  const [piiGap, setPiiGap] = useState<string | null>(null);
+  /** Flags já aceitos numa trava anterior, para o próximo PATCH não recuar. */
+  const [acceptedFlags, setAcceptedFlags] = useState<Record<string, boolean>>({});
 
   // Revisão por IA — parte do relatório persistido na ingestão (é ele que traz
   // os avisos de slot), sobrescrito quando o operador roda a IA de novo.
@@ -190,6 +200,10 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
       if (res.status === 409 && data?.code === "SLOT_CLAUSE_MISSING") {
         // Não é erro de operação: é uma decisão que falta ser tomada.
         setSlotGap(data.error as string);
+        return;
+      }
+      if (res.status === 409 && data?.code === "PII_LEFTOVER") {
+        setPiiGap(data.error as string);
         return;
       }
       if (!res.ok) throw new Error(data.error ?? "Falha ao atualizar template");
@@ -300,9 +314,44 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                 // Saída consciente: o texto padrão da plataforma é legítimo pra
                 // quem não tem redação própria — só não pode acontecer sem
                 // ninguém saber.
+                setAcceptedFlags((f) => ({ ...f, forceActivate: true }));
                 void patchTemplate(
-                  { status: "active", forceActivate: true },
+                  { status: "active", ...acceptedFlags, forceActivate: true },
                   "Template ativado com o texto padrão da plataforma no espaço de cláusula."
+                );
+              }}
+            >
+              Ativar mesmo assim
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={piiGap !== null} onOpenChange={(o) => !o && setPiiGap(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>O modelo ainda tem dado pessoal no texto</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>{piiGap}</p>
+                <p>
+                  Use o mapeamento manual abaixo para trocar o trecho por uma chave
+                  de preenchimento, ou edite o Doc e clique em &quot;Revalidar&quot;.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Voltar e corrigir</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setPiiGap(null);
+                // Saída consciente e SEPARADA da do slot: quem aceita imprimir
+                // o dado em todo contrato assume isso com nome próprio.
+                setAcceptedFlags((f) => ({ ...f, allowPii: true }));
+                void patchTemplate(
+                  { status: "active", ...acceptedFlags, allowPii: true },
+                  "Template ativado com dado pessoal no texto — revise os contratos gerados."
                 );
               }}
             >
@@ -361,6 +410,18 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {report?.pii?.blocked && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+          <p className="font-medium">Dado pessoal literal no texto do modelo</p>
+          <p className="text-muted-foreground">
+            {report.pii.kinds.join(", ")} — {report.pii.count}{" "}
+            {report.pii.count === 1 ? "ocorrência" : "ocorrências"}. A ativação fica travada
+            até o trecho virar chave de preenchimento (ou cláusula do acervo) e o modelo ser
+            revalidado.
+          </p>
+        </div>
+      )}
 
       {/* Slot de cláusula que não abriu — o aviso mais grave desta tela: o
           modelo consolidado ficou com a garantia de UMA variante chumbada. */}

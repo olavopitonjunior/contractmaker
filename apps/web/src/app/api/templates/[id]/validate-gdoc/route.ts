@@ -3,6 +3,7 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { isGoogleDocsConfigured } from "@/lib/google/client";
 import { getDocPlainText } from "@/lib/google/docs";
+import { auditTemplateText } from "@/lib/templates/pii-gate";
 import { googleErrorMessage } from "@/lib/google/auth-error";
 import { extractPlaceholdersFromText } from "@/lib/google/replace-placeholders";
 import {
@@ -135,6 +136,9 @@ export async function POST(
           ...prevReport,
           ...(prevSlots.length ? { slots } : {}),
           missingRequired,
+          // Espelho do Doc, como `slots`: o operador troca o trecho por uma
+          // chave, revalida, e a trava de PII da ativação some.
+          pii: auditTemplateText(text),
           lastValidatedAt: new Date().toISOString(),
         } as object,
         ...(template.engine === "google_docs" && slotsChanged

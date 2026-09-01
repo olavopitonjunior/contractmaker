@@ -3,6 +3,8 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/db/prisma";
 import { insertPlaceholdersWithAI } from "@/lib/templates/ai-placeholder-insertion";
+import { getDocPlainText } from "@/lib/google/docs";
+import { auditTemplateText } from "@/lib/templates/pii-gate";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -34,7 +36,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   const template = await prisma.contractTemplate.findFirst({
     where: { id: params.id, orgId: org.id },
-    select: { googleTemplateDocId: true, modalidade: true, engine: true },
+    select: { googleTemplateDocId: true, modalidade: true, engine: true, draftReport: true },
   });
   if (!template) return NextResponse.json({ error: "Template não encontrado." }, { status: 404 });
   if (template.engine !== "google_docs" || !template.googleTemplateDocId) {
@@ -50,11 +52,30 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       modalidade: template.modalidade ?? "a_vista",
       orgId: org.id,
     });
+    // Uma nova passada NÃO apaga o que a ingestão mediu (slots, neutralização):
+    // antes o relatório era sobrescrito inteiro e os avisos de slot sumiam da
+    // revisão. E PII é re-auditada no texto que a IA acabou de deixar.
+    const prevReport =
+      template.draftReport && typeof template.draftReport === "object"
+        ? (template.draftReport as Record<string, unknown>)
+        : {};
+    let pii: unknown = prevReport.pii ?? null;
+    try {
+      pii = auditTemplateText(await getDocPlainText(template.googleTemplateDocId));
+    } catch (err) {
+      console.error("[templates/rerun-ai] não consegui reler o doc pra auditar PII:", err);
+    }
     await prisma.contractTemplate.update({
       where: { id: params.id },
-      data: { draftReport: report as object },
+      data: {
+        draftReport: {
+          ...prevReport,
+          ...(report as object),
+          ...(pii ? { pii } : {}),
+        } as object,
+      },
     });
-    return NextResponse.json({ report });
+    return NextResponse.json({ report: { ...(report as object), ...(pii ? { pii } : {}) } });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Falha na revisão por IA." },
