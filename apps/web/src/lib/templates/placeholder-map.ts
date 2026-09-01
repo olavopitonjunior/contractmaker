@@ -89,6 +89,16 @@ export function buildLocacaoPlaceholderMap(
     aluguel_valor_extenso:
       get(enriched, "aluguel.valor") != null ? hbsExpr("extenso aluguel.valor", enriched) : "",
     aluguel_dia_vencimento: numExtensoPar(enriched, "aluguel.dia_vencimento"),
+    // Encargos da 9.1.2, do próprio form (aluguel.iptu_mensal / condominio_mensal).
+    // Sem chave, o modelo ingerido guardava o IPTU e o condomínio do imóvel-fonte.
+    iptu_valor:
+      get(enriched, "aluguel.iptu_mensal") != null
+        ? hbsExpr("moeda aluguel.iptu_mensal", enriched)
+        : "",
+    condominio_valor:
+      get(enriched, "aluguel.condominio_mensal") != null
+        ? hbsExpr("moeda aluguel.condominio_mensal", enriched)
+        : "",
     vigencia_meses: numExtensoPar(enriched, "aluguel.vigencia_meses"),
     vigencia_inicio: str(config.vigencia_inicio_texto),
     vigencia_fim: str(config.vigencia_fim_texto),

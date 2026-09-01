@@ -127,6 +127,27 @@ describe("buildLocacaoPlaceholderMap", () => {
     expect(map.data_local_assinatura).toContain("São Paulo/SP, 9 de junho de 2026");
   });
 
+  it("encargos da 9.1.2: IPTU e condomínio vêm do form em BRL; vazios quando não informados", () => {
+    // Fixture base não informa os itens → chaves existem e ficam vazias (casa
+    // sem condomínio, ou form antigo): nada do imóvel-fonte sobra no contrato.
+    expect(map.iptu_valor).toBe("");
+    expect(map.condominio_valor).toBe("");
+
+    const comEncargos = buildLocacaoPlaceholderMap(
+      enrichLocacaoData(
+        JSON.parse(
+          JSON.stringify({
+            ...locacaoBase,
+            aluguel: { ...locacaoBase.aluguel, iptu_mensal: 31.67, condominio_mensal: 676.08 },
+          })
+        ),
+        { administradora: { nome: "ImobPro Ltda", creci: "24.342-J/SP", endereco: "Rua X, 1" } }
+      )
+    );
+    expect(comEncargos.iptu_valor).toMatch(/R\$\s?31,67/);
+    expect(comEncargos.condominio_valor).toMatch(/R\$\s?676,08/);
+  });
+
   it("sem administradora cai no fallback e fiador vazio fora da fiança", () => {
     const semAdm = buildLocacaoPlaceholderMap(
       enrichLocacaoData(JSON.parse(JSON.stringify(locacaoBase)))

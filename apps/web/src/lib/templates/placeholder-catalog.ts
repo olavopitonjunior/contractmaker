@@ -23,6 +23,13 @@ export interface PlaceholderDef {
   description: string;
   example: string;
   required: boolean;
+  /**
+   * Obrigatório SÓ nestas modalidades (soma-se a `required`). Um token pode
+   * ser opcional na venda e obrigatório na locação sem duplicar a entrada —
+   * `catalogForModalidade` resolve, e é dela que o prompt da IA, o
+   * `requiredTokens` e a revisão leem.
+   */
+  requiredIn?: PlaceholderModalidade[];
   kind: PlaceholderKind;
   modalidades: PlaceholderModalidade[];
 }
@@ -144,9 +151,16 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   {
     token: "imovel_descricao",
     label: "Descrição do imóvel",
-    description: "Descrição narrativa do imóvel preenchida no formulário.",
+    description:
+      "Descrição narrativa do imóvel preenchida no formulário. Na locação é " +
+      "OBRIGATÓRIA: a cláusula do objeto (1.1) diz 'apartamento 33 do condomínio " +
+      "Siracusa, localizado na…' — sem esta chave, a descrição do imóvel do " +
+      "arquivo-fonte fica literal no modelo e todo contrato sai com ela.",
     example: "Apartamento residencial com 3 dormitórios…",
     required: false,
+    // Rebuild da RE/MAX Trio (2026-09-01): 16/16 modelos ficaram com a
+    // descrição do imóvel-fonte na 1.1 porque a IA só tokenizou o endereço.
+    requiredIn: LOCACAO,
     kind: "simple",
     modalidades: TODAS,
   },
@@ -167,6 +181,30 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
     required: false,
     kind: "simple",
     modalidades: TODAS,
+  },
+  {
+    token: "iptu_valor",
+    label: "IPTU mensal",
+    description:
+      "Valor mensal do IPTU informado no formulário, em BRL. Na cláusula de " +
+      "encargos (9.1.2): 'IPTU (R$ 31,67 por mês – referência ano X)'.",
+    example: "R$ 31,67",
+    required: false,
+    kind: "simple",
+    modalidades: LOCACAO,
+  },
+  {
+    token: "condominio_valor",
+    label: "Condomínio mensal",
+    description:
+      "Valor mensal das despesas ordinárias de condomínio informado no " +
+      "formulário, em BRL. Na cláusula de encargos (9.1.2): 'despesas ordinárias " +
+      "de condomínio (R$ 676,08 – referência mês X)'. Vazio quando o imóvel não " +
+      "tem condomínio (casa).",
+    example: "R$ 676,08",
+    required: false,
+    kind: "simple",
+    modalidades: LOCACAO,
   },
   {
     token: "aluguel_valor",
@@ -324,8 +362,9 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
 ];
 
 export function catalogForModalidade(modalidade: string): PlaceholderDef[] {
-  return PLACEHOLDER_CATALOG.filter((d) =>
-    d.modalidades.includes(modalidade as PlaceholderModalidade)
+  const m = modalidade as PlaceholderModalidade;
+  return PLACEHOLDER_CATALOG.filter((d) => d.modalidades.includes(m)).map((d) =>
+    d.requiredIn?.includes(m) && !d.required ? { ...d, required: true } : d
   );
 }
 
