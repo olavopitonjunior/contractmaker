@@ -188,10 +188,13 @@ export function FormSettingsClient({ initial }: FormSettingsClientProps) {
     {
       endpoint: ENDPOINT,
       // E-mail pela metade não pode ir pra rota: o Zod devolveria 400 e a pill
-      // travaria em erro no meio da digitação.
-      isValid: (f) => {
+      // travaria em erro no meio da digitação. Mas quem fica retido é SÓ ele —
+      // com um `isValid` de seção, o e-mail incompleto segurava junto os dois
+      // toggles vizinhos, que não têm relação nenhuma com ele e já estavam
+      // prontos para gravar. Sair da página perdia o toggle, calado.
+      invalidKeys: (f) => {
         const v = String(f.summaryRecipientEmail ?? "");
-        return v === "" || EMAIL_RE.test(v);
+        return v === "" || EMAIL_RE.test(v) ? [] : ["summaryRecipientEmail"];
       },
     },
   );
