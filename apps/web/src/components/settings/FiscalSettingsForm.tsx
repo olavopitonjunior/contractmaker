@@ -1,11 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
 import { useOrgSettingsForm } from "@/hooks/use-org-settings-form";
 import { SaveStatusPill } from "@/components/settings/SaveStatusPill";
 
@@ -48,12 +46,15 @@ function MunicipioAutocomplete({
   name,
   onPick,
   onCodeChange,
+  onBlurField,
 }: {
   uf: string;
   code: string;
   name: string;
   onPick: (m: MunicipioHit) => void;
   onCodeChange: (code: string) => void;
+  /** Grava na hora ao sair do campo, como nos demais campos do formulário. */
+  onBlurField: () => void;
 }) {
   const [query, setQuery] = useState(name);
   const [hits, setHits] = useState<MunicipioHit[]>([]);
@@ -143,6 +144,7 @@ function MunicipioAutocomplete({
           inputMode="numeric"
           className="h-8 w-28 font-mono text-sm"
           onChange={(e) => onCodeChange(e.target.value.replace(/\D/g, "").slice(0, 4))}
+          onBlur={onBlurField}
         />
         <span className="text-xs text-muted-foreground">
           Selecione na lista para preencher automaticamente (4 dígitos da tabela da Receita).
@@ -156,7 +158,7 @@ export function FiscalSettingsForm({ initial }: { initial: FiscalSettings }) {
   // Autosave + hidratação do servidor + PATCH só dos campos sujos. Esta tela e
   // o perfil da imobiliária (onboarding) escrevem nas MESMAS colunas de
   // Organization — mandar os campos intocados faria uma pisar na outra.
-  const { form, set, patch, saveNow, status, error, hydrated, isDirty } = useOrgSettingsForm(
+  const { form, set, patch, saveNow, status, error, isDirty } = useOrgSettingsForm(
     {
       legalName: initial.legalName ?? "",
       cnpj: initial.cnpj ?? "",
@@ -169,12 +171,6 @@ export function FiscalSettingsForm({ initial }: { initial: FiscalSettings }) {
     },
     { onSaved: undefined }
   );
-
-  async function onSaveClick() {
-    const ok = await saveNow();
-    if (ok) toast.success("Dados fiscais salvos.");
-    else toast.error(error ?? "Falha ao salvar");
-  }
 
   return (
     <Card>
@@ -191,6 +187,7 @@ export function FiscalSettingsForm({ initial }: { initial: FiscalSettings }) {
                 value={form[f.key]}
                 placeholder={f.placeholder}
                 onChange={(e) => set(f.key, e.target.value)}
+                onBlur={() => void saveNow()}
               />
               {f.hint && <p className="text-xs text-muted-foreground">{f.hint}</p>}
             </div>
@@ -207,13 +204,12 @@ export function FiscalSettingsForm({ initial }: { initial: FiscalSettings }) {
               })
             }
             onCodeChange={(code) => set("fiscalMunicipioCode", code)}
+            onBlurField={() => void saveNow()}
           />
         </div>
-        <div className="flex items-center justify-end gap-3">
-          <SaveStatusPill status={status} isDirty={isDirty} />
-          <Button onClick={onSaveClick} disabled={!hydrated || status === "saving"}>
-            {status === "saving" ? "Salvando…" : "Salvar dados fiscais"}
-          </Button>
+        {/* Sem botão "Salvar" — a seção grava sozinha e a pill é o retorno. */}
+        <div className="flex items-center justify-end">
+          <SaveStatusPill status={status} isDirty={isDirty} error={error} />
         </div>
       </CardContent>
     </Card>
