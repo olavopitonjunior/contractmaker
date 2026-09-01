@@ -8,6 +8,7 @@ import {
   resolveSlaPolicies,
   recomputeSlaDeadlines,
 } from "@/lib/pipeline/sla-policies";
+import { audit } from "@/lib/security/audit";
 
 vi.mock("@/lib/auth/context", () => ({ requireAuth: vi.fn() }));
 vi.mock("@/lib/security/rbac/guard", async (orig) => ({
@@ -29,6 +30,7 @@ const resolve = vi.mocked(resolveSlaPolicies);
 const recompute = vi.mocked(recomputeSlaDeadlines);
 const upsert = vi.mocked(prisma.slaPolicy.upsert);
 const deleteMany = vi.mocked(prisma.slaPolicy.deleteMany);
+const auditMock = vi.mocked(audit);
 
 const POLICIES = [
   {
@@ -117,8 +119,23 @@ describe("PATCH /api/org/sla-policies", () => {
     expect(res.status).toBe(200);
     expect(upsert).not.toHaveBeenCalled();
     expect(deleteMany).toHaveBeenCalledWith({
-      where: { orgId: "org-1", scope: "deal_stage", key: "s0" },
+      where: { orgId: "org-1", scope: "deal_stage", key: "s0", kind: "venda" },
     });
+
+    // Um PATCH que só DELETOU ainda precisa re-materializar os deadlines: os
+    // deals ativos voltam ao default e as datas mudam.
+    expect(recompute).toHaveBeenCalledWith("org-1", "venda");
+
+    // E a trilha tem de dizer que foi RESET, não "a org escolheu 5/10". Sem
+    // isso, mudar o default de código torna o log velho enganoso.
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          policies: [expect.objectContaining({ stageId: "s0", effect: "reset" })],
+        }),
+      })
+    );
   });
 
   it("salvar UMA etapa divergente não cria linha para as que estão no padrão", async () => {
@@ -149,7 +166,7 @@ describe("PATCH /api/org/sla-policies", () => {
     );
     expect(deleteMany).toHaveBeenCalledTimes(1);
     expect(deleteMany).toHaveBeenCalledWith({
-      where: { orgId: "org-1", scope: "deal_stage", key: "s1" },
+      where: { orgId: "org-1", scope: "deal_stage", key: "s1", kind: "venda" },
     });
   });
 

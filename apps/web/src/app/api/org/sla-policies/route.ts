@@ -153,7 +153,12 @@ export async function PATCH(req: NextRequest) {
   for (const p of policies) {
     if (isCodeDefault(p)) {
       await prisma.slaPolicy.deleteMany({
-        where: { orgId: ctx.orgId, scope: "deal_stage", key: p.stageId },
+        // `kind` é redundante — `@@unique([orgId, scope, key])` já garante no
+        // máximo uma linha, e `stageId` é cuid global, então não há colisão
+        // entre esteiras. Vai junto para casar com o `deleteMany` do DELETE
+        // logo abaixo: dois filtros diferentes no mesmo arquivo escondem a
+        // premissa de unicidade e custam caro na próxima leitura.
+        where: { orgId: ctx.orgId, scope: "deal_stage", key: p.stageId, kind },
       });
       continue;
     }
@@ -192,11 +197,17 @@ export async function PATCH(req: NextRequest) {
       resource: ctx.orgId,
       metadata: {
         kind,
+        // `effect` distingue quem virou linha de quem PERDEU a linha. Sem ele,
+        // um reset ao padrão fica registrado como "warnDays: 5, dangerDays:
+        // 10" — indistinguível de uma org que escolheu 5/10 de propósito. Se
+        // o default de código mudar depois, quem auditar o log velho conclui
+        // errado que havia configuração explícita.
         policies: policies.map((p) => ({
           stageId: p.stageId,
           warnDays: p.warnDays,
           dangerDays: p.dangerDays,
           enabled: p.enabled,
+          effect: isCodeDefault(p) ? ("reset" as const) : ("custom" as const),
         })),
       },
     }
