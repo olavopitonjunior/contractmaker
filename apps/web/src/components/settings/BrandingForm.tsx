@@ -26,7 +26,7 @@ export interface OrgBranding {
  * preencheu), então o dono nunca encontra a tela em branco.
  */
 export function BrandingForm({ initial }: { initial: OrgBranding }) {
-  const { form, set, saveNow, status, error, hydrated, isDirty } = useOrgSettingsForm(
+  const { form, set, saveNow, status, error, isDirty } = useOrgSettingsForm(
     {
       displayName: initial.displayName ?? "",
       supportEmail: initial.supportEmail ?? "",
@@ -39,12 +39,6 @@ export function BrandingForm({ initial }: { initial: OrgBranding }) {
   const [logoUrl, setLogoUrl] = useState(initial.logoUrl ?? "");
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  async function onSaveClick() {
-    const ok = await saveNow();
-    if (ok) toast.success("Identidade visual salva.");
-    else toast.error(error ?? "Falha ao salvar");
-  }
 
   async function uploadLogo(file: File) {
     setUploading(true);
@@ -162,6 +156,7 @@ export function BrandingForm({ initial }: { initial: OrgBranding }) {
             value={form.displayName}
             placeholder="RE/MAX Ativa"
             onChange={(e) => set("displayName", e.target.value)}
+            onBlur={() => void saveNow()}
           />
           <p className="text-xs text-muted-foreground">
             Assina os e-mails e a página de pagamento.
@@ -176,6 +171,7 @@ export function BrandingForm({ initial }: { initial: OrgBranding }) {
               type="color"
               value={/^#[0-9a-fA-F]{6}$/.test(color) ? color : "#0f172a"}
               onChange={(e) => set("primaryColor", e.target.value)}
+              onBlur={() => void saveNow()}
               className="h-9 w-12 cursor-pointer rounded border bg-transparent p-1"
             />
             <Input
@@ -183,6 +179,7 @@ export function BrandingForm({ initial }: { initial: OrgBranding }) {
               value={form.primaryColor}
               placeholder="#0f172a"
               onChange={(e) => set("primaryColor", e.target.value)}
+              onBlur={() => void saveNow()}
               className="font-mono"
             />
           </div>
@@ -195,6 +192,7 @@ export function BrandingForm({ initial }: { initial: OrgBranding }) {
             value={form.supportEmail}
             placeholder="contato@imobiliaria.com.br"
             onChange={(e) => set("supportEmail", e.target.value)}
+            onBlur={() => void saveNow()}
           />
         </div>
 
@@ -205,15 +203,17 @@ export function BrandingForm({ initial }: { initial: OrgBranding }) {
             value={form.supportPhone}
             placeholder="(19) 99999-0000"
             onChange={(e) => set("supportPhone", e.target.value)}
+            onBlur={() => void saveNow()}
           />
         </div>
       </div>
 
-      <div className="flex items-center justify-end gap-3">
-        <SaveStatusPill status={status} isDirty={isDirty} />
-        <Button onClick={onSaveClick} disabled={!hydrated || status === "saving"}>
-          {status === "saving" ? "Salvando…" : "Salvar identidade"}
-        </Button>
+      {/* Sem botão "Salvar": a seção grava sozinha (ver `useOrgSettingsForm`) e
+          a pill é o único retorno. O botão que existia aqui só chamava o mesmo
+          flush que o `blur` de cada campo já faz — e, convivendo com seções
+          vizinhas que salvam sem botão, ensinava o contrário do que a área faz. */}
+      <div className="flex items-center justify-end">
+        <SaveStatusPill status={status} isDirty={isDirty} error={error} />
       </div>
     </div>
   );

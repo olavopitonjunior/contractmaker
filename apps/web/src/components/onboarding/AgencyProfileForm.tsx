@@ -1,10 +1,8 @@
 "use client";
 
-import { toast } from "sonner";
 import { Info } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
 import { useOrgSettingsForm } from "@/hooks/use-org-settings-form";
 import { SaveStatusPill } from "@/components/settings/SaveStatusPill";
 
@@ -62,7 +60,7 @@ export function AgencyProfileForm({
   initial: AgencyProfile;
   onSaved?: () => void;
 }) {
-  const { form, set, saveNow, status, error, hydrated, isDirty } = useOrgSettingsForm(
+  const { form, set, saveNow, status, error, isDirty } = useOrgSettingsForm(
     {
       legalName: initial.legalName ?? "",
       cnpj: initial.cnpj ?? "",
@@ -71,14 +69,6 @@ export function AgencyProfileForm({
     },
     { onSaved }
   );
-
-  // O autosave é silencioso (sinalizado pelo pill). O clique explícito confirma
-  // com toast — inclusive quando não havia nada sujo pra salvar.
-  async function onSaveClick() {
-    const ok = await saveNow();
-    if (ok) toast.success("Perfil da imobiliária salvo.");
-    else toast.error(error ?? "Falha ao salvar");
-  }
 
   return (
     <div className="space-y-4">
@@ -99,16 +89,17 @@ export function AgencyProfileForm({
               value={form[f.key]}
               placeholder={f.placeholder}
               onChange={(e) => set(f.key, e.target.value)}
+              onBlur={() => void saveNow()}
             />
             {f.hint && <p className="text-xs text-muted-foreground">{f.hint}</p>}
           </div>
         ))}
       </div>
-      <div className="flex items-center justify-end gap-3">
-        <SaveStatusPill status={status} isDirty={isDirty} />
-        <Button onClick={onSaveClick} disabled={!hydrated || status === "saving"}>
-          {status === "saving" ? "Salvando…" : "Salvar perfil"}
-        </Button>
+      {/* Sem botão "Salvar" — a seção grava sozinha e a pill é o retorno. Este
+          form também vive num passo do wizard de onboarding: sair do passo ou
+          da página dispara o flush de unmount do hook. */}
+      <div className="flex items-center justify-end">
+        <SaveStatusPill status={status} isDirty={isDirty} error={error} />
       </div>
     </div>
   );

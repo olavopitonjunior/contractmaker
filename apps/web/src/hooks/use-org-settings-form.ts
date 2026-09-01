@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 
 export type OrgSettingsSaveStatus = "idle" | "saving" | "saved" | "error";
 
@@ -9,6 +10,9 @@ export type OrgSettingsFields = Record<string, string | null | undefined>;
 
 /** Endpoint default — o cadastro fiscal/perfil da imobiliária. */
 const DEFAULT_ENDPOINT = "/api/org/fiscal-settings";
+
+/** ~3s de espera por um PATCH em voo antes de desistir do re-agendamento. */
+const MAX_REQUEUES = 20;
 
 function norm(v: unknown): string {
   return (v ?? "").toString();
@@ -33,6 +37,10 @@ function norm(v: unknown): string {
  *
  *  3. **Rascunho perdido.** Sem autosave, o que era digitado e não confirmado
  *     no botão evaporava. Aqui salva sozinho após `debounceMs` sem digitação.
+ *
+ * As três saídas do estado que o debounce sozinho não cobre — desmontar, editar
+ * durante um PATCH em voo e tomar 4xx — são tratadas abaixo, cada uma no ponto
+ * comentado. São as mesmas de `use-settings-auto-save.ts`, que já as pagou.
  */
 export function useOrgSettingsForm<T extends OrgSettingsFields>(
   initial: T,
@@ -60,12 +68,35 @@ export function useOrgSettingsForm<T extends OrgSettingsFields>(
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightRef = useRef(false);
   const mountedRef = useRef(true);
+  /** Há gravação agendada e ainda não disparada — o unmount precisa saber. */
+  const pendingRef = useRef(false);
+  /** 401/403/404 é veredito: para de tentar. Ver o tratamento em `persist`. */
+  const stoppedRef = useRef(false);
+  /** Valor corrente para quem persiste fora do render (unmount, re-agendamento). */
+  const formRef = useRef(form);
+  formRef.current = form;
+  /** Tentativas seguidas de re-agendamento por PATCH em voo — ver `persist`. */
+  const requeuesRef = useRef(0);
+  /** Re-agendamento que já sobreviveu ao unmount; nenhuma limpeza o cancela. */
+  const orphanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       if (timerRef.current) clearTimeout(timerRef.current);
+      // Desmontar no meio do debounce NÃO pode descartar a edição. Aqui o
+      // caminho é comum: `AgencyProfileForm` vive num passo do wizard de
+      // onboarding e em `/settings/perfil` — sair da página ou trocar de passo
+      // dentro da janela de 1,2s perdia o que tinha sido digitado, em silêncio.
+      // (O wizard já contornava isso mantendo o form montado e só escondido; a
+      // correção aqui é na origem, e vale também para quem navega para fora.)
+      // O fetch sobrevive ao unmount; só os setState é que não podem rodar, e
+      // `mountedRef` já cuida disso.
+      if (pendingRef.current) {
+        pendingRef.current = false;
+        void persistRef.current();
+      }
     };
   }, []);
 
@@ -74,7 +105,7 @@ export function useOrgSettingsForm<T extends OrgSettingsFields>(
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(ENDPOINT);
+        const res = await fetch(ENDPOINT, { credentials: "include" });
         if (!res.ok) throw new Error(String(res.status));
         const server = (await res.json()) as Record<string, unknown>;
         if (cancelled || !mountedRef.current) return;
@@ -110,56 +141,129 @@ export function useOrgSettingsForm<T extends OrgSettingsFields>(
     [keys]
   );
 
-  const persist = useCallback(
-    async (state: T): Promise<boolean> => {
-      const dirty = dirtyKeys(state);
-      if (dirty.length === 0 || inFlightRef.current) return true;
+  const persist = useCallback(async (): Promise<boolean> => {
+    const state = formRef.current;
+    const dirty = dirtyKeys(state);
+    if (dirty.length === 0) return true;
+    if (stoppedRef.current) return false;
+    // Editar durante um PATCH em voo não pode sumir. Antes isto devolvia `true`
+    // sem gravar: a alteração ficava suja e sem ninguém para gravá-la, porque o
+    // efeito só volta a agendar quando o valor muda de novo — e o valor não vai
+    // mudar sozinho. Pior, `saveNow` reportava sucesso sem ter salvo nada.
+    if (inFlightRef.current) {
+      // Teto: uma requisição que nunca volta não pode virar polling eterno.
+      // Estourou, a edição continua suja e a próxima digitação reagenda — mas
+      // desistir CALADO seria trocar um defeito por outro: a pill continuaria
+      // dizendo "Alterações não salvas" como se ainda fosse tentar. Marca erro.
+      if (requeuesRef.current >= MAX_REQUEUES) {
+        if (mountedRef.current) {
+          setStatus("error");
+          setError("O servidor não respondeu. Edite de novo para tentar.");
+        }
+        return false;
+      }
+      requeuesRef.current += 1;
+      const retry = () => {
+        pendingRef.current = false;
+        void persistRef.current();
+      };
+      if (mountedRef.current) {
+        if (timerRef.current) clearTimeout(timerRef.current);
+        // `pendingRef` continua ligado durante o re-agendamento: sem isto,
+        // desmontar nesta janela de 150ms cairia no mesmo buraco que o flush
+        // de unmount tapa — só que mais estreito, e por isso mais difícil de
+        // enxergar.
+        pendingRef.current = true;
+        timerRef.current = setTimeout(retry, 150);
+      } else {
+        // Já desmontado (este persist veio do flush de unmount). O timer NÃO
+        // pode morar em `timerRef`: a limpeza do efeito de debounce roda depois
+        // da deste efeito e limparia justamente ele, engolindo a edição que o
+        // flush existe para salvar.
+        orphanTimerRef.current = setTimeout(retry, 150);
+      }
+      return false;
+    }
+    requeuesRef.current = 0;
 
-      inFlightRef.current = true;
+    inFlightRef.current = true;
+    // O save de unmount roda com o componente já fora da árvore: o fetch vale,
+    // o setState não.
+    if (mountedRef.current) {
       setStatus("saving");
       setError(null);
-      try {
-        const payload = Object.fromEntries(dirty.map((k) => [k, norm(state[k]).trim()]));
-        const res = await fetch(ENDPOINT, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) {
-          const j = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(j.error || "Falha ao salvar");
+    }
+    try {
+      const payload = Object.fromEntries(dirty.map((k) => [k, norm(state[k]).trim()]));
+      const res = await fetch(ENDPOINT, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        // 401/403/404 são definitivos (sem permissão, sessão expirada, recurso
+        // sumiu): insistir só queima request, e sem a trava CADA tecla vira um
+        // PATCH novo contra uma rota que já recusou. 400/422 são de CONTEÚDO —
+        // o usuário corrige digitando, então NÃO travam; a baseline não avança
+        // e a próxima edição válida reagenda sozinha.
+        const definitivo =
+          res.status === 401 || res.status === 403 || res.status === 404;
+        if (definitivo) {
+          stoppedRef.current = true;
+          if (timerRef.current) clearTimeout(timerRef.current);
+          toast.error(
+            j.error === "PERMISSION_DENIED"
+              ? "Você não tem permissão para alterar estas configurações."
+              : (j.error ?? "Não foi possível salvar. Recarregue a página."),
+          );
         }
-        const saved = (await res.json()) as Record<string, unknown>;
-        // Rebaseia com o que o servidor devolveu (a rota responde a linha nova).
-        for (const k of keys) {
-          baselineRef.current[k] = k in saved ? norm(saved[k]) : norm(state[k]).trim();
-        }
-        if (!mountedRef.current) return true;
-        setStatus("saved");
-        onSavedRef.current?.();
-        setTimeout(() => {
-          if (mountedRef.current) setStatus((s) => (s === "saved" ? "idle" : s));
-        }, 2500);
-        return true;
-      } catch (err) {
-        if (!mountedRef.current) return false;
-        setStatus("error");
-        setError(err instanceof Error ? err.message : "Falha ao salvar");
-        return false;
-      } finally {
-        inFlightRef.current = false;
+        throw new Error(j.error || "Falha ao salvar");
       }
-    },
-    [dirtyKeys, keys, ENDPOINT]
-  );
+      const saved = (await res.json()) as Record<string, unknown>;
+      // Rebaseia com o que o servidor devolveu (a rota responde a linha nova).
+      for (const k of keys) {
+        baselineRef.current[k] = k in saved ? norm(saved[k]) : norm(state[k]).trim();
+      }
+      if (!mountedRef.current) return true;
+      setStatus("saved");
+      onSavedRef.current?.();
+      setTimeout(() => {
+        if (mountedRef.current) setStatus((s) => (s === "saved" ? "idle" : s));
+      }, 2500);
+      return true;
+    } catch (err) {
+      if (!mountedRef.current) return false;
+      setStatus("error");
+      setError(err instanceof Error ? err.message : "Falha ao salvar");
+      return false;
+    } finally {
+      inFlightRef.current = false;
+    }
+  }, [dirtyKeys, keys, ENDPOINT]);
+
+  // Deixa o unmount e o re-agendamento chamarem a versão corrente sem se
+  // auto-referenciar.
+  const persistRef = useRef(persist);
+  persistRef.current = persist;
 
   // --- Autosave: debounce após a última tecla ---
   useEffect(() => {
-    if (!hydrated) return;
-    if (dirtyKeys(form).length === 0) return;
+    // Todo caminho que NÃO agenda precisa zerar `pendingRef`: ele é o que
+    // autoriza o unmount a gravar, e deixá-lo preso em `true` faria um form
+    // limpo (ou ainda não hidratado) disparar PATCH ao desmontar.
+    if (!hydrated || stoppedRef.current || dirtyKeys(form).length === 0) {
+      pendingRef.current = false;
+      return;
+    }
 
     if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => void persist(form), debounceMs);
+    pendingRef.current = true;
+    timerRef.current = setTimeout(() => {
+      pendingRef.current = false;
+      void persist();
+    }, debounceMs);
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
@@ -175,11 +279,12 @@ export function useOrgSettingsForm<T extends OrgSettingsFields>(
     setForm((f) => ({ ...f, ...values }));
   }, []);
 
-  /** Flush imediato (botão "Salvar"). Devolve se persistiu sem erro. */
+  /** Flush imediato — usar no `blur` de campo de texto. */
   const saveNow = useCallback(async (): Promise<boolean> => {
     if (timerRef.current) clearTimeout(timerRef.current);
-    return persist(form);
-  }, [persist, form]);
+    pendingRef.current = false;
+    return persist();
+  }, [persist]);
 
   return {
     form,
