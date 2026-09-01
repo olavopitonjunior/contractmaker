@@ -165,13 +165,30 @@ function SignaturePreferencesEditor({ inicial }: { inicial: Settings }) {
     },
     {
       endpoint: "/api/settings/signature-preferences",
-      isValid: () =>
-        !deadlineErro &&
-        !ownerDeadlineErro &&
-        !assuntoLongo &&
-        !mensagemLonga &&
-        s.allowedAuthMethods.length > 0 &&
-        s.allowedAuthMethods.includes(s.defaultAuthMethod),
+      // Por chave, NÃO pela seção inteira. Com um `isValid` único, um prazo
+      // momentaneamente fora de faixa (digitar "400" a caminho de "40")
+      // segurava também o switch "Fechar automaticamente" — que não tem
+      // `blur` para forçar e dependia só do debounce. Sair da página nesse
+      // estado perdia o switch em silêncio, sem botão para recuperar. Era o
+      // mesmo defeito encontrado em `/settings/profile`, já em produção aqui.
+      invalidKeys: () => {
+        const ruins: string[] = [];
+        if (deadlineErro) ruins.push("defaultDeadlineDays");
+        if (ownerDeadlineErro) ruins.push("proposalOwnerDeadlineDays");
+        if (assuntoLongo) ruins.push("proposalEmailSubject");
+        if (mensagemLonga) ruins.push("proposalEmailMessage");
+        // O par de métodos tem invariante CRUZADA, checada no servidor contra
+        // a linha atual: o padrão precisa estar entre os permitidos. Quando ela
+        // quebra, os DOIS ficam retidos juntos — nunca um sem o outro, senão o
+        // servidor recebe metade e recusa (ou pior, aceita e fica incoerente).
+        if (
+          s.allowedAuthMethods.length === 0 ||
+          !s.allowedAuthMethods.includes(s.defaultAuthMethod)
+        ) {
+          ruins.push("allowedAuthMethods", "defaultAuthMethod");
+        }
+        return ruins;
+      },
     },
   );
 

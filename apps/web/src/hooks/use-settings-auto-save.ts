@@ -24,6 +24,23 @@ export interface UseSettingsAutoSaveOptions<T extends SettingsFields> {
    * furando o teto legal do art. 52 do CDC.
    */
   isValid?: (fields: T) => boolean;
+  /**
+   * Chaves que NÃO podem viajar agora, por estarem com valor incompleto ou
+   * inválido. Diferente de `isValid`, que reprova a seção inteira, esta opção
+   * remove só as chaves ruins do payload e deixa as boas passarem.
+   *
+   * Use quando os campos são INDEPENDENTES entre si — colunas distintas, sem
+   * regra cruzada. Em `/settings/profile`, nome e CPF não têm relação nenhuma:
+   * reprovar a seção inteira porque o CPF está pela metade fazia o nome — já
+   * corrigido e válido — nunca ser gravado. E como nada era agendado, o flush
+   * de unmount também não disparava: sair da página perdia o nome bom, calado,
+   * sem botão que desse ao usuário a chance de forçar.
+   *
+   * `isValid` continua sendo o certo onde a coerência é do CONJUNTO (prazo que
+   * depende de outro prazo, método padrão que precisa estar entre os
+   * permitidos): ali gravar metade é gravar incoerência.
+   */
+  invalidKeys?: (fields: T) => string[];
   debounceMs?: number;
   /** Desliga o agendamento (seção somente-leitura / sem permissão). */
   enabled?: boolean;
@@ -40,6 +57,11 @@ export interface UseSettingsAutoSaveOptions<T extends SettingsFields> {
 const MAX_REQUEUES = 20;
 
 function serialize(value: unknown): string {
+  // `JSON.stringify(NaN)` é a string "null" — sem este caso, um número que o
+  // usuário deixou inválido (campo de renda com texto) ficaria IGUAL a "não
+  // informado" na comparação, e a pill diria "sem alterações" enquanto o erro
+  // inline dizia o contrário.
+  if (typeof value === "number" && Number.isNaN(value)) return '"__NaN__"';
   return JSON.stringify(value ?? null);
 }
 
@@ -77,6 +99,7 @@ export function useSettingsAutoSave<T extends SettingsFields>(
   const {
     endpoint,
     isValid,
+    invalidKeys,
     debounceMs = 800,
     enabled = true,
     onSaved,
@@ -111,6 +134,8 @@ export function useSettingsAutoSave<T extends SettingsFields>(
   fieldsRef.current = fields;
   const validRef = useRef(isValid);
   validRef.current = isValid;
+  const invalidKeysRef = useRef(invalidKeys);
+  invalidKeysRef.current = invalidKeys;
   const onSavedRef = useRef(onSaved);
   onSavedRef.current = onSaved;
 
@@ -150,11 +175,21 @@ export function useSettingsAutoSave<T extends SettingsFields>(
     [dirtyKeys, fields],
   );
 
-  const persist = useCallback(async (): Promise<boolean> => {
-    const current = fieldsRef.current;
+  /**
+   * Chaves sujas que podem viajar AGORA: as que mudaram, menos as que o card
+   * declarou inválidas. Uma chave ruim retém só a si mesma — não as vizinhas.
+   */
+  const enviaveis = useCallback((current: T): string[] => {
     const dirty = Object.keys(current).filter(
       (k) => serialize(current[k]) !== baselineRef.current[k],
     );
+    const ruins = invalidKeysRef.current?.(current) ?? [];
+    return ruins.length === 0 ? dirty : dirty.filter((k) => !ruins.includes(k));
+  }, []);
+
+  const persist = useCallback(async (): Promise<boolean> => {
+    const current = fieldsRef.current;
+    const dirty = enviaveis(current);
     if (dirty.length === 0) return true;
     if (stoppedRef.current) return false;
     if (validRef.current && !validRef.current(current)) return false;
@@ -262,7 +297,7 @@ export function useSettingsAutoSave<T extends SettingsFields>(
     } finally {
       inFlightRef.current = false;
     }
-  }, [endpoint]);
+  }, [endpoint, enviaveis]);
 
   // Deixa o re-agendamento acima chamar a versão corrente sem se auto-referenciar.
   const persistRef = useRef(persist);
@@ -286,6 +321,12 @@ export function useSettingsAutoSave<T extends SettingsFields>(
       pendingRef.current = false;
       return;
     }
+    // Sujo, porém tudo o que mudou está inválido: não há o que mandar. Agendar
+    // aqui faria o unmount disparar um PATCH que `persist` descartaria.
+    if (enviaveis(fieldsRef.current).length === 0) {
+      pendingRef.current = false;
+      return;
+    }
 
     if (timerRef.current) clearTimeout(timerRef.current);
     pendingRef.current = true;
@@ -296,7 +337,7 @@ export function useSettingsAutoSave<T extends SettingsFields>(
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [dirtySignature, enabled, debounceMs, persist]);
+  }, [dirtySignature, enabled, debounceMs, persist, enviaveis]);
 
   /** Flush imediato — usar no `blur` de campo de texto. */
   const flush = useCallback(async (): Promise<boolean> => {
