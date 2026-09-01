@@ -118,11 +118,11 @@ export async function canApproveInvitations(
  * reprova. Quem está na allowlist de env é operador de plataforma e não tem
  * teto — a allowlist já é a fronteira de confiança dele.
  *
- * **Alcance honesto:** isto fecha o caminho de CONVITE, não a org inteira.
- * `POST /api/org/members` cria membership com papel arbitrário protegido só por
- * `org.members.invite` mais `requireElevation`, que hoje é no-op deliberado —
- * quem tem essa chave chega a `admin` por lá, em uma chamada, sem passar por
- * aqui. É pré-existente e fora deste PR; segue como follow-up.
+ * **Alcance:** isto fecha o caminho de CONVITE. A porta lateral —
+ * `POST /api/org/members`, que criava membership com papel arbitrário protegido
+ * só por `org.members.invite` — foi fechada depois pela issue #452, com o mesmo
+ * teto: ver `canGrantRole`. `requireElevation` continua no-op deliberado, então
+ * o teto é a única barreira real nas duas rotas.
  *
  * Devolve o motivo separado porque "não pode decidir" e "não pode conceder ESTE
  * papel" são coisas diferentes para quem lê a mensagem de erro.
@@ -139,17 +139,97 @@ export async function canApproveInvitationForRole(
     return { allowed: false, reason: "forbidden" };
   }
 
-  const target = await resolveTargetPermissions(params.orgId, params.targetRole);
-  // `null` = papel cujas permissões não dá para conhecer aqui (`custom`, que
-  // depende de um customRoleId que este fluxo não carrega). Um mapa vazio
+  // O convite não carrega customRoleId, então `custom` cai no `null` do
+  // resolver e continua negado — comportamento idêntico ao de antes.
+  const withinCeiling = await isWithinRoleCeiling({
+    orgId: params.orgId,
+    effective,
+    targetRole: params.targetRole,
+  });
+  return withinCeiling
+    ? { allowed: true }
+    : { allowed: false, reason: "role_ceiling" };
+}
+
+/**
+ * O teto puro: as permissões do papel alvo têm de ser SUBCONJUNTO das de quem
+ * concede.
+ *
+ * Sem gate e sem allowlist de propósito. Os dois caminhos que concedem papel
+ * exigem permissões DIFERENTES — `ORG_MEMBERS_APPROVE` na aprovação de convite,
+ * `ORG_MEMBERS_INVITE` em `POST /api/org/members` — e embutir um gate aqui
+ * trocaria em silêncio a permissão exigida por uma das rotas, que é mudança de
+ * comportamento disfarçada de correção. Cada call-site faz o seu gate; o teto é
+ * a única coisa que eles compartilham, e é isto.
+ */
+export async function isWithinRoleCeiling(params: {
+  orgId: string;
+  effective: Awaited<ReturnType<typeof getEffectivePermissions>>;
+  targetRole: string;
+  targetCustomRoleId?: string | null;
+}): Promise<boolean> {
+  const target = await resolveTargetPermissions(
+    params.orgId,
+    params.targetRole,
+    params.targetCustomRoleId
+  );
+  // `null` = papel cujas permissões não dá para conhecer aqui. Um mapa vazio
   // passaria o `.every` VACUAMENTE e o teto liberaria conceder qualquer
   // CustomRole da org — nega em vez de adivinhar.
-  if (target === null) return { allowed: false, reason: "role_ceiling" };
-
-  const withinCeiling = Object.entries(target).every(
+  if (target === null) return false;
+  // Ator sem membership resolve `effective` para `null`. Com um alvo de mapa
+  // vazio o `.every` passaria VACUAMENTE e o teto diria "dentro" para quem não
+  // tem permissão nenhuma. Hoje nenhum call-site chega aqui sem gate, mas isto
+  // é primitiva de segurança exportada: o invariante tem de valer sozinho, não
+  // por sorte de quem chama. (O `effective!` de antes estourava TypeError neste
+  // caso — fail-closed por acidente; a guarda torna a intenção explícita.)
+  if (!params.effective) return false;
+  // Extraído para local: o narrowing de `params.effective` não atravessa o
+  // callback do `.every`, e o tsc reprova a propriedade lá dentro.
+  const { permissions } = params.effective;
+  return Object.entries(target).every(
     ([key, granted]) =>
-      granted !== true || effective!.permissions[key as PermissionKey] === true
+      granted !== true || permissions[key as PermissionKey] === true
   );
+}
+
+/**
+ * Teto da concessão DIRETA de papel — `POST /api/org/members`, que cria a
+ * membership sem passar pela fila de convites.
+ *
+ * Essa rota era a porta lateral do teto que o PR #447 instalou: `role` vinha do
+ * body, `ROLE_VALUES` inclui `admin`, e o único gate era `ORG_MEMBERS_INVITE` —
+ * quem podia convidar criava um `admin` em UMA chamada, sem nunca ter tido
+ * `org.members.change_role`. `requireElevation` dá a impressão de segunda
+ * barreira, mas é no-op deliberado (`security/elevation.ts`); religá-la afeta
+ * muitas rotas e é outro trabalho, não este.
+ *
+ * NÃO herda o curto-circuito de `isApprover`. A allowlist de e-mail por env é a
+ * fronteira de confiança do fluxo de CONVITE; esta rota nunca a teve, e
+ * importá-la junto seria ALARGAR permissão dentro de uma correção de segurança.
+ * Não trava ninguém: `admin` concedendo `admin` passa por igualdade, e `owner`
+ * passa por superset — a rota não aceita `owner` como ALVO (não está em
+ * `ROLE_VALUES`), só como quem concede.
+ */
+export async function canGrantRole(
+  params: Pick<InvitationDecider, "userId" | "orgId"> & {
+    targetRole: string;
+    targetCustomRoleId?: string | null;
+  }
+): Promise<{ allowed: true } | { allowed: false; reason: "role_ceiling" }> {
+  // Resolve o alvo por conta própria, mesmo quando o caller já buscou a
+  // CustomRole para validar existência. Aceitar as permissões do alvo por
+  // parâmetro pouparia uma query e é exatamente como um teto vira decorativo:
+  // bastaria um call-site passar o objeto errado. Numa ação rara de admin, a
+  // segunda leitura é preço justo por uma primitiva que resolve a própria
+  // verdade.
+  const effective = await getEffectivePermissions(params.userId, params.orgId);
+  const withinCeiling = await isWithinRoleCeiling({
+    orgId: params.orgId,
+    effective,
+    targetRole: params.targetRole,
+    targetCustomRoleId: params.targetCustomRoleId,
+  });
   return withinCeiling
     ? { allowed: true }
     : { allowed: false, reason: "role_ceiling" };
@@ -167,14 +247,32 @@ export async function canApproveInvitationForRole(
  */
 async function resolveTargetPermissions(
   orgId: string,
-  targetRole: string
+  targetRole: string,
+  customRoleId?: string | null
 ): Promise<PermissionMap | null> {
-  // `custom` não é conhecível sem o customRoleId, que este fluxo não carrega.
-  // Devolver `{}` faria o teto passar vacuamente. Hoje é inalcançável pelo
-  // convite (`INVITATION_ROLE_VALUES` não tem `custom`), mas a função é
-  // exportada e o conserto natural da brecha de `POST /api/org/members` é
-  // chamá-la de lá — onde `custom` + customRoleId É aceito.
-  if (targetRole === "custom") return null;
+  // `custom` só é conhecível COM o id da CustomRole. O fluxo de convite não o
+  // carrega (`INVITATION_ROLE_VALUES` não tem `custom`) e cai no `null`, que
+  // nega: devolver `{}` ali faria o teto passar VACUAMENTE e liberaria conceder
+  // QUALQUER CustomRole da org. Já `POST /api/org/members` aceita
+  // `custom` + customRoleId, e negar cego lá tiraria uma capacidade legítima —
+  // com o id o alvo é conhecível e o subconjunto é decidível de verdade.
+  if (targetRole === "custom") {
+    if (!customRoleId) return null;
+    const custom = await prisma.customRole.findFirst({
+      // Escopado por org: id de OUTRO tenant não vira teto aqui.
+      where: { id: customRoleId, orgId },
+      select: { permissions: true },
+    });
+    if (!custom) return null;
+    // CustomRole sem permissão nenhuma resolve para `{}` e passa o `.every`
+    // vacuamente — e aqui isso está CERTO, ao contrário do caso acima. A
+    // vacuidade só é bug quando significa "não sei"; quando significa "sei, e
+    // está vazio", conceder é o comportamento correto.
+    return resolvePermissions(
+      "custom",
+      (custom.permissions as PermissionMap | undefined) ?? null
+    );
+  }
 
   // Mesma guarda de `getOrgApproverEmails`: `resolvePermissions` faz
   // console.warn em role fora do catálogo, e `member` é o DEFAULT do
