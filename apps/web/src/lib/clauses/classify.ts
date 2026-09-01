@@ -126,6 +126,18 @@ export interface ClassifyDeps {
   detectPii?: (content: string) => string[];
 }
 
+/**
+ * Tetos do que o modelo pode propor por cláusula.
+ *
+ * Ficam AQUI, no parse, e não como `maxItems` no JSON Schema: o subconjunto de
+ * `output_config.format` recusa a família de palavras-chave que restringe o
+ * valor além da forma, e `maxItems` derrubou um smoke inteiro em staging com
+ * 400 (`For 'array' type, property 'maxItems' is not supported`). O schema só
+ * diz o teto na `description`; quem garante é o corte abaixo.
+ */
+export const MAX_PROPOSED_TAGS = 8;
+export const MAX_PROPOSED_MAPPINGS = 12;
+
 const SUBCATEGORIES = new Set<string>(CLAUSE_SUBCATEGORY_SUGGESTIONS);
 const GROUPS = new Set<string>(CLAUSE_GROUP_CODES);
 const ESTEIRAS = new Set<string>(["venda", "locacao", "ambas"]);
@@ -210,7 +222,11 @@ export function buildProposal(
         "As tags desta cláusula ligam o formulário ao contrato; alterá-las quebraria a reingestão do pacote.",
     });
   }
-  const mergedTags = mergeDescriptiveTags(clause.tags, raw.tags ?? [], { frozen });
+  const mergedTags = mergeDescriptiveTags(
+    clause.tags,
+    (raw.tags ?? []).slice(0, MAX_PROPOSED_TAGS),
+    { frozen }
+  );
   if (mergedTags) {
     fields.tags = { current: clause.tags, proposed: mergedTags };
   }
@@ -230,7 +246,7 @@ export function buildProposal(
   // não se tokeniza. Metadados seguem normalmente.
   const validationEsteiras = resolvableEsteiras(esteira);
   if (raw.mappings?.length && validationEsteiras.length > 0) {
-    for (const m of raw.mappings) {
+    for (const m of raw.mappings.slice(0, MAX_PROPOSED_MAPPINGS)) {
       const trecho = typeof m?.trecho === "string" ? m.trecho : "";
       const chave = typeof m?.chave === "string" ? m.chave.trim().replace(/^\{+|\}+$/g, "") : "";
       if (!trecho || !chave) continue;

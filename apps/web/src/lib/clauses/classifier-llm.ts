@@ -20,6 +20,8 @@ import { CLAUSE_CLASSIFY_MODEL } from "@/lib/ai/shared/models";
 import { recordAIUsage } from "@/lib/ai/usage";
 import {
   buildProposal,
+  MAX_PROPOSED_TAGS,
+  MAX_PROPOSED_MAPPINGS,
   type ClauseSnapshot,
   type ClauseClassificationProposal,
   type RawClassification,
@@ -52,7 +54,18 @@ const MAX_CONTENT_CHARS = 6_000;
 export const CLAUSE_CLASSIFICATION_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
-  required: ["esteira", "subcategory", "tags", "agentNotes", "mappings", "reason"],
+  // Modo estrito: TODO campo de `properties` entra em `required` e a ausência
+  // vira um valor explícito (`null`, `[]`). Ver `checkObjectStrictness` em
+  // `lib/ai/shared/schema-lint.ts`.
+  required: [
+    "esteira",
+    "groupCode",
+    "subcategory",
+    "tags",
+    "agentNotes",
+    "mappings",
+    "reason",
+  ],
   properties: {
     // `nullableEnum`, e NÃO `{type:["string","null"], enum:[...,null]}` — este
     // segundo formato é recusado com 400 pelo validador de `output_config`
@@ -68,19 +81,21 @@ export const CLAUSE_CLASSIFICATION_SCHEMA: Record<string, unknown> = {
     subcategory: nullableString(
       "Um valor da lista de temas fornecida para a esteira escolhida."
     ),
+    // Sem `maxItems`: `output_config.format` recusa a família que restringe o
+    // VALOR além da forma — foi um 400 real em staging. O teto vira texto na
+    // `description` e trava de verdade no parse (`MAX_PROPOSED_TAGS`).
     tags: {
       type: "array",
-      maxItems: 8,
       items: { type: "string" },
       description:
-        "Somente tags do vocabulário fornecido. NUNCA use os prefixos slot:, garantia:, provider: ou cobertura:.",
+        `No máximo ${MAX_PROPOSED_TAGS} tags, somente do vocabulário fornecido. NUNCA use os prefixos slot:, garantia:, provider: ou cobertura:. Lista vazia quando não houver tag aplicável.`,
     },
     agentNotes: nullableString(
       "Em PT-BR, no máximo 3 frases, dizendo QUANDO o agente deve usar esta cláusula."
     ),
+    // Idem: o teto é `MAX_PROPOSED_MAPPINGS`, imposto no parse.
     mappings: {
       type: "array",
-      maxItems: 12,
       items: {
         type: "object",
         additionalProperties: false,
@@ -98,7 +113,7 @@ export const CLAUSE_CLASSIFICATION_SCHEMA: Record<string, unknown> = {
         },
       },
       description:
-        "Valores literais que deveriam virar variáveis. Lista vazia quando não há o que tokenizar.",
+        `Valores literais que deveriam virar variáveis, no máximo ${MAX_PROPOSED_MAPPINGS}. Lista vazia quando não há o que tokenizar.`,
     },
     reason: {
       type: "string",

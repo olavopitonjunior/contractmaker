@@ -24,6 +24,7 @@ import {
 import * as llmClassifier from "@/lib/ingestion/llm-classifier";
 import * as planner from "@/lib/ingestion/planner";
 import * as reviewer from "@/lib/contract-review/reviewer";
+import * as clauseClassifier from "@/lib/clauses/classifier-llm";
 
 /**
  * Os módulos inteiros são importados de propósito: a varredura por `*_SCHEMA`
@@ -37,6 +38,11 @@ const MODULES: Array<[string, Record<string, unknown>]> = [
   // pagou o próprio 400 em staging (maxItems, req_011CeUHW9zfUz84zouVdXdFY)
   // por não estar nesta guarda. Agora está.
   ["contract-review/reviewer", reviewer as unknown as Record<string, unknown>],
+  // Classificador do banco de cláusulas. Ficou de fora desta guarda quando
+  // nasceu e pagou DOIS 400 seguidos em staging pelas duas restrições que o
+  // linter já conhecia: `enum` com type em união e, no deploy seguinte,
+  // `maxItems`. O registro aqui é o que impede o terceiro.
+  ["clauses/classifier-llm", clauseClassifier as unknown as Record<string, unknown>],
 ];
 
 function exportedSchemas(): Array<[string, unknown]> {
@@ -52,6 +58,7 @@ function exportedSchemas(): Array<[string, unknown]> {
 describe("schemas de output_config.format", () => {
   it("a varredura encontra os schemas conhecidos", () => {
     expect(exportedSchemas().map(([name]) => name).sort()).toEqual([
+      "clauses/classifier-llm.CLAUSE_CLASSIFICATION_SCHEMA",
       "contract-review/reviewer.REVIEW_OUTPUT_SCHEMA",
       "llm-classifier.CLASSIFICATION_SCHEMA",
       "planner.PLAN_SCHEMA",

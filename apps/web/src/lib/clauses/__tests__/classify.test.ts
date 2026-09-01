@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   buildProposal,
   diffSummary,
+  MAX_PROPOSED_TAGS,
+  MAX_PROPOSED_MAPPINGS,
   type ClauseSnapshot,
   type ClassifyDeps,
   type RawClassification,
@@ -253,5 +255,95 @@ describe("diffSummary", () => {
     expect(s).toContain("tema");
     expect(s).toContain("notas do agente");
     expect(s.some((x) => x.includes("chave"))).toBe(true);
+  });
+});
+
+/**
+ * Os tetos do que o modelo pode propor saíram do JSON Schema e viraram
+ * `.slice()` no parse — `maxItems` derrubou 13 de 13 cláusulas num smoke em
+ * staging com 400 (`For 'array' type, property 'maxItems' is not supported`),
+ * porque `output_config.format` recusa a família que restringe o VALOR além da
+ * forma.
+ *
+ * A troca é certa, mas transformou uma restrição que a API impunha numa que só
+ * nós impomos. Sem estes testes, um refactor que apague o corte passa em `tsc`
+ * e na suíte inteira, e o teto some em silêncio.
+ */
+describe("tetos do que o modelo propõe", () => {
+  /** Tags reais do vocabulário: o merge descarta o que não estiver nele. */
+  const VINTE_TAGS = [
+    "tema:garantia",
+    "tema:reajuste",
+    "tema:encargos",
+    "tema:uso",
+    "tema:vistoria",
+    "tema:benfeitorias",
+    "tema:devolucao",
+    "tema:preferencia",
+    "tema:renovatoria",
+    "tema:sublocacao",
+    "tema:rescisao",
+    "tema:partes",
+    "tema:objeto",
+    "tema:preco",
+    "tema:prazo",
+    "tema:foro",
+    "tema:assinatura-eletronica",
+    "tema:lgpd",
+    "tema:declaracoes",
+    "tema:seguro",
+  ];
+
+  it("corta em MAX_PROPOSED_TAGS mesmo com 20 tags válidas", () => {
+    expect(VINTE_TAGS.length).toBeGreaterThan(MAX_PROPOSED_TAGS);
+
+    const p = buildProposal(
+      clause({ esteira: "locacao" }),
+      { tags: VINTE_TAGS } as RawClassification,
+      deps()
+    );
+
+    // A cláusula nasce sem tag nenhuma, então o proposto É o que passou do corte.
+    expect(p?.fields.tags?.proposed).toHaveLength(MAX_PROPOSED_TAGS);
+    expect(p?.fields.tags?.proposed).toEqual(VINTE_TAGS.slice(0, MAX_PROPOSED_TAGS));
+  });
+
+  it("o corte soma ao que a cláusula já tem, não a substitui", () => {
+    // Mutação de controle do teste acima: se o corte fosse aplicado DEPOIS do
+    // merge, a tag preexistente seria empurrada para fora pelas propostas.
+    const p = buildProposal(
+      clause({ esteira: "locacao", tags: ["locacao"] }),
+      { tags: VINTE_TAGS } as RawClassification,
+      deps()
+    );
+
+    expect(p?.fields.tags?.proposed?.[0]).toBe("locacao");
+    expect(p?.fields.tags?.proposed).toHaveLength(1 + MAX_PROPOSED_TAGS);
+  });
+
+  it("percorre no máximo MAX_PROPOSED_MAPPINGS mappings", () => {
+    // 20 trechos distintos, todos presentes no texto: sem o corte, os 20 seriam
+    // aplicados. Do 13º em diante não pode nem ser tentado.
+    const numeros = Array.from({ length: 20 }, (_, i) => `${i + 100}`);
+    const p = buildProposal(
+      clause({
+        esteira: "locacao",
+        content: `Valores: ${numeros.join(", ")}.`,
+      }),
+      {
+        mappings: numeros.map((n) => ({
+          trecho: n,
+          chave: "config.multa_rescisoria_meses",
+        })),
+      } as RawClassification,
+      deps()
+    );
+
+    expect(p?.fields.content?.mappings).toHaveLength(MAX_PROPOSED_MAPPINGS);
+    // O que sobrou foi IGNORADO, não rejeitado: o corte é anterior à validação,
+    // então não existe motivo de rejeição para ele.
+    expect(p?.fields.content?.rejected ?? []).toHaveLength(0);
+    // E o 13º número em diante segue literal no texto proposto.
+    expect(p?.fields.content?.proposed).toContain(numeros[MAX_PROPOSED_MAPPINGS]);
   });
 });
