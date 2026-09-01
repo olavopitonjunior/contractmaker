@@ -104,6 +104,12 @@ um eixo além da garantia SOMENTE quando o documento o declarar sem ambiguidade 
 um eixo marcado por engano DESCLASSIFICA o modelo em todo formulário que
 escolher o outro valor, e o operador volta a trocar o template à mão.
 
+Para \`admImobiliaria\`, a evidência é a linha \`administracao=\` de cada item
+(\`imobiliaria\` → true, \`direta\` → false, \`?\` → deixe null): quem a
+escreveu leu o documento inteiro, e o índice de blocos pode não trazer a
+cláusula de pagamento. Documentos com \`administracao\` diferente NÃO são
+duplicatas um do outro — são variantes do mesmo modelo, uma por valor do eixo.
+
 ### Slot permitido aqui
 
 Apenas \`garantia\`.`,

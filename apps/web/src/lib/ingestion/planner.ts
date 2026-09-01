@@ -649,6 +649,11 @@ function describeItem(item: PlannerItem): string {
     `  tipo=${c?.docType ?? "?"} modalidade=${c?.modalidade ?? "?"} garantia=${c?.garantiaTipo ?? "?"}`,
     `  fornecedor=${c?.provider ?? "—"} preenchido=${c?.isFilledInstance ? "sim" : "não"}` +
       ` confiança=${(c?.confidence ?? 0).toFixed(2)} decidido_por=${c?.via ?? "?"}`,
+    // Eixo de administração lido do documento INTEIRO pelo classificador — o
+    // índice de blocos pode não trazer a cláusula de pagamento.
+    `  administracao=${
+      c?.admImobiliaria == null ? "?" : c.admImobiliaria ? "imobiliaria" : "direta"
+    }`,
     `  porquê: ${c?.reason ?? "—"}`,
   ];
   if (c?.conflicts?.length) {

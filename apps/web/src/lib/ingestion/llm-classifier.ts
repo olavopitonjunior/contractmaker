@@ -102,6 +102,7 @@ interface RawClassification {
   modalidade: string | null;
   garantiaTipo: string | null;
   provider: string | null;
+  admImobiliaria: boolean | null;
   isFilledInstance: boolean;
   piiEntities: Array<{ kind: string; excerpt: string }>;
   confidence: number;
@@ -118,6 +119,7 @@ export const CLASSIFICATION_SCHEMA: Record<string, unknown> = {
     "modalidade",
     "garantiaTipo",
     "provider",
+    "admImobiliaria",
     "isFilledInstance",
     "piiEntities",
     "confidence",
@@ -144,6 +146,16 @@ export const CLASSIFICATION_SCHEMA: Record<string, unknown> = {
       type: ["string", "null"],
       description:
         'Rótulo humano do fornecedor da garantia ("Porto Seguro"). Null quando não há.',
+    },
+    // União sem `enum`, como `provider`: é a forma que o `output_config.format`
+    // aceita (ver schema-lint.ts). Null = "o documento não decide", nunca false.
+    admImobiliaria: {
+      type: ["boolean", "null"],
+      description:
+        "Só em contrato de locação. true quando a imobiliária ADMINISTRA a " +
+        "locação (cobra e gere os aluguéis, faz o laudo de vistoria); false " +
+        "quando o pagamento é direto ao locador; null quando o texto não decide " +
+        "ou o documento não é contrato de locação.",
     },
     isFilledInstance: {
       type: "boolean",
@@ -186,7 +198,7 @@ export const CLASSIFICATION_SCHEMA: Record<string, unknown> = {
  * breakpoint de cache — os 20 documentos de um lote compartilham este prefixo
  * inteiro, e é isso que faz a classificação caber no alvo de custo.
  */
-const CLASSIFY_PLAYBOOK = `Você classifica documentos do acervo de uma imobiliária brasileira, para uma
+export const CLASSIFY_PLAYBOOK = `Você classifica documentos do acervo de uma imobiliária brasileira, para uma
 biblioteca de modelos de contrato. Responda SOMENTE com o JSON do schema.
 
 ## Vocabulário FECHADO
@@ -236,6 +248,23 @@ O nome da empresa que PRESTA a garantia, como um humano o escreveria: "Porto
 Seguro", "Tokio Marine", "Pottencial", "TOO", "Almada", "Loft", "CredAluga". Não
 slugifique, não abrevie, não invente. Banco financiador de compra e venda NÃO é
 provider. Sem fornecedor identificado, null.
+
+## admImobiliaria
+
+Só em contrato de locação. É o eixo Administração × Não Administração, e ele
+NÃO está na cláusula de garantia — está na cláusula de pagamento e na de
+vistoria:
+
+- true — a imobiliária ADMINISTRA a locação: "os aluguéis e demais encargos
+  serão cobrados e geridos pela ADMINISTRADORA", pagamento "para [imobiliária]
+  regularmente inscrita no CRECI", laudo de vistoria elaborado pela
+  administradora;
+- false — pagamento DIRETO à parte locadora ("diretamente à PARTE LOCADORA por
+  meio de crédito bancário"), locatária declara ter vistoriado o imóvel;
+- null — o texto não decide, ou o documento não é contrato de locação.
+
+Uma imobiliária que só INTERMEDEIA (corretagem, comissão) não administra: a
+cláusula de corretagem sozinha não faz true.
 
 ## piiEntities
 
@@ -303,6 +332,11 @@ function toDocType(v: unknown): IngestDocType | null {
 function toConfidence(raw: unknown): number {
   if (typeof raw !== "number" || !Number.isFinite(raw)) return 0.5;
   return Math.min(1, Math.max(0, raw));
+}
+
+/** `null` quando não é booleano: "sim"/"não"/ausente NÃO viram eixo marcado. */
+function toNullableBool(v: unknown): boolean | null {
+  return typeof v === "boolean" ? v : null;
 }
 
 function toGarantia(v: unknown): GarantiaTipo | null {
@@ -429,6 +463,10 @@ export function createLlmItemClassifier(
         ? ingestDocTypeDef(docType).slots.includes("garantia")
         : false;
       const garantiaTipo = admitsGarantia ? toGarantia(raw.garantiaTipo) : null;
+      // Eixo de administração só existe no CONTRATO de locação: na proposta o
+      // playbook proíbe (`proposta.ts`), e em venda/administração não faz sentido.
+      const admImobiliaria =
+        docType === "contrato_locacao" ? toNullableBool(raw.admImobiliaria) : null;
 
       const confidence = toConfidence(raw.confidence);
 
@@ -446,6 +484,7 @@ export function createLlmItemClassifier(
         confidence,
         reason: asString(raw.reason) ?? signals.reason,
         provider: asString(raw.provider),
+        admImobiliaria,
         isFilledInstance: raw.isFilledInstance === true,
         conflicts: conflictsBetween(signals, {
           docType,
