@@ -409,6 +409,17 @@ describe("useSettingsAutoSave", () => {
     const enviado = bodyOf(spy);
     expect(enviado.name).toBe("Olavo Piton");
     expect(enviado).not.toHaveProperty("cpf");
+
+    // Save PARCIAL é o único caminho que o contador de baseline (#463) muda
+    // fora da pill: só `name` avança a baseline, então `dirtySignature` passa
+    // de "name=…|cpf=…" para "cpf=…" e o efeito de agendamento VOLTA a rodar,
+    // onde antes ficava congelado. Ele tem de morrer no guard de `enviaveis`
+    // (a única chave suja é a inválida) — sem isso, o CPF ruim viraria um
+    // PATCH por ciclo contra uma rota que grava audit log a cada gravação.
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 
   it("com TUDO que mudou inválido, não sai PATCH nem ao desmontar", async () => {
@@ -637,5 +648,45 @@ describe("useSettingsAutoSave", () => {
       vi.advanceTimersByTime(200);
     });
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  // #463. A baseline é REF: mutar não invalida memo. Como `dirtyKeys` é
+  // memoizado em `fields`, quem passa um `fields` de identidade ESTÁVEL (o
+  // `useMemo` do /settings/profile) ficava com a sujeira congelada depois do
+  // save — pill em "Alterações não salvas" para sempre, com PATCH 200 no
+  // histórico. Quem passa objeto literal inline escapava por acidente.
+  //
+  // No `renderHook`, os props mantêm a mesma identidade nos re-renders que o
+  // próprio hook provoca (setStatus/setBaselineVersao) — então este teste
+  // reproduz o caso do /settings/profile, e não o do card com literal inline.
+  // Naquele, o mascaramento vem do COMPONENTE recriar o objeto a cada render,
+  // coisa que este harness não faz. É por isso que o bug nunca apareceu ali.
+  it("save bem-sucedido limpa a sujeira mesmo com `fields` de identidade estável", async () => {
+    const spy = mockFetch(() => ({ ok: true }));
+    const editado = { autoLockFormOnFinalize: true };
+    const { result, rerender } = renderHook(
+      ({ v }) => useSettingsAutoSave(v, { endpoint: ENDPOINT, debounceMs: 10 }),
+      { initialProps: { v: { autoLockFormOnFinalize: false } } },
+    );
+
+    rerender({ v: editado });
+    expect(result.current.isDirty).toBe(true);
+
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    // Nenhum rerender com `fields` novo daqui pra frente — é o cenário real.
+    await waitFor(() => expect(result.current.isDirty).toBe(false));
+
+    // Amostra ao longo do tempo: o defeito só ficava visível ~3s depois, quando
+    // o status "saved" expira e a pill volta a renderizar por `isDirty`.
+    await act(async () => {
+      vi.advanceTimersByTime(4000);
+    });
+    expect(result.current.isDirty).toBe(false);
+    expect(result.current.status).toBe("idle");
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });

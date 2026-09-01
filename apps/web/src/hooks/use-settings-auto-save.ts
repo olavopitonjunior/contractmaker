@@ -158,13 +158,33 @@ export function useSettingsAutoSave<T extends SettingsFields>(
     };
   }, []);
 
+  /**
+   * Sobe a cada mutação de `baselineRef`. Existe porque baseline é REF: mutar
+   * não invalida memo nenhum, e o `dirtyKeys` abaixo é memoizado em `fields`.
+   *
+   * Quem monta `fields` com `useMemo` (identidade estável — o certo a fazer)
+   * ficava com o `dirtyKeys` CONGELADO depois de um save bem-sucedido: a pill
+   * dizia "Alterações não salvas" para sempre, embora o PATCH tivesse voltado
+   * 200, e só destravava quando a pessoa digitasse de novo. Quem monta `fields`
+   * como objeto literal inline escapava por acidente, porque a identidade muda
+   * a cada render e o memo recomputa sempre. O defeito punia justamente quem
+   * memoizava. Ver #463.
+   *
+   * Não é só cosmético: `dirtySignature` deriva de `dirtyKeys` e é o gatilho do
+   * efeito que AGENDA o save. Congelar um congela o outro.
+   */
+  const [baselineVersao, setBaselineVersao] = useState(0);
+
   // Gatilho do efeito e base do `isDirty` da pill.
   const dirtyKeys = useMemo(
     () =>
       Object.keys(fields).filter(
         (k) => serialize(fields[k]) !== baselineRef.current[k],
       ),
-    [fields],
+    // `baselineVersao` não é lido aqui dentro de propósito: ele existe só para
+    // invalidar este memo quando a ref muda. Sem ele o cálculo fica velho.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fields, baselineVersao],
   );
   // Inclui o VALOR, não só o nome da chave. Com a lista de chaves apenas, um
   // campo que continua sujo mas mudou de conteúdo não re-agendava o save — era
@@ -280,6 +300,10 @@ export function useSettingsAutoSave<T extends SettingsFields>(
       for (const k of dirty) baselineRef.current[k] = serialize(current[k]);
       onSavedRef.current?.(payload);
       if (!mountedRef.current) return true;
+      // A baseline acabou de mudar: force o `dirtyKeys` a recalcular. Sem isto
+      // ele fica com a lista de antes do save. Desmontado não precisa — a
+      // instância nova semeia a baseline do zero.
+      setBaselineVersao((v) => v + 1);
       setStatus("saved");
       setTimeout(() => {
         if (mountedRef.current) {
