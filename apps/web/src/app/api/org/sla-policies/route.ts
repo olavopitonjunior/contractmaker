@@ -14,6 +14,7 @@ import {
   resolveSlaPolicies,
   recomputeSlaDeadlines,
 } from "@/lib/pipeline/sla-policies";
+import { AGING_WARN_DAYS, AGING_DANGER_DAYS } from "@/lib/pipeline/stage-config";
 
 /**
  * Política de SLA por stage (plano 2026-08-06, PR 3.5). Espelha o padrão de
@@ -129,7 +130,33 @@ export async function PATCH(req: NextRequest) {
     );
   }
 
+  // Persistimos SÓ divergências (contrato no topo do arquivo). A tela manda
+  // TODAS as etapas editáveis a cada "Salvar", então gravar o que chega criava
+  // linha para etapa que está no padrão — e linha explícita em 5/10 congela a
+  // org no default ANTIGO caso o valor de código mude, que é exatamente o que
+  // este contrato existe pra impedir. Quem chega igual ao default perde a linha.
+  //
+  // A regra mora AQUI, e não no cliente, porque é a rota que documenta o
+  // contrato e é ela que conhece o default de código — assim vale para qualquer
+  // chamador, não só para /settings/sla.
+  //
+  // `enabled: false` nunca casa (o default resolve `enabled: true`), então
+  // etapa DESLIGADA sempre cai no upsert e mantém a linha. Isso é deliberado:
+  // o GET mascara os prazos de etapa desligada (devolve `null`, e a tela
+  // preenche 5/10), então tratá-la como "igual ao default" apagaria prazos
+  // reais que o cliente nem sabe que existem.
+  const isCodeDefault = (p: (typeof policies)[number]) =>
+    p.enabled &&
+    p.warnDays === AGING_WARN_DAYS &&
+    p.dangerDays === AGING_DANGER_DAYS;
+
   for (const p of policies) {
+    if (isCodeDefault(p)) {
+      await prisma.slaPolicy.deleteMany({
+        where: { orgId: ctx.orgId, scope: "deal_stage", key: p.stageId },
+      });
+      continue;
+    }
     await prisma.slaPolicy.upsert({
       where: {
         orgId_scope_key: { orgId: ctx.orgId, scope: "deal_stage", key: p.stageId },
