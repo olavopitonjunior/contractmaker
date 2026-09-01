@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { updateKnowledgeItem } from "@/lib/ai/knowledge";
-import { clauseWriteSchema, normalizeClauseBody } from "@/lib/clauses/schema";
+import {
+  clauseWriteSchema,
+  normalizeClauseBody,
+  deriveIsVariable,
+} from "@/lib/clauses/schema";
 import { resolveUserOrgId } from "@/lib/security/org-scope";
 
 /**
@@ -74,7 +78,10 @@ export async function PATCH(
     tags: data.tags ?? clause.tags,
     subcategory: data.subcategory ?? clause.subcategory,
     groupCode: data.groupCode === undefined ? clause.groupCode : data.groupCode,
-    isVariable: data.isVariable ?? clause.isVariable,
+    esteira: data.esteira === undefined ? clause.esteira : data.esteira,
+    // Derivado do conteúdo FINAL — PATCH que só muda o texto reclassifica
+    // sozinho, e o client não opina (ver `deriveIsVariable`).
+    isVariable: deriveIsVariable(data.content ?? clause.content),
     agentNotes: data.agentNotes === undefined ? clause.agentNotes : data.agentNotes,
     status: data.status ?? clause.status,
   });

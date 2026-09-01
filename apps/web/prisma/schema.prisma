@@ -2253,8 +2253,21 @@ model KnowledgeItem {
   // 20260518120000_unify_clause_to_knowledge_item). Aplicam quando
   // category === "clause"; em outras categorias ficam ignorados.
   agentNotes     String?  @db.Text
-  groupCode      String? // G1..G6 (CLAUSE_SLOT em template)
+  groupCode      String? // G1..G6 — taxonomia EXCLUSIVA de compra e venda
   subcategory    String? // partes|objeto|preco|posse|...
+  /// Esteira do acervo: "venda" | "locacao" (valores de `FormModule`,
+  /// lib/forms/presets) | "ambas" (comum às duas: foro, assinatura eletrônica,
+  /// LGPD — UMA linha, lida nas duas visões, nunca duplicada).
+  ///
+  /// NULL = NÃO CLASSIFICADA, e é significativo: continua sendo lida nas DUAS
+  /// esteiras (fail-open, pra que nenhum contrato perca cláusula no dia do
+  /// deploy) e é a fila de triagem do classificador.
+  ///
+  /// É coluna, e não tag, de propósito: o CONJUNTO EXATO de tags é a chave de
+  /// idempotência da reingestão (`ingest-clauses.ts::sameTagSet`) — uma tag
+  /// `esteira:*` backfillada mudaria a identidade de todo acervo curado e a
+  /// próxima reingestão o duplicaria.
+  esteira        String? // venda|locacao|ambas — só faz sentido em category="clause"
   isVariable     Boolean  @default(false) // tem placeholders [preencher X]
   status         String   @default("approved") // approved|pending|archived
   usageCount     Int      @default(0)
@@ -2275,6 +2288,7 @@ model KnowledgeItem {
   @@index([orgId, category])
   @@index([orgId, parentId])
   @@index([orgId, category, groupCode])
+  @@index([orgId, category, esteira])
   @@index([legacyClauseId])
 }
 

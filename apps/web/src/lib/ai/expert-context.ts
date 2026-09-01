@@ -19,6 +19,7 @@ import { resolveAgentProfile } from "./agents/resolve";
 import { usageCountsForOrg } from "./knowledge-usage";
 import type { AgentKey } from "./agents/registry";
 import type { AgentContext } from "./types";
+import { esteiraForContext, visibleEsteiras } from "@/lib/clauses/taxonomy";
 
 const TOP_SIMILAR_CONTRACTS = 3;
 const TOP_CLAUSES = 8;
@@ -198,32 +199,63 @@ async function loadTopClauses(
   scope: KnowledgeScopeOptions
 ) {
   const modalidade = context.templateModalidade ?? "";
-  const isLocacao =
-    context.dealKind === "locacao" || modalidade.startsWith("locacao");
 
-  // As cláusulas de locação (seed-locacao-clauses) usam subcategoria/tags e
-  // têm groupCode NULL — o filtro antigo `groupCode: { not: "G4" }` as excluía
-  // (SQL: NULL <> 'G4' não é verdadeiro), então nunca entravam no contexto de
-  // um contrato de locação. Agora selecionamos por família:
-  //   - locação → cláusulas taggeadas "locacao" (groupCode null);
-  //   - venda   → grupos G1-G6, ocultando G4 fora de financiamento.
-  const clauseFilter: object = isLocacao
-    ? { tags: { has: "locacao" } }
-    : {
-        groupCode: {
-          in:
-            modalidade === "financiamento"
-              ? ["G1", "G2", "G3", "G4", "G5", "G6"]
-              : ["G1", "G2", "G3", "G5", "G6"],
-        },
-      };
+  // Seleção por ESTEIRA (coluna), não mais por heurística de tag.
+  //
+  // O filtro anterior de locação era `tags: { has: "locacao" }`, e isso EXCLUÍA
+  // do contexto justamente o acervo curado: as cláusulas de pacote e de
+  // consolidação carregam `slot:garantia`/`garantia:*`, não a tag "locacao".
+  // Num tenant montado por consolidação, o agente não via nenhuma delas.
+  //
+  // `esteira IS NULL` entra: cláusula ainda não triada não pode sumir do
+  // contexto. E `esteiraForContext` devolve `null` quando não há sinal
+  // confiável — aí não se filtra nada (fail-open).
+  const esteira = esteiraForContext({
+    dealKind: context.dealKind,
+    templateModalidade: context.templateModalidade,
+  });
+
+  // Os dois filtros abaixo entram no MESMO array `AND` do escopo — nunca
+  // espalhados ao lado dele. Espalhar sobrescreveria o `AND` de
+  // `knowledgeScopeWhere`, que carrega o filtro de visibilidade por agente e o
+  // recorte org/plataforma: um furo de escopo silencioso (o próprio
+  // `knowledge-scope.ts` avisa disso num comentário; a suíte pegou).
+  const extraAnd: Record<string, unknown>[] = [];
+
+  if (esteira) {
+    extraAnd.push({
+      OR: [
+        { esteira: null },
+        { esteira: { in: visibleEsteiras(esteira) as string[] } },
+      ],
+    });
+  }
+
+  // G4 é regra de MODALIDADE dentro da esteira de venda — não é o eixo.
+  //
+  // Armadilha preservada do código anterior: `groupCode: { not: "G4" }` exclui
+  // NULL em SQL, o que varreria junto toda cláusula sem grupo. Daí o OR com
+  // `groupCode: null` explícito.
+  if (esteira === "venda" && modalidade !== "financiamento") {
+    extraAnd.push({
+      OR: [
+        { groupCode: null },
+        { groupCode: { in: ["G1", "G2", "G3", "G5", "G6"] } },
+      ],
+    });
+  }
+
+  const scopeWhere = knowledgeScopeWhere(context.orgId, scope);
+  const scopeAnd = Array.isArray(scopeWhere.AND)
+    ? (scopeWhere.AND as Record<string, unknown>[])
+    : [];
 
   const candidatas = await prisma.knowledgeItem.findMany({
     where: {
-      ...knowledgeScopeWhere(context.orgId, scope),
+      ...scopeWhere,
       category: "clause",
       status: "approved",
-      ...clauseFilter,
+      AND: [...scopeAnd, ...extraAnd],
     },
     select: {
       id: true,
