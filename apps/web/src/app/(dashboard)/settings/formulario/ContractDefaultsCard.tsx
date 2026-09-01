@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import { RotateCcw } from "lucide-react";
 import { SaveStatusPill } from "@/components/settings/SaveStatusPill";
 import { useSettingsAutoSave } from "@/hooks/use-settings-auto-save";
@@ -42,6 +42,9 @@ import { useEsteira } from "./EsteiraTabs";
  * (a praça de fechamento é sempre a mesma). A DATA continua fora nas duas: é
  * por negócio, e vazia o template usa a data da assinatura.
  */
+/** Par do `useState`, para o pai poder ceder o estado ao filho inteiro. */
+type SettingsState<T> = [T, Dispatch<SetStateAction<T>>];
+
 export function ContractDefaultsCard({
   initial,
   initialLocacao,
@@ -54,7 +57,25 @@ export function ContractDefaultsCard({
   locacaoEnabled?: boolean;
 }) {
   const esteira = useEsteira();
-  if (!locacaoEnabled) return <VendaDefaults initial={initial} />;
+
+  // O estado das duas esteiras vive AQUI, não dentro de cada formulário.
+  // Trocar de esteira DESMONTA o filho (é render condicional, logo abaixo), e
+  // um `useState(initial)` no filho ressemeia do snapshot que a RSC leu no
+  // carregamento da PÁGINA. Depois de um save bem-sucedido isso mostrava o
+  // valor PRÉ-edição de volta no campo, com o servidor já correto: a mesma
+  // cara do bug de perda de edição que o flush no unmount corrigiu, só que
+  // agora com a UI atrás do servidor em vez do contrário.
+  //
+  // Este componente NÃO desmonta na troca de esteira, então o estado
+  // sobrevive e o filho remonta já com o valor corrente. O baseline do
+  // auto-save nasce dos `fields` na primeira renderização do hook — como eles
+  // agora chegam atuais, remontar não dispara PATCH espúrio.
+  const vendaState = useState<ContractSettings>(initial);
+  const locacaoState = useState<LocacaoSettings>(initialLocacao);
+  const comissaoState =
+    useState<LocacaoComissaoDefaults>(initialComissaoLocacao);
+
+  if (!locacaoEnabled) return <VendaDefaults state={vendaState} />;
   return (
     <Card>
       <CardHeader>
@@ -69,12 +90,9 @@ export function ContractDefaultsCard({
       </CardHeader>
       <CardContent>
         {esteira === "venda" ? (
-          <VendaDefaults initial={initial} embedded />
+          <VendaDefaults state={vendaState} embedded />
         ) : (
-          <LocacaoDefaults
-            initial={initialLocacao}
-            initialComissao={initialComissaoLocacao}
-          />
+          <LocacaoDefaults state={locacaoState} comissaoState={comissaoState} />
         )}
       </CardContent>
     </Card>
@@ -95,13 +113,13 @@ function diasNaFaixa(v: ContractSettings): boolean {
 }
 
 function VendaDefaults({
-  initial,
+  state,
   embedded = false,
 }: {
-  initial: ContractSettings;
+  state: SettingsState<ContractSettings>;
   embedded?: boolean;
 }) {
-  const [values, setValues] = useState<ContractSettings>(initial);
+  const [values, setValues] = state;
 
   // O branch inteiro é a unidade de salvamento, não o campo: `desistencia.
   // prazo_dias` só faz sentido junto com `desistencia.permite`, e a rota mescla
@@ -354,15 +372,14 @@ function locacaoNaFaixa(
 }
 
 function LocacaoDefaults({
-  initial,
-  initialComissao,
+  state,
+  comissaoState,
 }: {
-  initial: LocacaoSettings;
-  initialComissao: LocacaoComissaoDefaults;
+  state: SettingsState<LocacaoSettings>;
+  comissaoState: SettingsState<LocacaoComissaoDefaults>;
 }) {
-  const [values, setValues] = useState<LocacaoSettings>(initial);
-  const [comissao, setComissao] =
-    useState<LocacaoComissaoDefaults>(initialComissao);
+  const [values, setValues] = state;
+  const [comissao, setComissao] = comissaoState;
 
   // Só os branches de locação: o PATCH mescla por branch, então o padrão de
   // venda não é tocado.
