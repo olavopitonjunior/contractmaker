@@ -384,6 +384,54 @@ describe("useSettingsAutoSave", () => {
     expect(bodyOf(spy, 1).summaryRecipientEmail).toBe("c@d.com");
   });
 
+  it("desmontar durante o re-agendamento (PATCH em voo) também grava", async () => {
+    // A mesma perda, numa janela mais estreita: com um PATCH em voo, a edição
+    // nova espera num timer de 150ms. Duas coisas precisam valer aí — que
+    // `pendingRef` continue ligado, e que o timer que o flush de unmount cria
+    // NÃO more em `timerRef`, porque a limpeza do efeito de debounce roda
+    // depois e cancelaria justamente ele.
+    let releaseFirst: (() => void) | null = null;
+    let calls = 0;
+    const spy = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) {
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as Response;
+    });
+    global.fetch = spy as unknown as typeof fetch;
+
+    const { rerender, unmount } = renderHook(
+      ({ v }) => useSettingsAutoSave(v, { endpoint: ENDPOINT, debounceMs: 10 }),
+      { initialProps: { v: { prazo: 15 } } },
+    );
+
+    rerender({ v: { prazo: 20 } });
+    await act(async () => {
+      vi.advanceTimersByTime(50);
+    });
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+
+    rerender({ v: { prazo: 30 } });
+    await act(async () => {
+      vi.advanceTimersByTime(20);
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    unmount();
+    await act(async () => {
+      releaseFirst?.();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+    });
+
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+    expect(bodyOf(spy, 1).prazo).toBe(30);
+  });
+
   it("desmontar no meio do debounce GRAVA, não descarta", async () => {
     // Regressão de produção (fase 1): o cleanup só fazia clearTimeout, então
     // digitar um valor no Padrão contratual e trocar a aba Vendas↔Locação

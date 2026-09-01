@@ -11,10 +11,19 @@ import type { OrgSettingsSaveStatus } from "@/hooks/use-org-settings-form";
 export function SaveStatusPill({
   status,
   isDirty,
+  error,
   className,
 }: {
   status: OrgSettingsSaveStatus;
   isDirty?: boolean;
+  /**
+   * Motivo da falha, vindo da API ("CNPJ inválido"). Some do texto — a pill é
+   * discreta de propósito — mas fica no `title`: sem o botão "Salvar", que
+   * mostrava a mensagem exata em toast, este é o único lugar onde o usuário
+   * ainda alcança o porquê de um 400. Erro de permissão continua em toast,
+   * porque ali não há o que corrigir digitando.
+   */
+  error?: string | null;
   className?: string;
 }) {
   if (status === "idle" && !isDirty) return null;
@@ -42,6 +51,7 @@ export function SaveStatusPill({
   return (
     <span
       aria-live="polite"
+      title={status === "error" && error ? error : undefined}
       className={cn(
         "inline-flex items-center gap-1.5 text-xs font-medium",
         status === "saved" && "text-success",
