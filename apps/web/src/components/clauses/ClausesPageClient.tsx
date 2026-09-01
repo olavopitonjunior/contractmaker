@@ -311,7 +311,10 @@ export function ClausesPageClient({
       const res = await fetch("/api/clauses/classify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clauseIds: ids }),
+        // Manda a esteira: a rota recorta o lote por ela e devolve em
+        // `ignored` o que ficou de fora. Redundante com a limpeza acima por
+        // desenho — a limpeza é de UI e não cobre quem chama a rota direto.
+        body: JSON.stringify({ clauseIds: ids, esteira }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -353,6 +356,14 @@ export function ClausesPageClient({
         onChange={(next) => {
           setEsteira(next);
           setGroupFilter(ALL);
+          // A seleção sobrevivia à troca: cláusula marcada em Vendas seguia no
+          // Set em Locação, sem checkbox visível, e "16 selecionada(s)" com 15
+          // marcados mandava um item invisível para o classificador (#479).
+          //
+          // Só na troca de ESTEIRA. Trocar o filtro de grupo continua
+          // preservando a seleção — ali o item some da lista mas segue na mesma
+          // esteira, e limpar seria regressão travestida de correção.
+          setSelected(new Set());
         }}
         locacaoEnabled={locacaoEnabled}
         counts={esteiraCounts}
