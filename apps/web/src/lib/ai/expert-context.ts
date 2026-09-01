@@ -210,10 +210,9 @@ async function loadTopClauses(
   // `esteira IS NULL` entra: cláusula ainda não triada não pode sumir do
   // contexto. E `esteiraForContext` devolve `null` quando não há sinal
   // confiável — aí não se filtra nada (fail-open).
-  const esteira = esteiraForContext({
-    dealKind: context.dealKind,
-    templateModalidade: context.templateModalidade,
-  });
+  // Pronta do contexto (resolvida dos valores crus em `buildAgentContext`) —
+  // recalcular daqui reintroduziria o falso sinal do default "a_vista".
+  const esteira = context.esteira ?? null;
 
   // Os dois filtros abaixo entram no MESMO array `AND` do escopo — nunca
   // espalhados ao lado dele. Espalhar sobrescreveria o `AND` de

@@ -39,10 +39,38 @@ describe("esteiraForModalidade", () => {
 });
 
 describe("esteiraForContext — fail-open", () => {
-  it("prefere a modalidade do template", () => {
+  it("usa a modalidade do template quando é o único sinal", () => {
+    expect(esteiraForContext({ templateModalidade: "locacao" })).toBe("locacao");
+    expect(esteiraForContext({ templateModalidade: "a_vista" })).toBe("venda");
+  });
+
+  it("sinais contraditórios NÃO filtram", () => {
+    // Dado inconsistente. Não filtrar é recuperável; esconder o acervo errado
+    // do agente é um bug silencioso e caríssimo de diagnosticar.
     expect(
       esteiraForContext({ dealKind: "venda", templateModalidade: "locacao" })
+    ).toBeNull();
+    expect(
+      esteiraForContext({ dealKind: "locacao", templateModalidade: "a_vista" })
+    ).toBeNull();
+  });
+
+  it("CONTRATO IMPORTADO de locação resolve como locação", () => {
+    // A regressão que a revisão pegou: contrato importado não tem template, e
+    // `buildAgentContext` defaulta `templateModalidade` para "a_vista". Se a
+    // esteira fosse calculada a partir do valor JÁ defaultado, uma locação
+    // importada viraria "venda" e o agente perderia todo o acervo de locação.
+    // Com os valores CRUS (modalidade null), o dealKind decide.
+    expect(
+      esteiraForContext({ dealKind: "locacao", templateModalidade: null })
     ).toBe("locacao");
+    expect(esteiraForContext({ dealKind: "venda", templateModalidade: null })).toBe(
+      "venda"
+    );
+  });
+
+  it("importado sem deal nenhum não filtra", () => {
+    expect(esteiraForContext({ dealKind: null, templateModalidade: null })).toBeNull();
   });
 
   it("sem NENHUM sinal, devolve null (não filtra)", () => {

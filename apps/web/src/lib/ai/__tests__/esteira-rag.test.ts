@@ -17,6 +17,7 @@ import { prisma } from "@/lib/db/prisma";
 import { loadExpertContext } from "../expert-context";
 import { __resetAgentProfileCacheForTests } from "../agents/resolve";
 import type { AgentContext } from "../types";
+import { esteiraForContext } from "@/lib/clauses/taxonomy";
 
 vi.mock("../memory", () => ({ findSimilarContracts: vi.fn().mockResolvedValue([]) }));
 
@@ -39,6 +40,23 @@ function ctxWith(over: Partial<Record<string, unknown>>): AgentContext {
   } as unknown as AgentContext;
 }
 
+/** Contexto como `buildAgentContext` o monta: esteira já resolvida dos crus. */
+function ctxForContract(over: {
+  dealKind?: string | null;
+  templateModalidade?: string | null;
+}): AgentContext {
+  return ctxWith({
+    // Espelha os defaults reais de `lib/ai/shared/context.ts` — é justamente
+    // o que NÃO pode ser usado para decidir a esteira.
+    templateModalidade: over.templateModalidade || "a_vista",
+    dealKind: over.dealKind ?? "venda",
+    esteira: esteiraForContext({
+      dealKind: over.dealKind ?? null,
+      templateModalidade: over.templateModalidade ?? null,
+    }),
+  });
+}
+
 function clauseAnd(): Record<string, unknown>[] {
   const where = mockPrisma.knowledgeItem.findMany.mock.calls[0]?.[0]?.where as Record<
     string,
@@ -58,7 +76,7 @@ beforeEach(() => {
 
 describe("expert-context filtra por esteira", () => {
   it("contrato de locação busca locacao + ambas, e deixa NULL passar", async () => {
-    await loadExpertContext(ctxWith({ templateModalidade: "locacao" }));
+    await loadExpertContext(ctxForContract({ templateModalidade: "locacao" }));
     const json = JSON.stringify(clauseAnd());
     expect(json).toContain('"esteira":null');
     expect(json).toContain("locacao");
@@ -67,7 +85,7 @@ describe("expert-context filtra por esteira", () => {
   });
 
   it("contrato de venda busca venda + ambas", async () => {
-    await loadExpertContext(ctxWith({ templateModalidade: "a_vista" }));
+    await loadExpertContext(ctxForContract({ templateModalidade: "a_vista" }));
     const json = JSON.stringify(clauseAnd());
     expect(json).toContain('"venda"');
     expect(json).toContain("ambas");
@@ -75,7 +93,7 @@ describe("expert-context filtra por esteira", () => {
   });
 
   it("administração de locação é LOCAÇÃO, apesar do nome", async () => {
-    await loadExpertContext(ctxWith({ templateModalidade: "administracao_locacao" }));
+    await loadExpertContext(ctxForContract({ templateModalidade: "administracao_locacao" }));
     const json = JSON.stringify(clauseAnd());
     expect(json).toContain('"locacao"');
     expect(json).not.toMatch(/"esteira":\{"in":\[[^\]]*"venda"/);
@@ -84,14 +102,24 @@ describe("expert-context filtra por esteira", () => {
   it("SEM sinal de esteira, não filtra nada (fail-open)", async () => {
     // `lib/ai/shared/context.ts` defaulta dealKind pra "venda"; se confiássemos
     // nisso, um contrato sem deal perderia o acervo de locação em silêncio.
-    await loadExpertContext(ctxWith({ templateModalidade: undefined, dealKind: undefined }));
+    await loadExpertContext(ctxForContract({}));
     expect(JSON.stringify(clauseAnd())).not.toContain("esteira");
+  });
+
+  it("CONTRATO IMPORTADO de locação não é filtrado como venda", async () => {
+    // A regressão: importado não tem template, `buildAgentContext` defaulta
+    // `templateModalidade` para "a_vista", e calcular a esteira a partir daí
+    // esconderia TODO o acervo de locação em toda conversa desse contrato.
+    await loadExpertContext(ctxForContract({ dealKind: "locacao", templateModalidade: null }));
+    const json = JSON.stringify(clauseAnd());
+    expect(json).toContain('"locacao"');
+    expect(json).not.toMatch(/"esteira":\{"in":\[[^\]]*"venda"/);
   });
 
   it("não substitui o AND do escopo — visibilidade por agente sobrevive", async () => {
     // Regressão: espalhar `{ AND: [...] }` ao lado de `knowledgeScopeWhere`
     // apagava o filtro de visibilidade. Os dois têm que coexistir.
-    await loadExpertContext(ctxWith({ templateModalidade: "locacao" }), "editor");
+    await loadExpertContext(ctxForContract({ templateModalidade: "locacao" }), "editor");
     const json = JSON.stringify(clauseAnd());
     expect(json).toContain("visibleToAgents");
     expect(json).toContain("esteira");
@@ -102,7 +130,7 @@ describe("supressão de G4 continua valendo, mas só dentro de venda", () => {
   it("venda fora de financiamento esconde G4 SEM varrer groupCode nulo", async () => {
     // `groupCode: { not: "G4" }` excluiria NULL em SQL — a armadilha que o
     // código anterior já documentava. Tem que ser OR com null explícito.
-    await loadExpertContext(ctxWith({ templateModalidade: "a_vista" }));
+    await loadExpertContext(ctxForContract({ templateModalidade: "a_vista" }));
     const json = JSON.stringify(clauseAnd());
     expect(json).toContain('"groupCode":null');
     expect(json).toContain("G5");
@@ -110,12 +138,12 @@ describe("supressão de G4 continua valendo, mas só dentro de venda", () => {
   });
 
   it("financiamento inclui G4", async () => {
-    await loadExpertContext(ctxWith({ templateModalidade: "financiamento" }));
+    await loadExpertContext(ctxForContract({ templateModalidade: "financiamento" }));
     expect(JSON.stringify(clauseAnd())).not.toContain("G5"); // sem lista de supressão
   });
 
   it("locação nunca aplica a regra de G4 — não é o eixo dela", async () => {
-    await loadExpertContext(ctxWith({ templateModalidade: "locacao" }));
+    await loadExpertContext(ctxForContract({ templateModalidade: "locacao" }));
     expect(JSON.stringify(clauseAnd())).not.toContain("groupCode");
   });
 });

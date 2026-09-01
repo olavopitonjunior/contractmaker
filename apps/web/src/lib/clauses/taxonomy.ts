@@ -158,20 +158,32 @@ export interface EsteiraSignals {
  * o filtro esconderia o acervo de locação em silêncio, e "o agente não acha a
  * cláusula" é um bug caríssimo de diagnosticar.
  *
- * Por isso: só devolve esteira quando há sinal REAL. Sem sinal → `null` → o
- * chamador NÃO filtra. Nunca "simplificar" isso para um `?? "venda"`.
+ * Pior: `templateModalidade` tem o MESMO problema no mesmo arquivo —
+ * `contract.template?.modalidade || "a_vista"`. Contrato IMPORTADO (upload
+ * externo) não tem template, então chega aqui parecendo venda à vista. Uma
+ * locação importada, com `deal.kind = "locacao"` correto, perderia todo o
+ * acervo de locação em toda conversa daquele contrato.
+ *
+ * Por isso esta função precisa receber os valores **CRUS** (`?? null`), antes
+ * de qualquer default — é o que `buildAgentContext` faz, gravando o resultado
+ * em `AgentContext.esteira`. Os consumidores leem esse campo pronto; não
+ * recalculam a partir do contexto já defaultado.
+ *
+ * Regras: sem sinal → `null` (não filtra); sinais contraditórios → `null`
+ * também. Nunca "simplificar" para um `?? "venda"`.
  */
 export function esteiraForContext(signals: EsteiraSignals): FormModule | null {
-  // A modalidade do template é o sinal forte: sai do dado, não de um default.
   const byModalidade = esteiraForModalidade(signals.templateModalidade);
-  if (byModalidade) return byModalidade;
 
   const kind = (signals.dealKind ?? "").trim().toLowerCase();
-  if (!kind) return null;
-  if (kind === "locacao") return "locacao";
-  if (kind === "venda") return "venda";
-  // Valor desconhecido: não arrisca estreitar a busca.
-  return null;
+  const byDeal: FormModule | null =
+    kind === "locacao" ? "locacao" : kind === "venda" ? "venda" : null;
+
+  // Sinais que se contradizem = dado inconsistente. Não se escolhe um lado:
+  // não filtrar é sempre recuperável, esconder o acervo errado não é.
+  if (byModalidade && byDeal && byModalidade !== byDeal) return null;
+
+  return byModalidade ?? byDeal;
 }
 
 /**

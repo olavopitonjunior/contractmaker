@@ -16,6 +16,16 @@ export interface AgentContext {
   templateName?: string;
   /** "venda" | "locacao" — discrimina o domínio do agente (prompts/contexto). */
   dealKind?: string;
+  /**
+   * Esteira do acervo (venda × locação) já resolvida a partir dos valores
+   * CRUS de `template.modalidade` e `deal.kind` — antes dos defaults
+   * `|| "a_vista"` e `?? "venda"` que os campos acima carregam.
+   *
+   * Quem filtra o RAG lê ESTE campo, nunca recalcula a partir dos dois de
+   * cima: um contrato importado (sem template) chegaria como "a_vista" e a
+   * locação sumiria do agente. `undefined`/`null` = não filtrar (fail-open).
+   */
+  esteira?: "venda" | "locacao" | null;
   /** Deal do contrato — atribuição analítica (AIUsage.dealId). */
   dealId?: string | null;
   activeClauses: { id: string; clauseId: string; title: string; category: string; position: number; isActive: boolean }[];

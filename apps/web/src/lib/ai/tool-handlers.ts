@@ -808,15 +808,12 @@ async function handleQueryKnowledgeBase(
   }
 
   // Esteira do contrato — direciona a busca de CLÁUSULA (venda × locação).
-  // Calculada uma vez e aplicada nos três caminhos (vetorial e os dois
-  // fallbacks), pra que a busca não atravesse esteiras justamente quando o
-  // Voyage cai. `null` = sem sinal confiável = NÃO filtra (fail-open; ver
-  // `esteiraForContext`, que de propósito não confia no default "venda" de
-  // `lib/ai/shared/context.ts`).
-  const esteira = esteiraForContext({
-    dealKind: context.dealKind,
-    templateModalidade: context.templateModalidade,
-  });
+  // Lida PRONTA do contexto: `buildAgentContext` a resolve dos valores crus,
+  // antes dos defaults `|| "a_vista"` e `?? "venda"`. Recalcular aqui, a
+  // partir de `context.templateModalidade`, faria contrato importado de
+  // locação parecer venda e esconderia o acervo certo do agente.
+  // Ausente = não filtra (fail-open).
+  const esteira = context.esteira ?? null;
 
   if (!isEmbeddingsConfigured()) {
     // Degradação pro ILIKE (recall inferior) era TOTALMENTE silenciosa aqui —
