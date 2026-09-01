@@ -170,12 +170,17 @@ describe("PATCH /api/org/sla-policies", () => {
     });
   });
 
-  // Contra-caso que trava a armadilha: o GET MASCARA os prazos de etapa
-  // desligada (`warnDays: row.enabled ? row.warnDays : null`) e a tela preenche
-  // 5/10 no lugar. Se "igual ao default" ignorasse o `enabled`, um Salvar
-  // qualquer APAGARIA os prazos reais de uma etapa desligada — que o usuário
-  // recuperaria ao religá-la. Etapa desligada diverge por definição.
-  it("etapa DESLIGADA em 5/10 é upsert, nunca delete (o GET mascara os prazos dela)", async () => {
+  // Contra-caso que trava a regra: **desligar já é uma divergência**, porque o
+  // default de código resolve `enabled: true`. Se "igual ao default" ignorasse
+  // o `enabled`, uma etapa desligada parada em 5/10 cairia no delete — e, sem
+  // linha, ela voltaria a resolver pelo default e se RELIGARIA sozinha. Some a
+  // intenção do usuário, não só o número.
+  //
+  // A justificativa anterior deste caso era outra (o GET mascarava os prazos de
+  // etapa desligada, e apagá-la destruiria valores reais). Esse mascaramento
+  // acabou — ver #461 e `ResolvedSlaPolicy`. A regra sobreviveu à mudança de
+  // premissa; o motivo é que está registrado aqui.
+  it("etapa DESLIGADA em 5/10 é upsert, nunca delete (apagar a linha religaria a etapa)", async () => {
     const res = await PATCH(
       req("PATCH", {
         kind: "venda",
