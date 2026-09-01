@@ -103,7 +103,13 @@ export async function POST(req: NextRequest) {
 
     // Esteira FINAL — decide se groupCode pode existir e contra qual catálogo
     // a chave é validada.
-    const finalEsteira = (patch.esteira ?? current.esteira) as string | null;
+    //
+    // `in`, e não `??`: aprovar a esteira como `null` ("desclassificar") é um
+    // valor legítimo, e `null ?? current` cairia de volta no valor antigo do
+    // banco — decidindo o grupo e o catálogo pelo dado errado, em silêncio.
+    const finalEsteira = ("esteira" in patch ? patch.esteira : current.esteira) as
+      | string
+      | null;
 
     if (approve.groupCode && values.groupCode !== undefined) {
       // G1..G6 só existe em venda. Fora dela, o valor é sempre limpo — mesmo
