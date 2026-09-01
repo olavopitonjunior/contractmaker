@@ -36,6 +36,9 @@ export interface UseSettingsAutoSaveOptions<T extends SettingsFields> {
   onSaved?: (payload: Record<string, unknown>) => void;
 }
 
+/** ~3s de espera por um PATCH em voo antes de desistir do re-agendamento. */
+const MAX_REQUEUES = 20;
+
 function serialize(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
@@ -91,6 +94,10 @@ export function useSettingsAutoSave<T extends SettingsFields>(
    * saber que precisa gravar antes de sumir — ver o cleanup abaixo.
    */
   const pendingRef = useRef(false);
+  /** Tentativas seguidas de re-agendamento por PATCH em voo — ver `persist`. */
+  const requeuesRef = useRef(0);
+  /** Re-agendamento que já sobreviveu ao unmount; nenhuma limpeza o cancela. */
+  const orphanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Verdade do servidor, por chave. Nasce do valor inicial — que a page RSC leu
   // do banco —, logo montar a tela não dispara save nenhum.
@@ -155,10 +162,36 @@ export function useSettingsAutoSave<T extends SettingsFields>(
     // a alteração ficaria suja e sem ninguém para gravá-la — o efeito só
     // dispara de novo quando o VALOR muda, e ele não vai mudar sozinho.
     if (inFlightRef.current) {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => void persistRef.current(), 150);
+      // Teto: uma requisição que nunca volta não pode virar polling eterno.
+      // Desistir CALADO seria trocar um defeito por outro — a pill seguiria
+      // dizendo "Alterações não salvas" como se ainda fosse tentar.
+      if (requeuesRef.current >= MAX_REQUEUES) {
+        if (mountedRef.current) {
+          setStatus("error");
+          setError("O servidor não respondeu. Edite de novo para tentar.");
+        }
+        return false;
+      }
+      requeuesRef.current += 1;
+      const retry = () => {
+        pendingRef.current = false;
+        void persistRef.current();
+      };
+      if (mountedRef.current) {
+        if (timerRef.current) clearTimeout(timerRef.current);
+        // `pendingRef` fica LIGADO durante o re-agendamento: desmontar nesta
+        // janela de 150ms cairia no mesmo buraco que o flush de unmount tapa.
+        pendingRef.current = true;
+        timerRef.current = setTimeout(retry, 150);
+      } else {
+        // Já desmontado (veio do flush de unmount). O timer NÃO pode morar em
+        // `timerRef`: a limpeza do efeito de debounce roda DEPOIS da deste
+        // efeito e cancelaria justamente ele.
+        orphanTimerRef.current = setTimeout(retry, 150);
+      }
       return false;
     }
+    requeuesRef.current = 0;
 
     const payload = Object.fromEntries(dirty.map((k) => [k, current[k]]));
 
