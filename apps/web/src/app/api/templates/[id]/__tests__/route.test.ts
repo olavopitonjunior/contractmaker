@@ -5,6 +5,12 @@ import { GET, PATCH, DELETE } from "../route";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { createMockSession, createMockOrg } from "@/__tests__/helpers";
+import { getDocPlainText } from "@/lib/google/docs";
+import { audit } from "@/lib/security/audit";
+
+vi.mock("@/lib/google/docs", () => ({ getDocPlainText: vi.fn() }));
+vi.mock("@/lib/security/audit", () => ({ audit: vi.fn(async () => undefined) }));
+const mockDocText = vi.mocked(getDocPlainText);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const p = prisma as any;
@@ -219,7 +225,8 @@ describe("PATCH /api/templates/[id] — trava da ativação com slot", () => {
     const res = await PATCH(req({ status: "active" }), { params: { id: "t1" } });
 
     expect(res.status).toBe(200);
-    expect(p.contractTemplate.update.mock.calls[0][0].data.status).toBe("active");
+    // Último update = a ativação (o gate de PII pode gravar a medida antes).
+    expect(p.contractTemplate.update.mock.calls.at(-1)[0].data.status).toBe("active");
   });
 
   it("`forceActivate` é a saída consciente — o texto padrão é legítimo", async () => {
@@ -229,7 +236,8 @@ describe("PATCH /api/templates/[id] — trava da ativação com slot", () => {
 
     expect(res.status).toBe(200);
     expect(p.knowledgeItem.findMany).not.toHaveBeenCalled();
-    expect(p.contractTemplate.update.mock.calls[0][0].data.status).toBe("active");
+    // Último update = a ativação (o gate de PII pode gravar a medida antes).
+    expect(p.contractTemplate.update.mock.calls.at(-1)[0].data.status).toBe("active");
   });
 
   it("modelo SEM slot ativa sem consultar o acervo", async () => {
@@ -336,10 +344,18 @@ describe("PATCH /api/templates/[id] — trava da ativação com PII", () => {
     expect((await res.json()).code).toBe("PII_LEFTOVER");
   });
 
-  it("`allowPii` é a saída consciente: ativa", async () => {
+  it("`allowPii` é a saída consciente: ativa E fica na auditoria com nome próprio", async () => {
     const res = await PATCH(req({ status: "active", allowPii: true }), { params: { id: "t1" } });
     expect(res.status).toBe(200);
     expect(p.contractTemplate.update).toHaveBeenCalled();
+    expect(vi.mocked(audit)).toHaveBeenCalledWith(
+      expect.objectContaining({ orgId: "org-1" }),
+      expect.objectContaining({
+        action: "TEMPLATE_ACTIVATE_WITH_PII",
+        resource: "t1",
+        metadata: expect.objectContaining({ kinds: ["cpf", "bank_account"] }),
+      })
+    );
   });
 
   it("PATCH que não ativa (arquivar, renomear) passa direto", async () => {
@@ -347,10 +363,45 @@ describe("PATCH /api/templates/[id] — trava da ativação com PII", () => {
     expect(res.status).toBe(200);
   });
 
-  it("modelo legado sem relatório de PII não é bloqueado", async () => {
-    p.contractTemplate.findFirst = findFirstHonoringWhere({ ...COM_PII, draftReport: { inserted: [] } });
+  it("`allowPii` só vale como booleano true — 'não' (string truthy) não libera", async () => {
+    const res = await PATCH(req({ status: "active", allowPii: "não" }), { params: { id: "t1" } });
+    expect(res.status).toBe(409);
+  });
+
+  it("modelo handlebars legado sem relatório: mede o próprio source e, limpo, ativa", async () => {
+    p.contractTemplate.findFirst = findFirstHonoringWhere({ ...COM_PII, engine: "handlebars", draftReport: { inserted: [] } });
     const res = await PATCH(req({ status: "active" }), { params: { id: "t1" } });
     expect(res.status).toBe(200);
+    // A medida foi gravada antes da ativação.
+    const gravado = p.contractTemplate.update.mock.calls.find((c: unknown[]) => (c[0] as { data?: { draftReport?: unknown } }).data?.draftReport);
+    expect((gravado?.[0] as { data: { draftReport: { pii: { blocked: boolean } } } }).data.draftReport.pii.blocked).toBe(false);
+  });
+
+  it("modelo google_docs legado sem relatório: lê o Doc na hora e bloqueia se houver CPF", async () => {
+    p.contractTemplate.findFirst = findFirstHonoringWhere({
+      ...COM_PII,
+      engine: "google_docs",
+      googleTemplateDocId: "doc-1",
+      draftReport: { inserted: [] },
+    });
+    mockDocText.mockResolvedValueOnce("{{locadores_qualificacao}} CPF nº 529.982.247-25");
+    const res = await PATCH(req({ status: "active" }), { params: { id: "t1" } });
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("PII_LEFTOVER");
+    expect(mockDocText).toHaveBeenCalledWith("doc-1");
+  });
+
+  it("não conseguiu medir (Doc ilegível) → falha FECHADO com PII_UNVERIFIED", async () => {
+    p.contractTemplate.findFirst = findFirstHonoringWhere({
+      ...COM_PII,
+      engine: "google_docs",
+      googleTemplateDocId: "doc-1",
+      draftReport: null,
+    });
+    mockDocText.mockRejectedValueOnce(new Error("429"));
+    const res = await PATCH(req({ status: "active" }), { params: { id: "t1" } });
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("PII_UNVERIFIED");
   });
 
   it("relatório limpo (blocked=false) ativa normalmente", async () => {

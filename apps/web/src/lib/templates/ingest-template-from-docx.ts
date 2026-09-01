@@ -291,7 +291,9 @@ export async function ingestTemplateFromDocx(
   // ─── GATE DE PII DO MODELO ────────────────────────────────────────────────
   // Só mede; quem bloqueia é o PATCH de ativação (ver pii-gate.ts). Doc
   // ilegível → sem relatório, e a revalidação preenche na primeira leitura.
-  const pii: TemplatePiiReport | null = finalDocText !== null ? auditTemplateText(finalDocText) : null;
+  // Texto VAZIO também é "não medido" (o slot acima trata igual): afirmar
+  // `blocked: false` sobre um export vazio seria a mentira mais barata do fluxo.
+  const pii: TemplatePiiReport | null = finalDocText ? auditTemplateText(finalDocText) : null;
   // Doc ilegível → não declara (fail-closed): melhor um token órfão, que
   // `cleanupOrphanPlaceholders` limpa na geração, do que uma declaração mentindo.
   const survivingSlots = appliedReports

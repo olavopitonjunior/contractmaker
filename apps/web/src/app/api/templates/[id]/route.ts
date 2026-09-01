@@ -13,7 +13,15 @@ import {
   checkSlotClauseReadiness,
   slotClauseGapMessage,
 } from "@/lib/templates/slot-readiness";
-import { parseTemplatePiiReport, piiGateMessage } from "@/lib/templates/pii-gate";
+import {
+  auditTemplateText,
+  parseTemplatePiiReport,
+  piiGateMessage,
+  PII_UNVERIFIED_MESSAGE,
+  readDraftReport,
+} from "@/lib/templates/pii-gate";
+import { getDocPlainText } from "@/lib/google/docs";
+import { audit } from "@/lib/security/audit";
 
 /**
  * Escopo multitenant deny-by-default.
@@ -122,7 +130,10 @@ export async function PATCH(
   // futura). Enquanto o modelo é draft o slot é inofensivo — a geração só
   // enxerga `active` —, então a checagem custa uma consulta apenas na
   // transição para ativo. Ver lib/templates/slot-readiness.ts.
-  if (body.status === "active" && template.status !== "active" && !body.forceActivate) {
+  // "Este PATCH é uma ativação" mora num lugar só — as duas travas leem daqui.
+  const activating = body.status === "active" && template.status !== "active";
+
+  if (activating && !body.forceActivate) {
     const readiness = await checkSlotClauseReadiness({
       orgId,
       handlebarsSource: nextSource,
@@ -146,9 +157,34 @@ export async function PATCH(
   // em todo contrato" são decisões diferentes, e um flag só faria a primeira
   // liberar a segunda sem ninguém ler. Modelo sem relatório (legado, ou Doc
   // ilegível na ingestão) passa: a revalidação mede na primeira leitura.
-  if (body.status === "active" && template.status !== "active" && !body.allowPii) {
-    const pii = parseTemplatePiiReport(template.draftReport);
-    if (pii?.blocked) {
+  // `=== true`, não truthiness: "allowPii": "não" não pode liberar a trava.
+  const allowPii = body.allowPii === true;
+  if (activating) {
+    let pii = parseTemplatePiiReport(template.draftReport);
+    if (!pii && !allowPii) {
+      // Nunca medido (legado, from-contract, releitura que falhou na ingestão):
+      // mede AGORA, uma vez, em vez de presumir limpo. Google Docs lê o Doc;
+      // handlebars audita o próprio source. Se nem isso der, falha FECHADO.
+      try {
+        const text =
+          template.engine === "google_docs" && template.googleTemplateDocId
+            ? await getDocPlainText(template.googleTemplateDocId)
+            : nextSource;
+        if (!text) throw new Error("texto vazio");
+        pii = auditTemplateText(text);
+        await prisma.contractTemplate.update({
+          where: { id: params.id, orgId },
+          data: { draftReport: { ...readDraftReport(template.draftReport), pii } as object },
+        });
+      } catch (err) {
+        console.error("[templates/PATCH] não consegui medir PII antes de ativar:", err);
+        return NextResponse.json(
+          { error: PII_UNVERIFIED_MESSAGE, code: "PII_UNVERIFIED" },
+          { status: 409 }
+        );
+      }
+    }
+    if (pii?.blocked && !allowPii) {
       return NextResponse.json(
         {
           error: piiGateMessage(pii),
@@ -156,6 +192,22 @@ export async function PATCH(
           pii: { kinds: pii.kinds, count: pii.count, checkedAt: pii.checkedAt },
         },
         { status: 409 }
+      );
+    }
+    if (allowPii && (!pii || pii.blocked)) {
+      // Quem aceita imprimir o dado em todo contrato assume isso com nome
+      // próprio — e o log é imutável (impersonation carimba o ator efetivo).
+      await audit(
+        { orgId, userId: session.user.id },
+        {
+          action: "TEMPLATE_ACTIVATE_WITH_PII",
+          result: "SUCCESS",
+          resource: params.id,
+          resourceType: "ContractTemplate",
+          metadata: pii
+            ? { kinds: pii.kinds, count: pii.count, checkedAt: pii.checkedAt }
+            : { unmeasured: true },
+        }
       );
     }
   }

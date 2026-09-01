@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   auditTemplateText,
+  describePiiKinds,
   parseTemplatePiiReport,
   piiGateMessage,
+  readDraftReport,
   TEMPLATE_BLOCKING_PII_KINDS,
   TEMPLATE_WARNING_PII_KINDS,
 } from "../pii-gate";
@@ -97,5 +99,32 @@ describe("piiGateMessage", () => {
     expect(msg).toContain("CPF, conta bancária");
     expect(msg).toContain("3 ocorrências");
     expect(msg).toContain("chave de preenchimento");
+  });
+});
+
+describe("categorias desconhecidas e rótulos", () => {
+  it("categoria fora da tabela é descartada — nunca vira 'undefined' na mensagem", () => {
+    const r = parseTemplatePiiReport({ pii: { blocked: true, kinds: ["bank", "cpf"], count: 0 } });
+    expect(r?.kinds).toEqual(["cpf"]);
+    expect(r?.count).toBe(1);
+    expect(piiGateMessage(r!)).toContain("(CPF — 1 ocorrência)");
+  });
+
+  it("blocked sem categoria conhecida ainda bloqueia, com texto genérico", () => {
+    const r = parseTemplatePiiReport({ pii: { blocked: true, kinds: ["bank"] } });
+    expect(r?.blocked).toBe(true);
+    expect(piiGateMessage(r!)).toContain("(dado pessoal — 1 ocorrência)");
+  });
+
+  it("describePiiKinds usa o mesmo vocabulário do 409 (card e diálogo iguais)", () => {
+    expect(describePiiKinds(["bank_agency", "bank_account"])).toBe("agência bancária, conta bancária");
+    expect(describePiiKinds([])).toBe("dado pessoal");
+  });
+
+  it("readDraftReport: objeto passa, o resto vira {} (array não vira índices no merge)", () => {
+    expect(readDraftReport({ a: 1 })).toEqual({ a: 1 });
+    expect(readDraftReport([1, 2])).toEqual({});
+    expect(readDraftReport(null)).toEqual({});
+    expect(readDraftReport("x")).toEqual({});
   });
 });

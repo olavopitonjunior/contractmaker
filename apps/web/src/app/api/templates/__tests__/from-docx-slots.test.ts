@@ -322,6 +322,12 @@ describe("POST /api/templates/from-docx — gate de PII do modelo", () => {
     expect((draftReport()?.pii as Record<string, unknown>)?.blocked).toBe(false);
   });
 
+  it("export VAZIO também é 'não medido' — nada de blocked:false sobre texto nenhum", async () => {
+    getDocPlainTextMock.mockResolvedValue("");
+    await POST(req() as never);
+    expect(draftReport()?.pii).toBeUndefined();
+  });
+
   it("Doc ilegível → sem relatório de PII (não afirma o que não mediu)", async () => {
     getDocPlainTextMock.mockRejectedValue(new Error("429"));
     const res = await POST(req() as never);

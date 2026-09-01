@@ -92,6 +92,7 @@ export async function POST(
     const slotsChanged =
       slotsInDoc.length !== declaredSlots.length ||
       slotsInDoc.some((s) => !declaredSlots.includes(s));
+    const pii = auditTemplateText(text);
 
     // Atualiza o relatório do draft com o estado mais recente da validação.
     const prevReport =
@@ -138,7 +139,7 @@ export async function POST(
           missingRequired,
           // Espelho do Doc, como `slots`: o operador troca o trecho por uma
           // chave, revalida, e a trava de PII da ativação some.
-          pii: auditTemplateText(text),
+          pii,
           lastValidatedAt: new Date().toISOString(),
         } as object,
         ...(template.engine === "google_docs" && slotsChanged
@@ -161,6 +162,9 @@ export async function POST(
       unknown,
       missingRequired,
       slots,
+      // A tela mescla `pii` no relatório como faz com `slots` — sem isso o card
+      // de dado pessoal ficava stale depois do conserto.
+      pii,
       catalog: catalog.map((d) => ({
         token: d.token,
         label: d.label,

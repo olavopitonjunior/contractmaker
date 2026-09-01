@@ -66,7 +66,7 @@ export interface TemplatePiiReport {
 }
 
 /** Nomes que o operador entende, no lugar das chaves internas. */
-const KIND_LABEL: Record<PiiKind, string> = {
+export const KIND_LABEL: Record<PiiKind, string> = {
   cpf: "CPF",
   cnpj: "CNPJ",
   rg: "RG",
@@ -81,12 +81,39 @@ const KIND_LABEL: Record<PiiKind, string> = {
   address: "endereço",
 };
 
-function blockingFindings(findings: readonly PiiFinding[]): PiiFinding[] {
-  return findings.filter(
-    (f) =>
-      f.confidence >= DEFAULT_MIN_CONFIDENCE &&
-      TEMPLATE_BLOCKING_PII_KINDS.includes(f.kind)
-  );
+/** Só o que está na tabela de rótulos é uma categoria conhecida. */
+export function isPiiKind(v: unknown): v is PiiKind {
+  return typeof v === "string" && Object.prototype.hasOwnProperty.call(KIND_LABEL, v);
+}
+
+export function piiKindLabel(kind: string): string {
+  return isPiiKind(kind) ? KIND_LABEL[kind] : kind;
+}
+
+/** "CPF, conta bancária" — o MESMO texto na mensagem do 409 e no card da revisão. */
+export function describePiiKinds(kinds: readonly string[]): string {
+  return kinds.length ? kinds.map(piiKindLabel).join(", ") : "dado pessoal";
+}
+
+/**
+ * Leitor único de `ContractTemplate.draftReport`: objeto → ele mesmo; qualquer
+ * outra coisa (null, array, string) → `{}`. Quem mescla o relatório
+ * (ingestão, revalidação, nova passada da IA) parte daqui, para o merge não
+ * divergir entre os escritores.
+ */
+export function readDraftReport(raw: unknown): Record<string, unknown> {
+  return raw && typeof raw === "object" && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : {};
+}
+
+/** Mensagem do 409 `PII_UNVERIFIED` — o texto não pôde ser lido para medir. */
+export const PII_UNVERIFIED_MESSAGE =
+  "Não consegui ler o texto do modelo para conferir se sobrou dado pessoal. " +
+  "Revalide o modelo e tente ativar de novo.";
+
+function confidentFindings(findings: readonly PiiFinding[]): PiiFinding[] {
+  return findings.filter((f) => f.confidence >= DEFAULT_MIN_CONFIDENCE);
 }
 
 /**
@@ -96,12 +123,10 @@ function blockingFindings(findings: readonly PiiFinding[]): PiiFinding[] {
  * sobrou literal.
  */
 export function auditTemplateText(text: string, now: Date = new Date()): TemplatePiiReport {
-  const findings = detectPii(text);
-  const blocking = blockingFindings(findings);
+  const confident = confidentFindings(detectPii(text));
+  const blocking = confident.filter((f) => TEMPLATE_BLOCKING_PII_KINDS.includes(f.kind));
   const kinds = TEMPLATE_BLOCKING_PII_KINDS.filter((k) => blocking.some((f) => f.kind === k));
-  const warnings = TEMPLATE_WARNING_PII_KINDS.filter((k) =>
-    findings.some((f) => f.kind === k && f.confidence >= DEFAULT_MIN_CONFIDENCE)
-  );
+  const warnings = TEMPLATE_WARNING_PII_KINDS.filter((k) => confident.some((f) => f.kind === k));
   return {
     blocked: blocking.length > 0,
     kinds,
@@ -118,21 +143,19 @@ export function auditTemplateText(text: string, now: Date = new Date()): Templat
  * vez, sem ninguém pedir. A revalidação preenche o campo na primeira leitura.
  */
 export function parseTemplatePiiReport(draftReport: unknown): TemplatePiiReport | null {
-  if (!draftReport || typeof draftReport !== "object" || Array.isArray(draftReport)) return null;
-  const raw = (draftReport as Record<string, unknown>).pii;
+  const raw = readDraftReport(draftReport).pii;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const r = raw as Record<string, unknown>;
   if (typeof r.blocked !== "boolean") return null;
-  const kinds = Array.isArray(r.kinds)
-    ? (r.kinds.filter((k): k is PiiKind => typeof k === "string") as PiiKind[])
-    : [];
-  const warnings = Array.isArray(r.warnings)
-    ? (r.warnings.filter((k): k is PiiKind => typeof k === "string") as PiiKind[])
-    : [];
+  // Categoria fora da tabela (relatório de outra versão, JSON editado à mão)
+  // não vira "undefined" na tela: é descartada, e `blocked` continua valendo.
+  const kinds = Array.isArray(r.kinds) ? r.kinds.filter(isPiiKind) : [];
+  const warnings = Array.isArray(r.warnings) ? r.warnings.filter(isPiiKind) : [];
+  const count = typeof r.count === "number" && r.count > 0 ? r.count : kinds.length;
   return {
     blocked: r.blocked,
     kinds,
-    count: typeof r.count === "number" ? r.count : kinds.length,
+    count: r.blocked ? Math.max(count, 1) : count,
     warnings,
     checkedAt: typeof r.checkedAt === "string" ? r.checkedAt : "",
   };
@@ -140,8 +163,8 @@ export function parseTemplatePiiReport(draftReport: unknown): TemplatePiiReport 
 
 /** Mensagem do 409 `PII_LEFTOVER` — o que o operador lê na tela. */
 export function piiGateMessage(report: TemplatePiiReport): string {
-  const lista = report.kinds.map((k) => KIND_LABEL[k]).join(", ");
-  const n = report.count;
+  const lista = describePiiKinds(report.kinds);
+  const n = Math.max(report.count, 1);
   return (
     `O texto do modelo ainda tem dado pessoal literal (${lista} — ${n} ` +
     `${n === 1 ? "ocorrência" : "ocorrências"}). Todo contrato gerado a partir ` +
