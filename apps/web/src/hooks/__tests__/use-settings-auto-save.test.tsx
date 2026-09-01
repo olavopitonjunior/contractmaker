@@ -384,6 +384,107 @@ describe("useSettingsAutoSave", () => {
     expect(bodyOf(spy, 1).summaryRecipientEmail).toBe("c@d.com");
   });
 
+  it("chave inválida NÃO segura as vizinhas válidas", async () => {
+    // Achado de review no lote 4. Com `isValid` reprovando a seção inteira, um
+    // CPF pela metade impedia o NOME — já corrigido e válido — de ser gravado.
+    // Sem botão, o usuário não tinha como forçar; e como nada era agendado, o
+    // flush de unmount também não disparava. A edição boa sumia calada.
+    const spy = mockFetch(() => ({ ok: true }));
+    const { rerender } = renderHook(
+      ({ v }) =>
+        useSettingsAutoSave(v, {
+          endpoint: ENDPOINT,
+          debounceMs: 10,
+          invalidKeys: (f) => (f.cpf === "111" ? ["cpf"] : []),
+        }),
+      { initialProps: { v: { name: "Olavo", cpf: "" } } },
+    );
+
+    rerender({ v: { name: "Olavo Piton", cpf: "111" } });
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    const enviado = bodyOf(spy);
+    expect(enviado.name).toBe("Olavo Piton");
+    expect(enviado).not.toHaveProperty("cpf");
+  });
+
+  it("com TUDO que mudou inválido, não sai PATCH nem ao desmontar", async () => {
+    // A contraprova: o filtro não pode virar desculpa para mandar corpo vazio,
+    // nem para o unmount gravar lixo.
+    const spy = mockFetch(() => ({ ok: true }));
+    const { rerender, unmount } = renderHook(
+      ({ v }) =>
+        useSettingsAutoSave(v, {
+          endpoint: ENDPOINT,
+          debounceMs: 5_000,
+          invalidKeys: (f) => (f.cpf === "111" ? ["cpf"] : []),
+        }),
+      { initialProps: { v: { cpf: "" } } },
+    );
+
+    rerender({ v: { cpf: "111" } });
+    unmount();
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("corrigir a chave inválida faz ela viajar depois", async () => {
+    const spy = mockFetch(() => ({ ok: true }));
+    const { rerender } = renderHook(
+      ({ v }) =>
+        useSettingsAutoSave(v, {
+          endpoint: ENDPOINT,
+          debounceMs: 10,
+          invalidKeys: (f) => (f.cpf === "111" ? ["cpf"] : []),
+        }),
+      { initialProps: { v: { cpf: "" } } },
+    );
+
+    rerender({ v: { cpf: "111" } });
+    await act(async () => {
+      vi.advanceTimersByTime(100);
+    });
+    expect(spy).not.toHaveBeenCalled();
+
+    rerender({ v: { cpf: "111.444.777-35" } });
+    await act(async () => {
+      vi.advanceTimersByTime(100);
+    });
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    expect(bodyOf(spy).cpf).toBe("111.444.777-35");
+  });
+
+  it("NaN não se confunde com 'não informado' na comparação", async () => {
+    // `JSON.stringify(NaN)` é "null". Sem tratamento, um campo numérico que o
+    // usuário deixou inválido ficava IGUAL a vazio: a pill dizia "sem
+    // alterações" enquanto o erro inline dizia o contrário.
+    const spy = mockFetch(() => ({ ok: true }));
+    const { result, rerender } = renderHook(
+      ({ v }) =>
+        useSettingsAutoSave(v, {
+          endpoint: ENDPOINT,
+          debounceMs: 10,
+          invalidKeys: (f) =>
+            Number.isNaN(f.renda as number) ? ["renda"] : [],
+        }),
+      { initialProps: { v: { renda: null as number | null } } },
+    );
+
+    rerender({ v: { renda: Number.NaN } });
+    await act(async () => {
+      vi.advanceTimersByTime(100);
+    });
+
+    expect(result.current.isDirty).toBe(true);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it("desmontar durante o re-agendamento (PATCH em voo) também grava", async () => {
     // A mesma perda, numa janela mais estreita: com um PATCH em voo, a edição
     // nova espera num timer de 150ms. Duas coisas precisam valer aí — que
