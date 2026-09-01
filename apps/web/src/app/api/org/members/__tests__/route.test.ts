@@ -150,6 +150,28 @@ describe("POST /api/org/members — teto de papel (#452)", () => {
     );
   });
 
+  // A mensagem tem de nomear o papel NEGADO. Com `role` cru ela dizia `o papel
+  // "custom"` para qualquer CustomRole, e numa org com várias o operador não
+  // descobria qual delas foi recusada.
+  it("nomeia a CustomRole negada na mensagem, não o enum `custom`", async () => {
+    comPapelDoAtor("admin");
+    p.customRole.findFirst.mockResolvedValue({
+      id: "cr-acima",
+      name: "QA Acima do Admin",
+      // `org.delete` é uma das permissões que `owner` tem e `admin` não.
+      permissions: { "org.delete": true },
+    });
+
+    const res = await POST(
+      req({ email: "novo@x.com", role: "custom", customRoleId: "cr-acima" })
+    );
+
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toContain("QA Acima do Admin");
+    expect(body.error).not.toContain('"custom"');
+  });
+
   // Quando "já é membro" e "fora do teto" coexistem, o 403 vence — decisão, não
   // acidente de ordem: a alternativa daria a quem não pode conceder uma resposta
   // que confirma quem já pertence à org.
