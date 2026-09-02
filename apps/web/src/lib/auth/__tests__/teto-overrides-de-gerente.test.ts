@@ -25,6 +25,17 @@
  * negada explicitamente, ou uma chave fora do catálogo (literal digitado
  * errado), ou o dia em que `adminAccess()` deixar de derivar de `fullAccess()`.
  *
+ * **Limite deste arquivo, e ele é mais estreito do que o nome sugere:** só o
+ * papel `gerente` recebe o merge de `OrgManagerSettings.permissionsJson`. Isso
+ * não está escrito como uma lista de "papéis configuráveis por org" — está como
+ * `if (role === "gerente")` em `rbac/check.ts:42` e `if (targetRole ===
+ * "gerente")` em `auth/invitations.ts:286`, dois `if` literais mantidos em
+ * paralelo. Enquanto for assim, cobrir `MANAGER_CONFIGURABLE_PERMISSIONS` cobre
+ * tudo o que um tenant consegue acrescentar a um preset. No dia em que alguém
+ * quiser um SEGUNDO papel configurável por org, vai duplicar o `if` — e este
+ * arquivo passa a defender metade do que defende hoje, sem ficar vermelho e sem
+ * nada avisando. Quem fizer isso precisa voltar aqui.
+ *
  * O acoplamento é invisível de onde o dano nasce: quem acrescenta a chave mexe
  * em `permissions.ts` e não passa perto de nenhuma rota de membros. Este é o
  * único lugar onde as duas pontas se encontram, e falha no PR de quem
