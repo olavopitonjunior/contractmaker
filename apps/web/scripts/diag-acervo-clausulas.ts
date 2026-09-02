@@ -36,6 +36,7 @@ if (fs.existsSync(envPath)) {
 import { PrismaClient } from "@prisma/client";
 import { extractHandlebarsPaths, validateKey } from "../src/lib/clauses/key-catalog";
 import { areTagsFrozen, isCanonicalTag } from "../src/lib/clauses/tag-vocabulary";
+import { findEsteiraInconsistencies } from "../src/lib/clauses/taxonomy";
 import { detectPii } from "../src/lib/ingestion/pii";
 import type { FormModule } from "../src/lib/forms/presets";
 
@@ -77,6 +78,11 @@ async function main() {
     process.exit(1);
   }
 
+  // Arquivadas ficam de fora de propósito: o diagnóstico é sobre o acervo que o
+  // agente e a geração enxergam (`approved` é filtro duro dos dois). A migration
+  // de correção de esteira, por outro lado, toca linha arquivada também — então
+  // este relatório não confirma o estado delas, e não deve ser lido como se
+  // confirmasse.
   const rows = await prisma.knowledgeItem.findMany({
     where: { orgId: org.id, category: "clause", status: { not: "archived" } },
     select: {
@@ -153,6 +159,12 @@ async function main() {
   }
   const colisoes = [...porTagSet.entries()].filter(([, v]) => v.length > 1);
 
+  // Invariante esteira × groupCode. Um backfill já violou isto em produção e
+  // ninguém viu: 37 cláusulas de locação foram para a esteira de venda e
+  // sumiram da busca do agente sem erro nenhum. Entra no resumo (e não só no
+  // texto) pra valer também no `--json`, que é como um agente lê isto.
+  const incoerentes = findEsteiraInconsistencies(rows);
+
   const resumo = {
     org: { id: org.id, name: org.name, slug: org.slug },
     total: rows.length,
@@ -171,7 +183,13 @@ async function main() {
       isVariableDivergente: problemas.filter(
         (p) => p.isVariableGravado !== p.isVariableDerivado
       ).length,
+      esteiraIncoerente: incoerentes.length,
     },
+    esteiraIncoerente: incoerentes.map((c) => ({
+      id: c.id,
+      title: c.title,
+      groupCode: c.groupCode,
+    })),
     colisoesDeTags: colisoes.map(([k, titles]) => ({ conjunto: k, clausulas: titles })),
   };
 
@@ -186,6 +204,19 @@ async function main() {
   console.log("Por esteira:", resumo.porEsteira);
   console.log("Por status:", resumo.porStatus);
   console.log("\nFora do padrão:", resumo.foraDoPadrao);
+
+  if (incoerentes.length > 0) {
+    console.log(
+      `\n⚠ ${incoerentes.length} cláusula(s) com esteira=venda e groupCode FORA de G1..G6:`
+    );
+    for (const c of incoerentes) {
+      console.log(`    - [${c.groupCode}] ${c.title}`);
+    }
+    console.log(
+      "  Provavelmente locação classificada errado. Ver a migration" +
+        " 20260902013000_knowledge_item_esteira_fix_group_code."
+    );
+  }
 
   if (colisoes.length > 0) {
     console.log("\n⚠ COLISÕES de conjunto exato de tags (dois approved iguais):");

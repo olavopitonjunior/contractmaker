@@ -7,6 +7,10 @@ import {
   visibleEsteiras,
   ESTEIRA_AXIS,
   ESTEIRA_PRIMARY_FIXTURE,
+  isEsteiraConsistent,
+  findEsteiraInconsistencies,
+  groupCodeForEsteira,
+  esteiraFromTags,
 } from "@/lib/clauses/taxonomy";
 import { CLAUSE_PREVIEW_MODALIDADE_VALUES } from "@/lib/clauses/schema";
 
@@ -140,5 +144,109 @@ describe("visibleEsteiras", () => {
   it("sempre inclui 'ambas'", () => {
     expect(visibleEsteiras("venda")).toEqual(["venda", "ambas"]);
     expect(visibleEsteiras("locacao")).toEqual(["locacao", "ambas"]);
+  });
+});
+
+describe("invariante esteira × groupCode", () => {
+  // As formas abaixo NÃO são inventadas: são as linhas que estavam em produção
+  // em 02/09/2026, quando o backfill original mandou o acervo curado de garantia
+  // da RE/MAX Trio e da RE/MAX Ativa para a esteira de venda.
+  const CURADAS_DE_LOCACAO = [
+    { title: "Garantia — Fiador", groupCode: "GARANTIA", tags: ["slot:garantia", "garantia:fiador"] },
+    { title: "Garantia — Caução em dinheiro", groupCode: "GARANTIA", tags: ["slot:garantia", "garantia:caucao"] },
+    { title: "Cláusula opcional — Comissão de co-corretagem", groupCode: "OPCIONAL", tags: ["locacao:opcional"] },
+  ];
+
+  it("groupCode fora de G1..G6 não pode conviver com esteira=venda", () => {
+    for (const c of CURADAS_DE_LOCACAO) {
+      expect(isEsteiraConsistent({ ...c, esteira: "venda" })).toBe(false);
+    }
+  });
+
+  it("as mesmas linhas são consistentes em locação e em triagem", () => {
+    // O conserto aceito é mudar a ESTEIRA, não o groupCode: 'GARANTIA' é o eixo
+    // legítimo do acervo curado e a migration de correção não o toca.
+    for (const c of CURADAS_DE_LOCACAO) {
+      expect(isEsteiraConsistent({ ...c, esteira: "locacao" })).toBe(true);
+      expect(isEsteiraConsistent({ ...c, esteira: null })).toBe(true);
+    }
+  });
+
+  it("venda legítima passa: G1..G6, ou sem grupo nenhum", () => {
+    expect(isEsteiraConsistent({ esteira: "venda", groupCode: "G4" })).toBe(true);
+    expect(isEsteiraConsistent({ esteira: "venda", groupCode: null })).toBe(true);
+    expect(isEsteiraConsistent({ esteira: "venda" })).toBe(true);
+  });
+
+  it("a guarda de escrita RECUSA gravar o estado incoerente", () => {
+    // Afirmação de NEGAÇÃO: não basta o detector detectar depois. Estes são os
+    // dois caminhos reais — aprovar só o campo `esteira` no classificador, e o
+    // PATCH que não menciona `groupCode` — reduzidos ao que decidem.
+    for (const c of CURADAS_DE_LOCACAO) {
+      expect(groupCodeForEsteira("venda", c.groupCode)).toBeNull();
+      expect(isEsteiraConsistent({ esteira: "venda", groupCode: groupCodeForEsteira("venda", c.groupCode) })).toBe(true);
+    }
+  });
+
+  it("a guarda preserva o grupo legítimo e limpa Gx fora de venda", () => {
+    expect(groupCodeForEsteira("venda", "G4")).toBe("G4");
+    // Fora de venda o eixo é `subcategory`; um Gx pendurado não é exibido por
+    // esteira nenhuma, então cai.
+    expect(groupCodeForEsteira("locacao", "G4")).toBeNull();
+    expect(groupCodeForEsteira("ambas", "G4")).toBeNull();
+    expect(groupCodeForEsteira(null, "G4")).toBeNull();
+    expect(groupCodeForEsteira("venda", null)).toBeNull();
+  });
+
+  it("a guarda PRESERVA a taxonomia do acervo curado fora de venda", () => {
+    // Achado de review: apagar 'GARANTIA' aqui poria a guarda em contradição
+    // com a própria migration de correção, que move a esteira e NUNCA o grupo.
+    // O primeiro PATCH em qualquer das 37 linhas consertadas apagaria o eixo
+    // do curador.
+    expect(groupCodeForEsteira("locacao", "GARANTIA")).toBe("GARANTIA");
+    expect(groupCodeForEsteira("locacao", "OPCIONAL")).toBe("OPCIONAL");
+    expect(groupCodeForEsteira("ambas", "GARANTIA")).toBe("GARANTIA");
+    expect(groupCodeForEsteira(null, "GARANTIA")).toBe("GARANTIA");
+  });
+
+  it("detector e guarda NUNCA divergem — são a mesma regra", () => {
+    const esteiras = ["venda", "locacao", "ambas", null];
+    const grupos = ["G1", "G4", "GARANTIA", "OPCIONAL", "none", null];
+    for (const esteira of esteiras) {
+      for (const groupCode of grupos) {
+        const persistido = groupCodeForEsteira(esteira, groupCode);
+        // O que a guarda grava é, por definição, o que o detector aprova.
+        expect(isEsteiraConsistent({ esteira, groupCode: persistido })).toBe(true);
+      }
+    }
+  });
+
+  it("esteiraFromTags classifica na ORIGEM o que a migration consertou no destino", () => {
+    // Estas são as tags reais das 14 curadas da Trio e das 4 de consolidação.
+    expect(esteiraFromTags(["slot:garantia", "garantia:fiador"])).toBe("locacao");
+    expect(esteiraFromTags(["slot:garantia", "garantia:seguro_fianca", "provider:porto_seguro"])).toBe("locacao");
+    expect(esteiraFromTags(["cobertura:pintura_externa"])).toBe("locacao");
+    expect(esteiraFromTags(["locacao:opcional", "tema:co_corretagem"])).toBe("locacao");
+    expect(esteiraFromTags(["locacao"])).toBe("locacao");
+  });
+
+  it("esteiraFromTags NÃO chuta sem evidência de identidade", () => {
+    // Sem prefixo de identidade, devolve null — a fila de triagem, lida nas
+    // duas esteiras. Chutar aqui seria repetir a premissa que furou o backfill.
+    expect(esteiraFromTags(["tema:arras", "lei:cc-417"])).toBeNull();
+    expect(esteiraFromTags([])).toBeNull();
+    // `provider:` sozinho não basta: seguradora não é exclusividade de locação.
+    expect(esteiraFromTags(["provider:porto_seguro"])).toBeNull();
+  });
+
+  it("findEsteiraInconsistencies separa as violações do acervo saudável", () => {
+    const acervo = [
+      { title: "Sinal e princípio de pagamento", esteira: "venda", groupCode: "G1" },
+      { title: "Financiamento e registro", esteira: "venda", groupCode: "G4" },
+      ...CURADAS_DE_LOCACAO.map((c) => ({ ...c, esteira: "venda" })),
+      { title: "Vistoria de entrada", esteira: "locacao", groupCode: null },
+    ];
+    const ruins = findEsteiraInconsistencies(acervo);
+    expect(ruins.map((c) => c.title)).toEqual(CURADAS_DE_LOCACAO.map((c) => c.title));
   });
 });

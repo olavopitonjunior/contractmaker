@@ -6,7 +6,7 @@ import { updateKnowledgeItem } from "@/lib/ai/knowledge";
 import { areTagsFrozen } from "@/lib/clauses/tag-vocabulary";
 import { deriveIsVariable, CLAUSE_ESTEIRA_VALUES } from "@/lib/clauses/schema";
 import { assertRendered, extractHandlebarsPaths, validateKey } from "@/lib/clauses/key-catalog";
-import { esteiraForModalidade } from "@/lib/clauses/taxonomy";
+import { esteiraForModalidade, groupCodeForEsteira } from "@/lib/clauses/taxonomy";
 import type { FormModule } from "@/lib/forms/presets";
 import { logError } from "@/lib/observability/log";
 
@@ -114,11 +114,15 @@ export async function POST(req: NextRequest) {
     if (approve.groupCode && values.groupCode !== undefined) {
       // G1..G6 só existe em venda. Fora dela, o valor é sempre limpo — mesmo
       // que o client tenha mandado outra coisa.
-      patch.groupCode = finalEsteira === "venda" ? values.groupCode : null;
-    } else if (patch.esteira !== undefined && finalEsteira !== "venda" && current.groupCode) {
-      // Mudou para locação/ambas com um grupo antigo pendurado: limpa junto,
-      // senão a cláusula fica com um grupo que a UI da esteira nem exibe.
-      patch.groupCode = null;
+      patch.groupCode = groupCodeForEsteira(finalEsteira, values.groupCode);
+    } else if (patch.esteira !== undefined && current.groupCode) {
+      // Mudou de esteira com um grupo antigo pendurado. A checagem vale nas
+      // DUAS direções: sair de venda limpa (grupo que a UI nem exibe), e
+      // ENTRAR em venda também, quando o grupo herdado é de outro acervo
+      // ('GARANTIA'/'OPCIONAL' do curado). Só a primeira metade existia, e era
+      // por ela que aprovar apenas o campo `esteira` recriava o estado que a
+      // migration 20260902013000 desfez.
+      patch.groupCode = groupCodeForEsteira(finalEsteira, current.groupCode);
     }
 
     if (approve.subcategory && values.subcategory !== undefined) {

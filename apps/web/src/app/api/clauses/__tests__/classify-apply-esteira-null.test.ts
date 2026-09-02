@@ -187,6 +187,49 @@ describe("apply — fail-closed", () => {
     expect(updateKnowledgeItem).not.toHaveBeenCalled();
   });
 
+  it("ENTRAR em venda limpa o grupo herdado do acervo curado", async () => {
+    // A metade que faltava. A regra era assimétrica: sair de venda limpava,
+    // entrar não conferia nada — e aprovar SÓ o campo esteira numa cláusula
+    // curada de locação deixava 'GARANTIA' convivendo com 'venda', que é
+    // exatamente o estado que a migration 20260902013000 teve de desfazer em
+    // produção. Quem propõe aqui é um LLM.
+    mockPrisma.knowledgeItem.findFirst.mockResolvedValue(
+      clause({ esteira: "locacao", groupCode: "GARANTIA", subcategory: "garantia" })
+    );
+
+    const res = await POST(
+      req([{ clauseId: "cl1", approve: { esteira: true }, values: { esteira: "venda" } }])
+    );
+
+    const body = await res.json();
+    expect(body.applied).toEqual(["cl1"]);
+    expect(updateKnowledgeItem).toHaveBeenCalledWith(
+      "cl1",
+      "org-1",
+      expect.objectContaining({ esteira: "venda", groupCode: null })
+    );
+  });
+
+  it("CONTROLE: entrar em venda com grupo do CCV preserva o grupo", async () => {
+    // Sem este controle, uma "simplificação" futura que apagasse groupCode em
+    // toda troca de esteira deixaria o teste acima verde.
+    mockPrisma.knowledgeItem.findFirst.mockResolvedValue(
+      clause({ esteira: "locacao", groupCode: "G4", subcategory: "garantia" })
+    );
+
+    const res = await POST(
+      req([{ clauseId: "cl1", approve: { esteira: true }, values: { esteira: "venda" } }])
+    );
+
+    const body = await res.json();
+    expect(body.applied).toEqual(["cl1"]);
+    expect(updateKnowledgeItem).toHaveBeenCalledWith(
+      "cl1",
+      "org-1",
+      expect.objectContaining({ esteira: "venda", groupCode: "G4" })
+    );
+  });
+
   it("cláusula de outra org não é encontrada", async () => {
     mockPrisma.knowledgeItem.findFirst.mockResolvedValue(null);
 

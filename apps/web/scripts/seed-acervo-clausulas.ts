@@ -68,6 +68,7 @@ import {
   updateKnowledgeItem,
   type EmbedTarget,
 } from "@/lib/ai/knowledge";
+import { esteiraFromTags } from "@/lib/clauses/taxonomy";
 import { isEmbeddingsConfigured } from "@/lib/ai/embeddings";
 import { chunkText } from "@/lib/ai/chunking";
 
@@ -692,6 +693,13 @@ async function main() {
         agentNotes: buildAgentNotes(clause),
         groupCode: clause.groupCode ?? null,
         subcategory: clause.subcategory ?? null,
+        // Classifica na ORIGEM o que a migration 20260902013000 teve de
+        // consertar no destino. Sem isto, um tenant NOVO que recebesse o
+        // pacote curado de locação nasceria com as linhas sem esteira, e não
+        // haveria migration para classificá-las depois. Só no create: em
+        // update, a esteira pode ter sido decidida por um humano no
+        // classificador, e o seed não é dono dessa decisão.
+        esteira: esteiraFromTags(clause.tags),
         status: "approved",
         // Row ÚNICA com o texto integral. Cláusula de slot é lida de volta
         // inteira pro contrato — chunkar deixava o resolver pegar o preview de
