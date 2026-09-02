@@ -144,11 +144,30 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   {
     token: "imovel_descricao",
     label: "Descrição do imóvel",
-    description: "Descrição narrativa do imóvel preenchida no formulário.",
+    description: "Descrição narrativa opcional do imóvel preenchida no formulário.",
     example: "Apartamento residencial com 3 dormitórios…",
     required: false,
     kind: "simple",
     modalidades: TODAS,
+  },
+  // Rebuild da RE/MAX Trio (2026-09-01): 16/16 modelos ingeridos ficaram com
+  // "apartamento 33, do condomínio edifício X" do imóvel-fonte literal na
+  // cláusula do objeto, porque só o endereço tinha chave. Esta é a chave do
+  // trecho que ANTECEDE o endereço — composta de campos que o form sempre tem
+  // (tipo, complemento, nome do condomínio), como faz a 1.1 do modelo canônico.
+  {
+    token: "imovel_identificacao",
+    label: "Identificação do imóvel",
+    description:
+      "Tipo e unidade do imóvel na cláusula do objeto, antes do endereço: " +
+      "'apartamento 33, do condomínio edifício X' ou 'casa'. Mapeie o trecho " +
+      "entre 'proprietária do(a)' e 'localizado(a) na'.",
+    example: "apartamento 33, do condomínio edifício Siracusa",
+    required: true,
+    // `simple`, não `composed`: é um trecho DENTRO da frase — "composed" faz o
+    // passe de IA mapear o bloco inteiro, e ele engoliria o endereço.
+    kind: "simple",
+    modalidades: LOCACAO,
   },
   {
     token: "imovel_matricula",
@@ -167,6 +186,29 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
     required: false,
     kind: "simple",
     modalidades: TODAS,
+  },
+  {
+    token: "iptu_valor",
+    label: "IPTU mensal",
+    description:
+      "Valor mensal do IPTU na cláusula de encargos/despesas da locação, em BRL. " +
+      "Vazio quando não informado ou zero.",
+    example: "R$ 31,67",
+    required: false,
+    kind: "simple",
+    modalidades: LOCACAO,
+  },
+  {
+    token: "condominio_valor",
+    label: "Condomínio mensal",
+    description:
+      "Valor mensal das despesas ordinárias de condomínio na cláusula de " +
+      "encargos/despesas da locação, em BRL. Vazio quando o imóvel não tem " +
+      "condomínio (casa) ou o valor é zero.",
+    example: "R$ 676,08",
+    required: false,
+    kind: "simple",
+    modalidades: LOCACAO,
   },
   {
     token: "aluguel_valor",

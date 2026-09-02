@@ -1,4 +1,5 @@
 import { flattenForPlaceholders } from "@/lib/google/replace-placeholders";
+import { TIPO_IMOVEL_TEXTO } from "@/lib/locacao/enrich";
 import {
   qualificacaoPessoas,
   qualificacaoPessoasVenda,
@@ -40,6 +41,53 @@ function numExtensoPar(data: Record<string, unknown>, path: string): string {
   return `${v} (${hbsExpr(`numeroExtenso ${path}`, data)})`;
 }
 
+/**
+ * BRL ou vazio. Zero e não-número contam como "não informado": o form grava 0
+ * quando o campo fica em branco (casa sem condomínio, IPTU pago à parte), e a
+ * convenção do repo é a mesma — `brl()` do resumo e `{{#if (gt … 0)}}` do
+ * canônico. "R$ 0,00" numa cláusula de encargos é afirmação falsa.
+ */
+function moedaOuVazio(data: Record<string, unknown>, path: string): string {
+  const n = Number(get(data, path));
+  return Number.isFinite(n) && n > 0 ? hbsExpr(`moeda ${path}`, data) : "";
+}
+/**
+ * Trecho da cláusula do objeto que antecede o endereço — "apartamento 33, do
+ * condomínio edifício X" — dos campos que o form sempre tem. Espelha a 1.1 do
+ * modelo canônico (locacao_residencial_v3.hbs): tipo + complemento + condomínio.
+ */
+/** Como o form costuma abreviar cada tipo dentro do complemento ("apto. 121"). */
+const TIPO_SINONIMOS: Record<string, string[]> = {
+  apartamento: ["apartamento", "apto", "ap"],
+  casa: ["casa"],
+  comercial_sala: ["sala", "sala comercial", "conj", "conjunto", "cj"],
+  loja: ["loja"],
+  galpao: ["galpão", "galpao"],
+  terreno: ["terreno", "lote"],
+};
+function imovelIdentificacao(imovel: Record<string, unknown> | undefined): string {
+  if (!imovel) return "";
+  const kind = str(imovel.kind);
+  const tipo =
+    str(imovel.tipo_texto) || (kind ? (TIPO_IMOVEL_TEXTO[kind] ?? kind.replace(/_/g, " ")) : "");
+  // O complemento do form costuma repetir o PRÓPRIO tipo ("apto. 121", "casa 2"):
+  // sem isto sairia "apartamento apto. 121". Só o sinônimo do tipo atual cai —
+  // "Loja 1" num apartamento (prédio misto) fica como está.
+  let complemento = str(imovel.complemento).trim();
+  // Do mais longo pro mais curto (a alternância é first-match: `conj`
+  // sequestraria "Conjunto") e com separador OBRIGATÓRIO — ponto, espaço ou
+  // dígito à frente. Sem separador, "Apenas fundos" viraria "enas fundos".
+  const sinonimos = [...(TIPO_SINONIMOS[kind] ?? [])].sort((a, b) => b.length - a.length);
+  if (sinonimos.length) {
+    const alt = sinonimos.map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+    complemento = complemento
+      .replace(new RegExp(`^(?:${alt})(?:\\s*\\.\\s*|\\s+|(?=\\d))`, "i"), "")
+      .trim();
+  }
+  const unidade = [tipo, complemento].filter(Boolean).join(" ");
+  const condominio = str(imovel.condominio_nome).trim();
+  return [unidade, condominio && `do ${condominio}`].filter(Boolean).join(", ");
+}
 function enderecoCompleto(imovel: Record<string, unknown> | undefined): string {
   if (!imovel) return "";
   const partes: string[] = [];
@@ -80,6 +128,7 @@ export function buildLocacaoPlaceholderMap(
 
     // Simples formatados
     imovel_endereco_completo: enderecoCompleto(imovel),
+    imovel_identificacao: imovelIdentificacao(imovel),
     imovel_descricao: str(imovel?.descricao),
     imovel_matricula: imovel?.matricula
       ? `${imovel.matricula}${imovel.cartorio ? ` do ${imovel.cartorio}` : ""}`
@@ -89,6 +138,10 @@ export function buildLocacaoPlaceholderMap(
     aluguel_valor_extenso:
       get(enriched, "aluguel.valor") != null ? hbsExpr("extenso aluguel.valor", enriched) : "",
     aluguel_dia_vencimento: numExtensoPar(enriched, "aluguel.dia_vencimento"),
+    // Encargos da 9.1.2, do próprio form (aluguel.iptu_mensal / condominio_mensal).
+    // Sem chave, o modelo ingerido guardava o IPTU e o condomínio do imóvel-fonte.
+    iptu_valor: moedaOuVazio(enriched, "aluguel.iptu_mensal"),
+    condominio_valor: moedaOuVazio(enriched, "aluguel.condominio_mensal"),
     vigencia_meses: numExtensoPar(enriched, "aluguel.vigencia_meses"),
     vigencia_inicio: str(config.vigencia_inicio_texto),
     vigencia_fim: str(config.vigencia_fim_texto),
