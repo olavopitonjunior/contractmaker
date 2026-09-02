@@ -84,8 +84,12 @@ describe("reverseMergeDocToTemplate — travas no texto plano", () => {
     expect(replacedTokens).toContain("aluguel_valor_extenso");
     expect(state).toContain("{{aluguel_valor}}");
 
-    const skippedReasons = Object.fromEntries(result.skipped.map((s) => [s.value, s.reason]));
-    expect(skippedReasons["Bruno Tavares"]).toBe("ambiguous");
+    // "Bruno Tavares" é a chave crua do flatten (`locatarios_nome`), fora do
+    // catálogo: nem candidato é — não aparece em replaced NEM em skipped.
+    // A qualificação inteira (token composto do catálogo) é o caminho certo.
+    const touched = [...result.replaced, ...result.skipped].map((x) => x.value);
+    expect(touched).not.toContain("Bruno Tavares");
+    expect(state).toContain("Bruno Tavares");
 
     // Nenhuma request com stopword nem valor curto.
     const calls = mockBatchUpdate.mock.calls;
@@ -118,6 +122,84 @@ describe("reverseMergeDocToTemplate — travas no texto plano", () => {
     expect(result.replaced).toEqual([]);
     expect(mockBatchUpdate).not.toHaveBeenCalled();
     expect(mockGetDocPlainText).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Especificidade (A6): quando trocar TODAS as ocorrências. O par (token, valor)
+ * decide — `matchPolicy: "all"` no catálogo E `isSpecificValue(valor)`.
+ */
+describe("reverseMergeDocToTemplate — matchPolicy all × unique", () => {
+  it("valor do aluguel repetido em 3 cláusulas: token `all` + valor específico → TODAS viram chave", async () => {
+    useDoc(
+      "1. Aluguel de R$ 3.500,00 mensais.\n2. Reajuste sobre R$ 3.500,00.\n3. Multa calculada sobre R$ 3.500,00 devidos."
+    );
+    const result = await run();
+    const r = result.replaced.find((x) => x.token === "aluguel_valor");
+    expect(r?.occurrences).toBe(3);
+    expect(state.split("{{aluguel_valor}}")).toHaveLength(4);
+    expect(state).not.toContain("3.500,00");
+  });
+
+  it("token `unique` com valor repetido continua ambíguo (imovel_descricao)", async () => {
+    // "Apartamento de 3 dormitórios." é a descrição do dataJson; `imovel_descricao`
+    // é `unique` no catálogo: repetido → ambíguo, e o texto fica intacto.
+    useDoc("Apartamento de 3 dormitórios. Vistoria: Apartamento de 3 dormitórios. Fim.");
+    const result = await run();
+    expect(result.skipped).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ token: "imovel_descricao", reason: "ambiguous", occurrences: 2 }),
+      ])
+    );
+    expect(state).not.toContain("{{imovel_descricao}}");
+  });
+
+  it("token `all` com valor repetido mas GENÉRICO → not-specific (não corrompe o texto fixo)", async () => {
+    const data = { ...dataJson, imovel: { ...dataJson.imovel, matricula: "Bloco A" } };
+    useDoc("Matrícula: Bloco A. O Bloco A tem elevador. Fim.");
+    const result = await reverseMergeDocToTemplate({ docId: "d", dataJson: data, modalidade: "locacao" });
+    expect(result.skipped).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ token: "imovel_matricula", reason: "not-specific", occurrences: 2 }),
+      ])
+    );
+    expect(state).not.toContain("{{imovel_matricula}}");
+    // Controle: o mesmo token com valor específico e repetido entra em todas.
+    // (≥ 40 chars: específico por comprimento)
+    const MAT = "152.834 do 5º Registro de Imóveis de São Paulo/SP";
+    const data2 = { ...dataJson, imovel: { ...dataJson.imovel, matricula: MAT } };
+    useDoc(`Matrícula ${MAT}. Averbada na ${MAT}.`);
+    const r2 = await reverseMergeDocToTemplate({ docId: "d", dataJson: data2, modalidade: "locacao" });
+    expect(r2.replaced.find((x) => x.token === "imovel_matricula")?.occurrences).toBe(2);
+  });
+
+  it("NBSP ≡ espaço: Doc digitado com espaço comum casa o valor com NBSP, e o request vai com o texto do Doc", async () => {
+    useDoc("O aluguel é de R$ 3.500,00 mensais."); // espaço comum
+    const result = await run();
+    expect(result.replaced.map((x) => x.token)).toContain("aluguel_valor");
+    const req = (mockBatchUpdate.mock.calls[0][0].requestBody.requests as ReplaceReq[]).find(
+      (r) => r.replaceAllText.replaceText === "{{aluguel_valor}}"
+    )!;
+    expect(req.replaceAllText.containsText.text).toBe("R$ 3.500,00"); // literal do Doc, não o NBSP do mapa
+    expect(state).toContain("{{aluguel_valor}}");
+  });
+
+  it("formas mistas (NBSP e espaço) no mesmo Doc: uma request por forma, tudo confirmado", async () => {
+    useDoc("Preço: R$ 3.500,00. Reajuste sobre R$ 3.500,00.");
+    const result = await run();
+    expect(result.replaced.find((x) => x.token === "aluguel_valor")?.occurrences).toBe(2);
+    const forms = (mockBatchUpdate.mock.calls[0][0].requestBody.requests as ReplaceReq[])
+      .filter((r) => r.replaceAllText.replaceText === "{{aluguel_valor}}")
+      .map((r) => r.replaceAllText.containsText.text);
+    expect(forms).toHaveLength(2);
+    expect(state).not.toContain("3.500,00");
+  });
+
+  it("over-matched compara com as ocorrências ESPERADAS: 3 esperadas e 3 trocadas não é over-matched", async () => {
+    useDoc("R$ 3.500,00 a. R$ 3.500,00 b. R$ 3.500,00 c.");
+    const result = await run();
+    expect(result.skipped.find((s) => s.reason === "over-matched")).toBeUndefined();
+    expect(result.replaced.find((x) => x.token === "aluguel_valor")?.occurrences).toBe(3);
   });
 });
 
