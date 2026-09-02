@@ -129,6 +129,27 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
     modalidades: LOCACAO,
   },
   {
+    token: "imobiliaria_qualificacao",
+    label: "Qualificação da imobiliária intermediadora",
+    description:
+      "Razão social, CNPJ, CRECI e sede da PRÓPRIA imobiliária como intermediadora da locação (quem recebe a comissão do 1º aluguel) — vem do perfil da imobiliária, não do formulário. Use no trecho que nomeia a imobiliária na cláusula de corretagem, mesmo quando ela não administra o imóvel. Vazio quando o perfil não tem razão social.",
+    example:
+      "Imobiliária Exemplo Ltda., inscrita no CNPJ sob nº 12.345.678/0001-90, CRECI nº 12345-J, com sede na Rua das Flores, nº 100, Centro, São Paulo/SP",
+    required: false,
+    kind: "composed",
+    modalidades: LOCACAO,
+  },
+  {
+    token: "imobiliaria_dados_pagamento",
+    label: "Dados de recebimento da imobiliária",
+    description:
+      "Chave PIX ou banco/agência/conta onde a PRÓPRIA imobiliária recebe a comissão de intermediação (1º aluguel), configurada em Padrão contratual · Locação. Use no lugar da conta/agência/PIX da imobiliária digitada no modelo — conta literal no texto bloqueia a ativação. Vazio quando a imobiliária não informou.",
+    example: "na chave PIX (CNPJ): 12.345.678/0001-90, de titularidade de Imobiliária Exemplo Ltda.",
+    required: false,
+    kind: "composed",
+    modalidades: LOCACAO,
+  },
+  {
     token: "assinaturas",
     label: "Bloco de assinaturas",
     description:

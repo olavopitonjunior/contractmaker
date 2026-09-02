@@ -195,11 +195,53 @@ export const DEFAULT_LOCACAO_COMISSAO: LocacaoComissaoDefaults = {
   taxa_locacao_valor: 0,
 };
 
+/**
+ * Onde a PRÓPRIA imobiliária recebe a comissão de intermediação (1º aluguel)
+ * — a via que a cláusula de corretagem do contrato de locação imprime pela
+ * chave `{{imobiliaria_dados_pagamento}}`.
+ *
+ * Terceira chave irmã (ao lado de `locacao_comissao`), pelo mesmo motivo: é
+ * dado comercial da org, não cláusula por contrato. Mesmos nomes de campo do
+ * `recebimento` dos comissionados (`lib/forms/commissioner-receiving.ts`), para
+ * o texto sair pelo MESMO renderizador do corretor (`viaDeRepasse`) — uma via
+ * de repasse só, seja de quem for. Tudo string e opcional: "" = não informado.
+ * Nasceu na reingestão da RE/MAX Trio (02/09/2026): 12 dos 16 modelos ficaram
+ * barrados pelo gate de PII exclusivamente pela conta da imobiliária, literal
+ * no item a) da cláusula 4.2 — não havia chave para ela.
+ */
+export const locacaoRecebimentoSchema = z
+  .object({
+    pix_chave: z.string().max(200),
+    pix_tipo_chave: z.enum(["CPF", "CNPJ", "EMAIL", "PHONE", "EVP"]).or(z.literal("")),
+    banco: z.string().max(80),
+    agencia: z.string().max(20),
+    conta: z.string().max(30),
+    tipo_conta: z.enum(["corrente", "poupanca"]).or(z.literal("")),
+    titular_nome: z.string().max(200),
+    titular_doc: z.string().max(18),
+  })
+  .strict();
+
+export type LocacaoRecebimento = z.infer<typeof locacaoRecebimentoSchema>;
+
+/** Tudo vazio = "a imobiliária não informou" → a chave sai "" no contrato. */
+export const DEFAULT_LOCACAO_RECEBIMENTO: LocacaoRecebimento = {
+  pix_chave: "",
+  pix_tipo_chave: "",
+  banco: "",
+  agencia: "",
+  conta: "",
+  tipo_conta: "",
+  titular_nome: "",
+  titular_doc: "",
+};
+
 /** Shape de `OrgFormSettings.contractDefaultsJson`. */
 export const orgContractDefaultsSchema = z.object({
   venda: contractSettingsSchema.deepPartial().optional(),
   locacao: locacaoSettingsSchema.deepPartial().optional(),
   locacao_comissao: locacaoComissaoDefaultsSchema.deepPartial().optional(),
+  locacao_recebimento: locacaoRecebimentoSchema.deepPartial().optional(),
 });
 
 export type OrgContractDefaults = z.infer<typeof orgContractDefaultsSchema>;
@@ -348,6 +390,29 @@ export function resolveOrgLocacaoComissao(
     forma: c.forma === "valor_fixo" ? "valor_fixo" : d.forma,
     taxa_locacao_percent: num(c.taxa_locacao_percent, d.taxa_locacao_percent),
     taxa_locacao_valor: num(c.taxa_locacao_valor, d.taxa_locacao_valor),
+  };
+}
+
+/**
+ * Recebimento da própria imobiliária. Enum fora do domínio cai em "" (não
+ * informado) — nunca inventa uma via de pagamento a partir de JSON estranho.
+ */
+export function resolveOrgLocacaoRecebimento(
+  contractDefaultsJson: unknown
+): LocacaoRecebimento {
+  const r = obj(obj(contractDefaultsJson).locacao_recebimento);
+  const d = DEFAULT_LOCACAO_RECEBIMENTO;
+  const pixTipo = text(r.pix_tipo_chave, "");
+  const tipoConta = text(r.tipo_conta, "");
+  return {
+    pix_chave: text(r.pix_chave, d.pix_chave),
+    pix_tipo_chave: (["CPF", "CNPJ", "EMAIL", "PHONE", "EVP"] as const).find((t) => t === pixTipo) ?? "",
+    banco: text(r.banco, d.banco),
+    agencia: text(r.agencia, d.agencia),
+    conta: text(r.conta, d.conta),
+    tipo_conta: tipoConta === "corrente" || tipoConta === "poupanca" ? tipoConta : "",
+    titular_nome: text(r.titular_nome, d.titular_nome),
+    titular_doc: text(r.titular_doc, d.titular_doc),
   };
 }
 

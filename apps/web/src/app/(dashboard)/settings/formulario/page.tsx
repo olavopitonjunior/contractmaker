@@ -7,6 +7,7 @@ import { ArrowLeft } from "lucide-react";
 import {
   resolveOrgContractDefaults,
   resolveOrgLocacaoComissao,
+  resolveOrgLocacaoRecebimento,
 } from "@/lib/contracts/default-config";
 import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
 import { MODULE } from "@/lib/modules/catalog";
@@ -47,6 +48,7 @@ export default async function FormularioSettingsPage() {
   );
   const defaults = resolveOrgContractDefaults(settings.contractDefaultsJson);
   const comissaoLocacao = resolveOrgLocacaoComissao(settings.contractDefaultsJson);
+  const recebimentoLocacao = resolveOrgLocacaoRecebimento(settings.contractDefaultsJson);
 
   // Categorias de terceiro (links por parte com campos customizáveis).
   const participantCategories = await listOrgParticipantCategories(org.id);
@@ -121,6 +123,7 @@ export default async function FormularioSettingsPage() {
           initial={defaults.venda}
           initialLocacao={defaults.locacao}
           initialComissaoLocacao={comissaoLocacao}
+          initialRecebimentoLocacao={recebimentoLocacao}
           locacaoEnabled={locacaoEnabled}
         />
       </EsteiraTabs>
