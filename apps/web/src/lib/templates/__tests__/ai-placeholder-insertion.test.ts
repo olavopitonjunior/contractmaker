@@ -206,8 +206,8 @@ describe("insertPlaceholdersWithAI — inserted só depois de conferir", () => {
     mockMessagesCreate.mockResolvedValue(MAP);
     const report = await run();
     expect(report.inserted.map((i) => i.token)).toEqual(["aluguel_valor", "aluguel_dia_vencimento"]);
-    expect(report.notMapped).not.toContain("aluguel_valor");
-    expect(report.notMapped).not.toContain("aluguel_dia_vencimento");
+    expect(report.notMapped.map((n) => n.token)).not.toContain("aluguel_valor");
+    expect(report.notMapped.map((n) => n.token)).not.toContain("aluguel_dia_vencimento");
     expect(mockGetDocPlainText).toHaveBeenCalledTimes(2);
   });
 
@@ -236,7 +236,7 @@ describe("insertPlaceholdersWithAI — inserted só depois de conferir", () => {
       expect.objectContaining({ token: "aluguel_dia_vencimento", reason: "replace-noop" }),
     ]);
     // O relatório aponta o que falta de verdade.
-    expect(report.notMapped).toContain("aluguel_dia_vencimento");
+    expect(report.notMapped.map((n) => n.token)).toContain("aluguel_dia_vencimento");
   });
 
   it("over-matched: a API casou mais de uma vez (cabeçalho/rodapé) — não é inserido", async () => {
@@ -257,7 +257,7 @@ describe("insertPlaceholdersWithAI — inserted só depois de conferir", () => {
     // O token ESTÁ no Doc (a API pôs), mas não onde alguém revisou: não some
     // dos dois lados do relatório — conta como faltante até ser confirmado.
     expect(state).toContain("{{aluguel_valor}}");
-    expect(report.notMapped).toContain("aluguel_valor");
+    expect(report.notMapped.map((n) => n.token)).toContain("aluguel_valor");
     expect(report.missingRequired).toContain("aluguel_valor");
   });
 
@@ -289,7 +289,83 @@ describe("insertPlaceholdersWithAI — inserted só depois de conferir", () => {
     // O Doc mudou de verdade (token entrou, parágrafos saíram) e o relatório
     // NÃO finge que está tudo bem: o token segue como não mapeado.
     expect(state).toContain("{{clausula_garantia}}");
-    expect(report.notMapped).toContain("clausula_garantia");
+    expect(report.notMapped.map((n) => n.token)).toContain("clausula_garantia");
+  });
+
+  it("notMapped traz o MOTIVO por token: o do passe quando a IA tentou, no-mapping quando não", async () => {
+    useDoc(DOC);
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([
+        { trecho_literal: "R$ 2.500,00", token: "aluguel_valor" },
+        { trecho_literal: "texto que não existe", token: "aluguel_dia_vencimento" },
+      ])
+    );
+    const report = await run();
+    const by = Object.fromEntries(report.notMapped.map((n) => [n.token, n]));
+    expect(by.aluguel_valor).toBeUndefined(); // confirmado
+    expect(by.aluguel_dia_vencimento).toEqual({
+      token: "aluguel_dia_vencimento",
+      reason: "not-found",
+      trecho: "texto que não existe",
+    });
+    expect(by.imovel_identificacao).toEqual({ token: "imovel_identificacao", reason: "no-mapping" });
+  });
+
+  it("PII do contrato-fonte NÃO entra no relatório: trecho e parágrafo saem mascarados", async () => {
+    // CPF canônico de teste + agência/conta sintéticas — o relatório vai para
+    // o jsonb e para a tela; o dado real fica só no Doc.
+    useDoc(
+      "Ana, CPF 529.982.247-25, conta na Agência 1234 Conta 68233198-6.\nAna, CPF 529.982.247-25, de novo."
+    );
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([{ trecho_literal: "Ana, CPF 529.982.247-25", token: "locadores_qualificacao" }])
+    );
+    const report = await run();
+    expect(report.skippedAmbiguous[0].reason).toBe("ambiguous");
+    expect(report.skippedAmbiguous[0].trecho).not.toContain("529.982.247-25");
+    expect(report.skippedAmbiguous[0].trecho).toContain("000.000.000-00");
+    const nm = report.notMapped.find((n) => n.token === "locadores_qualificacao")!;
+    expect(nm.reason).toBe("ambiguous");
+    expect(nm.trecho).not.toContain("529.982.247-25");
+    // Controle: o mesmo texto sem máscara conteria o CPF.
+    expect(JSON.stringify(report)).not.toContain("529.982.247-25");
+  });
+
+  it("PII também sai mascarada de `inserted` — depois do replace, o trecho só existe no relatório", async () => {
+    useDoc("LOCADORA: Ana Ribeiro, CPF 529.982.247-25, Agência 1234 Conta 68233198-6.\nCLÁUSULA 1.");
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([
+        {
+          trecho_literal: "Ana Ribeiro, CPF 529.982.247-25, Agência 1234 Conta 68233198-6.",
+          token: "locadores_qualificacao",
+        },
+      ])
+    );
+    const report = await run();
+    expect(report.inserted.map((i) => i.token)).toEqual(["locadores_qualificacao"]);
+    expect(state).toContain("{{locadores_qualificacao}}");
+    expect(state).not.toContain("529.982.247-25"); // o Doc já não tem
+    expect(report.inserted[0].trecho).toContain("000.000.000-00");
+    // Asserção de AUSÊNCIA: nenhum CPF sobrevive em lugar nenhum do relatório
+    // (o placeholder da máscara tem a mesma forma — sai antes da busca).
+    expect(JSON.stringify(report).replace(/000\.000\.000-00/g, "")).not.toMatch(
+      /\d{3}\.\d{3}\.\d{3}-\d{2}/
+    );
+    expect(JSON.stringify(report)).not.toContain("529.982.247-25");
+    expect(JSON.stringify(report)).not.toContain("68233198-6");
+  });
+
+  it("readNotMapped aceita o formato antigo (string[]) e o novo, e descarta lixo", async () => {
+    const { readNotMapped } = await import("../ai-placeholder-insertion");
+    expect(readNotMapped(["a", "b"])).toEqual([
+      { token: "a", reason: "no-mapping" },
+      { token: "b", reason: "no-mapping" },
+    ]);
+    expect(readNotMapped([{ token: "a", reason: "ambiguous", trecho: "x" }, { nope: 1 }, 7, null])).toEqual([
+      { token: "a", reason: "ambiguous", trecho: "x" },
+    ]);
+    expect(readNotMapped(undefined)).toEqual([]);
+    expect(readNotMapped("x")).toEqual([]);
   });
 
   it("reply ausente num parágrafo do bloco: a releitura decide se virou leftover", async () => {
@@ -330,7 +406,7 @@ describe("insertPlaceholdersWithAI — inserted só depois de conferir", () => {
     const report = await run();
     expect(report.inserted).toEqual([]);
     expect(report.skippedAmbiguous.map((s) => s.reason)).toEqual(["verify-failed", "verify-failed"]);
-    expect(report.notMapped).toContain("aluguel_valor");
+    expect(report.notMapped.map((n) => n.token)).toContain("aluguel_valor");
   });
 
   it("verify-unavailable: releitura falhou — 'não sei' não vira 'deu certo'", async () => {
@@ -347,7 +423,7 @@ describe("insertPlaceholdersWithAI — inserted só depois de conferir", () => {
       "verify-unavailable",
     ]);
     // Pessimista: sem releitura, notMapped é o pré-passe.
-    expect(report.notMapped).toContain("aluguel_valor");
+    expect(report.notMapped.map((n) => n.token)).toContain("aluguel_valor");
   });
 
   it("batch-failed: o Google recusou o lote — nada inserido, nenhuma releitura", async () => {

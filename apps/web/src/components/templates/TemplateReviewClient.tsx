@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { describePiiKinds, type TemplatePiiReport } from "@/lib/templates/pii-gate";
+import { maskForReport, readNotMapped } from "@/lib/templates/insertion-report";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -57,7 +58,8 @@ interface SlotReport {
 interface DraftReport {
   inserted?: { token: string; trecho: string }[];
   skippedAmbiguous?: { token: string; trecho: string; reason: string; paragraph?: string }[];
-  notMapped?: string[];
+  /** `string[]` em relatórios antigos; `{token, reason, trecho?}` desde 2026-09-02. */
+  notMapped?: unknown[];
   missingRequired?: string[];
   slots?: SlotReport[];
   ranAt?: string;
@@ -308,6 +310,8 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
   }
 
   const catalog = validation?.catalog ?? [];
+  // Por que cada chave ausente está ausente — vem do último passe da IA.
+  const notMappedByToken = new Map(readNotMapped(report?.notMapped).map((n) => [n.token, n]));
   const total = catalog.length;
   const done = catalog.filter((c) => c.present).length;
   const missing = catalog.filter((c) => !c.present);
@@ -639,11 +643,18 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                   <div key={i} className="rounded-md border bg-muted/30 p-2">
                     <code className="rounded bg-muted px-1">{`{{${s.token}}}`}</code>{" "}
                     <span className="text-muted-foreground">— {SKIP_REASON[s.reason] ?? s.reason}.</span>
+                    {/* Máscara também no render: relatório gravado antes de
+                        2026-09-02 tem o trecho cru, e é a única defesa se um
+                        relatório futuro escapar da máscara na gravação. */}
                     {s.paragraph && (
-                      <p className="mt-1 text-destructive">Parágrafo apagado: “{s.paragraph}”</p>
+                      <p className="mt-1 text-destructive">
+                        Parágrafo apagado: “{maskForReport(s.paragraph)}”
+                      </p>
                     )}
                     {s.trecho && (
-                      <p className="mt-1 line-clamp-2 italic text-muted-foreground">“{s.trecho}”</p>
+                      <p className="mt-1 line-clamp-2 italic text-muted-foreground">
+                        “{maskForReport(s.trecho)}”
+                      </p>
                     )}
                   </div>
                 ))}
@@ -672,6 +683,16 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                         <span className="ml-1 text-muted-foreground">(bloco)</span>
                       )}
                       <p className="text-muted-foreground">{c.label}</p>
+                      {!c.present && notMappedByToken.get(c.token)?.reason &&
+                        notMappedByToken.get(c.token)!.reason !== "no-mapping" && (
+                          <p className="text-warning">
+                            {SKIP_REASON[notMappedByToken.get(c.token)!.reason] ??
+                              notMappedByToken.get(c.token)!.reason}
+                            {notMappedByToken.get(c.token)!.trecho && (
+                              <> — “{maskForReport(notMappedByToken.get(c.token)!.trecho!)}”</>
+                            )}
+                          </p>
+                        )}
                     </div>
                   </li>
                 ))}

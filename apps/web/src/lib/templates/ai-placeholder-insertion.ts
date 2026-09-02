@@ -3,6 +3,24 @@ import { batchUpdateDoc, getDocPlainText } from "@/lib/google/docs";
 import { extractPlaceholdersFromText } from "@/lib/google/replace-placeholders";
 import { getAnthropicClient, SONNET_MODEL } from "@/lib/ai/shared/anthropic-client";
 import { recordAIUsage } from "@/lib/ai/usage";
+import {
+  maskForReport,
+  type InsertedToken,
+  type InsertionReport,
+  type SkipReason,
+  type SkippedToken,
+  type UnmappedToken,
+} from "./insertion-report";
+
+export {
+  maskForReport,
+  readNotMapped,
+  type InsertedToken,
+  type InsertionReport,
+  type SkipReason,
+  type SkippedToken,
+  type UnmappedToken,
+} from "./insertion-report";
 import { catalogForModalidade, requiredTokens, isKnownToken } from "./placeholder-catalog";
 
 // ============================================================================
@@ -26,45 +44,6 @@ import { catalogForModalidade, requiredTokens, isKnownToken } from "./placeholde
 // traduz. "Não sei" (Drive fora na releitura) nunca vira "deu certo".
 // ============================================================================
 
-export interface InsertedToken {
-  token: string;
-  trecho: string;
-  /** Em blocos multi-parágrafo: parágrafos do trecho que NÃO puderam ser
-   *  removidos com segurança (ambíguos no doc) e ficaram pra revisão manual. */
-  leftoverParagraphs?: string[];
-}
-
-export type SkipReason =
-  // Antes do batch — decididos no texto plano.
-  | "ambiguous"
-  | "not-found"
-  | "unknown-token"
-  | "already-tokenized"
-  // Depois do batch — decididos pela resposta da API e pela releitura.
-  /** O Google recusou o lote inteiro (nada mudou no Doc). */
-  | "batch-failed"
-  /** A API casou 0 ocorrências: o texto plano mentiu (formatação partindo o trecho). */
-  | "replace-noop"
-  /** A API casou MAIS de uma vez: o token entrou em lugar que ninguém examinou (cabeçalho/rodapé). */
-  | "over-matched"
-  /**
-   * Um parágrafo do bloco foi APAGADO em mais de um lugar. É o caso destrutivo:
-   * o Doc perdeu conteúdo fora do trecho revisado. `paragraph` diz qual.
-   */
-  | "over-removed"
-  /** A API disse que trocou, mas a releitura não mostra o token (ou ainda mostra o trecho). */
-  | "verify-failed"
-  /** Não deu para reler o Doc — e "não sei" não é "deu certo". */
-  | "verify-unavailable";
-
-export interface SkippedToken {
-  token: string;
-  trecho: string;
-  reason: SkipReason;
-  /** Em `over-removed`: o parágrafo do bloco que foi apagado além do esperado. */
-  paragraph?: string;
-}
-
 /**
  * Trecho que já contém placeholder é intocável. Este pass roda DEPOIS de
  * `applyClauseSlotToDoc`, então o `{{slot_garantia}}` já está no documento — e
@@ -77,17 +56,6 @@ export interface SkippedToken {
  * tokenizado nunca é o trabalho deste pass.
  */
 const HAS_PLACEHOLDER = /\{\{[^{}]+\}\}/;
-
-export interface InsertionReport {
-  /** Tokens CONFIRMADOS no documento após o batch (não "enviados"). */
-  inserted: InsertedToken[];
-  skippedAmbiguous: SkippedToken[];
-  /** Tokens do catálogo que a IA não conseguiu localizar no doc. */
-  notMapped: string[];
-  /** Tokens obrigatórios ainda ausentes no doc após o pass. */
-  missingRequired: string[];
-  ranAt: string;
-}
 
 function countOccurrences(haystack: string, needle: string): number {
   if (!needle) return 0;
@@ -287,6 +255,8 @@ export async function insertPlaceholdersWithAI(input: {
       reason,
       ...(paragraph ? { paragraph } : {}),
     });
+  // As travas do texto plano (acima) empurram direto em skippedAmbiguous com
+  // o trecho cru; a máscara é aplicada UMA vez, na montagem do relatório.
   // Tokens que a API pôs no Doc mas em lugar/quantidade que ninguém revisou.
   // Estão no texto e NÃO contam como presentes: "não confirmado" é "faltando".
   const unconfirmed = new Set<string>();
@@ -385,12 +355,41 @@ export async function insertPlaceholdersWithAI(input: {
     extractPlaceholdersFromText(finalText).filter((t) => !unconfirmed.has(t))
   );
   const catalogTokens = catalogForModalidade(input.modalidade).map((d) => d.token);
-  const notMapped = catalogTokens.filter((t) => !present.has(t));
   const missingRequired = requiredTokens(input.modalidade).filter((t) => !present.has(t));
 
+  // Máscara antes de gravar. `trecho` e `paragraph` vêm do contrato-fonte —
+  // e o `trecho` de `inserted` é o pior caso: depois do replace ele só existe
+  // AQUI, porque o Doc já mostra {{token}}.
+  const insertedMasked: InsertedToken[] = inserted.map((i) => ({
+    ...i,
+    trecho: maskForReport(i.trecho),
+    ...(i.leftoverParagraphs
+      ? { leftoverParagraphs: i.leftoverParagraphs.map(maskForReport) }
+      : {}),
+  }));
+  const skippedMasked: SkippedToken[] = skippedAmbiguous.map((s) => ({
+    ...s,
+    trecho: maskForReport(s.trecho),
+    ...(s.paragraph ? { paragraph: maskForReport(s.paragraph) } : {}),
+  }));
+
+  // Motivo por token ausente: o ÚLTIMO skip daquele token. A IA pode propor o
+  // mesmo token mais de uma vez (só candidatos entram em `seenTokens`; skip
+  // pré-batch não), e "último" ganha de "mais acionável" de propósito: os
+  // pós-batch vêm depois dos pré-batch, então o último é o que corresponde ao
+  // estado real do Doc — e todos os skips continuam em `skippedAmbiguous`.
+  const lastSkip = new Map<string, SkippedToken>();
+  for (const s of skippedMasked) lastSkip.set(s.token, s);
+  const notMapped: UnmappedToken[] = catalogTokens
+    .filter((t) => !present.has(t))
+    .map((token) => {
+      const s = lastSkip.get(token);
+      return s ? { token, reason: s.reason, trecho: s.trecho } : { token, reason: "no-mapping" };
+    });
+
   return {
-    inserted,
-    skippedAmbiguous,
+    inserted: insertedMasked,
+    skippedAmbiguous: skippedMasked,
     notMapped,
     missingRequired,
     ranAt: new Date().toISOString(),

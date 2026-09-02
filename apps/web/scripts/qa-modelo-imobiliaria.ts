@@ -81,7 +81,11 @@ async function main() {
   console.log(`[qa] pulados (${report.skippedAmbiguous.length}):`);
   for (const s of report.skippedAmbiguous)
     console.log(`   ↷ ${s.token} (${s.reason}) "${s.trecho.slice(0, 60)}"`);
-  console.log(`[qa] não mapeados: ${report.notMapped.join(", ") || "(nenhum)"}`);
+  console.log(
+  `[qa] não mapeados: ${
+    report.notMapped.map((n) => `${n.token} (${n.reason})`).join(", ") || "(nenhum)"
+  }`
+);
   console.log(`[qa] obrigatórios ausentes: ${report.missingRequired.join(", ") || "(nenhum)"}`);
 
   if (activate) {
