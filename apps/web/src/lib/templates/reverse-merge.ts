@@ -7,7 +7,7 @@ import {
 import { catalogForModalidade } from "./placeholder-catalog";
 import { templateFamilyForModalidade } from "@/lib/contracts/template-category";
 import { isSpecificValue, normalizeSpaces } from "./specific-value";
-import type { SkipReason } from "./insertion-report";
+import { maskForReport, type SkipReason } from "./insertion-report";
 
 // ============================================================================
 // Reverse-merge: transforma um CONTRATO preenchido (Google Doc) em MODELO com
@@ -29,9 +29,13 @@ import type { SkipReason } from "./insertion-report";
 //     todas as ocorrências, mas só se `isSpecificValue(valor)` — o par
 //     (token, valor) decide. "10 de agosto de 2021" passa e vira token em
 //     todas as cláusulas; "casa" não passa e não deve passar.
-//   - NBSP ≡ espaço: o helper `moeda` produz `R$ `, Doc digitado traz
-//     espaço comum. A contagem normaliza os dois lados e o request vai com o
-//     texto COMO ESTÁ no Doc (o Docs casa literal) — issue #503.
+//   - NBSP ≡ espaço: o helper `moeda` produz `R$ `, Doc digitado traz
+//     espaço comum. A contagem normaliza os dois lados — issue #503. E o
+//     request vai com TODAS as formas plausíveis (a literal do texto
+//     exportado, a do mapa e a normalizada): `drive.files.export text/plain`
+//     devolve espaço comum onde o Doc tem NBSP, então "como está no texto"
+//     não é "como está no Doc" — mandar só a forma exportada casava zero no
+//     valor do aluguel (medido no smoke de staging, 02/09).
 //
 // `replaced` SÓ DEPOIS DE CONFERIR (2026-09-02, mesmo desenho do passe de IA):
 // cada request tem índice rastreado, `occurrencesChanged` faz a 1ª triagem,
@@ -107,18 +111,38 @@ function countOccurrences(haystack: string, needle: string): number {
 }
 
 /**
- * Formas LITERAIS com que `value` aparece no Doc (NBSP × espaço podem variar
- * de ocorrência para ocorrência). `normalizeSpaces` é 1:1 em comprimento, então
- * o índice no texto normalizado vale no original.
+ * Formas com que `value` pode estar no DOC: as literais do texto exportado
+ * (NBSP × espaço podem variar de ocorrência para ocorrência; `normalizeSpaces`
+ * é 1:1 em comprimento, então o índice no texto normalizado vale no
+ * original), mais o valor do mapa como veio e a forma normalizada. O export
+ * text/plain do Drive troca NBSP por espaço, então o texto que lemos pode não
+ * ter a forma que o Doc tem — cada forma vira um `replaceAllText`, e as
+ * replies somam. Forma que não casa custa uma reply zerada, nada mais.
  */
-function literalForms(doc: string, normDoc: string, normValue: string): string[] {
+function candidateForms(doc: string, normDoc: string, value: string, normValue: string): string[] {
   const forms = new Set<string>();
   let idx = normDoc.indexOf(normValue);
   while (idx !== -1) {
     forms.add(doc.slice(idx, idx + normValue.length));
     idx = normDoc.indexOf(normValue, idx + 1);
   }
+  forms.add(value);
+  forms.add(normValue);
+  // Gabarito com espaço comum × Doc com NBSP: o export normaliza, então nenhuma
+  // das formas acima teria o NBSP. A variante toda-NBSP fecha o caso de forma
+  // genérica (moeda é o produtor conhecido, mas autocorreção do Word também
+  // planta NBSP em texto digitado). Escape explícito: NBSP literal no fonte
+  // vira espaço comum ao passar por editor.
+  forms.add(normValue.replace(/ /g, "\u00A0"));
   return Array.from(forms);
+}
+
+/** O que vai para o jsonb/HTTP: valores do gabarito passam pela máscara de PII. */
+export function maskReverseMergeReport(r: ReverseMergeResult): ReverseMergeResult {
+  return {
+    replaced: r.replaced.map((x) => ({ ...x, value: maskForReport(x.value) })),
+    skipped: r.skipped.map((x) => ({ ...x, value: maskForReport(x.value) })),
+  };
 }
 
 export async function reverseMergeDocToTemplate(input: {
@@ -196,8 +220,8 @@ export async function reverseMergeDocToTemplate(input: {
         continue;
       }
     }
-    // Uma request por forma literal presente no Doc (NBSP × espaço).
-    const forms = literalForms(sim, normSim, normValue);
+    // Uma request por forma plausível (exportada, do mapa, normalizada).
+    const forms = candidateForms(sim, normSim, value, normValue);
     const idx: number[] = [];
     for (const form of forms) {
       idx.push(requests.length);

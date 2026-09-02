@@ -40,6 +40,7 @@ import {
   type UnmappedToken,
 } from "@/lib/templates/insertion-report";
 import {
+  maskReverseMergeReport,
   reverseMergeDocToTemplate,
   type ReverseMergeResult,
 } from "@/lib/templates/reverse-merge";
@@ -463,7 +464,7 @@ export async function ingestTemplateFromDocx(
             ...((report ?? {}) as object),
             ...(finalSlotReports.length ? { slots: finalSlotReports } : {}),
             ...(neutralization ? { neutralization } : {}),
-            ...(reverseMerge ? { reverseMerge: maskReverseMerge(reverseMerge) } : {}),
+            ...(reverseMerge ? { reverseMerge: maskReverseMergeReport(reverseMerge) } : {}),
             ...(pii ? { pii } : {}),
           } as object,
         },
@@ -512,14 +513,6 @@ export function gabaritoFromSourceValues(
     if (rawKeys.has(k)) config[k] = v;
   }
   return { ...enriched, config };
-}
-
-/** O gabarito é PII do contrato-fonte: o que vai para o jsonb sai mascarado. */
-function maskReverseMerge(r: ReverseMergeResult): ReverseMergeResult {
-  return {
-    replaced: r.replaced.map((x) => ({ ...x, value: maskForReport(x.value) })),
-    skipped: r.skipped.map((x) => ({ ...x, value: maskForReport(x.value) })),
-  };
 }
 
 /**

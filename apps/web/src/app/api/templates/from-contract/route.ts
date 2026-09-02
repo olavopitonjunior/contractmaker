@@ -4,7 +4,10 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { isGoogleDocsFeatureEnabled } from "@/lib/google/client";
 import { copyContractGoogleDoc } from "@/lib/google/copy-doc";
-import { reverseMergeDocToTemplate } from "@/lib/templates/reverse-merge";
+import {
+  maskReverseMergeReport,
+  reverseMergeDocToTemplate,
+} from "@/lib/templates/reverse-merge";
 import { insertPlaceholdersWithAI } from "@/lib/templates/ai-placeholder-insertion";
 import {
   UPLOAD_MODALIDADES,
@@ -142,11 +145,15 @@ export async function POST(req: NextRequest) {
     console.error("[templates/from-contract] pass de IA falhou:", err);
   }
 
+  // O gabarito aqui é o dataJson de um contrato REAL: valores crus (CPF,
+  // conta) não podem ir para o jsonb nem para a resposta. A ingestão por
+  // upload já mascarava; esta rota não — medido no smoke de staging (02/09).
+  const reverseMasked = reverse ? maskReverseMergeReport(reverse) : null;
   await prisma.contractTemplate.update({
     where: { id: template.id },
     data: {
       draftReport: {
-        reverseMerge: reverse as object | null,
+        reverseMerge: reverseMasked as object | null,
         ...(aiReport ? (aiReport as object) : {}),
       },
     },
@@ -156,7 +163,7 @@ export async function POST(req: NextRequest) {
     templateId: template.id,
     docId: copy.docId,
     embedLink: copy.embedLink,
-    reverseMerge: reverse,
+    reverseMerge: reverseMasked,
     report: aiReport,
   });
 }
