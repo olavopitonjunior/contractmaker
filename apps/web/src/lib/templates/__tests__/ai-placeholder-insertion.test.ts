@@ -437,6 +437,119 @@ describe("insertPlaceholdersWithAI — inserted só depois de conferir", () => {
     expect(mockMessagesCreate.mock.calls[0][0].max_tokens).toBe(8192);
   });
 
+  it("um token SIMPLES em N trechos: todos entram; token COMPOSTO só uma vez (controle)", async () => {
+    useDoc(
+      "1. O aluguel é de R$ 2.500,00 mensais.\n2. A multa é de 10% sobre R$ 2.500,00 mensais devidos.\n" +
+        "8.1. Garantia A.\n9.1. Garantia B."
+    );
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([
+        { trecho_literal: "de R$ 2.500,00 mensais.", token: "aluguel_valor" },
+        { trecho_literal: "sobre R$ 2.500,00 mensais devidos", token: "aluguel_valor" },
+        { trecho_literal: "8.1. Garantia A.", token: "clausula_garantia" },
+        { trecho_literal: "9.1. Garantia B.", token: "clausula_garantia" },
+      ])
+    );
+    const report = await run();
+    expect(report.inserted.map((i) => i.token)).toEqual([
+      "aluguel_valor",
+      "aluguel_valor",
+      "clausula_garantia",
+    ]);
+    expect(state.split("{{aluguel_valor}}")).toHaveLength(3); // duas ocorrências
+    expect(state.split("{{clausula_garantia}}")).toHaveLength(2); // uma só
+    expect(state).toContain("9.1. Garantia B."); // o 2º bloco composto ficou intacto
+    expect(report.notMapped.map((n) => n.token)).not.toContain("aluguel_valor");
+  });
+
+  it("trecho sobreposto a um já aceito sai como `overlapped`, não vira request e não corrompe o Doc", async () => {
+    useDoc("O aluguel mensal é de R$ 2.500,00. Vencimento todo dia 10 (dez).");
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([
+        { trecho_literal: "R$ 2.500,00. Vencimento todo dia 10 (dez)", token: "aluguel_valor" },
+        // Contido no anterior: no texto simulado já virou {{aluguel_valor}}.
+        { trecho_literal: "10 (dez)", token: "aluguel_dia_vencimento" },
+      ])
+    );
+    const report = await run();
+    expect(report.inserted.map((i) => i.token)).toEqual(["aluguel_valor"]);
+    expect(report.skippedAmbiguous).toEqual([
+      expect.objectContaining({ token: "aluguel_dia_vencimento", reason: "overlapped" }),
+    ]);
+    expect(mockBatchUpdate.mock.calls[0][0].requestBody.requests).toHaveLength(1);
+    expect(state).toBe("O aluguel mensal é de {{aluguel_valor}}.");
+  });
+
+  it("longest-first: a ordem da IA não decide quem vence um substring", async () => {
+    useDoc("O aluguel mensal é de R$ 2.500,00. Vencimento todo dia 10 (dez).");
+    // A IA propõe o CURTO primeiro; mesmo assim o bloco longo entra e é o
+    // curto (contido nele) que sai como overlapped.
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([
+        { trecho_literal: "10 (dez)", token: "aluguel_dia_vencimento" },
+        { trecho_literal: "R$ 2.500,00. Vencimento todo dia 10 (dez)", token: "aluguel_valor" },
+      ])
+    );
+    const report = await run();
+    expect(report.inserted.map((i) => i.token)).toEqual(["aluguel_valor"]);
+    expect(report.skippedAmbiguous).toEqual([
+      expect.objectContaining({ token: "aluguel_dia_vencimento", reason: "overlapped" }),
+    ]);
+  });
+
+  it("trecho que era ambíguo DEIXA de ser quando outra substituição consome uma ocorrência", async () => {
+    useDoc("Cláusula 1: sobre R$ 2.500,00 mensais e encargos. Cláusula 2: sobre R$ 2.500,00 mensais.");
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([
+        // 2 ocorrências no original; a 1ª é consumida pelo bloco maior abaixo.
+        { trecho_literal: "sobre R$ 2.500,00 mensais", token: "aluguel_valor" },
+        { trecho_literal: "sobre R$ 2.500,00 mensais e encargos", token: "aluguel_valor" },
+      ])
+    );
+    const report = await run();
+    expect(report.inserted).toHaveLength(2);
+    expect(report.skippedAmbiguous).toEqual([]);
+    expect(state).toBe("Cláusula 1: {{aluguel_valor}}. Cláusula 2: {{aluguel_valor}}.");
+  });
+
+  it("um token com um candidato confirmado e outro over-matched NÃO sai como faltante", async () => {
+    useDoc("Valor: R$ 2.500,00 mensais. Reajuste sobre R$ 2.500,00 ao ano.");
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([
+        { trecho_literal: "Valor: R$ 2.500,00 mensais", token: "aluguel_valor" },
+        { trecho_literal: "sobre R$ 2.500,00 ao ano", token: "aluguel_valor" },
+      ])
+    );
+    const real = mockBatchUpdate.getMockImplementation()!;
+    mockBatchUpdate.mockImplementation(async (arg) => {
+      const res = await real(arg);
+      res.data.replies[1] = { replaceAllText: { occurrencesChanged: 2 } }; // o 2º casou no rodapé
+      return res;
+    });
+    const report = await run();
+    expect(report.inserted.map((i) => i.token)).toEqual(["aluguel_valor"]);
+    expect(report.skippedAmbiguous).toEqual([
+      expect.objectContaining({ token: "aluguel_valor", reason: "over-matched" }),
+    ]);
+    // O token tem um candidato confirmado: não pode aparecer como faltante.
+    expect(report.notMapped.map((n) => n.token)).not.toContain("aluguel_valor");
+  });
+
+  it("a 2ª proposta de um token simples ainda obedece à unicidade", async () => {
+    useDoc("Valor: R$ 2.500,00. Reajuste sobre R$ 2.500,00 anual. Multa sobre R$ 2.500,00 anual.");
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([
+        { trecho_literal: "Valor: R$ 2.500,00.", token: "aluguel_valor" },
+        { trecho_literal: "R$ 2.500,00 anual", token: "aluguel_valor" }, // 2 ocorrências
+      ])
+    );
+    const report = await run();
+    expect(report.inserted).toHaveLength(1);
+    expect(report.skippedAmbiguous).toEqual([
+      expect.objectContaining({ token: "aluguel_valor", reason: "ambiguous" }),
+    ]);
+  });
+
   it("reply ausente num parágrafo do bloco: a releitura decide se virou leftover", async () => {
     useDoc("8.1. Primeira.\n8.2. Segunda.\n8.3. Terceira.");
     mockMessagesCreate.mockResolvedValue(

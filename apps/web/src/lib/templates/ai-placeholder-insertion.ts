@@ -195,12 +195,38 @@ export async function insertPlaceholdersWithAI(input: {
   const skippedAmbiguous: SkippedToken[] = [];
   const requests: docs_v1.Schema$Request[] = [];
   const candidates: Candidate[] = [];
-  const seenTokens = new Set<string>();
+  // Só token COMPOSTO fica limitado a uma inserção: bloco duplicado no
+  // contrato (duas qualificações, duas cláusulas de garantia) é regressão.
+  // Token simples aceita quantos trechos a IA propuser — o valor do aluguel
+  // aparece na cláusula do preço, na do reajuste e na da multa, e cada um
+  // desses trechos é um candidato próprio, sob a mesma regra de unicidade.
+  // Até 2026-09-02 `seenTokens` valia para todos e descartava em silêncio:
+  // o modelo saía com o literal em todas as cláusulas menos uma.
+  const composedTokens = new Set(
+    catalogForModalidade(input.modalidade)
+      .filter((d) => d.kind === "composed")
+      .map((d) => d.token)
+  );
+  const seenComposed = new Set<string>();
+  // Texto SIMULADO: acumula as substituições aceitas nesta passada, na mesma
+  // semântica global do replaceAllText. A unicidade dos candidatos seguintes
+  // é contada aqui, não no original — senão dois trechos sobrepostos passam
+  // ambos e o segundo casa zero no Docs.
+  let sim = docText;
+  const applySim = (needle: string, replacement: string) => {
+    sim = sim.split(needle).join(replacement);
+  };
 
-  for (const m of mapeamentos) {
-    const trecho = (m.trecho_literal ?? "").trim();
-    const token = (m.token ?? "").trim();
-    if (!trecho || !token) continue;
+  // Longest-first, como o reverse-merge: com o texto simulado, quem entra
+  // primeiro consome o que está contido nele. Se a ordem fosse a da IA, um
+  // trecho curto proposto antes derrubaria o bloco longo que o contém como
+  // "overlapped" — por acidente de array, não por sobreposição real.
+  const ordenados = mapeamentos
+    .map((m) => ({ trecho: (m.trecho_literal ?? "").trim(), token: (m.token ?? "").trim() }))
+    .filter((m) => m.trecho && m.token)
+    .sort((a, b) => b.trecho.length - a.trecho.length);
+
+  for (const { trecho, token } of ordenados) {
     // Trava determinística (ver HAS_PLACEHOLDER). A regra também está no
     // prompt, mas prompt é pedido — isto é garantia. Checar o trecho INTEIRO
     // cobre de quebra os parágrafos que seriam esvaziados num bloco
@@ -213,7 +239,10 @@ export async function insertPlaceholdersWithAI(input: {
       skippedAmbiguous.push({ token, trecho, reason: "unknown-token" });
       continue;
     }
-    if (seenTokens.has(token)) continue;
+    // Segunda proposta de bloco composto é descartada SEM entrar no relatório,
+    // de propósito: não é falha a corrigir, é o passe recusando duplicar um
+    // bloco — o primeiro (o maior, pela ordem acima) já está no documento.
+    if (composedTokens.has(token) && seenComposed.has(token)) continue;
 
     // replaceAllText do Docs NÃO atravessa quebras de parágrafo — trechos
     // multi-parágrafo (clausula_garantia, assinaturas) são tratados parágrafo
@@ -226,9 +255,11 @@ export async function insertPlaceholdersWithAI(input: {
       .filter((p) => p.length > 0);
     const first = paragraphs[0] ?? trecho;
 
-    const firstCount = countOccurrences(docText, first);
+    const firstCount = countOccurrences(sim, first);
     if (firstCount === 0) {
-      skippedAmbiguous.push({ token, trecho, reason: "not-found" });
+      // Existia no original? Então outra substituição desta passada o levou.
+      const reason: SkipReason = countOccurrences(docText, first) > 0 ? "overlapped" : "not-found";
+      skippedAmbiguous.push({ token, trecho, reason });
       continue;
     }
     if (firstCount > 1) {
@@ -250,8 +281,9 @@ export async function insertPlaceholdersWithAI(input: {
         replaceText: `{{${token}}}`,
       },
     });
+    applySim(first, `{{${token}}}`);
     for (const par of paragraphs.slice(1)) {
-      if (countOccurrences(docText, par) === 1) {
+      if (countOccurrences(sim, par) === 1) {
         candidate.rest.push({ idx: requests.length, par });
         requests.push({
           replaceAllText: {
@@ -259,11 +291,12 @@ export async function insertPlaceholdersWithAI(input: {
             replaceText: "",
           },
         });
+        applySim(par, "");
       } else {
         candidate.leftover.push(par);
       }
     }
-    seenTokens.add(token);
+    if (composedTokens.has(token)) seenComposed.add(token);
     candidates.push(candidate);
   }
 
@@ -371,8 +404,14 @@ export async function insertPlaceholdersWithAI(input: {
   // otimista. Token que a API pôs em lugar não revisado (over-*) está no
   // texto mas sai de `present`: ele aparece em `notMapped`/`missingRequired`
   // até alguém confirmar no Doc, em vez de sumir dos dois lados do relatório.
+  // Com N candidatos por token, `unconfirmed` (por token) só vale quando
+  // NENHUM candidato daquele token foi confirmado — senão o mesmo token
+  // apareceria em `inserted` e em `notMapped` no mesmo relatório.
+  const confirmed = new Set(inserted.map((i) => i.token));
   const present = new Set(
-    extractPlaceholdersFromText(finalText).filter((t) => !unconfirmed.has(t))
+    extractPlaceholdersFromText(finalText).filter(
+      (t) => confirmed.has(t) || !unconfirmed.has(t)
+    )
   );
   const catalogTokens = catalogForModalidade(input.modalidade).map((d) => d.token);
   const missingRequired = requiredTokens(input.modalidade).filter((t) => !present.has(t));

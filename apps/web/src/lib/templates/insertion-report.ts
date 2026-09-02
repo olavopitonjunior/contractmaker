@@ -20,6 +20,8 @@ export type SkipReason =
   | "not-found"
   | "unknown-token"
   | "already-tokenized"
+  /** Existia no original, mas outra substituição desta passada o consumiu. */
+  | "overlapped"
   // Depois do batch — decididos pela resposta da API e pela releitura.
   /** O Google recusou o lote inteiro (nada mudou no Doc). */
   | "batch-failed"

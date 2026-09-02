@@ -86,6 +86,7 @@ const SKIP_REASON: Record<string, string> = {
   "not-found": "não encontrei no texto",
   "unknown-token": "chave fora do catálogo",
   "already-tokenized": "o trecho já tem uma chave",
+  overlapped: "o trecho se sobrepõe a outro já mapeado nesta passada",
   // Pós-batch — o passe confere o que a API fez (mesmo vocabulário dos slots).
   "batch-failed": "o Google recusou a edição",
   "replace-noop":
@@ -275,7 +276,7 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
       }));
       const n = (data.report?.inserted ?? []).length;
       toast.success(
-        n > 0 ? `A IA confirmou ${n} campo(s) no documento.` : "A IA revisou o modelo."
+        n > 0 ? `A IA confirmou ${n} trecho(s) no documento.` : "A IA revisou o modelo."
       );
       await Promise.all([revalidate(), refreshDocText()]);
       setIframeKey((k) => k + 1);
@@ -633,7 +634,7 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
               </CardHeader>
               <CardContent className="space-y-2 text-xs">
                 <p className="text-muted-foreground">
-                  Confirmou <b className="text-success">{(report.inserted ?? []).length}</b> campo(s) no
+                  Confirmou <b className="text-success">{(report.inserted ?? []).length}</b> trecho(s) no
                   documento.
                   {(report.skippedAmbiguous ?? []).length > 0 && (
                     <>
