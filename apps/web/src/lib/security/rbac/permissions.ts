@@ -298,6 +298,16 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionKey[]> = {
  */
 export const MANAGER_CONFIGURABLE_PERMISSIONS: PermissionKey[] = [
   PERMISSION.DEAL_EDIT,
+  // Locação (2026-09-02): sem esta chave o gerente levava 403 em
+  // `POST /api/locacao/forms` — criar o formulário público de locação exige
+  // LEASE_CREATE — e o admin NÃO tinha o checkbox pra liberar, porque a chave
+  // não estava aqui. Assimetria com vendas, onde `POST /api/forms` não gateia
+  // por RBAC nenhum e o gerente sempre criou. As demais rotas que LEASE_CREATE
+  // destrava (deals, wizard de contrato, ficha, análise de crédito,
+  // admin-contract) aplicam o escopo do gerente POR CIMA desta permissão, então
+  // ligá-la não amplia o que ele enxerga — só o que ele pode criar/decidir nos
+  // negócios que já são dele. Nasce DESLIGADA (não está no preset `gerente`).
+  PERMISSION.LEASE_CREATE,
   PERMISSION.DEAL_MANAGER_ASSIGN,
   PERMISSION.CONTRACT_CREATE,
   PERMISSION.CONTRACT_EDIT,
@@ -372,7 +382,7 @@ export const PERMISSION_LABELS_PT: Record<PermissionKey, string> = {
   [PERMISSION.GUARANTEE_VIEW]: "Ver garantia locatícia",
   [PERMISSION.GUARANTEE_MANAGE]: "Gerenciar garantia locatícia",
   [PERMISSION.LEASE_VIEW]: "Ver contratos de locação",
-  [PERMISSION.LEASE_CREATE]: "Criar contrato de locação",
+  [PERMISSION.LEASE_CREATE]: "Criar negócio e contrato de locação",
   [PERMISSION.LEASE_EDIT]: "Editar contrato de locação",
   [PERMISSION.LEASE_TERMINATE]: "Rescindir contrato de locação",
   [PERMISSION.LEASE_RENEW]: "Renovar contrato de locação",
