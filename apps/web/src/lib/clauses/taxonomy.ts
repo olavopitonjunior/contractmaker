@@ -213,3 +213,100 @@ export function groupCodeFor(
   if (!value) return null;
   return axis.groups.some((g) => g.code === value) ? value : null;
 }
+
+/**
+ * O `groupCode` que pode ser PERSISTIDO para uma dada esteira — `null` quando
+ * o par não se sustenta. É a REGRA ÚNICA do eixo: `isEsteiraConsistent` só
+ * pergunta se ela devolveria o valor intacto, então detector e guarda nunca
+ * podem divergir.
+ *
+ * A regra tem duas metades, e cada esteira só aceita o eixo que ela de fato
+ * exibe:
+ *
+ * - **venda** agrupa por `groupCode` e o eixo é o roteiro do CCV. Só G1..G6
+ *   vale. Qualquer outro valor é taxonomia de outro acervo — o curado usa
+ *   'GARANTIA' e 'OPCIONAL' — e denuncia justamente a linha que não deveria
+ *   estar em venda.
+ * - **locação, ambas e triagem** agrupam por `subcategory`. Um `G4` pendurado
+ *   ali não é exibido por eixo nenhum, então cai. Mas a taxonomia própria do
+ *   acervo curado FICA: é dado do curador, e a migration de correção a preserva
+ *   de propósito (ela move a esteira, nunca o grupo). Apagá-la aqui poria a
+ *   guarda em contradição com a migration — achado de review.
+ *
+ * ## Por que isto existe
+ *
+ * O backfill original presumiu "ter groupCode é, por construção, ser cláusula
+ * de CCV" e mandou 37 cláusulas de locação de dois tenants para a esteira de
+ * venda em PRODUÇÃO. Nada falhou: o filtro do RAG é
+ * `esteira IN (<a do contrato>, 'ambas') OR IS NULL`, então elas apenas
+ * pararam de aparecer na busca do agente em contrato de locação. A migration
+ * `20260902013000_knowledge_item_esteira_fix_group_code` desfez o dado.
+ *
+ * A regra era ASSIMÉTRICA nos caminhos de escrita, e era por aí que o estado
+ * voltava: `classify/apply` limpava o grupo ao SAIR de venda mas não conferia
+ * nada ao ENTRAR, e o `PATCH` preservava o valor do banco verbatim quando o
+ * body não mencionava `groupCode`. Aprovar só o campo `esteira` numa cláusula
+ * curada bastava — e quem propõe é um LLM.
+ *
+ * Note a diferença para a premissa furada: aqui a inferência é sobre G1..G6, um
+ * conjunto FECHADO que é o roteiro do CCV por definição, e não sobre "tem
+ * algum groupCode".
+ */
+export function groupCodeForEsteira(
+  esteira: string | null | undefined,
+  groupCode: string | null | undefined
+): string | null {
+  if (!groupCode) return null;
+  const doRoteiroCcv = (CLAUSE_GROUP_CODES as readonly string[]).includes(groupCode);
+  return esteira === "venda" ? (doRoteiroCcv ? groupCode : null) : doRoteiroCcv ? null : groupCode;
+}
+
+/**
+ * Cláusula cujo `groupCode` não pertence ao eixo da própria `esteira`.
+ *
+ * Detector puro, derivado da MESMA regra da guarda — se `groupCodeForEsteira`
+ * devolveria outra coisa, o par gravado está errado.
+ *
+ * A detecção é PARCIAL por construção: cláusula de locação marcada 'venda' com
+ * `groupCode` nulo é invisível aqui. O escopo casa com este incidente — a regra
+ * furada só tocou linhas com `groupCode` não nulo — e não com "esteira errada"
+ * em geral.
+ */
+export function isEsteiraConsistent(clause: {
+  esteira?: string | null;
+  groupCode?: string | null;
+}): boolean {
+  return groupCodeForEsteira(clause.esteira, clause.groupCode) === (clause.groupCode ?? null);
+}
+
+/** As que violam o invariante, na ordem recebida. */
+export function findEsteiraInconsistencies<
+  T extends { esteira?: string | null; groupCode?: string | null },
+>(clauses: readonly T[]): T[] {
+  return clauses.filter((c) => !isEsteiraConsistent(c));
+}
+
+/**
+ * Esteira DEDUZÍVEL das tags, ou `null` quando não há evidência.
+ *
+ * Espelha as regras do backfill em SQL, para que o seed do acervo curado
+ * classifique na ORIGEM o que a migration teve de consertar no destino: hoje
+ * `scripts/seed-acervo-clausulas.ts` não grava `esteira` nenhuma, então um
+ * tenant novo que receba o pacote curado de locação nasce com as mesmas linhas
+ * sem esteira — e a migration não estará lá para classificá-las (achado de
+ * review).
+ *
+ * Só as tags de IDENTIDADE contam. `slot:`, `garantia:` e `cobertura:` são de
+ * garantia locatícia (`CLAUSE_SLOT_KEYS` tem uma chave só, "garantia", e ela é
+ * de locação); `locacao:` declara a esteira no próprio prefixo. Nada de
+ * heurística de texto: sem evidência, devolve `null`, que é a fila de triagem
+ * e é lida nas duas esteiras.
+ */
+export function esteiraFromTags(tags: readonly string[]): ClauseEsteira | null {
+  const temSlotLocaticio = tags.some(
+    (t) => t.startsWith("slot:") || t.startsWith("garantia:") || t.startsWith("cobertura:")
+  );
+  if (temSlotLocaticio) return "locacao";
+  if (tags.some((t) => t.startsWith("locacao:") || t === "locacao")) return "locacao";
+  return null;
+}
