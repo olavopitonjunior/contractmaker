@@ -155,6 +155,23 @@ export function enrichLocacaoData(
     }
   }
 
+  // Imobiliária INTERMEDIADORA — a mesma org, mas noutro papel: quem
+  // intermediou a locação e recebe a comissão do 1º aluguel (cláusula de
+  // corretagem, `{{imobiliaria_qualificacao}}`). Não passa pelo gate
+  // `adm_imobiliaria`: a intermediação existe mesmo quando a org não
+  // administra o imóvel — foi por depender só de `administradora_*` que os
+  // modelos da RE/MAX Trio ficaram com razão social/CNPJ/sede literais na 4.2.
+  // Idempotente como o bloco acima: dataJson já preenchido vence.
+  const inter = ctx?.administradora;
+  if (inter?.nome && (config.imobiliaria_nome == null || config.imobiliaria_nome === "")) {
+    config.imobiliaria_nome = inter.nome;
+    for (const key of ["cnpj", "creci", "endereco"] as const) {
+      const value = inter[key];
+      const target = `imobiliaria_${key}`;
+      if (value && (config[target] == null || config[target] === "")) config[target] = value;
+    }
+  }
+
   const aluguel = ((enriched.aluguel as Record<string, unknown>) || {}) as Record<string, unknown>;
   const imovel = (enriched.imovel as Record<string, unknown> | undefined) || {};
   const assinatura = enriched.assinatura as

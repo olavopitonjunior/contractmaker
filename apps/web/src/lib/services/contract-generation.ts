@@ -32,6 +32,7 @@ import {
 import {
   loadOrgContractDefaults,
   loadOrgLocacaoDefaults,
+  loadOrgLocacaoRecebimento,
 } from "@/lib/contracts/org-defaults";
 import { assertModuleEnabled } from "@/lib/modules/guard";
 import { MODULE } from "@/lib/modules/catalog";
@@ -58,6 +59,7 @@ import {
   corretoresDe,
   type RegistroCorretor,
 } from "@/lib/templates/corretagem";
+import { imobiliariaDadosPagamento } from "@/lib/templates/imobiliaria";
 import {
   GoogleDocsGenerationError,
   googleDocsFailureMessage,
@@ -1541,6 +1543,12 @@ export async function generateLocacaoContractForDeal(
           corretoresDe(rawDataJson).length > 0
             ? corretagemDadosPagamento(rawDataJson, await carregarRegistroCorretores(orgId))
             : "";
+        // Idem para a PRÓPRIA imobiliária: a via de recebimento da comissão vem
+        // do padrão da org (Padrão contratual · Locação), vai para o Doc e não
+        // para o dataJson. Nunca lança — sem padrão, a chave sai vazia.
+        map["imobiliaria_dados_pagamento"] = imobiliariaDadosPagamento(
+          await loadOrgLocacaoRecebimento(orgId)
+        );
         map["contrato_numero"] = numeroContrato;
         map["contrato_id"] = contract.id;
         map["contrato_versao"] = String(contract.version);
@@ -1864,6 +1872,13 @@ export async function generateAdministracaoContractForDeal(
         // locação (locadores_qualificacao = CONTRATANTE/proprietário, imóvel,
         // data). Chaves não presentes no doc são ignoradas; {{token}} órfão
         // (fora do mapa) é removido pelo cleanupOrphanPlaceholders.
+        //
+        // Sem o override de `imobiliaria_dados_pagamento` (feito só na geração
+        // de locação, acima): `administracao_locacao` está FORA do catálogo das
+        // chaves `imobiliaria_*`, então nenhum modelo de administração as tem —
+        // aqui a chave sai "" por desenho. Se o instrumento de administração
+        // um dia ganhar a cláusula (a taxa também cai numa conta da org),
+        // entrar no catálogo e repetir o override é o caminho, não um ajuste.
         const map = buildLocacaoPlaceholderMap(enrichedData);
         map["contrato_numero"] = numeroContrato;
         map["contrato_id"] = contract.id;
