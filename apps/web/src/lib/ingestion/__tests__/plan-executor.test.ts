@@ -295,6 +295,7 @@ function seed(args: {
   /** Texto extraído e relatório de PII do `item-0` — o gate lê os dois. */
   itemText?: string;
   itemPiiReport?: unknown;
+  itemClassification?: unknown;
 }): void {
   runs = [
     {
@@ -322,6 +323,7 @@ function seed(args: {
     status: "classified",
     text: i === 0 ? (args.itemText ?? null) : null,
     piiReport: i === 0 ? (args.itemPiiReport ?? null) : null,
+    classification: i === 0 ? (args.itemClassification ?? null) : null,
     createdAt: new Date(2026, 7, 25, 10, 0, i),
   }));
 }
@@ -794,6 +796,23 @@ describe("executePlanSlice — relatório final", () => {
     expect(report.templates[0].isDefaultSuggested).toBe(true);
     // O que foi pro `ingestTemplateFromDocx` não carrega isDefault nenhum.
     expect(ingestTemplateMock.mock.calls[0][0]).not.toHaveProperty("isDefault");
+  });
+
+  it("gabarito (A8): só item classificado como instância preenchida pede extração", async () => {
+    const p = plan();
+    seed({ plan: p, reviewed: reviewed(p), itemClassification: { isFilledInstance: true } });
+    await runToCompletion();
+    const arg = ingestTemplateMock.mock.calls[0][0] as { extractGabarito?: { userId?: unknown } | null };
+    expect(arg.extractGabarito).not.toBeNull();
+    // userId = createdBy do run (quem paga a chamada no AIUsage)
+    expect(arg.extractGabarito).toHaveProperty("userId");
+  });
+
+  it("gabarito (A8): minuta em branco (sem isFilledInstance) NÃO pede extração", async () => {
+    const p = plan();
+    seed({ plan: p, reviewed: reviewed(p), itemClassification: { isFilledInstance: false } });
+    await runToCompletion();
+    expect(ingestTemplateMock.mock.calls[0][0].extractGabarito).toBeNull();
   });
 
   it("plano ilegível derruba o run com mensagem, sem escrever nada", async () => {

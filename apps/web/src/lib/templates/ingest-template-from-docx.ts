@@ -33,6 +33,22 @@
 import { prisma } from "@/lib/db/prisma";
 import { uploadFileAsGoogleDoc } from "@/lib/google/upload-file-as-gdoc";
 import { insertPlaceholdersWithAI } from "@/lib/templates/ai-placeholder-insertion";
+import {
+  maskForReport,
+  readNotMapped,
+  type InsertionReport,
+  type UnmappedToken,
+} from "@/lib/templates/insertion-report";
+import {
+  maskReverseMergeReport,
+  reverseMergeDocToTemplate,
+  type ReverseMergeResult,
+} from "@/lib/templates/reverse-merge";
+import { enrichLocacaoData } from "@/lib/locacao/enrich";
+import { extractLocacaoContractDataJson } from "@/lib/extraction/locacao-extractor";
+import { templateFamilyForModalidade } from "@/lib/contracts/template-category";
+import { extractPlaceholdersFromText } from "@/lib/google/replace-placeholders";
+import { catalogForModalidade, requiredTokens } from "@/lib/templates/placeholder-catalog";
 import { schemaTypeForModalidade } from "@/lib/contracts/template-category";
 import {
   computeSourceHash,
@@ -40,7 +56,8 @@ import {
   resolveUniqueTemplateName,
   type DuplicateTemplate,
 } from "@/lib/templates/upload-dedup";
-import { getDocPlainText } from "@/lib/google/docs";
+import { exportDocAsPdf, getDocPlainText } from "@/lib/google/docs";
+import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
 import { auditTemplateText, type TemplatePiiReport } from "@/lib/templates/pii-gate";
 import {
   slotDeclarationComment,
@@ -87,6 +104,22 @@ export interface IngestTemplateFromDocxInput {
    * Vazio/ausente pula o passo — comportamento dos chamadores antigos.
    */
   neutralizeProviders?: readonly string[];
+  /**
+   * GABARITO: os valores do documento-fonte no shape do formulário (o que o
+   * extrator devolve). Quando presente, o estágio determinístico
+   * (`reverseMergeDocToTemplate`) roda DEPOIS do passe de IA e troca cada valor
+   * conhecido pelo token — sem interpretar nada. Ausente = fluxo antigo.
+   * Não é persistido: contém PII do contrato-fonte.
+   */
+  sourceValues?: Record<string, unknown> | null;
+  /**
+   * Extrair o gabarito do PRÓPRIO documento (Gemini, ~US$0,01), em paralelo
+   * com os slots/neutralização/passe de IA — não soma latência ao teto da
+   * rota. Ignorado quando `sourceValues` já veio. Família locação (locacao,
+   * comercial, temporada, administracao_locacao); venda fica para quando
+   * houver gabarito de venda. Falha = sem gabarito, fluxo antigo.
+   */
+  extractGabarito?: { userId?: string | null } | null;
 }
 
 export interface IngestTemplateFromDocxResult {
@@ -225,6 +258,44 @@ export async function ingestTemplateFromDocx(
     throw err;
   }
 
+  // ─── GABARITO (A8) ────────────────────────────────────────────────────────
+  // Começa AQUI (Doc existe e já está gravado na row) e só é aguardado na hora
+  // do reverse-merge: roda em paralelo com slots, neutralização e passe de IA,
+  // que levam dezenas de segundos. Nasce depois do upload E do update de
+  // propósito — qualquer falha antes daqui deixaria a chamada órfã gastando
+  // Gemini para ninguém.
+  //
+  // DOCX → PDF antes de extrair, como contract-import e re-extract: o Gemini
+  // lê DOCX cru (inlineData) de forma irregular e costuma devolver `{}` mudo —
+  // e `{}` aqui é indistinguível de "sem gabarito". Export falhando cai no
+  // buffer original (não pior que antes). O `.catch` devolve null: a extração
+  // falhando nunca derruba a ingestão.
+  const shouldExtract =
+    !input.sourceValues &&
+    !!input.extractGabarito &&
+    templateFamilyForModalidade(modalidade) === "locacao";
+  const gabaritoPromise: Promise<Record<string, unknown> | null> = shouldExtract
+    ? (async () => {
+        let extractionBuffer: Buffer = buffer;
+        let extractionMime: ImportableMime = DOCX_MIME;
+        try {
+          extractionBuffer = await exportDocAsPdf(uploaded.docId);
+          extractionMime = "application/pdf";
+        } catch (err) {
+          console.warn("[templates/from-docx] export PDF falhou; extraindo do DOCX cru:", err);
+        }
+        const r = await extractLocacaoContractDataJson(extractionBuffer, extractionMime, {
+          orgId,
+          userId: input.extractGabarito?.userId ?? null,
+          contractId: null,
+        });
+        return r.dataJson;
+      })().catch((err) => {
+        console.error("[templates/from-docx] extração do gabarito falhou (segue sem):", err);
+        return null;
+      })
+    : Promise.resolve(null);
+
   // Abre os slots ANTES do pass de IA: com a cláusula variável já trocada pelo
   // token, o mapeamento de placeholders não gasta esforço num texto que vai
   // deixar de existir.
@@ -268,6 +339,30 @@ export async function ingestTemplateFromDocx(
     console.error("[templates/from-docx] Pass de IA falhou (segue draft):", err);
   }
 
+  // ─── ESTÁGIO DETERMINÍSTICO (gabarito) ────────────────────────────────────
+  // DEPOIS do passe de IA, de propósito: os blocos compostos (qualificação,
+  // assinaturas) são narrativa que nunca bate byte a byte com o documento —
+  // o que bate são os pedaços (CPF, nome). Rodando antes, o preâmbulo viraria
+  // chaves soltas e a guarda `already-tokenized` impediria a IA de mapear o
+  // bloco; com dois locadores, o segundo sumiria do contrato gerado
+  // (`flattenForPlaceholders` só pega o primeiro item). Rodando depois, os
+  // valores que a IA já cobriu viram `not-found` sem ruído, e cada valor que
+  // sobrou e vira token é PII a menos para o gate abaixo.
+  let reverseMerge: ReverseMergeResult | null = null;
+  const sourceValues = input.sourceValues ?? (await gabaritoPromise);
+  if (sourceValues && Object.keys(sourceValues).length > 0) {
+    try {
+      const gabarito = gabaritoFromSourceValues(sourceValues, modalidade);
+      reverseMerge = await reverseMergeDocToTemplate({
+        docId: uploaded.docId,
+        dataJson: gabarito,
+        modalidade,
+      });
+    } catch (err) {
+      console.error("[templates/from-docx] reverse-merge falhou (segue draft):", err);
+    }
+  }
+
   // ─── DECLARAÇÃO DO SLOT ───────────────────────────────────────────────────
   // DEPOIS do pass de IA, e derivada do estado FINAL do documento. Declarar
   // antes da IA abria um buraco: o pass rodava depois e podia reescrever o
@@ -294,6 +389,19 @@ export async function ingestTemplateFromDocx(
   // Texto VAZIO também é "não medido" (o slot acima trata igual): afirmar
   // `blocked: false` sobre um export vazio seria a mentira mais barata do fluxo.
   const pii: TemplatePiiReport | null = finalDocText ? auditTemplateText(finalDocText) : null;
+
+  // O relatório do passe de IA foi medido ANTES do estágio determinístico:
+  // reconciliar com o texto final (token que o reverse-merge pôs deixa de ser
+  // "não mapeado") e enriquecer cada faltante com o que o gabarito sabe —
+  // valor (mascarado) e ocorrências — para o operador agir sem reabrir o Doc.
+  if (report && reverseMerge && finalDocText) {
+    report = reconcileReportWithReverseMerge(
+      report as InsertionReport,
+      reverseMerge,
+      finalDocText,
+      modalidade
+    );
+  }
   // Doc ilegível → não declara (fail-closed): melhor um token órfão, que
   // `cleanupOrphanPlaceholders` limpa na geração, do que uma declaração mentindo.
   const survivingSlots = appliedReports
@@ -347,7 +455,7 @@ export async function ingestTemplateFromDocx(
   // O relatório é gravado FORA do try do pass de IA: os avisos de slot precisam
   // chegar à página de revisão mesmo quando a IA falha (antes, um erro na IA
   // engolia junto o motivo de o slot não ter aberto).
-  if (report || finalSlotReports.length > 0 || neutralization || pii) {
+  if (report || finalSlotReports.length > 0 || neutralization || reverseMerge || pii) {
     try {
       await prisma.contractTemplate.update({
         where: { id: template.id },
@@ -356,6 +464,7 @@ export async function ingestTemplateFromDocx(
             ...((report ?? {}) as object),
             ...(finalSlotReports.length ? { slots: finalSlotReports } : {}),
             ...(neutralization ? { neutralization } : {}),
+            ...(reverseMerge ? { reverseMerge: maskReverseMergeReport(reverseMerge) } : {}),
             ...(pii ? { pii } : {}),
           } as object,
         },
@@ -376,3 +485,72 @@ export async function ingestTemplateFromDocx(
     neutralization,
   };
 }
+
+/**
+ * Gabarito para o reverse-merge = os valores EXTRAÍDOS, com as pontes de texto
+ * do enrich (qualificações, endereço completo, extenso) — e SEM os defaults de
+ * fábrica. `enrichLocacaoData` preenche `config.*` ausente com
+ * `DEFAULT_LOCACAO_SETTINGS` (multa 10%, juros 1%, rescisória 3 meses): certo
+ * para RENDERIZAR um contrato, errado como gabarito — o invariante do
+ * reverse-merge é "o valor existe neste documento", e um "10% (dez por cento)"
+ * inventado casaria a cláusula de comissão do modelo e a trocaria por
+ * `{{multa_atraso_percent}}` como sucesso (achado da revisão do A7). Só entra
+ * em `config` o que o gabarito bruto trouxe.
+ */
+export function gabaritoFromSourceValues(
+  sourceValues: Record<string, unknown>,
+  modalidade: string
+): Record<string, unknown> {
+  if (templateFamilyForModalidade(modalidade) !== "locacao") return sourceValues;
+  // Chaves ANTES do enrich, e sobre uma cópia: `enrichLocacaoData` faz cópia
+  // rasa e escreve os defaults dentro do MESMO objeto `config` da entrada.
+  const rawConfig = (sourceValues.config ?? null) as Record<string, unknown> | null;
+  const rawKeys = new Set(rawConfig && typeof rawConfig === "object" ? Object.keys(rawConfig) : []);
+  const enriched = enrichLocacaoData({ ...sourceValues, config: { ...(rawConfig ?? {}) } });
+  const enrichedConfig = (enriched.config ?? {}) as Record<string, unknown>;
+  const config: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(enrichedConfig)) {
+    if (rawKeys.has(k)) config[k] = v;
+  }
+  return { ...enriched, config };
+}
+
+/**
+ * `notMapped`/`missingRequired` releem o texto FINAL (pós-reverse-merge), e
+ * cada token ainda ausente ganha `sourceValue`/`occurrences`/motivo do
+ * reverse-merge quando a IA não tinha proposto nada (`no-mapping`) — o motivo
+ * do passe de IA, quando existe, vence: é o que corresponde ao trecho.
+ * "Presente" respeita o passe de IA: token que ele marcou `unconfirmed`
+ * (over-matched/over-removed) está no texto mas NÃO conta — senão a
+ * reconciliação apagaria o motivo que o operador precisa ver.
+ */
+export function reconcileReportWithReverseMerge(
+  report: InsertionReport,
+  reverse: ReverseMergeResult,
+  finalDocText: string,
+  modalidade: string
+): InsertionReport {
+  const unconfirmed = new Set(report.unconfirmed ?? []);
+  const present = new Set(
+    extractPlaceholdersFromText(finalDocText).filter((t) => !unconfirmed.has(t))
+  );
+  const skipByToken = new Map(reverse.skipped.map((s) => [s.token, s]));
+  const previous = new Map(readNotMapped(report.notMapped).map((n) => [n.token, n]));
+  const notMapped: UnmappedToken[] = catalogForModalidade(modalidade)
+    .map((d) => d.token)
+    .filter((t) => !present.has(t))
+    .map((token) => {
+      const prev = previous.get(token) ?? { token, reason: "no-mapping" as const };
+      const rm = skipByToken.get(token);
+      if (!rm) return prev;
+      return {
+        ...prev,
+        reason: prev.reason === "no-mapping" ? rm.reason : prev.reason,
+        sourceValue: maskForReport(rm.value),
+        ...(rm.occurrences !== undefined ? { occurrences: rm.occurrences } : {}),
+      };
+    });
+  const missingRequired = requiredTokens(modalidade).filter((t) => !present.has(t));
+  return { ...report, notMapped, missingRequired };
+}
+

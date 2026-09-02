@@ -4,6 +4,49 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-02 - Dois consertos medidos no smoke de staging da troca pelo gabarito
+
+### Corrigido
+
+- **O valor do aluguel não era trocado em documento gerado pelo sistema.** O texto que o sistema lê do Google Doc vem com espaço comum onde o documento tem o espaço "fixo" que a formatação de moeda usa; a edição ia com a forma lida e o Google não encontrava nada. Agora a edição vai com todas as formas plausíveis (a lida, a do gabarito e a normalizada) e a que existe no documento casa. Medido: no modelo criado a partir de um contrato de locação, `aluguel_valor` saía como "a edição não pegou" — passa a ser trocado.
+- **"Criar modelo a partir de contrato" gravava o relatório da troca sem máscara.** O gabarito ali é o contrato real de um cliente; CPF e conta iam para o relatório e para a resposta da API. A ingestão por upload já mascarava; a rota passa a mascarar também.
+## [Unreleased] - 2026-09-02 - O admin passa a poder liberar o gerente para abrir negócio de locação
+
+### Corrigido
+
+- **O gerente não conseguia criar formulário de locação, e não havia como liberá-lo.** Criar o formulário público de locação exige a permissão "criar negócio e contrato de locação", que o gerente não tem por padrão — até aí, o desenho. O problema é que essa permissão não aparecia em Configurações → Gerentes: o admin abria a tela procurando o que ligar e não encontrava nada, enquanto o gerente levava "sem autorização" a cada tentativa. Do lado de vendas o mesmo gerente sempre criou formulário sem pedir nada a ninguém, então a diferença lia como defeito. A permissão passa a estar na tela, desligada por padrão — quem liga é o admin, e vale para todos os gerentes da organização.
+- **O rótulo da permissão dizia menos do que ela faz.** Chamava-se "Criar contrato de locação", mas é ela que abre o formulário público, o cadastro de negócio a partir de imóvel/proposta e a aprovação da ficha. Passa a se chamar "Criar negócio e contrato de locação" — quem procura o checkbox certo agora o encontra pelo nome. Ligá-la não amplia o que o gerente enxerga: as rotas que ela destrava continuam aplicando o escopo de "só os negócios dele" por cima.
+
+## [Unreleased] - 2026-09-02 - Modelo enviado por upload troca os valores do documento pelas chaves, sem interpretar
+
+### Adicionado
+
+- **O gabarito é extraído do próprio arquivo.** Ao subir um modelo de locação, o sistema lê os valores do documento (partes, imóvel, aluguel, vigência, garantia — a mesma extração, pelo mesmo caminho via PDF, que a importação de contrato já usa) em paralelo com a leitura por IA, e troca cada valor encontrado no texto pela chave correspondente — em todas as cláusulas em que ele aparece, quando o valor é específico. É a troca "hardcoded" que faltava: o que estava preenchido no documento vira chave sem que a IA precise adivinhar o trecho; a IA só entra antes, nos blocos, e a conferência final diz o que ainda falta. Custa cerca de um centavo de dólar por modelo e entra no custo do lote. `gabarito=false` no envio desliga (minuta em branco não tem o que trocar).
+- **No lote da Central de ingestão, só os documentos classificados como instância preenchida** (dados reais de um cliente) pedem o gabarito; minuta em branco segue como antes.
+
+### Notas
+
+- O custo do passe de chaves por IA já entrava no custo do lote — a extração do gabarito passa a entrar também.
+- Venda ainda não tem gabarito nesta entrega; o encanamento é o mesmo e liga quando o extrator de venda entrar.
+
+## [Unreleased] - 2026-09-02 - A revisão do modelo mostra o que foi trocado pelo gabarito, e a ingestão está pronta para receber o gabarito
+
+### Adicionado
+
+- **Tela de revisão do modelo ganha o card "Troca pelo gabarito".** Ao criar um modelo a partir de um contrato, o sistema já trocava cada valor conhecido do contrato pela chave, sem IA — e gravava o relatório dessa troca sem que ninguém o visse. Agora a revisão mostra quantos valores foram confirmados e quais ficaram para revisão, com o motivo ("aparece em mais de um lugar", "genérico demais para trocar em todo lugar", "curto demais") e a contagem. É onde quem revisa vê o que foi trocado em todas as ocorrências antes de ativar. No catálogo, a chave ausente que tinha gabarito mostra o valor (mascarado) e quantas vezes ele aparece no texto.
+- **A ingestão por upload está pronta para o gabarito.** Quando o modelo vier com os valores do documento-fonte (o extrator, na próxima entrega), a troca determinística roda depois da leitura por IA e antes da conferência final: o que a IA cobriu já não está no texto, e cada valor que sobrou e vira chave é um dado pessoal a menos no modelo. O relatório da IA é reconciliado com o texto final — chave posta pela troca deixa de aparecer como "não mapeada" — e cada chave ainda ausente diz o que o gabarito sabe dela. Sem gabarito, nada muda. O gabarito não é guardado; o que vai para o relatório sai mascarado — "mascarado" cobre o que tem detector automático (documentos, dados bancários, CEP, telefone, e-mail); nome e endereço não têm. E o gabarito nunca leva valores padrão do sistema (multa, juros): só o que veio do documento — um "10% (dez por cento)" inventado casaria a cláusula errada.
+
+## [Unreleased] - 2026-09-02 - O modelo criado a partir de um contrato troca o valor em todas as cláusulas
+
+### Alterado
+
+- **Valor que se repete deixa de ficar literal por "aparecer mais de uma vez".** Ao criar um modelo a partir de um contrato pronto, o sistema troca cada valor do contrato pela chave correspondente — mas só quando o valor aparecia uma única vez. O valor do aluguel está na cláusula do preço, na do reajuste e na da multa; a data de início, no preâmbulo e na vigência. Ficavam literais, sem aviso. Agora os campos de valor (aluguel e seu extenso, início e fim da vigência, IPTU, condomínio, matrícula, inscrição, endereço, local e data de assinatura, preço, sinal, comissão) são trocados em **todas** as ocorrências, desde que o valor seja específico o bastante — moeda, valor por extenso em reais, CPF/CNPJ válido, CEP, data, ou texto longo. Dia de vencimento, meses de vigência, multas e juros ficam de fora de propósito: "10 (dez)" do vencimento é também o "prazo de 10 (dez) dias" da desocupação, e o formato não diz de qual campo o número é — a repetição desses fica com a leitura por IA, que tem o contexto. "casa" e "São Paulo" continuam não sendo trocados em todo lugar, de propósito: destruiriam "casa de máquinas" e "Foro de São Paulo". Quando um campo desses tem valor repetido mas genérico, o relatório gravado na criação do modelo registra o motivo ("genérico demais para trocar em todo lugar") e a contagem — a tela de revisão ainda não mostra esse relatório; isso fica para quando o motor entrar na ingestão.
+- **Só chaves do catálogo entram nessa troca.** As chaves cruas que o sistema deriva do formulário (área do imóvel, tipo de garantia, campos fiscais, nome solto de uma parte) não são mais candidatas — eram genéricas demais para trocar às cegas, e a validação do modelo as marcava como desconhecidas de qualquer forma. A qualificação completa de cada parte continua sendo trocada como bloco.
+
+### Corrigido
+
+- **Valor em reais com espaço "fixo" não casava em documento digitado à mão** (#503). O sistema formata moeda com um espaço não separável depois do `R$`; um documento digitado ou importado traz espaço comum, e a comparação era literal — o valor do aluguel ficava sem chave, em silêncio. A comparação passa a tratar os dois espaços como iguais e a edição vai com o texto exatamente como está no documento.
+
 ## [Unreleased] - 2026-09-02 - A mesma chave entra em todas as cláusulas em que o valor aparece
 
 ### Corrigido

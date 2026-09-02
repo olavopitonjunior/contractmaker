@@ -65,10 +65,17 @@ export type UnmappedReason =
 
 export interface UnmappedToken {
   token: string;
-  reason: UnmappedReason;
+  reason: UnmappedReason | ReverseMergeReason;
   /** Trecho que a IA propôs, MASCARADO (`maskForReport`). */
   trecho?: string;
+  /** Valor do gabarito (reverse-merge) para este token, MASCARADO. */
+  sourceValue?: string;
+  /** Quantas vezes o valor do gabarito aparece no texto (reverse-merge). */
+  occurrences?: number;
 }
+
+/** Motivos que só o reverse-merge produz (os pós-batch já estão em SkipReason). */
+export type ReverseMergeReason = "too-short" | "stopword" | "not-specific";
 
 /**
  * Tudo que entra no relatório passa por aqui: o relatório vai para
@@ -103,6 +110,14 @@ export interface InsertionReport {
   docTruncated?: boolean;
   /** A resposta estourou `max_tokens` (`stop_reason === "max_tokens"`). */
   responseTruncated?: boolean;
+  /**
+   * Tokens que a API pôs no Doc em lugar/quantidade que ninguém revisou
+   * (`over-matched`/`over-removed`) e que nenhum outro candidato confirmou.
+   * Estão no texto e NÃO contam como presentes — quem reler o Doc depois
+   * (reconciliação com o gabarito) precisa respeitar isto, senão "está no
+   * texto" vira "confirmado" e o motivo some.
+   */
+  unconfirmed?: string[];
 }
 
 /**
@@ -117,10 +132,13 @@ export function readNotMapped(raw: unknown): UnmappedToken[] {
       out.push({ token: item, reason: "no-mapping" });
     } else if (item && typeof item === "object" && typeof (item as { token?: unknown }).token === "string") {
       const o = item as { token: string; reason?: unknown; trecho?: unknown };
+      const o2 = item as { sourceValue?: unknown; occurrences?: unknown };
       out.push({
         token: o.token,
         reason: typeof o.reason === "string" ? (o.reason as UnmappedReason) : "no-mapping",
         ...(typeof o.trecho === "string" ? { trecho: o.trecho } : {}),
+        ...(typeof o2.sourceValue === "string" ? { sourceValue: o2.sourceValue } : {}),
+        ...(typeof o2.occurrences === "number" ? { occurrences: o2.occurrences } : {}),
       });
     }
   }
