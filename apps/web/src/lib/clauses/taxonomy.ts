@@ -195,6 +195,26 @@ export function visibleEsteiras(esteira: FormModule): ClauseEsteira[] {
   return [esteira, "ambas"];
 }
 
+/**
+ * A cláusula aparece na aba desta esteira? A própria, `ambas`, e a SEM esteira
+ * — esta última porque o balde de triagem tem de estar visível nas duas abas:
+ * o item que ainda não foi triado é o que mais precisa de atenção, e some se a
+ * regra o excluir.
+ *
+ * Existe para que CONTAGEM e LISTA não possam mais divergir. Elas divergiam
+ * (issue #480): a lista incluía a sem esteira e a contagem da aba não, então o
+ * badge dizia "Locação (23)" enquanto a lista mostrava 24 linhas — e o número
+ * mentia justamente sobre o item não triado. Duas cópias da mesma regra é como
+ * isso aconteceu; uma só é como para de acontecer.
+ */
+export function apareceNaEsteira(
+  clauseEsteira: string | null,
+  esteira: FormModule
+): boolean {
+  if (clauseEsteira === null) return true;
+  return (visibleEsteiras(esteira) as string[]).includes(clauseEsteira);
+}
+
 /** Eixo da esteira, com os grupos na ordem de exibição. */
 export function axisFor(esteira: FormModule): EsteiraAxis {
   return ESTEIRA_AXIS[esteira];

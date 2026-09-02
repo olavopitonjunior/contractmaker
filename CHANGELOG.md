@@ -4,6 +4,22 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-01 - A tela de cláusulas para de mentir sobre o que está selecionado e sobre o que falta triar
+
+### Corrigido
+
+- **A seleção em lote sobrevivia a qualquer filtro que escondesse a linha.** Irmã da correção da troca de esteira, que fechou só aquele caso. Marcar uma cláusula `approved` e mudar o filtro de Status para `draft` escondia a linha mas mantinha o id no `Set`: a barra seguia "1 selecionada(s)" com **nenhum checkbox marcado na tela**, e "Analisar e classificar" mandava esse id. O recorte por esteira não pegava — a cláusula é da mesma esteira, só está filtrada. Valia igual para origem, tag e busca. A contagem e o payload passam a ser a **interseção** do `Set` com o que está visível.
+  - Interseção com as visíveis, **não** com as seções ordenadas: aquelas já filtram por grupo de propósito, e o contrato é que trocar o filtro de GRUPO preserva a seleção. Derivar em vez de limpar também evita ter de lembrar de zerar o `Set` a cada filtro novo. Dois testes fixam o contrato pelo outro lado: **limpar o filtro traz a seleção de volta** (o `Set` não foi apagado) e **mudar o grupo não muda a contagem** — uma correção que "consertasse demais" passaria nos testes antigos e violaria isso em silêncio.
+  - **`ignored` deixa de ser silencioso.** O campo existia na resposta do classify e nenhuma superfície o lia. Vindo não-vazio, N cláusulas saíam da análise sem aviso — a mesma contagem mentindo, na direção oposta: sumiço a menos em vez de fantasma a mais.
+- **A contagem da aba ignorava justamente a cláusula que mais precisa de atenção.** A contagem reimplementava a regra de visibilidade e esqueceu das cláusulas SEM esteira, que a lista inclui de propósito: o badge dizia "Locação (23)" enquanto a lista mostrava 24 linhas. A regra virou uma função só (`apareceNaEsteira`), usada agora nas **três** pontas — as duas da tela e o recorte de lote do classify, que era uma terceira cópia. O teste fixa a **igualdade** entre contagem e nº de linhas em vez de um número mágico: asserção sobre literal passaria mesmo com as pontas derivando de regras diferentes, que é exatamente o bug. Os três caminhos de servidor (as duas queries Prisma do agente e a SQL crua) já tratavam `esteira IS NULL` corretamente — a divergência era só da tela.
+- **O classificador dizia "já classificada" para quem está no balde de triagem.** A proposta é vazia quando nenhum campo muda — e numa cláusula de esteira nula, o modelo que **se abstém** de decidir a esteira não muda campo nenhum. A resposta caía em "já estão classificadas", e a cláusula ficava presa em triagem para sempre: aparece nas duas abas, a seção manda usar "Analisar e classificar", e a única ação oferecida responde que não há nada a fazer. Agora a abstenção tem balde próprio e a tela aponta o caminho manual. Cláusula **com** esteira e sem proposta continua em "nada a mudar"; os dois casos são controles no teste.
+- **E esse caminho manual era uma parede em org sem o módulo de locação.** O select de esteira do editor era `disabled` sempre que o módulo estava desligado — então a instrução "defina a esteira à mão" apontava para um campo travado, e a cláusula não classificada não tinha saída nenhuma pela interface. Agora ele destrava **apenas** enquanto a cláusula está não classificada, e nesse caso oferece só "compra e venda": sair da triagem para venda é o que a regra do módulo já assume, e mover para locação continua vedado. Hoje as cinco organizações de produção têm o módulo ligado — isto era uma armadilha armada para o primeiro tenant venda-only, não um incêndio.
+- **Os filtros de grupo, status e origem ganharam nome acessível.** Eram comboboxes anônimos para leitor de tela: o `placeholder` desaparece assim que há valor selecionado.
+
+### Notas
+
+- Nenhuma mudança de status code e nenhum campo removido: os baldes novos da resposta são aditivos e saem de dentro dos existentes, então a soma continua fechando com o lote elegível.
+- Quando um lote tem falhas **e** abstenções, as duas frases agora somam em vez de competir — em cascata, a falha ganhava e a informação da abstenção sumia.
 ## [Unreleased] - 2026-09-01 - O convite avisa na hora, e o papel do Max para de correr risco de clique
 
 ### Corrigido

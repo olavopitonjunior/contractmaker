@@ -382,7 +382,15 @@ export function ClauseEditor({
                             // a própria esteira não exibe.
                             if (next !== "venda") form.setValue("groupCode", null);
                           }}
-                          disabled={!locacaoEnabled}
+                          // Org sem o módulo de locação fica travada em venda —
+                          // menos quando a cláusula ainda está NÃO CLASSIFICADA.
+                          // Travar também esse caso deixava o balde de triagem
+                          // sem saída nenhuma: a análise pode se abster de
+                          // decidir a esteira (issue #480) e manda definir à
+                          // mão, num campo que estaria desabilitado. Sair de
+                          // "não classificada" para venda não contradiz a regra
+                          // do módulo; é exatamente o que ela já assume.
+                          disabled={!locacaoEnabled && field.value != null}
                         >
                           <FormControl>
                             <SelectTrigger className="w-full">
@@ -391,7 +399,13 @@ export function ClauseEditor({
                           </FormControl>
                           <SelectContent>
                             <SelectItem value={NONE_GROUP}>Não classificada</SelectItem>
-                            {CLAUSE_ESTEIRA_VALUES.map((e) => (
+                            {/* Sem o módulo de locação, o único destino possível
+                                é venda — oferecer "locação"/"ambas" ali criaria
+                                cláusula numa esteira que a org não opera. */}
+                            {(locacaoEnabled
+                              ? CLAUSE_ESTEIRA_VALUES
+                              : (["venda"] as const)
+                            ).map((e) => (
                               <SelectItem key={e} value={e}>
                                 {ESTEIRA_LABEL[e]}
                               </SelectItem>
