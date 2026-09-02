@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import { PermissionKey } from "./permissions";
 import { EffectivePermissions, can, getEffectivePermissions } from "./check";
 import {
@@ -140,4 +141,42 @@ export function sanitizeChargeInput<T extends ChargeInputBase>(
   }
 
   return { sanitized: out, warnings };
+}
+
+/**
+ * Gate de permissão para rotas que já resolveram auth e org por conta própria.
+ * Devolve a `NextResponse` de 403 pronta, ou `null` para seguir o fluxo.
+ *
+ * Existe porque o mesmo bloco — resolver permissões efetivas, checar `can`,
+ * devolver `{error:"PERMISSION_DENIED", permission}` — já estava copiado em
+ * mais de um lugar. `guardDealCreate` (lib/deals/route-helpers.ts) é a versão
+ * ancorada em criação de deal e segue como está: refatorá-la para cá é mexer
+ * em código que já está em produção, e vira outro PR.
+ *
+ * O `userId` deve ser o ator EFETIVO que o caller já resolveu
+ * (`auth.actor.effectiveUserId`), não o id cru da sessão: sob impersonação o id
+ * da sessão é o do super_admin, que não tem membership no tenant. Resolver de
+ * novo aqui dentro criaria uma segunda fonte de verdade sobre quem é o ator
+ * dentro de um gate de segurança — se as regras de overlay mudarem, o gate
+ * autorizaria um ator diferente daquele com que o resto da request roda.
+ *
+ * `message` é texto pt-BR para a UI: o corpo devolve o código E a mensagem,
+ * porque cliente que faz `toast.error(err.reason ?? err.error)` mostraria
+ * "PERMISSION_DENIED" cru numa interface em português.
+ */
+export async function guardPermission(params: {
+  userId: string;
+  orgId: string;
+  permission: PermissionKey;
+  message: string;
+}): Promise<NextResponse | null> {
+  const { userId, orgId, permission, message } = params;
+  const perms = await getEffectivePermissions(userId, orgId);
+  if (!can(perms, permission)) {
+    return NextResponse.json(
+      { error: "PERMISSION_DENIED", permission, reason: message },
+      { status: 403 }
+    );
+  }
+  return null;
 }

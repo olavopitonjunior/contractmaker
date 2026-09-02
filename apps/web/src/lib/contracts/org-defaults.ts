@@ -2,13 +2,10 @@ import { prisma } from "@/lib/db/prisma";
 import {
   DEFAULT_CONTRACT_SETTINGS,
   DEFAULT_LOCACAO_SETTINGS,
-  DEFAULT_LOCACAO_RECEBIMENTO,
   resolveOrgVendaDefaults,
   resolveOrgLocacaoDefaults,
-  resolveOrgLocacaoRecebimento,
   type ContractSettings,
   type LocacaoSettings,
-  type LocacaoRecebimento,
 } from "./default-config";
 
 /**
@@ -52,25 +49,5 @@ export async function loadOrgLocacaoDefaults(
   } catch (err) {
     console.warn("[contract-defaults] falha ao carregar padrão da org:", err);
     return DEFAULT_LOCACAO_SETTINGS;
-  }
-}
-
-/**
- * Onde a própria imobiliária recebe a comissão do 1º aluguel
- * (`contractDefaultsJson.locacao_recebimento`). Vazio quando não configurado:
- * a chave `{{imobiliaria_dados_pagamento}}` sai "" e a geração segue.
- */
-export async function loadOrgLocacaoRecebimento(
-  orgId: string
-): Promise<LocacaoRecebimento> {
-  try {
-    const settings = await prisma.orgFormSettings.findUnique({
-      where: { orgId },
-      select: { contractDefaultsJson: true },
-    });
-    return resolveOrgLocacaoRecebimento(settings?.contractDefaultsJson);
-  } catch (err) {
-    console.warn("[contract-defaults] falha ao carregar recebimento da org:", err);
-    return DEFAULT_LOCACAO_RECEBIMENTO;
   }
 }

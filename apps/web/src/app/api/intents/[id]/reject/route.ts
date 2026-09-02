@@ -8,6 +8,8 @@ import {
 } from "@/lib/api/require-auth";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
+import { guardPermission } from "@/lib/security/rbac/guard";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 /**
  * POST /api/intents/[id]/reject — session-only.
@@ -30,6 +32,26 @@ export async function POST(
       { status: 403 }
     );
   }
+
+  // Rejeitar é a OUTRA METADE da mesma decisão humana, e estava tão aberta
+  // quanto aprovar: sessão + mesma org, e nada mais. Gatear só o approve
+  // deixaria o buraco espelhado de pé — e o de rejeitar é um veto silencioso.
+  // `/intents` lista todas as intents da org para qualquer membro, então os
+  // ids estão à mão: um `viewer` percorria a fila e matava pedidos legítimos
+  // (`ENVELOPE_SEND`, `PROPOSAL_CONVERT`) levando cada um ao estado terminal
+  // `rejected`. O agente externo via o pedido morrer sem explicação, e a
+  // negativa ficava atribuída ao papel que existe justamente para não mexer
+  // em nada.
+  //
+  // Mesma chave do approve, de propósito: a decisão é uma só, e quem pode
+  // dizer sim é quem pode dizer não.
+  const denied = await guardPermission({
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    permission: PERMISSION.NEWTON_INTENT_APPROVE,
+    message: "Você não tem permissão para decidir sobre esta ação.",
+  });
+  if (denied) return denied;
 
   const body = await req.json().catch(() => ({}));
   const parsed = rejectSchema.safeParse(body);
@@ -70,7 +92,8 @@ export async function POST(
     where: { id: params.id },
     data: {
       status: "rejected",
-      rejectedBy: auth.ident.userId,
+      // Ator autorizado, como no approve — ver o comentário de lá.
+      rejectedBy: auth.actor.effectiveUserId,
       rejectionReason: parsed.data.reason ?? null,
     },
   });

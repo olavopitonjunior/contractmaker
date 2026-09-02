@@ -24,7 +24,6 @@ import {
   DEFAULT_CONTRACT_SETTINGS,
   DEFAULT_LOCACAO_SETTINGS,
   DEFAULT_LOCACAO_COMISSAO,
-  DEFAULT_LOCACAO_RECEBIMENTO,
 } from "@/lib/contracts/default-config";
 
 let esteira: "venda" | "locacao" = "venda";
@@ -42,7 +41,6 @@ const props = {
   initial: DEFAULT_CONTRACT_SETTINGS,
   initialLocacao: DEFAULT_LOCACAO_SETTINGS,
   initialComissaoLocacao: DEFAULT_LOCACAO_COMISSAO,
-  initialRecebimentoLocacao: DEFAULT_LOCACAO_RECEBIMENTO,
   locacaoEnabled: true,
 };
 
