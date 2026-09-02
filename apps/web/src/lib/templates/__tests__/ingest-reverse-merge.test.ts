@@ -15,9 +15,13 @@ vi.mock("@/lib/templates/ai-placeholder-insertion", () => ({
   insertPlaceholdersWithAI: (...a: unknown[]) => aiMock(...a),
 }));
 const reverseMock = vi.fn();
-vi.mock("@/lib/templates/reverse-merge", () => ({
-  reverseMergeDocToTemplate: (...a: unknown[]) => reverseMock(...a),
-}));
+vi.mock("@/lib/templates/reverse-merge", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/templates/reverse-merge")>(
+    "@/lib/templates/reverse-merge"
+  );
+  // Só o motor é mockado; `maskReverseMergeReport` é o real (puro).
+  return { ...actual, reverseMergeDocToTemplate: (...a: unknown[]) => reverseMock(...a) };
+});
 const extractMock = vi.fn();
 vi.mock("@/lib/extraction/locacao-extractor", () => ({
   extractLocacaoContractDataJson: (...a: unknown[]) => extractMock(...a),

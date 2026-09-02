@@ -23,9 +23,16 @@ type ReplaceReq = { replaceAllText: { containsText: { text: string }; replaceTex
  * `occurrencesChanged` real; `getDocPlainText` lê o estado corrente.
  */
 let state = "";
-function useDoc(doc: string) {
+/**
+ * `exportNormalizes`: como o Drive de verdade — `drive.files.export text/plain`
+ * devolve espaço comum onde o Doc tem NBSP; o `replaceAllText` continua casando
+ * contra o Doc (com NBSP).
+ */
+function useDoc(doc: string, opts: { exportNormalizes?: boolean } = {}) {
   state = doc;
-  mockGetDocPlainText.mockImplementation(async () => state);
+  mockGetDocPlainText.mockImplementation(async () =>
+    opts.exportNormalizes ? state.replace(/\u00A0/g, " ") : state
+  );
   mockBatchUpdate.mockImplementation(async (arg: { requestBody: { requests: ReplaceReq[] } }) => {
     const replies = arg.requestBody.requests.map((r) => {
       const { text } = r.replaceAllText.containsText;
@@ -183,15 +190,56 @@ describe("reverseMergeDocToTemplate — matchPolicy all × unique", () => {
     useDoc("O aluguel é de R$ 3.500,00 mensais."); // espaço comum
     const result = await run();
     expect(result.replaced.map((x) => x.token)).toContain("aluguel_valor");
-    const req = (mockBatchUpdate.mock.calls[0][0].requestBody.requests as ReplaceReq[]).find(
-      (r) => r.replaceAllText.replaceText === "{{aluguel_valor}}"
-    )!;
-    expect(req.replaceAllText.containsText.text).toBe("R$ 3.500,00"); // literal do Doc, não o NBSP do mapa
+    const forms = (mockBatchUpdate.mock.calls[0][0].requestBody.requests as ReplaceReq[])
+      .filter((r) => r.replaceAllText.replaceText === "{{aluguel_valor}}")
+      .map((r) => r.replaceAllText.containsText.text);
+    expect(forms).toContain("R$ 3.500,00"); // a literal do Doc está entre as formas
     expect(state).toContain("{{aluguel_valor}}");
   });
 
+  it("export do Drive normaliza o NBSP: o request leva a forma do mapa (NBSP) e casa no Doc — medido em staging", async () => {
+    // Doc gerado pelo sistema tem NBSP; o texto exportado vem com espaço comum.
+    useDoc("Preço: R$\u00A03.500,00. Reajuste sobre R$\u00A03.500,00.", { exportNormalizes: true });
+    const result = await run();
+    expect(result.replaced.find((x) => x.token === "aluguel_valor")?.occurrences).toBe(2);
+    expect(state).not.toContain("3.500,00");
+    const forms = (mockBatchUpdate.mock.calls[0][0].requestBody.requests as ReplaceReq[])
+      .filter((r) => r.replaceAllText.replaceText === "{{aluguel_valor}}")
+      .map((r) => r.replaceAllText.containsText.text);
+    // Duas formas distintas: a exportada (espaço) e a do mapa/toda-NBSP. Só a segunda casa.
+    expect(forms).toHaveLength(2);
+    expect(forms).toContain("R$\u00A03.500,00");
+    expect(result.skipped.find((s) => s.token === "aluguel_valor")).toBeUndefined();
+  });
+
+  it("gabarito com espaço comum × Doc com NBSP (export normaliza): a variante R$+NBSP casa", async () => {
+    // Valor do mapa forçado a espaço comum via dataJson pré-formatado não existe;
+    // simular pelo caminho inverso: Doc com NBSP, export normalizado, e conferir
+    // que entre as formas enviadas há a de NBSP mesmo quando o mapa vem com espaço.
+    useDoc("Aluguel: R$\u00A03.500,00 mensais.", { exportNormalizes: true });
+    const result = await run();
+    expect(result.replaced.map((x) => x.token)).toContain("aluguel_valor");
+    const forms = (mockBatchUpdate.mock.calls[0][0].requestBody.requests as ReplaceReq[])
+      .filter((r) => r.replaceAllText.replaceText === "{{aluguel_valor}}")
+      .map((r) => r.replaceAllText.containsText.text);
+    expect(forms).toContain("R$ 3.500,00"); // exportada/normalizada
+    expect(forms).toContain("R$\u00A03.500,00"); // toda-NBSP (e a do mapa)
+    expect(state).toContain("{{aluguel_valor}}");
+  });
+
+  it("maskReverseMergeReport mascara os valores de replaced e skipped", async () => {
+    const { maskReverseMergeReport } = await import("../reverse-merge");
+    const out = maskReverseMergeReport({
+      replaced: [{ token: "locadores_qualificacao", value: "Ana, CPF 529.982.247-25", occurrences: 1 }],
+      skipped: [{ token: "x", value: "Agência 1234 Conta 68233198-6", reason: "ambiguous", occurrences: 2 }],
+    });
+    expect(JSON.stringify(out)).not.toContain("529.982.247-25");
+    expect(out.replaced[0].value).toContain("000.000.000-00");
+    expect(out.skipped[0].occurrences).toBe(2);
+  });
+
   it("formas mistas (NBSP e espaço) no mesmo Doc: uma request por forma, tudo confirmado", async () => {
-    useDoc("Preço: R$ 3.500,00. Reajuste sobre R$ 3.500,00.");
+    useDoc("Preço: R$\u00A03.500,00. Reajuste sobre R$ 3.500,00.", { exportNormalizes: true });
     const result = await run();
     expect(result.replaced.find((x) => x.token === "aluguel_valor")?.occurrences).toBe(2);
     const forms = (mockBatchUpdate.mock.calls[0][0].requestBody.requests as ReplaceReq[])
@@ -202,7 +250,7 @@ describe("reverseMergeDocToTemplate — matchPolicy all × unique", () => {
   });
 
   it("over-matched compara com as ocorrências ESPERADAS: 3 esperadas e 3 trocadas não é over-matched", async () => {
-    useDoc("R$ 3.500,00 a. R$ 3.500,00 b. R$ 3.500,00 c.");
+    useDoc("R$\u00A03.500,00 a. R$ 3.500,00 b. R$\u00A03.500,00 c.", { exportNormalizes: true });
     const result = await run();
     expect(result.skipped.find((s) => s.reason === "over-matched")).toBeUndefined();
     expect(result.replaced.find((x) => x.token === "aluguel_valor")?.occurrences).toBe(3);
@@ -254,9 +302,20 @@ describe("reverseMergeDocToTemplate — replaced só depois de conferir", () => 
 
   it("verify-failed: a API disse que trocou, mas o Doc não mostra", async () => {
     useDoc(DOC);
-    mockBatchUpdate.mockImplementation(async (arg: { requestBody: { requests: ReplaceReq[] } }) => ({
-      data: { replies: arg.requestBody.requests.map(() => ({ replaceAllText: { occurrencesChanged: 1 } })) },
-    }));
+    // 1 ocorrência na PRIMEIRA forma de cada valor (as demais formas, 0) — soma
+    // = esperado, para cair na releitura e não em over-matched.
+    mockBatchUpdate.mockImplementation(async (arg: { requestBody: { requests: ReplaceReq[] } }) => {
+      const seen = new Set<string>();
+      return {
+        data: {
+          replies: arg.requestBody.requests.map((r) => {
+            const first = !seen.has(r.replaceAllText.replaceText);
+            seen.add(r.replaceAllText.replaceText);
+            return { replaceAllText: { occurrencesChanged: first ? 1 : 0 } };
+          }),
+        },
+      };
+    });
     const result = await run();
     expect(result.replaced).toEqual([]);
     expect(result.skipped.every((s) => s.reason === "verify-failed" || s.reason === "not-found" || s.reason === "too-short" || s.reason === "stopword" || s.reason === "ambiguous")).toBe(true);

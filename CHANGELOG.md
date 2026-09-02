@@ -4,6 +4,12 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-02 - Dois consertos medidos no smoke de staging da troca pelo gabarito
+
+### Corrigido
+
+- **O valor do aluguel não era trocado em documento gerado pelo sistema.** O texto que o sistema lê do Google Doc vem com espaço comum onde o documento tem o espaço "fixo" que a formatação de moeda usa; a edição ia com a forma lida e o Google não encontrava nada. Agora a edição vai com todas as formas plausíveis (a lida, a do gabarito e a normalizada) e a que existe no documento casa. Medido: no modelo criado a partir de um contrato de locação, `aluguel_valor` saía como "a edição não pegou" — passa a ser trocado.
+- **"Criar modelo a partir de contrato" gravava o relatório da troca sem máscara.** O gabarito ali é o contrato real de um cliente; CPF e conta iam para o relatório e para a resposta da API. A ingestão por upload já mascarava; a rota passa a mascarar também.
 ## [Unreleased] - 2026-09-02 - O admin passa a poder liberar o gerente para abrir negócio de locação
 
 ### Corrigido
