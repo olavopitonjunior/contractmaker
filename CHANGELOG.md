@@ -16,6 +16,16 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 - Os rascunhos de modelo já criados com a conta escrita no texto não mudam sozinhos. Para atualizar um rascunho existente sem reenviar o arquivo, use "Pedir revisão pela IA" na tela de revisão do modelo: o passe de chaves roda de novo sobre o documento que já está lá, com o catálogo atual.
 - Este ajuste chega a produção junto com a migração de banco que cria as colunas; a pré-visualização de PR não roda migrações, então lá o card aparece vazio e não salva — o resto da tela de Perfil segue normal.
 
+## [Unreleased] - 2026-09-02 - Aprovar uma ação de risco passa a exigir permissão
+
+### Corrigido
+
+- **Qualquer pessoa da organização podia aprovar uma ação de alto risco e dispará-la na hora.** A tela de aprovação existe para ser o ponto humano no meio do caminho: alguém confere antes de o sistema criar uma cobrança, mandar um contrato para assinatura ou apagar um negócio em definitivo. Só que a aprovação não conferia **quem** estava aprovando — bastava estar dentro da organização e ter sessão aberta. Um perfil de leitura, que existe justamente para não mexer em nada, aprovava e a ação acontecia. São treze ações nessa condição, entre elas cobrança, envio para assinatura (que custa e tem efeito jurídico) e exclusão definitiva de negócio.
+- **A permissão para isso já existia e não fazia nada.** "Aprovar ActionIntent do Newton (HITL)" aparecia na tela de permissões e podia ser concedida ou negada — e o sistema ignorava a decisão nos dois sentidos. Era pior que não ter permissão nenhuma: dava ao administrador a impressão de estar no controle de quem aprova ações de risco, sem estar. Agora a permissão vale de verdade.
+- **A recusa acontece antes de qualquer outra resposta**, de propósito: quem não pode aprovar não descobre, pelo tipo de erro, se aquela aprovação existe ou em que estado ela está.
+
+Medido em produção antes de fechar: das aprovações já feitas, todas foram do proprietário da conta. Ninguém perde acesso que usava.
+
 ## [Unreleased] - 2026-09-02 - Converter proposta passa a pedir a permissão de criar, e converter lead para de errar o funil
 
 ### Corrigido

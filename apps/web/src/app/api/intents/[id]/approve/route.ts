@@ -8,6 +8,9 @@ import {
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
 import { executeIntent, IntentExecutionError } from "@/lib/api/intents";
+import { getEffectivePermissions, can } from "@/lib/security/rbac/check";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { getEffectiveUserId } from "@/lib/auth/impersonation";
 
 /**
  * POST /api/intents/[id]/approve
@@ -31,6 +34,32 @@ export async function POST(
       {
         error: "Forbidden",
         reason: "intent approval requires session auth (human-in-the-loop)",
+      },
+      { status: 403 }
+    );
+  }
+
+  // Permissão do APROVADOR (2026-09-02). Até aqui esta rota exigia sessão e
+  // mesma org — e mais nada: qualquer membro, `viewer` inclusive, aprovava uma
+  // intent de alto risco pendente e disparava a execução (criar cobrança,
+  // enviar envelope de assinatura, apagar negócio em definitivo).
+  //
+  // O agravante não era o buraco, era a fachada: `newton.intent.approve` já
+  // existia, com rótulo na tela ("Aprovar ActionIntent do Newton (HITL)") e
+  // concedida a `gestor_locacao`/`gestor_financeiro` — mas NENHUMA linha do
+  // código a lia. O admin concedia ou negava e o sistema ignorava a decisão
+  // nos dois sentidos. Permissão decorativa é pior que permissão ausente: dá
+  // garantia onde não há mecanismo.
+  //
+  // Ator EFETIVO pelo mesmo motivo do `guardDealScope`: sob impersonação o id
+  // da sessão é o do super_admin, que não tem membership no tenant.
+  const effUserId = await getEffectiveUserId(auth.ident.userId);
+  const approverPerms = await getEffectivePermissions(effUserId, auth.org.id);
+  if (!approverPerms || !can(approverPerms, PERMISSION.NEWTON_INTENT_APPROVE)) {
+    return NextResponse.json(
+      {
+        error: "PERMISSION_DENIED",
+        permission: PERMISSION.NEWTON_INTENT_APPROVE,
       },
       { status: 403 }
     );
