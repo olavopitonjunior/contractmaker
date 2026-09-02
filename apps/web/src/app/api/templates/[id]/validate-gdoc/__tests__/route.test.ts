@@ -185,3 +185,54 @@ describe("POST /api/templates/[id]/validate-gdoc — reconciliação de slots", 
     expect(updateArgs().where).toEqual({ id: "t1", orgId: "org-1" });
   });
 });
+
+/**
+ * A revalidação também espelha o gate de PII (lib/templates/pii-gate.ts): é o
+ * único ponto além da ingestão que relê o Doc inteiro, então é aqui que o
+ * conserto manual (trocar o trecho por uma chave) passa a valer na trava da
+ * ativação — e que o modelo legado, ingerido antes do gate, ganha a medida.
+ */
+describe("POST /api/templates/[id]/validate-gdoc — espelho do gate de PII", () => {
+  const HEADER = "<!-- engine=google_docs: a fonte é o Google Doc -->";
+  function withReport(draftReport: Record<string, unknown> | null) {
+    p.contractTemplate.findUnique = vi.fn().mockResolvedValue({
+      id: "t1",
+      orgId: "org-1",
+      engine: "google_docs",
+      googleTemplateDocId: "doc-123",
+      modalidade: "locacao",
+      handlebarsSource: HEADER,
+      draftReport,
+    });
+  }
+  const updateArgs = () => p.contractTemplate.update.mock.calls[0]?.[0];
+
+  it("Doc com CPF literal → draftReport.pii.blocked = true", async () => {
+    withReport({ inserted: [] });
+    mockDocText.mockResolvedValue("{{locadores_qualificacao}}\nCPF nº 529.982.247-25");
+    const res = await POST(new Request("http://localhost"), { params: { id: "t1" } });
+    expect(res.status).toBe(200);
+    expect(updateArgs().data.draftReport.pii).toMatchObject({ blocked: true, kinds: ["cpf"] });
+  });
+
+  it("operador trocou o trecho pela chave e revalidou → trava some (blocked = false)", async () => {
+    withReport({ pii: { blocked: true, kinds: ["cpf"], count: 1, warnings: [], checkedAt: "" } });
+    mockDocText.mockResolvedValue("{{locadores_qualificacao}}\n{{locatarios_qualificacao}}");
+    await POST(new Request("http://localhost"), { params: { id: "t1" } });
+    expect(updateArgs().data.draftReport.pii).toMatchObject({ blocked: false, kinds: [] });
+  });
+
+  it("export VAZIO não apaga um blocked:true anterior (não medido ≠ limpo)", async () => {
+    withReport({ pii: { blocked: true, kinds: ["cpf"], count: 1, warnings: [], checkedAt: "x" } });
+    mockDocText.mockResolvedValue("");
+    await POST(new Request("http://localhost"), { params: { id: "t1" } });
+    expect(updateArgs().data.draftReport.pii).toMatchObject({ blocked: true, kinds: ["cpf"] });
+  });
+
+  it("modelo legado sem relatório ganha a medida na primeira revalidação", async () => {
+    withReport(null);
+    mockDocText.mockResolvedValue("Agência 0001, Conta Corrente 682331986-6");
+    await POST(new Request("http://localhost"), { params: { id: "t1" } });
+    expect(updateArgs().data.draftReport.pii.blocked).toBe(true);
+  });
+});

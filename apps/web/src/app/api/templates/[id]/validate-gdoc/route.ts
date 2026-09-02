@@ -3,6 +3,7 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { isGoogleDocsConfigured } from "@/lib/google/client";
 import { getDocPlainText } from "@/lib/google/docs";
+import { auditTemplateText } from "@/lib/templates/pii-gate";
 import { googleErrorMessage } from "@/lib/google/auth-error";
 import { extractPlaceholdersFromText } from "@/lib/google/replace-placeholders";
 import {
@@ -91,6 +92,9 @@ export async function POST(
     const slotsChanged =
       slotsInDoc.length !== declaredSlots.length ||
       slotsInDoc.some((s) => !declaredSlots.includes(s));
+    // Export vazio é "não medido" (como na ingestão, no rerun-ai e no PATCH):
+    // gravar blocked:false sobre texto nenhum apagaria um blocked:true real.
+    const pii = text ? auditTemplateText(text) : null;
 
     // Atualiza o relatório do draft com o estado mais recente da validação.
     const prevReport =
@@ -135,6 +139,9 @@ export async function POST(
           ...prevReport,
           ...(prevSlots.length ? { slots } : {}),
           missingRequired,
+          // Espelho do Doc, como `slots`: o operador troca o trecho por uma
+          // chave, revalida, e a trava de PII da ativação some.
+          ...(pii ? { pii } : {}),
           lastValidatedAt: new Date().toISOString(),
         } as object,
         ...(template.engine === "google_docs" && slotsChanged
@@ -157,6 +164,9 @@ export async function POST(
       unknown,
       missingRequired,
       slots,
+      // A tela mescla `pii` no relatório como faz com `slots` — sem isso o card
+      // de dado pessoal ficava stale depois do conserto.
+      pii,
       catalog: catalog.map((d) => ({
         token: d.token,
         label: d.label,

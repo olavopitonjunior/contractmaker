@@ -224,13 +224,16 @@ export function TemplatesListClient({
     }
   }
 
-  async function restoreTemplate(id: string, forceActivate = false) {
+  async function restoreTemplate(
+    id: string,
+    flags: { forceActivate?: boolean; allowPii?: boolean } = {}
+  ) {
     setBusyId(id);
     try {
       const res = await fetch(`/api/templates/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "active", ...(forceActivate ? { forceActivate } : {}) }),
+        body: JSON.stringify({ status: "active", ...flags }),
       });
       const data = await res.json().catch(() => ({}));
       // O modelo tem espaço de cláusula e o acervo ainda não tem cláusula
@@ -240,12 +243,24 @@ export function TemplatesListClient({
       if (res.status === 409 && data?.code === "SLOT_CLAUSE_MISSING") {
         setBusyId(null);
         if (confirm(`${data.error}\n\nAtivar mesmo assim?`)) {
-          await restoreTemplate(id, true);
+          await restoreTemplate(id, { ...flags, forceActivate: true });
+        }
+        return;
+      }
+      // Mesma trava do servidor que a página de revisão mostra: dado pessoal
+      // literal no texto (ou texto que não pôde ser lido). Saída consciente
+      // própria, `allowPii` — o `forceActivate` do slot não libera isto.
+      if (res.status === 409 && (data?.code === "PII_LEFTOVER" || data?.code === "PII_UNVERIFIED")) {
+        setBusyId(null);
+        const pergunta =
+          data.code === "PII_UNVERIFIED" ? "Ativar sem conferir?" : "Ativar mesmo assim?";
+        if (confirm(`${data.error}\n\n${pergunta}`)) {
+          await restoreTemplate(id, { ...flags, allowPii: true });
         }
         return;
       }
       if (!res.ok) {
-        toast.error("Falha ao restaurar");
+        toast.error(data?.error ?? "Falha ao restaurar");
         return;
       }
       toast.success("Template restaurado.");
