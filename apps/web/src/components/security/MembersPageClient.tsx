@@ -319,6 +319,19 @@ export function MembersPageClient() {
                           <Shield className="h-3 w-3 mr-1" />
                           Proprietário
                         </Badge>
+                      ) : m.role === "custom" ? (
+                        // Papel customizado NÃO pode cair no select: ele lista
+                        // só os cinco presets, então `value="custom"` não casa
+                        // com nenhum item, o campo renderiza VAZIO e o primeiro
+                        // clique — o gesto natural de quem acha o campo
+                        // quebrado — dispara `handleChangeRole` e DEGRADA o
+                        // membro para um preset, sem aviso e sem desfazer
+                        // (issue #473). Em produção os únicos membros `custom`
+                        // são as contas do agente Max, uma por org.
+                        <Badge variant="outline" className="gap-1">
+                          <Shield className="h-3 w-3" />
+                          {m.customRoleName ?? "Papel customizado"}
+                        </Badge>
                       ) : canChangeRole && !isSelf ? (
                         <Select
                           value={m.role}
@@ -340,7 +353,7 @@ export function MembersPageClient() {
                           {ROLE_LABELS_PT[m.role as RolePreset] ?? m.role}
                         </Badge>
                       )}
-                      {m.customRoleName && (
+                      {m.customRoleName && m.role !== "custom" && (
                         <div className="text-xs text-muted-foreground">
                           {m.customRoleName}
                         </div>

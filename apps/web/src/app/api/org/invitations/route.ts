@@ -11,6 +11,7 @@ import { audit } from "@/lib/security/audit";
 import { sendEmail } from "@/lib/email/client";
 import { InvitationPendingEmail } from "@/lib/email/templates/invitation-pending";
 import {
+  canGrantRole,
   defaultInvitationExpiry,
   findPendingInvitation,
   getApproverEmails,
@@ -108,6 +109,51 @@ export async function POST(req: NextRequest) {
   }
   const email = parsed.data.email.toLowerCase().trim();
   const { name, role } = parsed.data;
+
+  // Teto de papel NA CRIAÇÃO (issue #474). A segurança nunca dependeu disto — o
+  // teto do `approve` é que decide, e é lá que a membership nasce —, mas sem
+  // esta porta o convite acima do teto era aceito com 201 e morria calado na
+  // aprovação: o convidador achava que deu certo, o aprovador tomava 403 e o
+  // convidado nunca recebia nada.
+  //
+  // Vem ANTES das checagens de existência de propósito: é a decisão mais
+  // barata e não revela a quem sequer pode conceder o papel se o e-mail já é
+  // membro da org.
+  //
+  // `ctx.userId` (não o impersonador): sob impersonation quem age dentro do
+  // tenant é o dono dele, e o operador de plataforma não tem membership nesta
+  // org — medir o teto por ele daria o resultado errado. Mesmo critério do
+  // `POST /api/org/members`.
+  //
+  // O schema de convite não aceita `custom`, então não há CustomRole a
+  // resolver aqui; `canGrantRole` recebe o alvo por papel.
+  const ceiling = await canGrantRole({
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    targetRole: role,
+  });
+  if (!ceiling.allowed) {
+    await audit(
+      {
+        orgId: ctx.orgId,
+        userId: ctx.userId,
+        ipAddress: ctx.ipAddress,
+        userAgent: ctx.userAgent,
+      },
+      {
+        action: "INVITATION_CREATED",
+        result: "DENIED",
+        resourceType: "org_invitation",
+        metadata: { email, role, reason: ceiling.reason },
+      }
+    );
+    return NextResponse.json(
+      {
+        error: `Você não pode conceder o papel "${role}" — ele tem permissões que você não possui`,
+      },
+      { status: 403 }
+    );
+  }
 
   // Bloqueia se já é membro
   const existingUser = await prisma.user.findUnique({

@@ -6,7 +6,7 @@ import { classifyOneClause } from "@/lib/clauses/classifier-llm";
 import type { ClauseSnapshot, ClauseClassificationProposal } from "@/lib/clauses/classify";
 import { getOrgAiBudgetStatus } from "@/lib/ai/budget";
 import { detectPii } from "@/lib/ingestion/pii";
-import { visibleEsteiras } from "@/lib/clauses/taxonomy";
+import { apareceNaEsteira } from "@/lib/clauses/taxonomy";
 import { logError } from "@/lib/observability/log";
 
 // Handlebars (via catálogo de chaves) e Anthropic rodam em node.
@@ -106,11 +106,13 @@ export async function POST(req: NextRequest) {
   // `ignored` distingue "está em outra esteira" de "não existe / é de
   // plataforma", que o `where` misturaria num sumiço mudo. O `orgId` — a
   // fronteira que de fato protege — continua no `where`.
-  const visiveis = parsed.data.esteira
-    ? (visibleEsteiras(parsed.data.esteira) as string[])
-    : null;
+  //
+  // Usa `apareceNaEsteira` — a MESMA função da tela. Esta era a terceira cópia
+  // da regra, e a #480 nasceu de duas cópias divergirem: manter mais uma aqui
+  // seria reabrir a porta pelo lado de dentro.
+  const alvo = parsed.data.esteira;
   const naEsteira = (e: string | null) =>
-    visiveis === null || e === null || visiveis.includes(e);
+    alvo === undefined || apareceNaEsteira(e, alvo);
 
   const elegiveis = rows.filter((r) => naEsteira(r.esteira));
   const ignored = rows.filter((r) => !naEsteira(r.esteira)).map((r) => r.id);
@@ -136,6 +138,17 @@ export async function POST(req: NextRequest) {
   const proposals: ClauseClassificationProposal[] = [];
   const failures: Array<{ clauseId: string; error: string }> = [];
   const unchanged: string[] = [];
+  /**
+   * Sem proposta E sem esteira: o modelo se ABSTEVE, não "já está no padrão".
+   *
+   * `buildProposal` devolve `null` quando nenhum campo muda. Para uma cláusula
+   * do balde de triagem, o modelo que não consegue decidir a esteira não muda
+   * campo nenhum — e a tela dizia "já estão classificadas" sobre um item que
+   * não está classificado, sobre o qual a única ação oferecida respondia que
+   * não havia nada a fazer. Ela ficava presa em triagem para sempre
+   * (issue #480).
+   */
+  const undecided: string[] = [];
 
   // Concorrência limitada: uma falha isolada não derruba o lote.
   for (let i = 0; i < snapshots.length; i += CONCURRENCY) {
@@ -160,10 +173,13 @@ export async function POST(req: NextRequest) {
         return;
       }
       if (res.value.proposal) proposals.push(res.value.proposal);
+      else if (clause.esteira === null) undecided.push(clause.id);
       else unchanged.push(clause.id);
     });
   }
 
-  // `ignored` é ADITIVO — nenhum consumidor existente quebra por ele existir.
-  return NextResponse.json({ proposals, failures, unchanged, ignored });
+  // `ignored` e `undecided` são ADITIVOS — nenhum consumidor existente quebra
+  // por eles existirem. `undecided` sai de dentro de `unchanged`, então a soma
+  // dos baldes continua fechando com o lote elegível.
+  return NextResponse.json({ proposals, failures, unchanged, undecided, ignored });
 }

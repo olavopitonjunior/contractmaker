@@ -42,7 +42,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { CLAUSE_STATUSES } from "@/lib/clauses/schema";
-import { axisFor, ESTEIRA_LABEL, type ClauseEsteira } from "@/lib/clauses/taxonomy";
+import {
+  apareceNaEsteira,
+  axisFor,
+  ESTEIRA_LABEL,
+  type ClauseEsteira,
+} from "@/lib/clauses/taxonomy";
 import { isCanonicalTag } from "@/lib/clauses/tag-vocabulary";
 import type { FormModule } from "@/lib/forms/presets";
 import type { ClauseClassificationProposal } from "@/lib/clauses/classify";
@@ -118,6 +123,7 @@ export function ClausesPageClient({
   const [proposals, setProposals] = useState<ClauseClassificationProposal[]>([]);
   const [unchanged, setUnchanged] = useState<string[]>([]);
   const [failures, setFailures] = useState<Array<{ clauseId: string; error: string }>>([]);
+  const [undecided, setUndecided] = useState<string[]>([]);
 
   const axis = axisFor(esteira);
 
@@ -127,10 +133,14 @@ export function ClausesPageClient({
     return Array.from(set).sort();
   }, [clauses]);
 
+  // Mesmo predicado que `visiveis` usa. Antes eram duas cópias da regra, e só
+  // uma lembrava das cláusulas SEM esteira: o badge dizia "Locação (23)" e a
+  // lista mostrava 24 linhas (issue #480). O número mentia justamente sobre o
+  // item não triado, que é o que mais precisa de atenção.
   const esteiraCounts = useMemo(
     () => ({
-      venda: clauses.filter((c) => c.esteira === "venda" || c.esteira === "ambas").length,
-      locacao: clauses.filter((c) => c.esteira === "locacao" || c.esteira === "ambas").length,
+      venda: clauses.filter((c) => apareceNaEsteira(c.esteira, "venda")).length,
+      locacao: clauses.filter((c) => apareceNaEsteira(c.esteira, "locacao")).length,
     }),
     [clauses]
   );
@@ -139,7 +149,7 @@ export function ClausesPageClient({
   const visiveis = useMemo(() => {
     const q = search.trim().toLowerCase();
     return clauses.filter((c) => {
-      if (c.esteira !== esteira && c.esteira !== "ambas" && c.esteira !== null) return false;
+      if (!apareceNaEsteira(c.esteira, esteira)) return false;
       if (statusFilter !== ALL && c.status !== statusFilter) return false;
       if (originFilter === "plataforma" && !isPlatformClause(c)) return false;
       if (originFilter === "org" && isPlatformClause(c)) return false;
@@ -304,6 +314,7 @@ export function ClausesPageClient({
     }
     setProposals([]);
     setUnchanged([]);
+    setUndecided([]);
     setFailures([]);
     setClassifyLoading(true);
     setReviewOpen(true);
@@ -324,7 +335,17 @@ export function ClausesPageClient({
       }
       setProposals(data.proposals ?? []);
       setUnchanged(data.unchanged ?? []);
+      setUndecided(data.undecided ?? []);
       setFailures(data.failures ?? []);
+      // `ignored` existia na resposta desde o #483 e ninguém o lia. Vindo
+      // não-vazio, N cláusulas saíam da análise sem nenhum aviso — a mesma
+      // "contagem mentindo" da #479, na direção oposta: sumiço a menos em vez
+      // de fantasma a mais.
+      if (data.ignored?.length > 0) {
+        toast.warning(
+          `${data.ignored.length} cláusula(s) ficaram de fora: são de outra esteira.`
+        );
+      }
     } catch {
       toast.error("Falha de rede ao analisar.");
       setReviewOpen(false);
@@ -333,7 +354,28 @@ export function ClausesPageClient({
     }
   }
 
-  const selectedIds = Array.from(selected);
+  /**
+   * A seleção que de fato conta: a interseção do `Set` com o que está VISÍVEL.
+   *
+   * O `Set` sobrevive a qualquer filtro que esconda uma linha — status, origem,
+   * tag, busca — e antes disto `selectedIds` era o `Set` inteiro. A barra dizia
+   * "1 selecionada(s)" sem nenhum checkbox marcado na tela, e "Analisar e
+   * classificar" mandava esse id (issue #484). O recorte por esteira do #483
+   * não pegava: a cláusula é da mesma esteira, só está filtrada.
+   *
+   * Interseção com `visiveis`, NÃO com `orderedSections`: aquele já filtra por
+   * `groupFilter` de propósito, e o contrato é que trocar o filtro de GRUPO
+   * preserva a seleção. Derivar em vez de limpar também evita ter de lembrar de
+   * zerar o `Set` em cada filtro novo que aparecer.
+   */
+  const visiveisIds = useMemo(
+    () => new Set(visiveis.map((c) => c.id)),
+    [visiveis]
+  );
+  const selectedIds = useMemo(
+    () => Array.from(selected).filter((id) => visiveisIds.has(id)),
+    [selected, visiveisIds]
+  );
 
   return (
     <div className="space-y-6">
@@ -384,7 +426,13 @@ export function ClausesPageClient({
           className="w-full sm:w-72"
         />
         <Select value={groupFilter} onValueChange={setGroupFilter}>
-          <SelectTrigger size="sm" className="w-[230px]">
+          <SelectTrigger
+            size="sm"
+            className="w-[230px]"
+            // Sem nome acessível o filtro é um combobox anônimo para leitor de
+            // tela (o placeholder some assim que há valor) — e intestável.
+            aria-label={axis.kind === "groupCode" ? "Filtrar por grupo" : "Filtrar por tema"}
+          >
             <SelectValue placeholder={axis.kind === "groupCode" ? "Grupo" : "Tema"} />
           </SelectTrigger>
           <SelectContent>
@@ -399,7 +447,7 @@ export function ClausesPageClient({
           </SelectContent>
         </Select>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger size="sm" className="w-[160px]">
+          <SelectTrigger size="sm" className="w-[160px]" aria-label="Filtrar por status">
             <SelectValue placeholder="Status" />
           </SelectTrigger>
           <SelectContent>
@@ -412,7 +460,7 @@ export function ClausesPageClient({
           </SelectContent>
         </Select>
         <Select value={originFilter} onValueChange={setOriginFilter}>
-          <SelectTrigger size="sm" className="w-[170px]">
+          <SelectTrigger size="sm" className="w-[170px]" aria-label="Filtrar por origem">
             <SelectValue placeholder="Origem" />
           </SelectTrigger>
           <SelectContent>
@@ -574,6 +622,7 @@ export function ClausesPageClient({
         }}
         proposals={proposals}
         unchanged={unchanged}
+        undecided={undecided}
         failures={failures}
         loading={classifyLoading}
       />

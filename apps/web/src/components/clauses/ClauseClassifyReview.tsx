@@ -57,6 +57,7 @@ export function ClauseClassifyReview({
   onOpenChange,
   proposals,
   unchanged,
+  undecided,
   failures,
   loading,
 }: {
@@ -64,6 +65,8 @@ export function ClauseClassifyReview({
   onOpenChange: (open: boolean) => void;
   proposals: ClauseClassificationProposal[];
   unchanged: string[];
+  /** Sem esteira E sem proposta: o modelo não decidiu. Não é "já classificada". */
+  undecided: string[];
   failures: Array<{ clauseId: string; error: string }>;
   loading: boolean;
 }) {
@@ -141,11 +144,28 @@ export function ClauseClassifyReview({
                 failures.length > 0 ? "border-destructive/40 text-destructive" : "text-muted-foreground"
               }`}
             >
-              {failures.length > 0
-                ? // Sem isto a tela dizia "já estão classificadas" com as falhas
-                  // listadas logo abaixo — mentira que esconde o erro.
-                  `Não foi possível analisar ${failures.length} cláusula(s). Nada foi alterado.`
-                : "Nada a alterar — as cláusulas selecionadas já estão classificadas."}
+              {/*
+                As duas frases SOMAM em vez de competir. Em cascata, um lote com
+                falhas E abstenções mostrava só a falha, e a informação de que N
+                cláusulas continuam sem esteira sumia — perda silenciosa da
+                mesma família que esta tela já teve duas vezes.
+              */}
+              {[
+                // Sem isto a tela dizia "já estão classificadas" com as falhas
+                // listadas logo abaixo — mentira que esconde o erro.
+                failures.length > 0
+                  ? `Não foi possível analisar ${failures.length} cláusula(s). Nada foi alterado.`
+                  : null,
+                // Cláusula do balde de triagem sobre a qual o modelo se absteve
+                // NÃO está classificada, e dizer que está a prendia lá para
+                // sempre.
+                undecided.length > 0
+                  ? `O modelo não conseguiu decidir a esteira de ${undecided.length} cláusula(s) pelo texto. Abra a cláusula e defina a esteira à mão — depois disso a análise consegue propor grupo, tema e chaves.`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" ") ||
+                "Nada a alterar — as cláusulas selecionadas já estão classificadas."}
             </div>
           )}
 
@@ -298,6 +318,13 @@ export function ClauseClassifyReview({
           {!loading && unchanged.length > 0 && (
             <p className="mt-2 text-xs text-muted-foreground">
               {unchanged.length} cláusula(s) já estavam no padrão e não precisam de mudança.
+            </p>
+          )}
+          {!loading && undecided.length > 0 && proposals.length > 0 && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              {undecided.length} cláusula(s) continuam sem esteira: o modelo não
+              conseguiu decidir pelo texto. Defina a esteira à mão na própria
+              cláusula.
             </p>
           )}
           {!loading &&
