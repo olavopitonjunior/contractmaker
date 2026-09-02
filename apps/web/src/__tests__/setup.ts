@@ -413,6 +413,12 @@ vi.mock("@/lib/db/prisma", () => {
       findFirst: vi.fn(),
       create: vi.fn().mockResolvedValue({ id: "pipe-mock" }),
     },
+    // `POST /api/leads/[leadId]/convert-to-deal` — a conversão de lead. Faltava
+    // aqui porque a rota nunca teve teste até o conserto de pipeline da #514.
+    lead: {
+      findUnique: vi.fn(),
+      update: vi.fn(),
+    },
     pipelineStage: {
       findFirst: vi.fn(),
       findUnique: vi.fn(),

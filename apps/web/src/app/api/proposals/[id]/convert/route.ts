@@ -13,6 +13,7 @@ import { proposalFeatureForKind } from "@/lib/modules/catalog";
 import { requireApproval, approvalResponse } from "@/lib/api/intents";
 import { ensureIntentExecutorsRegistered } from "@/lib/api/intent-executors";
 import { convertProposalToDeal, ProposalConvertError } from "@/lib/proposals/convert";
+import { guardDealCreate } from "@/lib/deals/route-helpers";
 
 const bodySchema = z.object({
   allowUnsigned: z.boolean().optional(),
@@ -42,6 +43,26 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (!can(eff, PERMISSION.PROPOSAL_CONVERT)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  // Converter CRIA um negócio — então cobra também a permissão de CRIAR, a
+  // mesma das seis rotas de criação fechadas no #513. Esta era a sétima porta:
+  // gateada só por PROPOSAL_CONVERT, ela deixava o admin que desliga "Criar
+  // negócio de venda" em /settings/gerentes ler a tela como fechada enquanto o
+  // gerente seguia criando negócio por aqui — um controle que mente (#514).
+  //
+  // Condicional por `kind` porque a rota é polimórfica: `convertProposalToDeal`
+  // resolve o pipeline com `getPipelineByKind(proposal.kind)` e grava
+  // `Deal.kind = proposal.kind`. Cobrar DEAL_CREATE ("criar negócio de venda")
+  // para converter uma proposta de locação seria o rótulo errado.
+  const deniedCreate = await guardDealCreate({
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    via: auth.ident.via,
+    permission:
+      proposal.kind === "locacao"
+        ? PERMISSION.LEASE_CREATE
+        : PERMISSION.DEAL_CREATE,
+  });
+  if (deniedCreate) return deniedCreate;
   try {
     await assertFeatureEnabled(auth.org.id, proposalFeatureForKind(proposal.kind));
   } catch (e) {
