@@ -16,6 +16,7 @@ import type {
 } from "@/lib/templates/clause-slots";
 import { slotToken } from "@/lib/templates/clause-slots";
 import { normalizeGarantiaTipo } from "@/lib/contracts/template-category";
+import { parseFillReport, type GenerationFillReport } from "./fill";
 
 export const GENERATION_PLAN_VERSION = 1;
 
@@ -55,6 +56,12 @@ export interface GenerationPlan {
     failures: ClauseSlotFailure[];
   };
   slotEvidence?: GenerationPlanSlotEvidence[];
+  /**
+   * Laudo determinístico de preenchimento (fill.ts). Gravado DEPOIS do create,
+   * quando o replace/cleanup já rodaram no Doc — por isso opcional: plano sem
+   * `fill` = geração anterior à feature ou Doc que falhou antes do replace.
+   */
+  fill?: GenerationFillReport;
 }
 
 export const EVIDENCE_HEAD_CHARS = 160;
@@ -169,5 +176,13 @@ export function parseGenerationPlan(json: unknown): GenerationPlan | null {
   const selection = raw.selection;
   if (!selection || typeof selection !== "object" || Array.isArray(selection)) return null;
   if (typeof (selection as Record<string, unknown>).manual !== "boolean") return null;
-  return json as GenerationPlan;
+  // `fill` é validado à parte e DESCARTADO se malformado — laudo ruim não
+  // pode derrubar o plano inteiro nem lançar dentro do executor (que não tem
+  // try/catch nos checks determinísticos: a exceção prenderia o run em
+  // `reviewing` até o sweeper reprocessar, e reprocessar repetiria o erro).
+  if (raw.fill === undefined) return json as GenerationPlan;
+  const fill = parseFillReport(raw.fill);
+  const { fill: _ignored, ...rest } = raw;
+  void _ignored;
+  return (fill ? { ...rest, fill } : rest) as unknown as GenerationPlan;
 }

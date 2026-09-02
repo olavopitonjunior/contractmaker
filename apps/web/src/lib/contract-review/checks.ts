@@ -11,6 +11,7 @@
 import type { ClauseSlotFailureReason } from "@/lib/templates/clause-slots";
 import type { GenerationPlan } from "./plan";
 import { normalizeEvidenceText } from "./plan";
+import { labelForToken } from "./fill";
 
 /** Mesma forma do QuickFinding do linter, com categoria livre (vira o
  *  namespace do dedupeKey: `review:<category>`). */
@@ -125,6 +126,73 @@ export function clausePlanChecks(
         selectedText: `platform:${resolved.slot}:${resolved.knowledgeItemId ?? ""}`,
       });
     }
+  }
+
+  return findings;
+}
+
+/**
+ * Confere o laudo de preenchimento (`plan.fill`) — campos que o modelo pedia e
+ * saíram em branco, e chaves que o sistema não produz. Não lê o documento: o
+ * laudo foi medido no momento do replace, com `occurrencesChanged` da própria
+ * API do Docs, que é mais confiável que reencontrar um vazio no texto.
+ *
+ * Obrigatório vazio → um aviso por campo (é o que o operador precisa corrigir
+ * um a um). Opcionais vazios → UM aviso agregado; chaves desconhecidas → UM
+ * aviso agregado. Sem isso, um modelo com dez chaves opcionais em branco
+ * viraria dez comentários e enterraria o que importa.
+ */
+export function placeholderFillChecks(plan: GenerationPlan): ReviewFinding[] {
+  const fill = plan.fill;
+  if (!fill) return [];
+  const findings: ReviewFinding[] = [];
+  const label = (token: string) => labelForToken(token, plan.modalidade);
+
+  for (const entry of fill.empty.filter((e) => e.required)) {
+    findings.push({
+      severity: "warning",
+      category: "campo_obrigatorio_vazio",
+      message:
+        `O campo obrigatório «${label(entry.token)}» ({{${entry.token}}}) saiu EM BRANCO no contrato` +
+        (entry.occurrences > 1 ? ` em ${entry.occurrences} trechos` : "") +
+        ` — a geração não tinha esse dado.`,
+      selectedText: `campo:${entry.token}`,
+      suggestedFix:
+        "Complete o dado no formulário e gere o contrato novamente, ou preencha o trecho diretamente no documento antes de aprovar.",
+    });
+  }
+
+  const optional = fill.empty.filter((e) => !e.required);
+  if (optional.length > 0) {
+    const lista = optional.map((e) => `«${label(e.token)}» ({{${e.token}}})`).join(", ");
+    findings.push({
+      severity: "warning",
+      category: "campo_vazio",
+      message:
+        (optional.length === 1
+          ? `O campo ${lista} saiu em branco no contrato`
+          : `${optional.length} campos saíram em branco no contrato: ${lista}`) +
+        ` — a geração não tinha esse(s) dado(s).`,
+      selectedText: `campos-vazios:${optional.map((e) => e.token).join(",")}`,
+      suggestedFix:
+        "Confira se o trecho faz sentido vazio. Se não, complete no formulário e gere novamente, ou edite o documento.",
+    });
+  }
+
+  if (fill.unknown.length > 0) {
+    const lista = fill.unknown.map((t) => `{{${t}}}`).join(", ");
+    findings.push({
+      severity: "warning",
+      category: "chave_desconhecida",
+      message:
+        (fill.unknown.length === 1
+          ? `O modelo pede a chave ${lista}, que o sistema não produz`
+          : `O modelo pede ${fill.unknown.length} chaves que o sistema não produz: ${lista}`) +
+        ` — o trecho correspondente foi apagado do contrato.`,
+      selectedText: `chaves-desconhecidas:${fill.unknown.join(",")}`,
+      suggestedFix:
+        "No modelo (Templates → Chaves), troque a chave por uma do catálogo da modalidade ou escreva o trecho por extenso.",
+    });
   }
 
   return findings;

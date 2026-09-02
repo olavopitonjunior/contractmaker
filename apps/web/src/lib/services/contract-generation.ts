@@ -21,7 +21,8 @@ import {
   GARANTIA_LABELS,
 } from "@/lib/contracts/template-category";
 import { resolveClauseSlots } from "@/lib/templates/clause-slots";
-import { buildGenerationPlan } from "@/lib/contract-review/plan";
+import { buildGenerationPlan, type GenerationPlan } from "@/lib/contract-review/plan";
+import { buildFillReport, type BuildFillReportInput } from "@/lib/contract-review/fill";
 import { enqueueContractReview } from "@/lib/contract-review/enqueue";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import {
@@ -1025,11 +1026,14 @@ export async function generateContractForDeal(
         map["contrato_versao"] = String(contract.version);
         // Sem replace, o contrato sai com `{{tokens}}` crus — inútil. Deixa propagar
         // para o catch externo, que desfaz o contrato e lança.
-        await replacePlaceholdersInDoc({
-          docId: copy.docId,
+        const replaced = await replacePlaceholdersInDoc({ docId: copy.docId, replacements: map });
+        const orphansRemoved = await cleanupOrphanPlaceholders(copy.docId);
+        await persistFillReport(contract.id, generationPlan, {
+          occurrencesByToken: replaced.occurrencesByToken,
           replacements: map,
+          orphansRemoved,
+          modalidade: template.modalidade,
         });
-        await cleanupOrphanPlaceholders(copy.docId);
 
         // Snapshot real do conteúdo (substitui o stub de htmlContent).
         try {
@@ -1283,6 +1287,30 @@ export async function generateContractForDeal(
 }
 
 /**
+ * Grava o laudo de preenchimento (fill.ts) no plano de geração — jsonb, sem
+ * migration. Best-effort e SEPARADO do snapshot de htmlContent: o laudo não
+ * pode depender do export do Drive dar certo, e a geração não pode falhar por
+ * causa do laudo. É o que a revisão pós-geração lê para avisar "campo em
+ * branco" sem reler o Doc.
+ */
+async function persistFillReport(
+  contractId: string,
+  plan: GenerationPlan,
+  input: BuildFillReportInput
+): Promise<void> {
+  try {
+    const fill = buildFillReport(input);
+    const next: GenerationPlan = { ...plan, fill };
+    await prisma.contract.update({
+      where: { id: contractId },
+      data: { generationPlanJson: next as any },
+    });
+  } catch (err) {
+    console.error("[generation] Falha ao gravar o laudo de preenchimento:", err);
+  }
+}
+
+/**
  * Cadastro de corretores da org no shape que `corretagemDadosPagamento` entende.
  *
  * Filtra por `archivedAt` e NÃO por `active`: `active` responde "dá pra repassar
@@ -1517,8 +1545,14 @@ export async function generateLocacaoContractForDeal(
         map["contrato_id"] = contract.id;
         map["contrato_versao"] = String(contract.version);
         // Sem replace, o contrato sai com `{{tokens}}` crus — deixa propagar.
-        await replacePlaceholdersInDoc({ docId: copy.docId, replacements: map });
-        await cleanupOrphanPlaceholders(copy.docId);
+        const replaced = await replacePlaceholdersInDoc({ docId: copy.docId, replacements: map });
+        const orphansRemoved = await cleanupOrphanPlaceholders(copy.docId);
+        await persistFillReport(contract.id, generationPlan, {
+          occurrencesByToken: replaced.occurrencesByToken,
+          replacements: map,
+          orphansRemoved,
+          modalidade: template.modalidade,
+        });
 
         // Snapshot real do conteúdo pro htmlContent (export/diff/memória).
         try {
@@ -1835,8 +1869,14 @@ export async function generateAdministracaoContractForDeal(
         map["contrato_id"] = contract.id;
         map["contrato_versao"] = String(contract.version);
         // Sem replace, o contrato sai com `{{tokens}}` crus — deixa propagar.
-        await replacePlaceholdersInDoc({ docId: copy.docId, replacements: map });
-        await cleanupOrphanPlaceholders(copy.docId);
+        const replaced = await replacePlaceholdersInDoc({ docId: copy.docId, replacements: map });
+        const orphansRemoved = await cleanupOrphanPlaceholders(copy.docId);
+        await persistFillReport(contract.id, generationPlan, {
+          occurrencesByToken: replaced.occurrencesByToken,
+          replacements: map,
+          orphansRemoved,
+          modalidade: template.modalidade,
+        });
 
         // Snapshot real do conteúdo pro htmlContent (export/diff/memória).
         try {
