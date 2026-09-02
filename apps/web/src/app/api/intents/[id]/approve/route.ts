@@ -8,6 +8,8 @@ import {
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
 import { executeIntent, IntentExecutionError } from "@/lib/api/intents";
+import { guardPermission } from "@/lib/security/rbac/guard";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 /**
  * POST /api/intents/[id]/approve
@@ -35,6 +37,30 @@ export async function POST(
       { status: 403 }
     );
   }
+
+  // Permissão do APROVADOR (2026-09-02). Até aqui esta rota exigia sessão e
+  // mesma org — e mais nada: qualquer membro, `viewer` inclusive, aprovava uma
+  // intent de alto risco pendente e disparava a execução (criar cobrança,
+  // enviar envelope de assinatura, apagar negócio em definitivo).
+  //
+  // O agravante não era o buraco, era a fachada: `newton.intent.approve` já
+  // existia, com rótulo na tela e concedida a `gestor_locacao`/
+  // `gestor_financeiro` — e NENHUMA linha do código a lia. Permissão
+  // decorativa é pior que permissão ausente: dá garantia onde não há
+  // mecanismo.
+  //
+  // ANTES do fetch da intent, de propósito: senão o código de status ensina a
+  // quem não pode aprovar se a intent existe e em que estado está.
+  //
+  // Ator EFETIVO já resolvido pelo `requireApiAuth` — não re-derivar aqui,
+  // para não criar segunda fonte de verdade sobre o ator dentro do gate.
+  const denied = await guardPermission({
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    permission: PERMISSION.NEWTON_INTENT_APPROVE,
+    message: "Você não tem permissão para aprovar esta ação.",
+  });
+  if (denied) return denied;
 
   const intent = await prisma.actionIntent.findUnique({
     where: { id: params.id },
@@ -78,7 +104,12 @@ export async function POST(
     where: { id: params.id },
     data: {
       status: "approved",
-      approvedBy: auth.ident.userId,
+      // O mesmo ator que o gate autorizou. Sob impersonação `ident.userId` é o
+      // super_admin (sem membership no tenant) e `actor.effectiveUserId` é o
+      // dono da org: gravar o primeiro faria a trilha nomear um aprovador
+      // diferente daquele cuja permissão permitiu a aprovação. Quem impersonou
+      // segue registrado na metadata de auditoria.
+      approvedBy: auth.actor.effectiveUserId,
       approvedAt: new Date(),
     },
   });
