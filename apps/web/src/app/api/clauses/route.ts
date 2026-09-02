@@ -8,6 +8,7 @@ import {
   normalizeClauseBody,
   deriveIsVariable,
 } from "@/lib/clauses/schema";
+import { groupCodeForEsteira } from "@/lib/clauses/taxonomy";
 
 /**
  * /api/clauses — biblioteca de cláusulas padronizadas da org.
@@ -90,7 +91,11 @@ export async function POST(req: NextRequest) {
     source: data.source || "manual",
     createdBy: session.user.id,
     subcategory: data.subcategory,
-    groupCode: data.groupCode ?? null,
+    // `clauseWriteSchema` valida os dois campos SEPARADAMENTE e aceita o par
+    // incoerente (`{ esteira:"locacao", groupCode:"G4" }`). Era o único caminho
+    // de escrita que criava o estado que o PATCH e o classificador recusam —
+    // e que o PATCH depois "consertaria" apagando em silêncio.
+    groupCode: groupCodeForEsteira(data.esteira, data.groupCode),
     esteira: data.esteira ?? null,
     agentNotes: data.agentNotes ?? null,
     // Derivado do conteúdo — o client não opina (ver `deriveIsVariable`).

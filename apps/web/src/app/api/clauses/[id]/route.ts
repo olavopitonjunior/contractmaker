@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { updateKnowledgeItem } from "@/lib/ai/knowledge";
 import { areTagsFrozen } from "@/lib/clauses/tag-vocabulary";
+import { groupCodeForEsteira } from "@/lib/clauses/taxonomy";
 import {
   clauseWriteSchema,
   normalizeClauseBody,
@@ -88,13 +89,20 @@ export async function PATCH(
     );
   }
 
+  const finalEsteira = data.esteira === undefined ? clause.esteira : data.esteira;
+  const groupCodeBruto = data.groupCode === undefined ? clause.groupCode : data.groupCode;
+
   await updateKnowledgeItem(params.id, clause.orgId, {
     title: data.title ?? clause.title,
     content: data.content ?? clause.content,
     tags: data.tags ?? clause.tags,
     subcategory: data.subcategory ?? clause.subcategory,
-    groupCode: data.groupCode === undefined ? clause.groupCode : data.groupCode,
-    esteira: data.esteira === undefined ? clause.esteira : data.esteira,
+    // Não é `?? clause.groupCode`: um PATCH que só manda `esteira` preservava o
+    // grupo do banco verbatim, e era assim que 'GARANTIA' (eixo do acervo
+    // curado de locação) passava a conviver com `esteira='venda'` — o estado
+    // que a migration 20260902013000 teve de desfazer em produção.
+    groupCode: groupCodeForEsteira(finalEsteira, groupCodeBruto),
+    esteira: finalEsteira,
     // Derivado do conteúdo FINAL — PATCH que só muda o texto reclassifica
     // sozinho, e o client não opina (ver `deriveIsVariable`).
     isVariable: deriveIsVariable(data.content ?? clause.content),

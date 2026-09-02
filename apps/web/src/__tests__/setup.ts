@@ -47,6 +47,15 @@ vi.mock("@/lib/db/prisma", () => {
       findMany: vi.fn().mockResolvedValue([]),
       upsert: vi.fn().mockResolvedValue({}),
     },
+    // Propostas do agente (`propose_new_clause`). Aprovar uma delas CRIA uma
+    // cláusula, então o caminho decide `groupCode`, `esteira` e `isVariable` —
+    // dirigido por LLM de ponta a ponta e sem cobertura até 09/2026.
+    clauseProposal: {
+      findFirst: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+      update: vi.fn().mockResolvedValue({}),
+      count: vi.fn().mockResolvedValue(0),
+    },
     contractTemplate: {
       findMany: vi.fn(),
       findFirst: vi.fn().mockResolvedValue(null),
