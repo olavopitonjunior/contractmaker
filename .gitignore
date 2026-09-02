@@ -83,3 +83,6 @@ apps/web/playwright-report/
 apps/web/test-results/
 apps/web/tests/screenshots/
 .env*
+
+# Artefatos de smoke/QA (docx, pdf) gerados no working tree — nunca versionar.
+.qa-tmp/
