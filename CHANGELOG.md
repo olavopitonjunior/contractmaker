@@ -4,6 +4,25 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-01 - O convite avisa na hora, e o papel do Max para de correr risco de clique
+
+### Corrigido
+
+- **`/settings/membros` renderizava um campo de Função VAZIO para quem tem papel customizado — e o primeiro clique degradava o membro.** O select lista só os cinco presets, então `value="custom"` não casava com item nenhum: o campo parecia quebrado, com o nome real do papel só numa legenda cinza embaixo. Como não havia opção correspondente, qualquer interação disparava a troca de papel e rebaixava o membro para um preset, sem aviso e sem desfazer pela tela. **Não era hipótese:** os quatro membros `custom` de produção são as contas do agente Max, uma por org — um clique acidental mudava o que o Max pode fazer. Agora papel customizado é um badge com o nome, não editável inline, seguindo o padrão que `owner` já usava. **Fica de fora de propósito:** oferecer as CustomRoles como opção do select exige que `PATCH /api/org/members/:id` aceite `customRoleId`, que ele não aceita — é mudança de API, e a issue segue aberta para ela.
+
+### Alterado
+
+- **`POST /api/org/invitations` passa a checar teto de papel na CRIAÇÃO, não só na aprovação.** Quem tinha apenas `org.members.invite` criava um convite de `admin` com 201 e toast de sucesso; a negativa só aparecia depois, no `approve`, para outra pessoa. Do ponto de vista das três envolvidas o convite simplesmente evaporava. **A segurança nunca dependeu disto** — o teto do `approve` decide, e é lá que a membership nasce; o que estava quebrado era o momento do feedback. Reusa `canGrantRole`, que o PR do teto lateral exportou justamente por ser o teto puro, sem gate embutido.
+  - **A capacidade removida não é usada, e isso foi medido, não suposto:** os 14 convites de produção foram todos criados por `owner` ou `admin`, e não há nenhum pendente. Ninguém convidava acima do próprio teto contando com um aprovador mais graduado.
+  - **A ordem é deliberada:** o teto vem antes das checagens de "já é membro" e "já tem convite pendente". É a decisão mais barata, e quem não pode conceder o papel também não deve descobrir por resposta de API se um e-mail já pertence à org. Os dois casos têm teste.
+  - **A armadilha que isto quase introduziu:** `member` é o default do schema de convite e **não está no catálogo de presets**. Se o teto tratasse "papel que não sei resolver" como recusa, todo convite padrão passaria a dar 403 — inclusive os do owner. `resolveTargetPermissions` já devolvia `{}` nesse caso; agora há teste para que continue.
+  - A recusa audita `DENIED` e não escreve nada. É o único dos quatro call-sites de teto que audita a negação — os outros três não, e a assimetria virou follow-up.
+
+### Notas
+
+- **Duas afirmações do bloco de 31/08 ficaram superadas** e são corrigidas aqui em vez de reescritas lá, porque aquele bloco já foi promovido a produção apesar do rótulo: (1) "`POST /api/org/invitations` só exige `org.members.invite` e não checa teto" deixou de valer com esta entrada; (2) "`POST /api/org/members` cria membership com papel arbitrário … fica como follow-up" foi fechado pelo teto lateral, já em produção.
+- Sem migration e sem mudança de schema.
+
 ## [Unreleased] - 2026-08-31 - O perfil de administrador passa a aprovar e reprovar usuários
 
 ### Corrigido
