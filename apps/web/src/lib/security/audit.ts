@@ -37,6 +37,12 @@ export type AuditAction =
   | "MEMBER_LEFT"
   | "MEMBER_ROLE_CHANGED"
   | "MEMBER_ROLE_CHANGED_TARGET"
+  // Recusa do teto de papel no PATCH de membro (#488). Ação PRÓPRIA e não
+  // `MEMBER_ROLE_CHANGED` com `result: "DENIED"`: o painel de auditoria agrupa
+  // `topActions` só por `action` (`api/admin/metrics/audit`), então a tentativa
+  // negada entraria na contagem de trocas efetivadas. Com ação própria, buscar
+  // por ação E buscar por resultado funcionam; reaproveitando, só a segunda.
+  | "MEMBER_ROLE_CHANGE_DENIED"
   | "OWNERSHIP_TRANSFERRED"
   | "CUSTOM_ROLE_CREATED"
   | "CUSTOM_ROLE_UPDATED"
