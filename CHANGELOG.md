@@ -4,6 +4,16 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-02 - O relatório da IA diz por que cada chave falta, e para de guardar dado pessoal
+
+### Alterado
+
+- **Cada chave ausente do catálogo agora vem com o motivo.** "Falta a chave X" era a mesma linha para quatro problemas — a IA não propôs nada, propôs um trecho que se repete, propôs um que não existe no texto, ou o Google recusou a edição. O relatório passa a dizer qual foi, com o trecho proposto, e a tela de revisão mostra isso embaixo de cada chave ausente. Chave que a IA nem tentou fica em silêncio, que é a informação certa ali.
+
+### Corrigido
+
+- **O relatório da ingestão guardava CPF, agência e conta do contrato-fonte.** O gate de dado pessoal protege o documento, mas os trechos que a IA recusou eram gravados crus no relatório do modelo e renderizados na revisão. Agora todo trecho passa pela máscara antes de ser gravado — inclusive o trecho que a IA **substituiu** pela chave, que depois disso só existia no relatório (documentos, dados bancários, CEP, telefone, e-mail). A tela mascara de novo ao exibir, então relatórios gravados antes desta versão, que têm o trecho cru no banco, também deixam de mostrá-lo. Nome e endereço não têm detector automático — o documento segue sendo a fonte, não o relatório.
+
 ## [Unreleased] - 2026-09-02 - O relatório da IA na ingestão de modelos para de contar o que não entrou
 
 ### Corrigido
