@@ -1,9 +1,10 @@
-import { getDocsClient } from "@/lib/google/client";
-import { getDocPlainText } from "@/lib/google/docs";
+import type { docs_v1 } from "googleapis";
+import { batchUpdateDoc, getDocPlainText } from "@/lib/google/docs";
 import {
   buildLocacaoPlaceholderMap,
   buildVendaPlaceholderMap,
 } from "./placeholder-map";
+import type { SkipReason } from "./insertion-report";
 
 // ============================================================================
 // Reverse-merge: transforma um CONTRATO preenchido (Google Doc) em MODELO com
@@ -17,16 +18,42 @@ import {
 //   - minLength >= 4 e stopwords: valores genéricos ("São Paulo", "10") nunca
 //     são trocados às cegas;
 //   - unicidade: só substitui quando o valor ocorre EXATAMENTE 1 vez no texto
-//     restante. O resto vai pro relatório e pro pass de IA/revisão humana.
+//     simulado (o original com as trocas anteriores já aplicadas). O resto vai
+//     pro relatório e pro pass de IA/revisão humana.
+//
+// `replaced` SÓ DEPOIS DE CONFERIR (2026-09-02, mesmo desenho do passe de IA):
+// a lista era montada antes do batchUpdate e a resposta da API era descartada.
+// Agora cada request tem índice rastreado, `occurrencesChanged` faz a 1ª
+// triagem, a releitura do Doc faz a 2ª — substituído = o token está lá E o
+// valor não está mais. "Não sei" (Drive fora na releitura) nunca vira "deu
+// certo". O batch vai por `batchUpdateDoc`, que marca a edição como
+// programática para o eco do webhook do Drive.
 // ============================================================================
 
+/**
+ * Motivos pré-batch (`ambiguous`, `too-short`, `not-found`, `stopword`,
+ * `batch-failed`): o Doc NÃO foi tocado para aquele valor. Motivos pós-batch
+ * `over-matched` e `verify-failed`: o Doc PODE ter sido alterado (a API
+ * reportou ocorrências trocadas) e mesmo assim o item sai em `skipped`,
+ * porque "não confirmado" conta como falha — pessimista de propósito, mesmo
+ * desenho do passe de IA. Quem lê `skipped` não pode inferir "o valor ainda
+ * está lá": a fonte da verdade é o Doc, não o relatório.
+ */
+export type ReverseMergeSkipReason =
+  | "ambiguous"
+  | "too-short"
+  | "not-found"
+  | "stopword"
+  // Pós-batch — mesmo vocabulário de insertion-report.ts / apply-clause-slot.ts.
+  | Extract<
+      SkipReason,
+      "batch-failed" | "replace-noop" | "over-matched" | "verify-failed" | "verify-unavailable"
+    >;
+
 export interface ReverseMergeResult {
+  /** Trocas CONFIRMADAS no documento após o batch (não "enviadas"). */
   replaced: Array<{ token: string; value: string }>;
-  skipped: Array<{
-    token: string;
-    value: string;
-    reason: "ambiguous" | "too-short" | "not-found" | "stopword";
-  }>;
+  skipped: Array<{ token: string; value: string; reason: ReverseMergeSkipReason }>;
 }
 
 const MIN_VALUE_LENGTH = 4;
@@ -82,19 +109,22 @@ export async function reverseMergeDocToTemplate(input: {
   }
 
   // longest-first: blocos compostos antes dos valores curtos contidos neles.
-  const candidates = Array.from(byValue.entries()).sort(
+  const candidatesAll = Array.from(byValue.entries()).sort(
     (a, b) => b[0].length - a[0].length
   );
 
-  const replaced: ReverseMergeResult["replaced"] = [];
   const skipped: ReverseMergeResult["skipped"] = [];
-  const requests: object[] = [];
+  const requests: docs_v1.Schema$Request[] = [];
+  const planned: Array<{ token: string; value: string; requestIdx: number }> = [];
 
-  // Simula as substituições sobre o texto pra que a checagem de unicidade dos
-  // próximos valores considere o que os anteriores já removeram.
-  let text = await getDocPlainText(input.docId);
+  // Simula as substituições sobre o texto (GLOBAL, como o replaceAllText —
+  // com a guarda de unicidade dá no mesmo, mas a semântica fica explícita)
+  // pra que a checagem de unicidade dos próximos valores considere o que os
+  // anteriores já removeram.
+  const docText = await getDocPlainText(input.docId);
+  let sim = docText;
 
-  for (const [value, token] of candidates) {
+  for (const [value, token] of candidatesAll) {
     if (value.length < MIN_VALUE_LENGTH) {
       skipped.push({ token, value, reason: "too-short" });
       continue;
@@ -103,7 +133,7 @@ export async function reverseMergeDocToTemplate(input: {
       skipped.push({ token, value, reason: "stopword" });
       continue;
     }
-    const count = countOccurrences(text, value);
+    const count = countOccurrences(sim, value);
     if (count === 0) {
       skipped.push({ token, value, reason: "not-found" });
       continue;
@@ -112,22 +142,63 @@ export async function reverseMergeDocToTemplate(input: {
       skipped.push({ token, value, reason: "ambiguous" });
       continue;
     }
-    replaced.push({ token, value });
+    planned.push({ token, value, requestIdx: requests.length });
     requests.push({
       replaceAllText: {
         containsText: { text: value, matchCase: true },
         replaceText: `{{${token}}}`,
       },
     });
-    text = text.replace(value, `{{${token}}}`);
+    sim = sim.split(value).join(`{{${token}}}`);
   }
 
-  if (requests.length > 0) {
-    const docs = getDocsClient();
-    await docs.documents.batchUpdate({
-      documentId: input.docId,
-      requestBody: { requests },
-    });
+  const replaced: ReverseMergeResult["replaced"] = [];
+  if (planned.length === 0) return { replaced, skipped };
+
+  let replies: docs_v1.Schema$Response[] | null = null;
+  try {
+    const res = await batchUpdateDoc(input.docId, requests);
+    replies = res?.data?.replies ?? [];
+  } catch (err) {
+    console.error("[reverse-merge] batchUpdate falhou:", err);
+  }
+  if (replies === null) {
+    for (const p of planned) skipped.push({ token: p.token, value: p.value, reason: "batch-failed" });
+    return { replaced, skipped };
+  }
+
+  // 1ª triagem: o que a API disse que fez. Reply ausente não decide.
+  const pending: typeof planned = [];
+  for (const p of planned) {
+    const r = replies[p.requestIdx];
+    const changed = r === undefined ? null : Number(r.replaceAllText?.occurrencesChanged ?? 0);
+    if (changed === 0) {
+      skipped.push({ token: p.token, value: p.value, reason: "replace-noop" });
+    } else if (changed !== null && changed > 1) {
+      // Casou também fora do texto plano (cabeçalho/rodapé): editou lugar que
+      // ninguém examinou. O Doc mudou; o relatório não finge que foi limpo.
+      skipped.push({ token: p.token, value: p.value, reason: "over-matched" });
+    } else {
+      pending.push(p);
+    }
+  }
+
+  // 2ª triagem: o que o documento mostra.
+  let reread: string | null = null;
+  try {
+    reread = await getDocPlainText(input.docId);
+  } catch (err) {
+    console.error("[reverse-merge] releitura falhou:", err);
+  }
+  if (reread === null) {
+    for (const p of pending) skipped.push({ token: p.token, value: p.value, reason: "verify-unavailable" });
+    return { replaced, skipped };
+  }
+  for (const p of pending) {
+    const tokenPresent = reread.includes(`{{${p.token}}}`);
+    const valueGone = countOccurrences(reread, p.value) === 0;
+    if (tokenPresent && valueGone) replaced.push({ token: p.token, value: p.value });
+    else skipped.push({ token: p.token, value: p.value, reason: "verify-failed" });
   }
 
   return { replaced, skipped };
