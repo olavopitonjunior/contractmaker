@@ -32,8 +32,8 @@ import {
 import {
   loadOrgContractDefaults,
   loadOrgLocacaoDefaults,
-  loadOrgLocacaoRecebimento,
 } from "@/lib/contracts/org-defaults";
+import { loadOrgRecebimento } from "@/lib/contracts/org-recebimento";
 import { assertModuleEnabled } from "@/lib/modules/guard";
 import { MODULE } from "@/lib/modules/catalog";
 import { enrichLocacaoData, enrichAdministracaoData } from "@/lib/locacao/enrich";
@@ -1544,10 +1544,10 @@ export async function generateLocacaoContractForDeal(
             ? corretagemDadosPagamento(rawDataJson, await carregarRegistroCorretores(orgId))
             : "";
         // Idem para a PRÓPRIA imobiliária: a via de recebimento da comissão vem
-        // do padrão da org (Padrão contratual · Locação), vai para o Doc e não
-        // para o dataJson. Nunca lança — sem padrão, a chave sai vazia.
+        // do cadastro da org (Perfil da imobiliária), vai para o Doc e não
+        // para o dataJson. Nunca lança — sem cadastro, a chave sai vazia.
         map["imobiliaria_dados_pagamento"] = imobiliariaDadosPagamento(
-          await loadOrgLocacaoRecebimento(orgId)
+          await loadOrgRecebimento(orgId)
         );
         map["contrato_numero"] = numeroContrato;
         map["contrato_id"] = contract.id;

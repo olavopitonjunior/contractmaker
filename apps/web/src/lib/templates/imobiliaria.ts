@@ -14,7 +14,8 @@
  *   `aluguel.adm_imobiliaria` — a intermediação existe mesmo quando a org não
  *   administra o imóvel). Sem razão social, "".
  * - A via de recebimento NÃO passa pelo dataJson: o call site da geração lê o
- *   padrão da org (`contractDefaultsJson.locacao_recebimento`) e escreve só no
+ *   cadastro da org (`Organization.pixAddressKey`/`bank*`, Perfil da
+ *   imobiliária — `lib/contracts/org-recebimento.ts`) e escreve só no
  *   Doc do contrato. O mapa puro emite a chave vazia. É o mesmo desenho do
  *   repasse do corretor — a conta de alguém nunca vira dado do negócio.
  *
@@ -55,7 +56,7 @@ export function imobiliariaQualificacao(data: Record<string, unknown>): string {
 
 /**
  * Onde a imobiliária recebe — a mesma prosa do corretor ("na chave PIX (CNPJ):
- * …" ou "no Banco X, Agência Y, Conta corrente nº Z"). "" quando o padrão da
+ * …" ou "no Banco X, Agência Y, Conta corrente nº Z"). "" quando o cadastro da
  * org está vazio ou a conta está incompleta.
  */
 export function imobiliariaDadosPagamento(

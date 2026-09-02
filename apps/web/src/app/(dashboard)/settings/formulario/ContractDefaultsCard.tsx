@@ -17,11 +17,9 @@ import { UF_LIST } from "@/components/forms/UFSelect";
 import {
   DEFAULT_CONTRACT_SETTINGS,
   DEFAULT_LOCACAO_COMISSAO,
-  DEFAULT_LOCACAO_RECEBIMENTO,
   DEFAULT_LOCACAO_SETTINGS,
   type ContractSettings,
   type LocacaoComissaoDefaults,
-  type LocacaoRecebimento,
   type LocacaoSettings,
 } from "@/lib/contracts/default-config";
 import { useEsteira } from "./EsteiraTabs";
@@ -57,13 +55,11 @@ export function ContractDefaultsCard({
   initial,
   initialLocacao,
   initialComissaoLocacao,
-  initialRecebimentoLocacao,
   locacaoEnabled = false,
 }: {
   initial: ContractSettings;
   initialLocacao: LocacaoSettings;
   initialComissaoLocacao: LocacaoComissaoDefaults;
-  initialRecebimentoLocacao: LocacaoRecebimento;
   locacaoEnabled?: boolean;
 }) {
   const esteira = useEsteira();
@@ -94,7 +90,6 @@ export function ContractDefaultsCard({
   const locacaoState = useState<LocacaoSettings>(initialLocacao);
   const comissaoState =
     useState<LocacaoComissaoDefaults>(initialComissaoLocacao);
-  const recebimentoState = useState<LocacaoRecebimento>(initialRecebimentoLocacao);
 
   // O branch inteiro é a unidade de salvamento, não o campo: `desistencia.
   // prazo_dias` só faz sentido junto com `desistencia.permite`, e a rota mescla
@@ -118,18 +113,14 @@ export function ContractDefaultsCard({
       contractDefaults: {
         locacao: locacaoState[0],
         locacao_comissao: comissaoState[0],
-        locacao_recebimento: recebimentoState[0],
       },
     },
     {
       endpoint: "/api/org/form-settings",
-      // Espelha as faixas de `locacaoSettingsSchema`,
-      // `locacaoComissaoDefaultsSchema` e `locacaoRecebimentoSchema`: percentual
-      // digitado grande demais (999 a caminho de 99) ou chave PIX além do
-      // limite não podem virar PATCH recusado.
-      isValid: () =>
-        locacaoNaFaixa(locacaoState[0], comissaoState[0]) &&
-        recebimentoNaFaixa(recebimentoState[0]),
+      // Espelha as faixas de `locacaoSettingsSchema` e
+      // `locacaoComissaoDefaultsSchema`: percentual digitado grande demais
+      // (999 a caminho de 99) não pode virar PATCH recusado.
+      isValid: () => locacaoNaFaixa(locacaoState[0], comissaoState[0]),
       enabled: locacaoEnabled,
     },
   );
@@ -159,7 +150,6 @@ export function ContractDefaultsCard({
           <LocacaoDefaults
             state={locacaoState}
             comissaoState={comissaoState}
-            recebimentoState={recebimentoState}
             autoSave={locacaoAutoSave}
           />
         )}
@@ -428,38 +418,20 @@ function locacaoNaFaixa(
   );
 }
 
-/** Espelha os `max()` de `locacaoRecebimentoSchema` — tudo texto livre. */
-function recebimentoNaFaixa(r: LocacaoRecebimento): boolean {
-  return (
-    r.pix_chave.length <= 200 &&
-    r.banco.length <= 80 &&
-    r.agencia.length <= 20 &&
-    r.conta.length <= 30 &&
-    r.titular_nome.length <= 200 &&
-    r.titular_doc.length <= 18
-  );
-}
-
 function LocacaoDefaults({
   state,
   comissaoState,
-  recebimentoState,
   autoSave,
 }: {
   state: SettingsState<LocacaoSettings>;
   comissaoState: SettingsState<LocacaoComissaoDefaults>;
-  recebimentoState: SettingsState<LocacaoRecebimento>;
   autoSave: AutoSave;
 }) {
   const [values, setValues] = state;
   const [comissao, setComissao] = comissaoState;
-  const [recebimento, setRecebimento] = recebimentoState;
 
   function patchComissao(next: Partial<LocacaoComissaoDefaults>) {
     setComissao((c) => ({ ...c, ...next }));
-  }
-  function patchRecebimento(next: Partial<LocacaoRecebimento>) {
-    setRecebimento((r) => ({ ...r, ...next }));
   }
 
   function patchConfig(next: Partial<LocacaoSettings["config"]>) {
@@ -656,116 +628,6 @@ function LocacaoDefaults({
         </div>
       </div>
 
-      {/* Onde a imobiliária recebe essa comissão. Vira a chave
-          `{{imobiliaria_dados_pagamento}}` da cláusula de corretagem — é o que
-          tira a conta da imobiliária do TEXTO do modelo (dado bancário literal
-          bloqueia a ativação). Só entra no contrato o que estiver completo:
-          uma chave PIX, ou banco + agência + conta + tipo. */}
-      <div className="space-y-4 rounded-md border border-border p-4">
-        <div>
-          <h4 className="text-sm font-medium">
-            Onde a imobiliária recebe a comissão
-          </h4>
-          <p className="text-xs text-muted-foreground">
-            Preenche a chave <code>{"{{imobiliaria_dados_pagamento}}"}</code> dos
-            modelos de locação. Com a chave PIX informada, ela vale; sem PIX, a
-            conta só entra no contrato quando banco, agência, conta e tipo
-            estiverem preenchidos. Em branco, a chave sai vazia.
-          </p>
-        </div>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-sm text-muted-foreground">Tipo da chave PIX</Label>
-            <NativeSelect
-              value={recebimento.pix_tipo_chave}
-              onChange={(v) =>
-                patchRecebimento({
-                  pix_tipo_chave:
-                    v === "CPF" || v === "CNPJ" || v === "EMAIL" || v === "PHONE" || v === "EVP"
-                      ? v
-                      : "",
-                })
-              }
-              options={[
-                { value: "", label: "—" },
-                { value: "CNPJ", label: "CNPJ" },
-                { value: "CPF", label: "CPF" },
-                { value: "EMAIL", label: "E-mail" },
-                { value: "PHONE", label: "Telefone" },
-                { value: "EVP", label: "Aleatória" },
-              ]}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5 md:col-span-2">
-            <Label className="text-sm text-muted-foreground">Chave PIX</Label>
-            <Input
-              value={recebimento.pix_chave}
-              maxLength={200}
-              placeholder="Ex.: 12.345.678/0001-90"
-              onChange={(e) => patchRecebimento({ pix_chave: e.target.value })}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-sm text-muted-foreground">Banco</Label>
-            <Input
-              value={recebimento.banco}
-              maxLength={80}
-              placeholder="Ex.: Itaú"
-              onChange={(e) => patchRecebimento({ banco: e.target.value })}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-sm text-muted-foreground">Agência</Label>
-            <Input
-              value={recebimento.agencia}
-              maxLength={20}
-              onChange={(e) => patchRecebimento({ agencia: e.target.value })}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-sm text-muted-foreground">Conta</Label>
-            <Input
-              value={recebimento.conta}
-              maxLength={30}
-              onChange={(e) => patchRecebimento({ conta: e.target.value })}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-sm text-muted-foreground">Tipo de conta</Label>
-            <NativeSelect
-              value={recebimento.tipo_conta}
-              onChange={(v) =>
-                patchRecebimento({
-                  tipo_conta: v === "corrente" || v === "poupanca" ? v : "",
-                })
-              }
-              options={[
-                { value: "", label: "—" },
-                { value: "corrente", label: "Corrente" },
-                { value: "poupanca", label: "Poupança" },
-              ]}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-sm text-muted-foreground">Titular</Label>
-            <Input
-              value={recebimento.titular_nome}
-              maxLength={200}
-              placeholder="Razão social, se diferente"
-              onChange={(e) => patchRecebimento({ titular_nome: e.target.value })}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-sm text-muted-foreground">CNPJ/CPF do titular</Label>
-            <Input
-              value={recebimento.titular_doc}
-              maxLength={18}
-              onChange={(e) => patchRecebimento({ titular_doc: e.target.value })}
-            />
-          </div>
-        </div>
-      </div>
-
       <div className="flex items-center gap-3 pt-2">
         <Button
           variant="ghost"
@@ -773,7 +635,6 @@ function LocacaoDefaults({
           onClick={() => {
             setValues(DEFAULT_LOCACAO_SETTINGS);
             setComissao(DEFAULT_LOCACAO_COMISSAO);
-            setRecebimento(DEFAULT_LOCACAO_RECEBIMENTO);
           }}
           disabled={autoSave.status === "saving"}
         >

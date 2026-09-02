@@ -135,8 +135,8 @@ export function buildLocacaoPlaceholderMap(
     corretagem_dados_pagamento: corretagemDadosPagamento(enriched),
     // A própria imobiliária como intermediadora: a qualificação vem do enrich
     // (`config.imobiliaria_*`); a via de recebimento é SOBRESCRITA pelo call
-    // site a partir do padrão da org (`contractDefaultsJson.locacao_recebimento`)
-    // — o mesmo desenho do repasse do corretor: a conta vai só para o Doc do
+    // site a partir do cadastro da org (`Organization.pixAddressKey`/`bank*`,
+    // Perfil) — o mesmo desenho do repasse do corretor: a conta vai só para o Doc do
     // contrato, nunca para o dataJson. Emitida vazia pelo mesmo motivo acima.
     imobiliaria_qualificacao: imobiliariaQualificacao(enriched),
     imobiliaria_dados_pagamento: "",
