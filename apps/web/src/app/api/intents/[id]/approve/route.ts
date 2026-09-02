@@ -8,9 +8,8 @@ import {
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
 import { executeIntent, IntentExecutionError } from "@/lib/api/intents";
-import { getEffectivePermissions, can } from "@/lib/security/rbac/check";
+import { guardPermission } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
-import { getEffectiveUserId } from "@/lib/auth/impersonation";
 
 /**
  * POST /api/intents/[id]/approve
@@ -45,25 +44,23 @@ export async function POST(
   // enviar envelope de assinatura, apagar negócio em definitivo).
   //
   // O agravante não era o buraco, era a fachada: `newton.intent.approve` já
-  // existia, com rótulo na tela ("Aprovar ActionIntent do Newton (HITL)") e
-  // concedida a `gestor_locacao`/`gestor_financeiro` — mas NENHUMA linha do
-  // código a lia. O admin concedia ou negava e o sistema ignorava a decisão
-  // nos dois sentidos. Permissão decorativa é pior que permissão ausente: dá
-  // garantia onde não há mecanismo.
+  // existia, com rótulo na tela e concedida a `gestor_locacao`/
+  // `gestor_financeiro` — e NENHUMA linha do código a lia. Permissão
+  // decorativa é pior que permissão ausente: dá garantia onde não há
+  // mecanismo.
   //
-  // Ator EFETIVO pelo mesmo motivo do `guardDealScope`: sob impersonação o id
-  // da sessão é o do super_admin, que não tem membership no tenant.
-  const effUserId = await getEffectiveUserId(auth.ident.userId);
-  const approverPerms = await getEffectivePermissions(effUserId, auth.org.id);
-  if (!approverPerms || !can(approverPerms, PERMISSION.NEWTON_INTENT_APPROVE)) {
-    return NextResponse.json(
-      {
-        error: "PERMISSION_DENIED",
-        permission: PERMISSION.NEWTON_INTENT_APPROVE,
-      },
-      { status: 403 }
-    );
-  }
+  // ANTES do fetch da intent, de propósito: senão o código de status ensina a
+  // quem não pode aprovar se a intent existe e em que estado está.
+  //
+  // Ator EFETIVO já resolvido pelo `requireApiAuth` — não re-derivar aqui,
+  // para não criar segunda fonte de verdade sobre o ator dentro do gate.
+  const denied = await guardPermission({
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    permission: PERMISSION.NEWTON_INTENT_APPROVE,
+    message: "Você não tem permissão para aprovar esta ação.",
+  });
+  if (denied) return denied;
 
   const intent = await prisma.actionIntent.findUnique({
     where: { id: params.id },
@@ -107,7 +104,12 @@ export async function POST(
     where: { id: params.id },
     data: {
       status: "approved",
-      approvedBy: auth.ident.userId,
+      // O mesmo ator que o gate autorizou. Sob impersonação `ident.userId` é o
+      // super_admin (sem membership no tenant) e `actor.effectiveUserId` é o
+      // dono da org: gravar o primeiro faria a trilha nomear um aprovador
+      // diferente daquele cuja permissão permitiu a aprovação. Quem impersonou
+      // segue registrado na metadata de auditoria.
+      approvedBy: auth.actor.effectiveUserId,
       approvedAt: new Date(),
     },
   });

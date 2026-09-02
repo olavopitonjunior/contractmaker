@@ -22,7 +22,9 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
 - **Qualquer pessoa da organização podia aprovar uma ação de alto risco e dispará-la na hora.** A tela de aprovação existe para ser o ponto humano no meio do caminho: alguém confere antes de o sistema criar uma cobrança, mandar um contrato para assinatura ou apagar um negócio em definitivo. Só que a aprovação não conferia **quem** estava aprovando — bastava estar dentro da organização e ter sessão aberta. Um perfil de leitura, que existe justamente para não mexer em nada, aprovava e a ação acontecia. São treze ações nessa condição, entre elas cobrança, envio para assinatura (que custa e tem efeito jurídico) e exclusão definitiva de negócio.
 - **A permissão para isso já existia e não fazia nada.** "Aprovar ActionIntent do Newton (HITL)" aparecia na tela de permissões e podia ser concedida ou negada — e o sistema ignorava a decisão nos dois sentidos. Era pior que não ter permissão nenhuma: dava ao administrador a impressão de estar no controle de quem aprova ações de risco, sem estar. Agora a permissão vale de verdade.
-- **A recusa acontece antes de qualquer outra resposta**, de propósito: quem não pode aprovar não descobre, pelo tipo de erro, se aquela aprovação existe ou em que estado ela está.
+- **Recusar também passou a exigir a mesma permissão.** Aprovar e recusar são as duas metades da mesma decisão, e só a primeira estava sendo olhada. Recusar estava tão aberto quanto aprovar — e é o lado mais silencioso dos dois: a lista de pendências mostra tudo para qualquer pessoa da organização, então bastava percorrer a fila e recusar pedidos legítimos, que morriam sem explicação para quem os fez. Quem pode dizer sim é quem pode dizer não.
+- **A recusa acontece antes de qualquer outra resposta**, de propósito: quem não pode decidir não descobre, pelo tipo de erro, se aquela aprovação existe ou em que estado ela está.
+- **A mensagem de recusa passa a vir em português.** Antes o aviso na tela mostraria o código interno cru.
 
 Medido em produção antes de fechar: das aprovações já feitas, todas foram do proprietário da conta. Ninguém perde acesso que usava.
 
