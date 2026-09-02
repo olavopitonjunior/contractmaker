@@ -79,6 +79,8 @@ export type PlanViolationKind =
   | "invalid_garantia"
   /** Eixo de `matchCriteria` que não existe nesta família. */
   | "criteria_axis_not_applicable"
+  /** `matchCriteria.admImobiliaria` contradiz o que o classificador leu no item. */
+  | "criteria_contradicts_classification"
   /** Mais de um "principal da modalidade" sugerido. */
   | "multiple_defaults"
   /** Slot fora dos slots conhecidos ou dos permitidos pela família. */
@@ -121,6 +123,12 @@ export interface PlanGuardItem {
   status?: string;
   /** Modalidade classificada; resolve qual playbook rege a cláusula do item. */
   modalidade?: string | null;
+  /**
+   * Eixo de administração lido do documento pelo classificador. Quando o plano
+   * marca o eixo no modelo com o valor OPOSTO, é contradição — o modelo seria
+   * desclassificado em todo formulário que escolhesse o valor certo.
+   */
+  admImobiliaria?: boolean | null;
 }
 
 export interface PlanValidationInput {
@@ -253,6 +261,22 @@ function checkTemplate(
         template.sourceItemId,
         `O modelo "${label}" é de locação e não diz para qual garantia ele serve. ` +
           `Sem isso o formulário nunca o escolhe.`
+      )
+    );
+  }
+
+  if (
+    typeof criteria.admImobiliaria === "boolean" &&
+    typeof item.admImobiliaria === "boolean" &&
+    criteria.admImobiliaria !== item.admImobiliaria
+  ) {
+    out.push(
+      violation(
+        "criteria_contradicts_classification",
+        template.sourceItemId,
+        `O modelo "${label}" marca admImobiliaria=${criteria.admImobiliaria}, mas o ` +
+          `classificador leu o documento como ${item.admImobiliaria ? "administrado pela imobiliária" : "pagamento direto ao locador"}. ` +
+          `Eixo marcado ao contrário desclassifica o modelo em todo formulário que escolher o valor certo.`
       )
     );
   }

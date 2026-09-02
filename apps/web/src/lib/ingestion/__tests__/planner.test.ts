@@ -16,7 +16,10 @@ import {
   type PlanLibraryOptions,
   type PlanLibraryResult,
   type PlannerItem,
+  ADMINISTRACAO_DIGEST,
+  ADMINISTRACAO_DIGEST_KEY,
 } from "@/lib/ingestion/planner";
+import { LOCACAO_PLAYBOOK } from "@/lib/ingestion/playbooks/locacao";
 import {
   deterministicItemClassifier,
   summarizePii,
@@ -180,6 +183,39 @@ describe("análise do lote — corpus real da Ativa", () => {
 });
 
 describe("digest do lote", () => {
+  it("emite administracao=imobiliaria|direta|? por item de locação, com os tokens exportados", () => {
+    const [a, b, c] = items;
+    const comEixo: PlanLibraryInput = {
+      ...input,
+      items: input.items.map((i) => {
+        const adm = i.id === a.id ? true : i.id === b.id ? false : null;
+        return { ...i, classification: { ...i.classification!, admImobiliaria: adm } };
+      }),
+    };
+    const digest = buildBatchDigest(comEixo, analysis);
+    expect(digest).toContain(`[${a.id}]`);
+    expect(digest).toContain(`${ADMINISTRACAO_DIGEST_KEY}=${ADMINISTRACAO_DIGEST.imobiliaria}`);
+    expect(digest).toContain(`${ADMINISTRACAO_DIGEST_KEY}=${ADMINISTRACAO_DIGEST.direta}`);
+    expect(digest).toContain(`${ADMINISTRACAO_DIGEST_KEY}=${ADMINISTRACAO_DIGEST.indefinida}`);
+    // O playbook de locação instrui o modelo a ler exatamente esses tokens.
+    expect(LOCACAO_PLAYBOOK.prompt).toContain(`\`${ADMINISTRACAO_DIGEST_KEY}=\``);
+    expect(LOCACAO_PLAYBOOK.prompt).toContain(`\`${ADMINISTRACAO_DIGEST.imobiliaria}\``);
+    expect(LOCACAO_PLAYBOOK.prompt).toContain(`\`${ADMINISTRACAO_DIGEST.direta}\``);
+    void c;
+  });
+
+  it("fora do contrato de locação a linha administracao= não existe (ruído sem regra)", () => {
+    const venda: PlanLibraryInput = {
+      ...input,
+      items: input.items.map((i) => ({
+        ...i,
+        classification: { ...i.classification!, docType: "contrato_venda" as const, admImobiliaria: true },
+      })),
+    };
+    const digest = buildBatchDigest(venda, analysis);
+    expect(digest).not.toContain(`${ADMINISTRACAO_DIGEST_KEY}=`);
+  });
+
   it("leva classificação, matriz e base comum resumida", () => {
     const digest = buildBatchDigest(input, analysis);
     expect(digest).toContain("## DOCUMENTOS DO LOTE (6)");

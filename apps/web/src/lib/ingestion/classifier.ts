@@ -94,6 +94,16 @@ export interface ItemClassification {
    */
   provider?: string | null;
   /**
+   * Eixo Administração × Não Administração do CONTRATO de locação: `true`
+   * quando a imobiliária cobra e gere os aluguéis (cláusula de pagamento +
+   * laudo de vistoria), `false` quando o pagamento é direto ao locador, `null`
+   * quando o texto não decide ou o tipo não tem o eixo. Só o classificador LLM
+   * preenche. Vira a linha `administracao=` do digest do planner — sem ela o
+   * planner só enxergava o eixo se a cláusula 4.1 caísse no índice de blocos
+   * (no lote de 51 da RE/MAX Trio, não caiu, e os quadrantes colapsaram).
+   */
+  admImobiliaria?: boolean | null;
+  /**
    * O documento é uma INSTÂNCIA preenchida (dados reais de um cliente), não uma
    * minuta em branco. Não é motivo de erro — é o insumo do descarte sugerido
    * `filled_instance` e do gate de PII da cláusula.

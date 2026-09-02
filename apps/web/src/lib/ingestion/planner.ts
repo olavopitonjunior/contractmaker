@@ -642,6 +642,26 @@ function clip(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max)}…`;
 }
 
+/**
+ * Vocabulário da linha `administracao=` do digest — contrato de string entre
+ * este arquivo e o playbook de locação, que instrui o modelo a lê-la. Exportado
+ * para o playbook e o teste usarem os MESMOS tokens.
+ */
+export const ADMINISTRACAO_DIGEST_KEY = "administracao";
+export const ADMINISTRACAO_DIGEST = {
+  imobiliaria: "imobiliaria",
+  direta: "direta",
+  indefinida: "?",
+} as const;
+
+export function administracaoDigestValue(v: boolean | null | undefined): string {
+  return v == null
+    ? ADMINISTRACAO_DIGEST.indefinida
+    : v
+      ? ADMINISTRACAO_DIGEST.imobiliaria
+      : ADMINISTRACAO_DIGEST.direta;
+}
+
 function describeItem(item: PlannerItem): string {
   const c = item.classification;
   const parts = [
@@ -651,6 +671,13 @@ function describeItem(item: PlannerItem): string {
       ` confiança=${(c?.confidence ?? 0).toFixed(2)} decidido_por=${c?.via ?? "?"}`,
     `  porquê: ${c?.reason ?? "—"}`,
   ];
+  // Eixo de administração, lido pelo classificador (que recebe os trechos de
+  // pagamento e vistoria) — o índice de blocos pode não trazer essa cláusula.
+  // Só em contrato de locação: nas outras famílias a linha seria ruído sem
+  // regra no playbook que a interprete.
+  if (c?.docType === "contrato_locacao") {
+    parts.push(`  ${ADMINISTRACAO_DIGEST_KEY}=${administracaoDigestValue(c.admImobiliaria)}`);
+  }
   if (c?.conflicts?.length) {
     parts.push(
       `  divergência heurística×LLM: ` +
@@ -1500,6 +1527,7 @@ function guardItems(items: readonly PlannerItem[]): PlanGuardItem[] {
     text: i.text,
     status: i.status,
     modalidade: i.classification?.modalidade ?? null,
+    admImobiliaria: i.classification?.admImobiliaria ?? null,
   }));
 }
 
