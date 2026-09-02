@@ -52,9 +52,18 @@ export interface SkippedToken {
  * nada para esse token. O operador age sobre isto; `token` sozinho só dizia
  * "falta".
  */
+export type UnmappedReason =
+  | SkipReason
+  /** A IA não propôs trecho nenhum para este token. */
+  | "no-mapping"
+  /** O documento passou do teto do prompt: a IA nunca viu a cauda. */
+  | "doc-truncated"
+  /** A resposta da IA estourou `max_tokens`: o JSON veio cortado. */
+  | "response-truncated";
+
 export interface UnmappedToken {
   token: string;
-  reason: SkipReason | "no-mapping";
+  reason: UnmappedReason;
   /** Trecho que a IA propôs, MASCARADO (`maskForReport`). */
   trecho?: string;
 }
@@ -84,6 +93,14 @@ export interface InsertionReport {
   /** Tokens obrigatórios ainda ausentes no doc após o pass. */
   missingRequired: string[];
   ranAt: string;
+  /**
+   * O texto enviado à IA foi cortado em `MAX_PROMPT_CHARS`. Tudo depois disso
+   * é invisível para o passe — e o relatório diz isso em vez de listar a cauda
+   * como "não mapeado" sem explicação.
+   */
+  docTruncated?: boolean;
+  /** A resposta estourou `max_tokens` (`stop_reason === "max_tokens"`). */
+  responseTruncated?: boolean;
 }
 
 /**
@@ -100,7 +117,7 @@ export function readNotMapped(raw: unknown): UnmappedToken[] {
       const o = item as { token: string; reason?: unknown; trecho?: unknown };
       out.push({
         token: o.token,
-        reason: typeof o.reason === "string" ? (o.reason as UnmappedToken["reason"]) : "no-mapping",
+        reason: typeof o.reason === "string" ? (o.reason as UnmappedReason) : "no-mapping",
         ...(typeof o.trecho === "string" ? { trecho: o.trecho } : {}),
       });
     }
