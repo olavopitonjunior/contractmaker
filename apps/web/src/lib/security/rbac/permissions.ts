@@ -138,6 +138,10 @@ export const PERMISSION = {
   // (dados, anexos, certidões, mark-*, notificações) — sem chave por subrecurso.
   DEAL_VIEW_ALL: "deal.view.all",
   DEAL_VIEW_ASSIGNED_ONLY: "deal.view.assigned_only",
+  // Criar negócio de VENDA (form público, kanban, iList, proposta, importação,
+  // conversão de lead). Espelha LEASE_CREATE do lado de locação, que já era
+  // exigida — as rotas de venda não checavam permissão nenhuma até 2026-09-02.
+  DEAL_CREATE: "deal.create",
   DEAL_EDIT: "deal.edit",
   DEAL_MANAGER_ASSIGN: "deal.manager.assign",
   CONTRACT_CREATE: "contract.create",
@@ -280,6 +284,7 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionKey[]> = {
   "Pipeline & Contratos": [
     PERMISSION.DEAL_VIEW_ALL,
     PERMISSION.DEAL_VIEW_ASSIGNED_ONLY,
+    PERMISSION.DEAL_CREATE,
     PERMISSION.DEAL_EDIT,
     PERMISSION.DEAL_MANAGER_ASSIGN,
     PERMISSION.CONTRACT_CREATE,
@@ -295,6 +300,30 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionKey[]> = {
  * overrides sobre ROLE_PRESETS.gerente). Chaves de view/scope (DEAL_VIEW_*),
  * org/members e financeiro org-wide ficam DE FORA de propósito — visão
  * restrita do gerente não é configurável.
+ *
+ * ATENÇÃO — esta lista tem DUAS responsabilidades, e elas coincidem por
+ * acidente, não por desenho:
+ *
+ *  1. **O que o admin vê como checkbox** em /settings/gerentes.
+ *  2. **O teto do que um gerente pode alcançar.** Esta é a ÚNICA lista pela
+ *     qual um override de org ACRESCENTA permissão a um preset
+ *     (`resolveTargetPermissions`, lib/auth/invitations.ts, mescla o
+ *     `permissionsJson` filtrado por ela quando o alvo é `gerente`).
+ *
+ * Consequência de (2): toda chave daqui PRECISA existir em `owner` e em
+ * `admin`. Se entrar uma que o admin não tem, uma org que a ligue faz o
+ * `gerente` EXCEDER o `admin` — e o teto de papel, funcionando exatamente como
+ * projetado, passa a devolver 403 pra um admin que só quer promover alguém a
+ * gerente na tela de membros. O dano nasce aqui e aparece numa rota que quem
+ * edita este arquivo não visita
+ * (`PATCH /api/org/members/[id]`).
+ *
+ * Isso é garantido por teste
+ * (`lib/auth/__tests__/teto-overrides-de-gerente.test.ts`), que também exige
+ * que a chave exista em ALL_PERMISSIONS e tenha rótulo em
+ * PERMISSION_LABELS_PT — sem rótulo a tela renderiza um checkbox em branco,
+ * que é uma falha silenciosa e que nenhum teste de RBAC pegaria.
+ * Ao acrescentar uma chave aqui, rode esse teste.
  */
 export const MANAGER_CONFIGURABLE_PERMISSIONS: PermissionKey[] = [
   PERMISSION.DEAL_EDIT,
@@ -308,6 +337,7 @@ export const MANAGER_CONFIGURABLE_PERMISSIONS: PermissionKey[] = [
   // ligá-la não amplia o que ele enxerga — só o que ele pode criar/decidir nos
   // negócios que já são dele. Nasce DESLIGADA (não está no preset `gerente`).
   PERMISSION.LEASE_CREATE,
+  PERMISSION.DEAL_CREATE,
   PERMISSION.DEAL_MANAGER_ASSIGN,
   PERMISSION.CONTRACT_CREATE,
   PERMISSION.CONTRACT_EDIT,
@@ -427,6 +457,7 @@ export const PERMISSION_LABELS_PT: Record<PermissionKey, string> = {
   [PERMISSION.PROPOSAL_ASSIGN]: "Atribuir responsável da proposta",
   [PERMISSION.DEAL_VIEW_ALL]: "Ver todos os negócios",
   [PERMISSION.DEAL_VIEW_ASSIGNED_ONLY]: "Ver apenas negócios atribuídos a ele",
+  [PERMISSION.DEAL_CREATE]: "Criar negócio de venda",
   [PERMISSION.DEAL_EDIT]: "Editar dados do negócio (anexos, certidões, etapas)",
   [PERMISSION.DEAL_MANAGER_ASSIGN]: "Atribuir gerente do negócio",
   [PERMISSION.CONTRACT_CREATE]: "Gerar/importar contrato",

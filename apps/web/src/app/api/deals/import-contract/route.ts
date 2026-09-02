@@ -15,6 +15,8 @@ import { getPipelineByKind } from "@/lib/modules/resolve";
 import { MODULE } from "@/lib/modules/catalog";
 import { importContractFromFile } from "@/lib/services/contract-import";
 import { resolveManagerForCreate } from "@/lib/deals/manager";
+import { guardDealCreate } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { formPublicPath } from "@/lib/forms/form-url";
 import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
 
@@ -73,6 +75,15 @@ function validateFileHeader(buffer: Buffer, mime: ImportableMime): boolean {
 export async function POST(req: NextRequest) {
   const auth = await requireApiAuth(req, { scope: "deals:rw" });
   if (isAuthFailure(auth)) return authFailureResponse(auth);
+
+  // Criar negócio exige DEAL_CREATE (2026-09-02) — ver guardDealCreate.
+  const deniedCreate = await guardDealCreate({
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    via: auth.ident.via,
+    permission: PERMISSION.DEAL_CREATE,
+  });
+  if (deniedCreate) return deniedCreate;
 
   let formData: FormData;
   try {

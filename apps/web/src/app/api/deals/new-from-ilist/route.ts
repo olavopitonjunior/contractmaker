@@ -15,6 +15,8 @@ import { formPublicPath } from "@/lib/forms/form-url";
 import { getIListConnection } from "@/lib/ilist/connection";
 import { buildImportPayload } from "@/lib/ilist/import";
 import { resolveManagerForCreate } from "@/lib/deals/manager";
+import { guardDealCreate } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -43,6 +45,15 @@ const bodySchema = z.object({
 export async function POST(req: NextRequest) {
   const auth = await requireApiAuth(req, { scope: "deals:rw" });
   if (isAuthFailure(auth)) return authFailureResponse(auth);
+
+  // Criar negócio exige DEAL_CREATE (2026-09-02) — ver guardDealCreate.
+  const deniedCreate = await guardDealCreate({
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    via: auth.ident.via,
+    permission: PERMISSION.DEAL_CREATE,
+  });
+  if (deniedCreate) return deniedCreate;
 
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {

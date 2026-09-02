@@ -15,6 +15,8 @@ import { assertModuleEnabled, ModuleDisabledError } from "@/lib/modules/guard";
 import { MODULE } from "@/lib/modules/catalog";
 import { getEffectivePermissions, dealScopeWhere } from "@/lib/security/rbac/check";
 import { resolveManagerForCreate } from "@/lib/deals/manager";
+import { guardDealCreate } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 const createDealSchema = z.object({
   formId: z.string().optional(),
@@ -28,6 +30,16 @@ const createDealSchema = z.object({
 export async function POST(req: NextRequest) {
   const auth = await requireApiAuth(req, { scope: "deals:rw" });
   if (isAuthFailure(auth)) return authFailureResponse(auth);
+
+  // Criar negócio exige DEAL_CREATE (2026-09-02) — ver guardDealCreate. Só no
+  // POST: o GET abaixo é listagem e segue governado pelo dealScopeWhere.
+  const deniedCreate = await guardDealCreate({
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    via: auth.ident.via,
+    permission: PERMISSION.DEAL_CREATE,
+  });
+  if (deniedCreate) return deniedCreate;
 
   try {
     await assertModuleEnabled(auth.org.id, MODULE.VENDAS);

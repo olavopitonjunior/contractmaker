@@ -13,6 +13,8 @@ import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
 import { matchDealGroup } from "@/lib/newton/group-match";
 import { resolveManagerForCreate } from "@/lib/deals/manager";
+import { guardDealCreate } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
@@ -37,6 +39,16 @@ export async function POST(
 ) {
   const apiAuth = await requireApiAuth(req, { scope: "deals:rw" });
   if (isAuthFailure(apiAuth)) return authFailureResponse(apiAuth);
+
+  // Converter lead CRIA um negócio — mesmo gate das demais rotas de criação
+  // (2026-09-02). Ver guardDealCreate.
+  const deniedCreate = await guardDealCreate({
+    userId: apiAuth.actor.effectiveUserId,
+    orgId: apiAuth.org.id,
+    via: apiAuth.ident.via,
+    permission: PERMISSION.DEAL_CREATE,
+  });
+  if (deniedCreate) return deniedCreate;
 
   const parsedBody = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsedBody.success) {
