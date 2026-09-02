@@ -61,7 +61,9 @@ export type UnmappedReason =
   /** O documento passou do teto do prompt: a IA nunca viu a cauda. */
   | "doc-truncated"
   /** A resposta da IA estourou `max_tokens`: o JSON veio cortado. */
-  | "response-truncated";
+  | "response-truncated"
+  /** A resposta da IA não pôde ser lida como JSON (prosa, cerca, nota). */
+  | "response-unparsed";
 
 export interface UnmappedToken {
   token: string;
@@ -110,6 +112,13 @@ export interface InsertionReport {
   docTruncated?: boolean;
   /** A resposta estourou `max_tokens` (`stop_reason === "max_tokens"`). */
   responseTruncated?: boolean;
+  /**
+   * A resposta chegou inteira mas não pôde ser lida como JSON (cerca de
+   * código com prosa depois, nota citando `{{placeholders}}`…). Falso quando
+   * `responseTruncated` já explica. Relatórios anteriores a 02/09/2026 não
+   * têm o campo: `undefined` = "não medido", não "parseou bem".
+   */
+  responseUnparsed?: boolean;
   /**
    * Tokens que a API pôs no Doc em lugar/quantidade que ninguém revisou
    * (`over-matched`/`over-removed`) e que nenhum outro candidato confirmou.

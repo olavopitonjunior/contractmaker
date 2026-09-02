@@ -64,6 +64,7 @@ interface DraftReport {
   slots?: SlotReport[];
   docTruncated?: boolean;
   responseTruncated?: boolean;
+  responseUnparsed?: boolean;
   /** Estágio determinístico (gabarito → chaves). Só existe quando houve gabarito. */
   reverseMerge?: {
     replaced?: { token: string; value: string; occurrences?: number }[];
@@ -109,6 +110,7 @@ const SKIP_REASON: Record<string, string> = {
   stopword: "o valor é uma palavra comum de contrato (não se troca às cegas)",
   "doc-truncated": "o documento é maior que o limite lido pela IA — esta parte ficou fora da leitura",
   "response-truncated": "a resposta da IA veio cortada antes de chegar aqui — rode a IA de novo",
+  "response-unparsed": "a resposta da IA não pôde ser lida (veio com texto fora do JSON) — rode a IA de novo",
 };
 
 const SLOT_LABEL: Record<string, string> = {
@@ -664,6 +666,12 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                   <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-warning">
                     A resposta da IA veio cortada. Rode a IA de novo — parte dos campos pode ter
                     ficado de fora.
+                  </p>
+                )}
+                {report.responseUnparsed && (
+                  <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-warning">
+                    A resposta da IA não pôde ser lida (veio com texto fora do JSON), então esta
+                    rodada não inseriu nada. Rode a IA de novo.
                   </p>
                 )}
                 {(report.skippedAmbiguous ?? []).map((s, i) => (

@@ -430,11 +430,102 @@ describe("insertPlaceholdersWithAI — inserted só depois de conferir", () => {
     // ausente deixaria um `true` de passada anterior grudado para sempre.
     expect(report.docTruncated).toBe(false);
     expect(report.responseTruncated).toBe(false);
-    expect({ docTruncated: true, responseTruncated: true, ...report }).toMatchObject({
+    expect(report.responseUnparsed).toBe(false);
+    expect({ docTruncated: true, responseTruncated: true, responseUnparsed: true, ...report }).toMatchObject({
       docTruncated: false,
       responseTruncated: false,
+      responseUnparsed: false,
     });
     expect(mockMessagesCreate.mock.calls[0][0].max_tokens).toBe(8192);
+  });
+
+  // Medido em produção em 02/09/2026 ("Pedir revisão pela IA" num rascunho
+  // já cheio de {{tokens}}): o Sonnet devolve o JSON em cerca de código e
+  // emenda uma "Nota de revisão" citando {{placeholders}}. A regex gananciosa
+  // de antes ia até o último `}` da nota, o parse quebrava e o passe seguia
+  // MUDO com lista vazia — "Confirmou 0 trecho" e tudo `no-mapping`.
+  it("JSON em cerca de código seguido de nota com {{placeholders}}: o JSON é lido e o trecho entra", async () => {
+    useDoc(DOC);
+    mockMessagesCreate.mockResolvedValue({
+      usage: { input_tokens: 100, output_tokens: 900 },
+      stop_reason: "end_turn",
+      content: [
+        {
+          type: "text",
+          text:
+            "```json\n" +
+            JSON.stringify({
+              mapeamentos: [
+                { trecho_literal: "R$ 2.500,00", token: "aluguel_valor" },
+                { trecho_literal: "{{imovel_endereco_completo}}", token: "IGNORAR — já contém placeholders, intocável" },
+              ],
+            }) +
+            "\n```\n\n---\n\n**Nota de revisão:**\n\nVários tokens já estão presentes como `{{placeholder}}`:\n- `{{locadores_qualificacao}}` ✅\n- `{{aluguel_valor}}` (ver cláusula { 3.1 })\n",
+        },
+      ],
+    });
+    const report = await run();
+    expect(report.responseUnparsed).toBe(false);
+    expect(report.inserted.map((i) => i.token)).toContain("aluguel_valor");
+    // O mapeamento espúrio cai na trava de placeholder, não derruba a rodada.
+    expect(report.skippedAmbiguous.some((s) => s.reason === "already-tokenized")).toBe(true);
+  });
+
+  it("resposta sem JSON legível: responseUnparsed e motivo response-unparsed — nunca mais lista vazia muda", async () => {
+    useDoc(DOC);
+    mockMessagesCreate.mockResolvedValue({
+      usage: { input_tokens: 100, output_tokens: 300 },
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: "Analisei o documento e não vejo trechos { a mapear }; os campos { já estão } como placeholders." }],
+    });
+    const report = await run();
+    expect(report.responseUnparsed).toBe(true);
+    expect(report.inserted).toEqual([]);
+    expect(report.notMapped.find((n) => n.token === "aluguel_valor")!.reason).toBe("response-unparsed");
+  });
+
+  it("resposta truncada também não parseia, mas o motivo é o truncamento (causa mais específica)", async () => {
+    useDoc(DOC);
+    mockMessagesCreate.mockResolvedValue({
+      usage: { input_tokens: 100, output_tokens: 8192 },
+      stop_reason: "max_tokens",
+      content: [{ type: "text", text: '{"mapeamentos":[{"trecho_literal":"R$ 2.500,00","token":"alug' }],
+    });
+    const report = await run();
+    expect(report.responseTruncated).toBe(true);
+    expect(report.responseUnparsed).toBe(false);
+    expect(report.notMapped.find((n) => n.token === "aluguel_valor")!.reason).toBe("response-truncated");
+  });
+
+  it("extractMapeamentos: chave dentro de string e escape não fecham o objeto; sem cerca também funciona", async () => {
+    const { extractMapeamentos } = await import("../ai-placeholder-insertion");
+    const tricky = 'Segue: {"mapeamentos":[{"trecho_literal":"cláusula { 8.1 } com \\"aspas\\" e }","token":"clausula_garantia"}]} — fim { nota }.';
+    const out = extractMapeamentos(tricky);
+    expect(out.ok).toBe(true);
+    expect(out.mapeamentos).toEqual([{ trecho_literal: 'cláusula { 8.1 } com "aspas" e }', token: "clausula_garantia" }]);
+    expect(extractMapeamentos("").ok).toBe(false);
+    expect(extractMapeamentos('{"outra_chave": []}').ok).toBe(false);
+  });
+
+  it("extractMapeamentos: prosa com vários {{tokens}} ANTES do JSON, sem cerca — o JSON ainda é achado", async () => {
+    const { extractMapeamentos } = await import("../ai-placeholder-insertion");
+    const raw =
+      "Antes de responder, note que {{tokenA}}, {{tokenB}}, {{tokenC}}, {{tokenD}} e {{tokenE}} já existem e são intocáveis.\n" +
+      JSON.stringify({ mapeamentos: [{ trecho_literal: "R$ 2.500,00", token: "aluguel_valor" }] }) +
+      "\nEspero ter ajudado.";
+    const out = extractMapeamentos(raw);
+    expect(out.ok).toBe(true);
+    expect(out.mapeamentos).toEqual([{ trecho_literal: "R$ 2.500,00", token: "aluguel_valor" }]);
+  });
+
+  it("extractMapeamentos: cerca em maiúsculas e cerca aberta sem fechamento (corte) também são lidas", async () => {
+    const { extractMapeamentos } = await import("../ai-placeholder-insertion");
+    const upper = "```JSON\n" + JSON.stringify({ mapeamentos: [{ trecho_literal: "x", token: "t" }] }) + "\n```";
+    expect(extractMapeamentos(upper)).toEqual({ ok: true, mapeamentos: [{ trecho_literal: "x", token: "t" }] });
+    const unclosed = "```json\n" + JSON.stringify({ mapeamentos: [{ trecho_literal: "y", token: "u" }] });
+    expect(extractMapeamentos(unclosed)).toEqual({ ok: true, mapeamentos: [{ trecho_literal: "y", token: "u" }] });
+    // Cortada no meio da string: não fecha, e o chamador marca truncamento.
+    expect(extractMapeamentos('```json\n{"mapeamentos":[{"trecho_literal":"R$ 2.5').ok).toBe(false);
   });
 
   it("um token SIMPLES em N trechos: todos entram; token COMPOSTO só uma vez (controle)", async () => {
