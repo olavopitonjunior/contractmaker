@@ -28,13 +28,25 @@ describe("isSpecificValue — o que pode ser trocado em TODAS as ocorrências", 
     expect(isSpecificValue("agosto de 2021")).toBe(false);
   });
 
-  it("o padrão número + extenso que o sistema produz", () => {
-    expect(isSpecificValue("10 (dez)")).toBe(true);
-    expect(isSpecificValue("10% (dez por cento)")).toBe(true);
-    expect(isSpecificValue("3 (três)")).toBe(true);
-    expect(isSpecificValue("30 (trinta)")).toBe(true);
+  it("número pequeno por extenso NÃO é específico — '10 (dez)' do vencimento é também o prazo de 10 (dez) dias", () => {
+    expect(isSpecificValue("10 (dez)")).toBe(false);
+    expect(isSpecificValue("10% (dez por cento)")).toBe(false);
+    expect(isSpecificValue("3 (três)")).toBe(false);
+    expect(isSpecificValue("30 (trinta)")).toBe(false);
     expect(isSpecificValue("10")).toBe(false);
-    expect(isSpecificValue("(dez)")).toBe(false);
+  });
+
+  it("local + data de assinatura é específico, mesmo abaixo de 40 chars", () => {
+    expect(isSpecificValue("São Paulo, 9 de junho de 2026")).toBe(true);
+    expect(isSpecificValue("São Paulo/SP, 9 de junho de 2026")).toBe(true);
+    expect(isSpecificValue("Ribeirão Preto, 15 de dezembro de 2026")).toBe(true);
+    expect(isSpecificValue("São Paulo, 2026")).toBe(false);
+  });
+
+  it("placeholder de máscara (só zeros) nunca é específico", () => {
+    expect(isSpecificValue("00000-000")).toBe(false);
+    expect(isSpecificValue("000.000.000-00")).toBe(false);
+    expect(isSpecificValue("R$ 0,00")).toBe(false);
   });
 
   it("valor por extenso em reais é específico (é o par do numérico, nas mesmas cláusulas)", () => {

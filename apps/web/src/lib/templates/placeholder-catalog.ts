@@ -24,7 +24,11 @@ export type PlaceholderModalidade =
  * - `all`: todas as ocorrências, desde que o valor seja específico
  *   (`isSpecificValue`): o valor do aluguel está na cláusula do preço, na do
  *   reajuste e na da multa, e é o mesmo negócio em todas.
- * Só faz sentido em token `simple`; composto continua `unique`.
+ * Só faz sentido em token `simple`; composto continua `unique`. E número
+ * pequeno por extenso ("10 (dez)", "3 (três)", "10% (dez por cento)") fica
+ * `unique` de propósito: "10 (dez)" do vencimento também é o "prazo de 10
+ * (dez) dias" da desocupação — o formato não diz de qual campo o número é.
+ * Repetição desses fica com o passe de IA, que tem o contexto.
  */
 export type MatchPolicy = "unique" | "all";
 
@@ -270,7 +274,6 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "aluguel_dia_vencimento",
-    matchPolicy: "all",
     label: "Dia de vencimento",
     description: "Dia do mês do vencimento do aluguel (número + extenso).",
     example: "10 (dez)",
@@ -280,7 +283,6 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "vigencia_meses",
-    matchPolicy: "all",
     label: "Prazo da locação",
     description: "Prazo em meses (número + extenso).",
     example: "30 (trinta)",
@@ -319,7 +321,6 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "multa_atraso_percent",
-    matchPolicy: "all",
     label: "Multa de atraso (%)",
     description: "Percentual da multa moratória (número + extenso).",
     example: "10% (dez por cento)",
@@ -329,7 +330,6 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "juros_mensais_atraso",
-    matchPolicy: "all",
     label: "Juros de mora (% a.m.)",
     description: "Percentual de juros mensais (número + extenso).",
     example: "1% (um por cento)",
@@ -339,7 +339,6 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "multa_rescisoria_meses",
-    matchPolicy: "all",
     label: "Multa contratual (aluguéis)",
     description: "Quantidade de aluguéis da multa por infração (número + extenso).",
     example: "3 (três)",

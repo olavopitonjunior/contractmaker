@@ -4,7 +4,7 @@ import {
   buildLocacaoPlaceholderMap,
   buildVendaPlaceholderMap,
 } from "./placeholder-map";
-import { catalogForModalidade, matchPolicyFor } from "./placeholder-catalog";
+import { catalogForModalidade } from "./placeholder-catalog";
 import { isSpecificValue, normalizeSpaces } from "./specific-value";
 import type { SkipReason } from "./insertion-report";
 
@@ -128,7 +128,9 @@ export async function reverseMergeDocToTemplate(input: {
   const map = input.modalidade.startsWith("locacao")
     ? buildLocacaoPlaceholderMap(input.dataJson)
     : buildVendaPlaceholderMap(input.dataJson);
-  const eligible = new Set(catalogForModalidade(input.modalidade).map((d) => d.token));
+  const catalog = catalogForModalidade(input.modalidade);
+  const eligible = new Set(catalog.map((d) => d.token));
+  const policyOf = new Map(catalog.map((d) => [d.token, d.matchPolicy ?? "unique"] as const));
 
   // Inverte valor→token; em colisão de valores, o último token do mapa vence
   // (Object.entries preserva a ordem de inserção: flat legado primeiro,
@@ -179,7 +181,7 @@ export async function reverseMergeDocToTemplate(input: {
       skipped.push({ token, value, reason: "not-found" });
       continue;
     }
-    const policy = matchPolicyFor(token, input.modalidade);
+    const policy = policyOf.get(token) ?? "unique";
     if (count > 1) {
       if (policy !== "all") {
         skipped.push({ token, value, reason: "ambiguous", occurrences: count });

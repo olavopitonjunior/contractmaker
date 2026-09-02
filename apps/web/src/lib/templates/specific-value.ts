@@ -21,8 +21,12 @@ const CEP_RE = /^\d{5}-?\d{3}$/;
 const DATE_NUM_RE = /^\d{2}\/\d{2}\/\d{4}$/;
 const DATE_EXTENSO_RE =
   /^\d{1,2}º? de (janeiro|fevereiro|março|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro) de \d{4}$/i;
-/** O padrão "número + extenso" que o próprio sistema produz: `10 (dez)`, `10% (dez por cento)`, `3 (três)`. */
-const NUM_EXTENSO_RE = /^\d+(?:[.,]\d+)?%?\s\([^()]{2,}\)$/;
+/**
+ * "Cidade/UF, 9 de junho de 2026" — o local+data de assinatura
+ * (`dataLocalAssinatura` em placeholder-map). Fica abaixo dos 40 chars e a
+ * data ancorada não casa com a cidade na frente.
+ */
+const DATE_LOCAL_RE = /^[^,]{2,}(?:\/[A-Z]{2})?,\s*\d{1,2}º? de [a-zç]+ de \d{4}$/i;
 /**
  * Valor por extenso em reais (`três mil e quinhentos reais`): é o par do valor
  * numérico e vive nas mesmas cláusulas. Texto fixo de contrato não termina em
@@ -44,11 +48,16 @@ export function normalizeSpaces(text: string): string {
 export function isSpecificValue(raw: string): boolean {
   const value = normalizeSpaces(raw).trim();
   if (!value) return false;
+  // Placeholder de máscara (`000.000.000-00`, `00000-000`): só zeros — nunca é
+  // de um negócio, e trocá-lo em todo lugar apagaria o que a máscara protegeu.
+  if (/\d/.test(value) && !/[1-9]/.test(value)) return false;
   if (value.length >= SPECIFIC_MIN_LENGTH) return true;
   if (BRL_RE.test(value)) return true;
   if (CEP_RE.test(value)) return true;
-  if (DATE_NUM_RE.test(value) || DATE_EXTENSO_RE.test(value)) return true;
-  if (NUM_EXTENSO_RE.test(value)) return true;
+  if (DATE_NUM_RE.test(value) || DATE_EXTENSO_RE.test(value) || DATE_LOCAL_RE.test(value)) return true;
+  // Número pequeno por extenso ("10 (dez)", "10% (dez por cento)") NÃO é
+  // específico: o formato não diz de qual campo o número é, e "10 (dez)" do
+  // vencimento também é o "prazo de 10 (dez) dias" da desocupação.
   if (value.length >= 12 && EXTENSO_REAIS_RE.test(value)) return true;
   const digits = value.replace(/\D/g, "");
   if (digits.length === 11 && /^[\d.\-\s]+$/.test(value) && isValidCpfNumber(digits)) return true;
