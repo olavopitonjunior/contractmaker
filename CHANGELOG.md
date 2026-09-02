@@ -4,6 +4,14 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-02 - Trocar o papel de um membro passa pelo mesmo teto das outras três portas
+
+### Corrigido
+
+- **A tela de membros deixava conceder um papel mais poderoso que o de quem concede.** Existem quatro maneiras de dar papel a alguém — convidar, aprovar convite, adicionar direto e trocar o papel de quem já é membro. As três primeiras já perguntavam se o papel que está sendo dado cabe dentro do papel de quem está dando; a quarta não perguntava nada. **Hoje ninguém consegue explorar isso**, porque só o dono e o administrador podem trocar papéis, e os dois já concedem tudo. O que fecha é o amanhã: a tela de papéis permite criar um papel personalizado com essa mesma capacidade, e no dia em que alguém criasse um, esse caminho daria acesso total numa única ação, sem fila e sem aprovação. Agora ele recusa, dizendo qual papel foi negado, e a recusa fica registrada na trilha de auditoria.
+- **Trocar alguém de papel personalizado para um papel comum deixava o papel antigo pendurado no cadastro.** O registro ficava com os dois ao mesmo tempo. Não mudava o que a pessoa podia fazer — o papel comum é que valia —, mas contradizia qualquer leitura posterior do dado. Agora o vínculo antigo é desfeito junto.
+- **Escolher "papel personalizado" sem escolher qual deixava a pessoa sem acesso nenhum, em silêncio.** A requisição era aceita, respondia sucesso, e o membro perdia tudo. A checagem que impedia isso existia, mas só valia quando quem agia era administrador; para o dono da conta, passava direto. Agora recusa sempre, dizendo o que falta.
+
 ## [Unreleased] - 2026-09-02 - Criar negócio de venda passa a pedir permissão
 
 ### Corrigido

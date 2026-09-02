@@ -215,6 +215,9 @@ vi.mock("@/lib/db/prisma", () => {
       // `POST /api/org/members` cria a membership direto, sem passar pela fila
       // de convites.
       create: vi.fn(),
+      // `PATCH /api/org/members/[id]` — a rota que troca papel. Faltava aqui
+      // porque nunca teve teste até o teto da #488.
+      update: vi.fn(),
       upsert: vi.fn(),
       findMany: vi.fn().mockResolvedValue([]),
       count: vi.fn().mockResolvedValue(0),
