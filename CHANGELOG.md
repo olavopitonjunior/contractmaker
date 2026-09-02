@@ -4,6 +4,19 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-02 - O contrato gerado passa a dizer que campo saiu em branco
+
+### Adicionado
+
+- **Laudo determinístico de preenchimento na geração por Google Docs.** A geração já era 100% hardcoded (formulário → mapa token→valor → `replaceAllText` → limpeza de órfãos), mas um campo que o modelo pedia e o formulário não trouxe saía **em branco** sem aviso — o replace troca `{{aluguel_dia_vencimento}}` por vazio e a evidência some. Os dois passos já devolviam o que faltava saber (ocorrências por token e a lista de órfãos apagados); os três call sites jogavam os dois fora. Agora o laudo vai para `GenerationPlan.fill` (no jsonb que já existe, sem migration) e a revisão pós-geração o transforma em comentário no contrato: **obrigatório em branco** gera um aviso por campo, com o rótulo do catálogo («Identificação do imóvel»); **opcionais em branco** viram um aviso agregado; **chave que o sistema não produz** (apagada da minuta) vira outro. Tudo aviso, nunca bloqueio — o contrato é gerado sempre; promover a bloqueante é decisão posterior, depois de medir.
+  - O laudo é gravado best-effort e separado do snapshot: não depende do export do Drive, e a geração não falha por causa dele. Laudo malformado no banco é descartado no parse em vez de derrubar o plano — o executor da revisão não tem try/catch nos checks determinísticos, e a exceção prenderia o run até um sweeper repetir o mesmo erro.
+  - Os checks determinísticos ganham o mesmo teto de 50 comentários IA abertos que o estágio LLM já tinha.
+
+### Notas
+
+- Não corrige a ingestão: modelo com chaveamento parcial continua parcial. Isto torna o efeito **visível** em cada contrato gerado; a cobertura total de chaves na ingestão vem nos PRs seguintes.
+- Contrato gerado antes desta versão não tem laudo e não recebe os avisos.
+
 ## [Unreleased] - 2026-09-01 - A tela de cláusulas para de mentir sobre o que está selecionado e sobre o que falta triar
 
 ### Corrigido

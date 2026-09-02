@@ -12,7 +12,7 @@ import { buildConsolidatedFormSummary } from "@/lib/forms/form-summary";
 import { isContractReviewEnabled, isProposalReviewEnabled } from "./guard";
 import { logProposalEvent } from "@/lib/proposals/events";
 import { parseGenerationPlan } from "./plan";
-import { clausePlanChecks, type ReviewFinding } from "./checks";
+import { clausePlanChecks, placeholderFillChecks, type ReviewFinding } from "./checks";
 import type { AcceptedReviewFinding } from "./guardrails";
 import { checkReviewDailyCap } from "./budget";
 import {
@@ -25,6 +25,9 @@ import {
   reviewClaimWhere,
   type ReviewStatus,
 } from "./review-state";
+
+/** Teto de comentários IA não resolvidos por contrato (= análise passiva). */
+const MAX_AI_UNRESOLVED_COMMENTS = 50;
 
 export interface AdvanceReviewResult {
   runId: string;
@@ -139,8 +142,19 @@ export async function advanceReviewRun(runId: string): Promise<AdvanceReviewResu
   // Checks do plano de geração (contrato sem plano = gerado antes da feature
   // ou importado — nada a conferir; o LLM do PR 3 ainda cobre o texto).
   const plan = parseGenerationPlan(contract.generationPlanJson);
-  const planFindings: ReviewFinding[] = plan ? clausePlanChecks(plan, docText) : [];
+  const planFindings: ReviewFinding[] = plan
+    ? [...clausePlanChecks(plan, docText), ...placeholderFillChecks(plan)]
+    : [];
+  // Mesmo teto do estágio LLM (e da análise passiva): acima de 50 comentários
+  // IA abertos, mais achado é ruído. O upsert é idempotente por dedupeKey,
+  // então o que já existe não conta duas vezes — o teto só barra achado NOVO.
+  const openAiComments = await prisma.contractComment.count({
+    where: { contractId: contract.id, authorType: "ai", resolved: false },
+  });
+  let headroom = Math.max(0, MAX_AI_UNRESOLVED_COMMENTS - openAiComments);
   for (const f of planFindings) {
+    if (headroom <= 0) break;
+    headroom -= 1;
     const dedupeKey = dedupeKeyFor("ai", `review:${f.category}`, f.selectedText);
     const text = f.suggestedFix ? `${f.message}\n\n**Sugestão:** ${f.suggestedFix}` : f.message;
     await upsertComment(contract.id, {
@@ -406,9 +420,9 @@ async function runLlmStage(
   const existingComments = await prisma.contractComment.findMany({
     where: { contractId: contract.id, authorType: "ai", resolved: false },
     select: { text: true, selectedText: true },
-    take: 50,
+    take: MAX_AI_UNRESOLVED_COMMENTS,
   });
-  if (existingComments.length >= 50) {
+  if (existingComments.length >= MAX_AI_UNRESOLVED_COMMENTS) {
     return { report: { skipped: "comment-cap" } };
   }
 
