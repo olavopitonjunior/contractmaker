@@ -1,5 +1,5 @@
-import { getDocsClient } from "@/lib/google/client";
-import { getDocPlainText } from "@/lib/google/docs";
+import type { docs_v1 } from "googleapis";
+import { batchUpdateDoc, getDocPlainText } from "@/lib/google/docs";
 import { extractPlaceholdersFromText } from "@/lib/google/replace-placeholders";
 import { getAnthropicClient, SONNET_MODEL } from "@/lib/ai/shared/anthropic-client";
 import { recordAIUsage } from "@/lib/ai/usage";
@@ -14,6 +14,16 @@ import { catalogForModalidade, requiredTokens, isKnownToken } from "./placeholde
 // trecho no doc. Por isso NADA vai pro batchUpdate sem passar pela validação
 // determinística `countOccurrences === 1` — trecho ambíguo vai pro relatório
 // (skippedAmbiguous) e o operador resolve manualmente na página de revisão.
+//
+// `inserted` SÓ DEPOIS DE CONFERIR: até 2026-09-02 a lista era montada antes
+// do batchUpdate e a resposta da API era descartada. Na reingestão da RE/MAX
+// Trio, 11 dos 12 modelos do lote 1 declaravam token "inserido" que NÃO estava
+// no documento (a contagem de unicidade roda no texto plano; o replace casa
+// contra a estrutura inteira do Doc, e formatação invisível parte o parágrafo
+// no meio). Hoje o passe lê `occurrencesChanged` de cada reply e relê o Doc:
+// inserido = o token está lá E o trecho não está mais. O resto vai para o
+// relatório com o MESMO vocabulário de `apply-clause-slot.ts`, que a tela já
+// traduz. "Não sei" (Drive fora na releitura) nunca vira "deu certo".
 // ============================================================================
 
 export interface InsertedToken {
@@ -24,10 +34,35 @@ export interface InsertedToken {
   leftoverParagraphs?: string[];
 }
 
+export type SkipReason =
+  // Antes do batch — decididos no texto plano.
+  | "ambiguous"
+  | "not-found"
+  | "unknown-token"
+  | "already-tokenized"
+  // Depois do batch — decididos pela resposta da API e pela releitura.
+  /** O Google recusou o lote inteiro (nada mudou no Doc). */
+  | "batch-failed"
+  /** A API casou 0 ocorrências: o texto plano mentiu (formatação partindo o trecho). */
+  | "replace-noop"
+  /** A API casou MAIS de uma vez: o token entrou em lugar que ninguém examinou (cabeçalho/rodapé). */
+  | "over-matched"
+  /**
+   * Um parágrafo do bloco foi APAGADO em mais de um lugar. É o caso destrutivo:
+   * o Doc perdeu conteúdo fora do trecho revisado. `paragraph` diz qual.
+   */
+  | "over-removed"
+  /** A API disse que trocou, mas a releitura não mostra o token (ou ainda mostra o trecho). */
+  | "verify-failed"
+  /** Não deu para reler o Doc — e "não sei" não é "deu certo". */
+  | "verify-unavailable";
+
 export interface SkippedToken {
   token: string;
   trecho: string;
-  reason: "ambiguous" | "not-found" | "unknown-token" | "already-tokenized";
+  reason: SkipReason;
+  /** Em `over-removed`: o parágrafo do bloco que foi apagado além do esperado. */
+  paragraph?: string;
 }
 
 /**
@@ -44,6 +79,7 @@ export interface SkippedToken {
 const HAS_PLACEHOLDER = /\{\{[^{}]+\}\}/;
 
 export interface InsertionReport {
+  /** Tokens CONFIRMADOS no documento após o batch (não "enviados"). */
   inserted: InsertedToken[];
   skippedAmbiguous: SkippedToken[];
   /** Tokens do catálogo que a IA não conseguiu localizar no doc. */
@@ -151,9 +187,26 @@ export async function insertPlaceholdersWithAI(input: {
     }
   }
 
-  const inserted: InsertedToken[] = [];
+  /**
+   * Candidato a inserção: passou nas travas do texto plano e gerou requests.
+   * Vira `inserted` só depois que a reply e a releitura confirmarem.
+   */
+  interface Candidate {
+    token: string;
+    trecho: string;
+    /** O parágrafo que vira `{{token}}` (o trecho inteiro, quando é um só). */
+    first: string;
+    /** Índice do request que insere o token. */
+    requestIdx: number;
+    /** Requests que esvaziam os demais parágrafos de um bloco. */
+    rest: Array<{ idx: number; par: string }>;
+    /** Parágrafos do bloco que ficaram no Doc (ambíguos ou não casados). */
+    leftover: string[];
+  }
+
   const skippedAmbiguous: SkippedToken[] = [];
-  const requests: object[] = [];
+  const requests: docs_v1.Schema$Request[] = [];
+  const candidates: Candidate[] = [];
   const seenTokens = new Set<string>();
 
   for (const m of mapeamentos) {
@@ -183,29 +236,8 @@ export async function insertPlaceholdersWithAI(input: {
       .split(/\n+/)
       .map((p) => p.trim())
       .filter((p) => p.length > 0);
+    const first = paragraphs[0] ?? trecho;
 
-    if (paragraphs.length <= 1) {
-      const count = countOccurrences(docText, trecho);
-      if (count === 0) {
-        skippedAmbiguous.push({ token, trecho, reason: "not-found" });
-        continue;
-      }
-      if (count > 1) {
-        skippedAmbiguous.push({ token, trecho, reason: "ambiguous" });
-        continue;
-      }
-      seenTokens.add(token);
-      inserted.push({ token, trecho });
-      requests.push({
-        replaceAllText: {
-          containsText: { text: trecho, matchCase: true },
-          replaceText: `{{${token}}}`,
-        },
-      });
-      continue;
-    }
-
-    const first = paragraphs[0];
     const firstCount = countOccurrences(docText, first);
     if (firstCount === 0) {
       skippedAmbiguous.push({ token, trecho, reason: "not-found" });
@@ -216,47 +248,142 @@ export async function insertPlaceholdersWithAI(input: {
       continue;
     }
 
-    const leftover: string[] = [];
-    const restRequests: object[] = [];
-    for (const par of paragraphs.slice(1)) {
-      if (countOccurrences(docText, par) === 1) {
-        restRequests.push({
-          replaceAllText: {
-            containsText: { text: par, matchCase: true },
-            replaceText: "",
-          },
-        });
-      } else {
-        leftover.push(par);
-      }
-    }
-
-    seenTokens.add(token);
-    inserted.push({
+    const candidate: Candidate = {
       token,
       trecho,
-      ...(leftover.length > 0 ? { leftoverParagraphs: leftover } : {}),
-    });
+      first,
+      requestIdx: requests.length,
+      rest: [],
+      leftover: [],
+    };
     requests.push({
       replaceAllText: {
         containsText: { text: first, matchCase: true },
         replaceText: `{{${token}}}`,
       },
     });
-    requests.push(...restRequests);
+    for (const par of paragraphs.slice(1)) {
+      if (countOccurrences(docText, par) === 1) {
+        candidate.rest.push({ idx: requests.length, par });
+        requests.push({
+          replaceAllText: {
+            containsText: { text: par, matchCase: true },
+            replaceText: "",
+          },
+        });
+      } else {
+        candidate.leftover.push(par);
+      }
+    }
+    seenTokens.add(token);
+    candidates.push(candidate);
   }
 
-  if (requests.length > 0) {
-    const docs = getDocsClient();
-    await docs.documents.batchUpdate({
-      documentId: input.docId,
-      requestBody: { requests },
+  const inserted: InsertedToken[] = [];
+  const skip = (c: Candidate, reason: SkipReason, paragraph?: string) =>
+    skippedAmbiguous.push({
+      token: c.token,
+      trecho: c.trecho,
+      reason,
+      ...(paragraph ? { paragraph } : {}),
     });
+  // Tokens que a API pôs no Doc mas em lugar/quantidade que ninguém revisou.
+  // Estão no texto e NÃO contam como presentes: "não confirmado" é "faltando".
+  const unconfirmed = new Set<string>();
+
+  // Texto pós-passe. Fica no pré-passe quando nada foi enviado ou quando o
+  // lote falhou (batchUpdate é atômico: ou tudo entra, ou nada).
+  let finalText = docText;
+
+  if (candidates.length > 0) {
+    let replies: docs_v1.Schema$Response[] | null = null;
+    try {
+      const res = await batchUpdateDoc(input.docId, requests);
+      replies = res?.data?.replies ?? [];
+    } catch (err) {
+      console.error("[ai-placeholder-insertion] batchUpdate falhou:", err);
+    }
+
+    if (replies === null) {
+      for (const c of candidates) skip(c, "batch-failed");
+    } else {
+      // 1ª triagem: o que a API disse que fez. Reply ausente (lista mais curta
+      // que os requests) não decide nada — fica para a releitura.
+      const changedAt = (idx: number): number | null => {
+        const r = replies![idx];
+        if (r === undefined) return null;
+        return Number(r.replaceAllText?.occurrencesChanged ?? 0);
+      };
+      const pending: Candidate[] = [];
+      for (const c of candidates) {
+        const changed = changedAt(c.requestIdx);
+        // O caso destrutivo vem primeiro: um parágrafo do bloco apagado em
+        // >1 lugar é conteúdo perdido fora do trecho revisado, e o operador
+        // precisa saber QUAL parágrafo, não só "deu errado".
+        const overRemoved = c.rest.find((r) => (changedAt(r.idx) ?? 0) > 1);
+        if (overRemoved) {
+          unconfirmed.add(c.token);
+          skip(c, "over-removed", overRemoved.par);
+          continue;
+        }
+        if (changed === 0) {
+          skip(c, "replace-noop");
+          continue;
+        }
+        if (changed !== null && changed > 1) {
+          unconfirmed.add(c.token);
+          skip(c, "over-matched");
+          continue;
+        }
+        for (const r of c.rest) {
+          if (changedAt(r.idx) === 0) c.leftover.push(r.par);
+        }
+        pending.push(c);
+      }
+
+      // 2ª triagem: o que o documento mostra. Aqui se decide `inserted`.
+      let reread: string | null = null;
+      try {
+        reread = await getDocPlainText(input.docId);
+      } catch (err) {
+        console.error("[ai-placeholder-insertion] releitura falhou:", err);
+      }
+      if (reread === null) {
+        for (const c of pending) skip(c, "verify-unavailable");
+      } else {
+        finalText = reread;
+        for (const c of pending) {
+          const tokenPresent = reread.includes(`{{${c.token}}}`);
+          const trechoGone = countOccurrences(reread, c.first) === 0;
+          // Parágrafo de bloco cuja reply faltou: conferir na releitura em vez
+          // de presumir apagado — se ainda está no Doc, é leftover.
+          for (const r of c.rest) {
+            if (changedAt(r.idx) === null && countOccurrences(reread, r.par) > 0) {
+              c.leftover.push(r.par);
+            }
+          }
+          if (tokenPresent && trechoGone) {
+            inserted.push({
+              token: c.token,
+              trecho: c.trecho,
+              ...(c.leftover.length > 0 ? { leftoverParagraphs: c.leftover } : {}),
+            });
+          } else {
+            skip(c, "verify-failed");
+          }
+        }
+      }
+    }
   }
 
-  // Estado pós-pass: o que ficou no doc vs catálogo.
-  const finalText = await getDocPlainText(input.docId);
-  const present = new Set(extractPlaceholdersFromText(finalText));
+  // Estado pós-pass: o que ficou no doc vs catálogo. Quando a releitura
+  // falhou, `finalText` é o pré-passe — o relatório fica pessimista, nunca
+  // otimista. Token que a API pôs em lugar não revisado (over-*) está no
+  // texto mas sai de `present`: ele aparece em `notMapped`/`missingRequired`
+  // até alguém confirmar no Doc, em vez de sumir dos dois lados do relatório.
+  const present = new Set(
+    extractPlaceholdersFromText(finalText).filter((t) => !unconfirmed.has(t))
+  );
   const catalogTokens = catalogForModalidade(input.modalidade).map((d) => d.token);
   const notMapped = catalogTokens.filter((t) => !present.has(t));
   const missingRequired = requiredTokens(input.modalidade).filter((t) => !present.has(t));

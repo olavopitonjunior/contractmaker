@@ -4,6 +4,13 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-02 - O relatório da IA na ingestão de modelos para de contar o que não entrou
+
+### Corrigido
+
+- **"Preencheu N campos" contava envios, não resultados.** O passe de IA que insere chaves em modelos enviados por upload montava a lista de inseridos **antes** de pedir a edição ao Google e descartava a resposta. Na reingestão da RE/MAX Trio, 11 de 12 modelos declaravam chave inserida que não estava no documento — e o operador ativava o modelo com base nessa contagem. Agora o passe lê quantas ocorrências a API realmente trocou, relê o documento e só declara inserido o que **está lá e cujo trecho original sumiu**. Cada falha ganha nome, no mesmo vocabulário que a conferência de cláusulas já usava: a edição não pegou (formatação invisível partindo o parágrafo), pegou em mais lugares que o esperado (cabeçalho/rodapé), a API disse que trocou mas o documento não mostra, não deu para conferir, ou o Google recusou o lote. "Não consegui conferir" nunca vira "deu certo".
+  - A lista de chaves faltantes passa a ler o documento **depois** do passe; se a releitura falhar, lê o de antes — o relatório erra para o lado pessimista. Chave que a API pôs em lugar não revisado continua contando como faltante até alguém conferir; e quando um parágrafo do bloco é apagado em mais de um lugar (o caso destrutivo), o relatório diz **qual** parágrafo e manda conferir o histórico de versões do Doc.
+  - O rótulo na tela vira "Confirmou N campo(s) no documento". **O número vai cair** em relação ao que aparecia antes; é a contagem antiga que estava errada.
 ## [Unreleased] - 2026-09-02 - O contrato gerado passa a dizer que campo saiu em branco
 
 ### Adicionado
