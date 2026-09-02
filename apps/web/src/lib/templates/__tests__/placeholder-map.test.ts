@@ -415,3 +415,53 @@ describe("administração de locação — engine google_docs", () => {
     expect(admTokens).not.toContain("locatarios_qualificacao");
   });
 });
+
+/**
+ * Corretagem: a chave existe no mapa mesmo vazia, porque token ausente do mapa
+ * é APAGADO do Doc por `cleanupOrphanPlaceholders` — o modelo perderia o
+ * parágrafo inteiro em vez de deixá-lo em branco.
+ */
+describe("buildLocacaoPlaceholderMap — corretagem", () => {
+  const comCorretor = () => ({
+    ...JSON.parse(JSON.stringify(locacaoBase)),
+    comissao: {
+      angariadores: [
+        {
+          nome: "Ana Ribeiro",
+          tipo_pessoa: "fisica",
+          cpf: "52998224725",
+          creci: "12.345-F",
+          recebimento: { pix_chave: "52998224725", pix_tipo_chave: "CPF" },
+        },
+      ],
+    },
+  });
+
+  it("emite as duas chaves mesmo quando o negócio não tem corretor", () => {
+    const map = buildLocacaoPlaceholderMap(
+      enrichLocacaoData(JSON.parse(JSON.stringify(locacaoBase)))
+    );
+    expect(map).toHaveProperty("corretagem_qualificacao", "");
+    expect(map).toHaveProperty("corretagem_dados_pagamento", "");
+  });
+
+  it("qualifica o corretor a partir do formulário", () => {
+    const map = buildLocacaoPlaceholderMap(enrichLocacaoData(comCorretor()));
+    expect(map.corretagem_qualificacao).toBe(
+      "Ana Ribeiro, inscrito(a) no CPF/MF sob nº 529.982.247-25, CRECI nº 12.345-F"
+    );
+  });
+
+  it("o caminho do mapa NUNCA produz repasse: o bancário sai antes do enrich", async () => {
+    const { stripCommissionerReceiving } = await import("@/lib/forms/redact-datajson");
+    // Controle que sabe falhar: com o dado bruto, a chave sairia preenchida.
+    expect(
+      buildLocacaoPlaceholderMap(enrichLocacaoData(comCorretor())).corretagem_dados_pagamento
+    ).not.toBe("");
+    // Como o pipeline de verdade faz. O valor real é injetado pelo call site.
+    const semBanco = stripCommissionerReceiving(comCorretor());
+    const map = buildLocacaoPlaceholderMap(enrichLocacaoData(semBanco));
+    expect(map.corretagem_dados_pagamento).toBe("");
+    expect(map.corretagem_qualificacao).toContain("Ana Ribeiro");
+  });
+});
