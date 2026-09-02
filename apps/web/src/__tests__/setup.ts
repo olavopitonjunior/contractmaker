@@ -197,6 +197,9 @@ vi.mock("@/lib/db/prisma", () => {
     },
     orgMembership: {
       findFirst: vi.fn(),
+      // `POST /api/org/members` cria a membership direto, sem passar pela fila
+      // de convites.
+      create: vi.fn(),
       upsert: vi.fn(),
       findMany: vi.fn().mockResolvedValue([]),
       count: vi.fn().mockResolvedValue(0),
@@ -213,6 +216,9 @@ vi.mock("@/lib/db/prisma", () => {
     // mínimo que ele usa (ver `upsertMaxRole`).
     customRole: {
       findUnique: vi.fn().mockResolvedValue(null),
+      // O teto de papel resolve a CustomRole alvo escopada por org, e `id` +
+      // `orgId` não formam unique — tem de ser findFirst.
+      findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
       upsert: vi.fn().mockResolvedValue({ id: "role-1" }),
       create: vi.fn(),
@@ -590,7 +596,12 @@ vi.mock("@/lib/auth/auth", () => ({
 }));
 
 // --- Handlebars render mock ---
-vi.mock("@/lib/render/handlebars", () => ({
+// PARCIAL de propósito: só `renderContratoHTML` é dublado. O mock total escondia
+// os demais exports do módulo (`HANDLEBARS_HELPER_NAMES`,
+// `registerHandlebarsHelpers`), e qualquer arquivo que os importasse quebrava
+// com "No export is defined on the mock" — mesmo sem usar o render.
+vi.mock("@/lib/render/handlebars", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/render/handlebars")>()),
   renderContratoHTML: vi.fn(
     (_template: string, data: Record<string, unknown>) =>
       `<rendered>${JSON.stringify(data)}</rendered>`

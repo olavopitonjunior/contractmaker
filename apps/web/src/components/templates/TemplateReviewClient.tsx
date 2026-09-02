@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { describePiiKinds, type TemplatePiiReport } from "@/lib/templates/pii-gate";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -60,6 +61,8 @@ interface DraftReport {
   missingRequired?: string[];
   slots?: SlotReport[];
   ranAt?: string;
+  /** Gate de PII do modelo — espelho do último texto lido (ver lib/templates/pii-gate.ts). */
+  pii?: TemplatePiiReport;
 }
 interface TemplateInfo {
   id: string;
@@ -121,6 +124,18 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
    * A trava é do servidor; aqui só mostramos o efeito e a saída consciente.
    */
   const [slotGap, setSlotGap] = useState<string | null>(null);
+  /**
+   * Mensagem do 409 `PII_LEFTOVER` do PATCH — o texto do modelo ainda tem dado
+   * pessoal literal (CPF, RG, conta bancária…). Trava do servidor; a saída
+   * consciente aqui é `allowPii`, separada do `forceActivate` do slot.
+   */
+  const [piiGap, setPiiGap] = useState<string | null>(null);
+  /**
+   * Flags já aceitos numa trava anterior, para o próximo PATCH não recuar
+   * (slot → PII é a única cadeia: o servidor roda a trava de slot primeiro).
+   * Ref, não state: é lido no mesmo handler que o escreve. Zerado ao ativar.
+   */
+  const acceptedFlags = useRef<{ forceActivate?: boolean; allowPii?: boolean }>({});
 
   // Revisão por IA — parte do relatório persistido na ingestão (é ele que traz
   // os avisos de slot), sobrescrito quando o operador roda a IA de novo.
@@ -153,8 +168,12 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
       setValidation(data);
       // A revalidação reconcilia a declaração de slot com o Doc — se o operador
       // consertou o modelo à mão, o aviso (e a trava da ativação) some aqui.
-      if (Array.isArray(data.slots)) {
-        setReport((prev) => ({ ...(prev ?? {}), slots: data.slots as SlotReport[] }));
+      if (Array.isArray(data.slots) || data.pii) {
+        setReport((prev) => ({
+          ...(prev ?? {}),
+          ...(Array.isArray(data.slots) ? { slots: data.slots as SlotReport[] } : {}),
+          ...(data.pii ? { pii: data.pii as TemplatePiiReport } : {}),
+        }));
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha na validação");
@@ -192,8 +211,16 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
         setSlotGap(data.error as string);
         return;
       }
-      if (!res.ok) throw new Error(data.error ?? "Falha ao atualizar template");
+      if (res.status === 409 && (data?.code === "PII_LEFTOVER" || data?.code === "PII_UNVERIFIED")) {
+        setPiiGap(data.error as string);
+        return;
+      }
+      if (!res.ok) {
+        acceptedFlags.current = {};
+        throw new Error(data.error ?? "Falha ao atualizar template");
+      }
       toast.success(okMsg);
+      if (body.status === "active") acceptedFlags.current = {};
       if (typeof body.status === "string") setStatus(body.status);
       if (typeof body.isDefault === "boolean") setIsDefault(body.isDefault);
       router.refresh();
@@ -205,6 +232,9 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
   }
 
   async function activate() {
+    // Nova tentativa = nenhum flag aceito ainda. O ref só sobrevive DENTRO da
+    // cadeia slot → PII de uma mesma tentativa (409 → diálogo → retry).
+    acceptedFlags.current = {};
     if ((validation?.missingRequired ?? []).length > 0 || failedSlots.length > 0) {
       setConfirmOpen(true);
       return;
@@ -293,16 +323,57 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Voltar e aprovar a cláusula</AlertDialogCancel>
+            <AlertDialogCancel onClick={() => (acceptedFlags.current = {})}>
+              Voltar e aprovar a cláusula
+            </AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 setSlotGap(null);
                 // Saída consciente: o texto padrão da plataforma é legítimo pra
                 // quem não tem redação própria — só não pode acontecer sem
-                // ninguém saber.
+                // ninguém saber. O flag SOBREVIVE ao próximo elo (slot → PII):
+                // o AlertDialogAction fecha o diálogo via onOpenChange, por isso
+                // a limpeza do ref vive só no Cancelar e no início da tentativa.
+                acceptedFlags.current.forceActivate = true;
                 void patchTemplate(
-                  { status: "active", forceActivate: true },
+                  { status: "active", ...acceptedFlags.current },
                   "Template ativado com o texto padrão da plataforma no espaço de cláusula."
+                );
+              }}
+            >
+              Ativar mesmo assim
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={piiGap !== null} onOpenChange={(o) => !o && setPiiGap(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>O modelo ainda tem dado pessoal no texto</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>{piiGap}</p>
+                <p>
+                  Use o mapeamento manual abaixo para trocar o trecho por uma chave
+                  de preenchimento, ou edite o Doc e clique em &quot;Revalidar&quot;.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => (acceptedFlags.current = {})}>
+              Voltar e corrigir
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setPiiGap(null);
+                // Saída consciente e SEPARADA da do slot: quem aceita imprimir
+                // o dado em todo contrato assume isso com nome próprio.
+                acceptedFlags.current.allowPii = true;
+                void patchTemplate(
+                  { status: "active", ...acceptedFlags.current },
+                  "Template ativado com dado pessoal no texto — revise os contratos gerados."
                 );
               }}
             >
@@ -361,6 +432,18 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {report?.pii?.blocked && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+          <p className="font-medium">Dado pessoal literal no texto do modelo</p>
+          <p className="text-muted-foreground">
+            {describePiiKinds(report.pii.kinds)} — {report.pii.count}{" "}
+            {report.pii.count === 1 ? "ocorrência" : "ocorrências"}. A ativação fica travada
+            até o trecho virar chave de preenchimento (ou cláusula do acervo) e o modelo ser
+            revalidado.
+          </p>
+        </div>
+      )}
 
       {/* Slot de cláusula que não abriu — o aviso mais grave desta tela: o
           modelo consolidado ficou com a garantia de UMA variante chumbada. */}
@@ -518,7 +601,7 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
           </Card>
 
           {/* Relato da IA */}
-          {report && (
+          {report && (report.ranAt || report.inserted) && (
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-1.5 text-sm">

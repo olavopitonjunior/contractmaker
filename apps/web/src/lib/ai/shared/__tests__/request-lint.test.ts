@@ -23,6 +23,8 @@ import {
   lintStructuredRequest,
 } from "@/lib/ai/shared/request-lint";
 import {
+  CLAUSE_CLASSIFY_MODEL,
+  CONTRACT_REVIEW_MODEL,
   INGEST_CLASSIFY_MODEL,
   INGEST_ESCALATION_MODEL,
   INGEST_PLAN_MODEL,
@@ -196,6 +198,14 @@ const REAL_MODELS: Array<[string, string, EffortLevel]> = [
   ["plano — degrau base", INGEST_PLAN_MODEL, "high"],
   ["plano — degrau de profundidade", INGEST_PLAN_MODEL, "xhigh"],
   ["escalação", INGEST_ESCALATION_MODEL, "xhigh"],
+  // Chamadas de fora da ingestão, com o `effort` REAL do call-site. Ficaram de
+  // fora quando nasceram: `CLAUSE_CLASSIFY_MODEL` passava por COINCIDÊNCIA (é
+  // a mesma string de `INGEST_CLASSIFY_MODEL`) e `CONTRACT_REVIEW_MODEL` não
+  // passava de jeito nenhum — é Sonnet, um modelo que este registro não via.
+  // O docblock das duas constantes prevê a troca; sem esta linha, trocar volta
+  // a mandar `effort` para um modelo que não o aceita.
+  ["classificação de cláusula", CLAUSE_CLASSIFY_MODEL, "medium"],
+  ["revisão de contrato", CONTRACT_REVIEW_MODEL, "high"],
 ];
 
 describe("contrato — o corpo que runStructured monta para cada modelo usado", () => {

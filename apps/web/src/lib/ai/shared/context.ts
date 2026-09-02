@@ -6,6 +6,7 @@
 
 import { prisma } from "@/lib/db/prisma";
 import type { AgentContext } from "../types";
+import { esteiraForContext } from "@/lib/clauses/taxonomy";
 
 export async function loadContext(contractId: string, orgId: string): Promise<AgentContext> {
   const contract = await prisma.contract.findUniqueOrThrow({
@@ -47,6 +48,12 @@ export async function loadContext(contractId: string, orgId: string): Promise<Ag
     templateModalidade: contract.template?.modalidade || "a_vista",
     templateName: contract.template?.name ?? "Contrato importado",
     dealKind: contract.deal?.kind ?? "venda",
+    // Dos valores CRUS, antes dos defaults acima: contrato importado não tem
+    // template, e o `|| "a_vista"` faria uma locação parecer venda.
+    esteira: esteiraForContext({
+      dealKind: contract.deal?.kind ?? null,
+      templateModalidade: contract.template?.modalidade ?? null,
+    }),
     dealId: contract.dealId,
     activeClauses: contract.clauses.map((cc) => ({
       id: cc.id,

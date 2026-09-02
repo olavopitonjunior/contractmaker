@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
@@ -15,7 +15,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -47,9 +46,17 @@ import {
   CLAUSE_GROUP_CODES,
   CLAUSE_STATUSES,
   CLAUSE_SUBCATEGORY_SUGGESTIONS,
+  CLAUSE_ESTEIRA_VALUES,
   GROUP_LABELS,
+  deriveIsVariable,
   type ClauseWriteInput,
 } from "@/lib/clauses/schema";
+import { ESTEIRA_LABEL, ESTEIRA_AXIS } from "@/lib/clauses/taxonomy";
+import {
+  descriptiveVocabularyFor,
+  isCanonicalTag,
+  areTagsFrozen,
+} from "@/lib/clauses/tag-vocabulary";
 import { CLAUSE_SLOT_KEYS, slotTag } from "@/lib/templates/clause-slots";
 import { ClausePreviewFrame } from "./ClausePreviewFrame";
 import { CLAUSE_STATUS_LABEL, type Clause } from "./types";
@@ -60,6 +67,10 @@ interface ClauseEditorProps {
   open: boolean;
   onClose: () => void;
   mode: "create" | "edit";
+  /** Módulo de locação do tenant: desligado, a esteira fica travada em venda. */
+  locacaoEnabled?: boolean;
+  /** Tags já usadas no acervo da org — entram no autocomplete. */
+  orgTags?: string[];
 }
 
 const NONE_GROUP = "none";
@@ -71,6 +82,7 @@ function defaultValuesFor(clause?: Clause | null): ClauseWriteInput {
       content: "",
       subcategory: "customizada",
       groupCode: null,
+      esteira: null,
       isVariable: false,
       agentNotes: "",
       tags: [],
@@ -87,6 +99,9 @@ function defaultValuesFor(clause?: Clause | null): ClauseWriteInput {
     groupCode: (CLAUSE_GROUP_CODES as readonly string[]).includes(clause.groupCode ?? "")
       ? (clause.groupCode as ClauseWriteInput["groupCode"])
       : null,
+    esteira: (CLAUSE_ESTEIRA_VALUES as readonly string[]).includes(clause.esteira ?? "")
+      ? (clause.esteira as ClauseWriteInput["esteira"])
+      : null,
     isVariable: clause.isVariable,
     agentNotes: clause.agentNotes ?? "",
     tags: clause.tags ?? [],
@@ -100,7 +115,14 @@ function defaultValuesFor(clause?: Clause | null): ClauseWriteInput {
  * dois lados sem divergir). Três abas: Conteúdo, Preview (mesmo mecanismo
  * do detail — é o "linter" do editor) e Metadados.
  */
-export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps) {
+export function ClauseEditor({
+  clause,
+  open,
+  onClose,
+  mode,
+  locacaoEnabled = false,
+  orgTags = [],
+}: ClauseEditorProps) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState("conteudo");
   const [previewContent, setPreviewContent] = useState(clause?.content ?? "");
@@ -143,7 +165,26 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
     }
   }
 
-  const tags = form.watch("tags") ?? [];
+  // `?? []` cria array novo a cada render e anularia os memos abaixo.
+  const watchedTags = form.watch("tags");
+  const tags = useMemo(() => watchedTags ?? [], [watchedTags]);
+  const watchedContent = form.watch("content") ?? "";
+  const watchedEsteira = form.watch("esteira") ?? null;
+
+  // `isVariable` deixou de ser um toggle e virou leitura do próprio texto —
+  // mesma regra do servidor (`deriveIsVariable`).
+  const variaveisDetectadas = useMemo(
+    () => (deriveIsVariable(watchedContent) ? watchedContent.match(/\{\{[^{}]+\}\}/g)?.length ?? 0 : 0),
+    [watchedContent]
+  );
+
+  /**
+   * Tags de IDENTIDADE (`slot:`, `garantia:`, `provider:`, `cobertura:`) e as
+   * origens curadas têm o conjunto CONGELADO: mexer nele — inclusive
+   * acrescentar — muda a identidade da cláusula e faz a próxima reingestão
+   * duplicá-la em vez de arquivar a anterior.
+   */
+  const tagsCongeladas = areTagsFrozen({ source: clause?.source ?? null, tags });
 
   function addTag(raw?: string) {
     const tag = (raw ?? tagInput).trim();
@@ -166,13 +207,34 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
     (t) => !tags.includes(t)
   );
 
+  // Antes o Popover "Sugestões" oferecia UMA opção (`slot:garantia`) — não
+  // havia vocabulário nenhum para escolher, o que fazia parecer que tag era
+  // coisa que só o back preenchia.
+  const vocabSuggestions = useMemo(
+    () =>
+      descriptiveVocabularyFor(
+        watchedEsteira === "venda" || watchedEsteira === "locacao" || watchedEsteira === "ambas"
+          ? watchedEsteira
+          : "ambas"
+      ).filter((d) => !tags.includes(d.tag)),
+    [watchedEsteira, tags]
+  );
+
+  const orgTagSuggestions = useMemo(
+    () => orgTags.filter((t) => !tags.includes(t) && !isCanonicalTag(t)).slice(0, 40),
+    [orgTags, tags]
+  );
+
   async function onSubmit(values: ClauseWriteInput) {
     const payload = {
       title: values.title,
       content: values.content,
       subcategory: values.subcategory,
       groupCode: values.groupCode ?? null,
-      isVariable: !!values.isVariable,
+      esteira: values.esteira ?? null,
+      // O servidor deriva de qualquer forma; mandar o derivado mantém os dois
+      // lados dizendo a mesma coisa.
+      isVariable: deriveIsVariable(values.content),
       agentNotes: values.agentNotes?.trim() ? values.agentNotes.trim() : null,
       tags: values.tags ?? [],
       status: values.status ?? "approved",
@@ -305,10 +367,51 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
                   />
                   <FormField
                     control={form.control}
+                    name="esteira"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Esteira</FormLabel>
+                        <Select
+                          value={field.value ?? NONE_GROUP}
+                          onValueChange={(v) => {
+                            const next =
+                              v === NONE_GROUP ? null : (v as ClauseWriteInput["esteira"]);
+                            field.onChange(next);
+                            // Grupo só existe em compra e venda; sair de lá com
+                            // um Gx pendurado deixaria a cláusula num grupo que
+                            // a própria esteira não exibe.
+                            if (next !== "venda") form.setValue("groupCode", null);
+                          }}
+                          disabled={!locacaoEnabled}
+                        >
+                          <FormControl>
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Não classificada" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value={NONE_GROUP}>Não classificada</SelectItem>
+                            {CLAUSE_ESTEIRA_VALUES.map((e) => (
+                              <SelectItem key={e} value={e}>
+                                {ESTEIRA_LABEL[e]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
                     name="groupCode"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Grupo</FormLabel>
+                        <FormLabel>
+                          Grupo
+                          <span className="ml-1 font-normal text-muted-foreground">
+                            (roteiro do CCV)
+                          </span>
+                        </FormLabel>
                         <Select
                           value={field.value ?? NONE_GROUP}
                           onValueChange={(v) =>
@@ -318,6 +421,9 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
                                 : (v as ClauseWriteInput["groupCode"])
                             )
                           }
+                          // G1–G6 são as seis etapas de um contrato de compra e
+                          // venda. Em locação o campo não se aplica.
+                          disabled={watchedEsteira !== "venda"}
                         >
                           <FormControl>
                             <SelectTrigger className="w-full">
@@ -333,6 +439,12 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
                             ))}
                           </SelectContent>
                         </Select>
+                        <p className="text-xs text-muted-foreground">
+                          {watchedEsteira === "venda"
+                            ? ESTEIRA_AXIS.venda.groups.find((g) => g.code === field.value)
+                                ?.help ?? "As seis etapas de um contrato de compra e venda."
+                            : "Só se aplica à esteira de compra e venda."}
+                        </p>
                       </FormItem>
                     )}
                   />
@@ -362,20 +474,23 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
                       </FormItem>
                     )}
                   />
-                  <FormField
-                    control={form.control}
-                    name="isVariable"
-                    render={({ field }) => (
-                      <FormItem className="flex flex-row items-center justify-between gap-3 space-y-0 pt-6">
-                        <FormLabel className="font-normal">
-                          Cláusula padronizada (G1–G6)
-                        </FormLabel>
-                        <FormControl>
-                          <Switch checked={!!field.value} onCheckedChange={field.onChange} />
-                        </FormControl>
-                      </FormItem>
-                    )}
-                  />
+                  {/*
+                    Aqui havia um Switch rotulado "Cláusula padronizada (G1–G6)"
+                    que, na verdade, era `isVariable` — "tem placeholders". Dois
+                    campos independentes com um nome só: a aba filtrava por
+                    `isVariable && groupCode`, então cláusula criada à mão nunca
+                    caía lá, e marcar o switch sem escolher grupo fazia a linha
+                    sumir da partição. Agora `isVariable` é DERIVADO do conteúdo
+                    (no servidor também) e isto é só leitura.
+                  */}
+                  <FormItem className="space-y-1 pt-6">
+                    <FormLabel className="font-normal">Variáveis no texto</FormLabel>
+                    <p className="text-xs text-muted-foreground">
+                      {variaveisDetectadas > 0
+                        ? `${variaveisDetectadas} campo(s) preenchido(s) pelo formulário.`
+                        : "Nenhuma — o texto é fixo."}
+                    </p>
+                  </FormItem>
                 </div>
 
                 <FormField
@@ -399,62 +514,116 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
 
                 <div className="space-y-2">
                   <FormLabel>Tags</FormLabel>
-                  <div className="flex gap-2">
-                    <Input
-                      value={tagInput}
-                      onChange={(e) => setTagInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          addTag();
-                        }
-                      }}
-                      placeholder="Adicionar tag"
-                    />
-                    <Popover open={tagPopoverOpen} onOpenChange={setTagPopoverOpen}>
-                      <PopoverTrigger asChild>
-                        <Button type="button" variant="outline" size="sm">
-                          Sugestões
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-56 p-0" align="end">
-                        <Command>
-                          <CommandInput placeholder="Buscar slot..." />
-                          <CommandList>
-                            <CommandEmpty>Nenhuma sugestão.</CommandEmpty>
-                            <CommandGroup heading="Slots de template">
-                              {slotSuggestions.map((t) => (
-                                <CommandItem
-                                  key={t}
-                                  onSelect={() => {
-                                    addTag(t);
-                                    setTagPopoverOpen(false);
-                                  }}
-                                >
-                                  {t}
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
-                    <Button type="button" variant="outline" size="sm" onClick={() => addTag()}>
-                      +
-                    </Button>
-                  </div>
+                  {tagsCongeladas ? (
+                    <p className="rounded border border-amber-500/40 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-500">
+                      As tags desta cláusula são a chave que liga o formulário ao
+                      contrato. Alterá-las quebraria a reingestão do pacote, então
+                      ficam somente leitura.
+                    </p>
+                  ) : (
+                    <div className="flex gap-2">
+                      <Input
+                        value={tagInput}
+                        onChange={(e) => setTagInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            addTag();
+                          }
+                        }}
+                        placeholder="Adicionar tag"
+                      />
+                      <Popover open={tagPopoverOpen} onOpenChange={setTagPopoverOpen}>
+                        <PopoverTrigger asChild>
+                          <Button type="button" variant="outline" size="sm">
+                            Sugestões
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-80 p-0" align="end">
+                          <Command>
+                            <CommandInput placeholder="Buscar tag..." />
+                            <CommandList>
+                              <CommandEmpty>Nenhuma sugestão.</CommandEmpty>
+                              {vocabSuggestions.length > 0 && (
+                                <CommandGroup heading="Vocabulário padrão">
+                                  {vocabSuggestions.map((d) => (
+                                    <CommandItem
+                                      key={d.tag}
+                                      value={`${d.tag} ${d.label}`}
+                                      onSelect={() => {
+                                        addTag(d.tag);
+                                        setTagPopoverOpen(false);
+                                      }}
+                                    >
+                                      <span className="font-mono text-xs">{d.tag}</span>
+                                      <span className="ml-2 truncate text-muted-foreground">
+                                        {d.label}
+                                      </span>
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              )}
+                              {orgTagSuggestions.length > 0 && (
+                                <CommandGroup heading="Já usadas nesta imobiliária">
+                                  {orgTagSuggestions.map((t) => (
+                                    <CommandItem
+                                      key={t}
+                                      onSelect={() => {
+                                        addTag(t);
+                                        setTagPopoverOpen(false);
+                                      }}
+                                    >
+                                      {t}
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              )}
+                              {slotSuggestions.length > 0 && (
+                                <CommandGroup heading="Slots de template">
+                                  {slotSuggestions.map((t) => (
+                                    <CommandItem
+                                      key={t}
+                                      onSelect={() => {
+                                        addTag(t);
+                                        setTagPopoverOpen(false);
+                                      }}
+                                    >
+                                      {t}
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              )}
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                      <Button type="button" variant="outline" size="sm" onClick={() => addTag()}>
+                        +
+                      </Button>
+                    </div>
+                  )}
                   <div className="flex flex-wrap gap-1">
                     {tags.map((tag) => (
                       <Badge
                         key={tag}
-                        variant="secondary"
-                        className="cursor-pointer text-xs"
-                        onClick={() => removeTag(tag)}
+                        // Canônica × livre: distinção visual, sem migrar nada.
+                        variant={isCanonicalTag(tag) ? "secondary" : "outline"}
+                        className={tagsCongeladas ? "text-xs" : "cursor-pointer text-xs"}
+                        title={isCanonicalTag(tag) ? undefined : "Tag livre (fora do vocabulário)"}
+                        onClick={() => {
+                          if (!tagsCongeladas) removeTag(tag);
+                        }}
                       >
                         {tag}
-                        <X className="ml-1 h-3 w-3" />
+                        {!tagsCongeladas && <X className="ml-1 h-3 w-3" />}
                       </Badge>
                     ))}
+                    {tags.length === 0 && (
+                      <span className="text-xs text-muted-foreground">
+                        Sem tags. Elas ajudam o agente a encontrar a cláusula — use
+                        as sugestões.
+                      </span>
+                    )}
                   </div>
                 </div>
               </TabsContent>

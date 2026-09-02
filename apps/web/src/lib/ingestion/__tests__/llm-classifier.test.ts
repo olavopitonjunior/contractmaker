@@ -4,6 +4,9 @@ import { join } from "node:path";
 import {
   buildClassifyUserContent,
   createLlmItemClassifier,
+  CLASSIFICATION_SCHEMA,
+  CLASSIFY_PLAYBOOK,
+  administracaoExcerpts,
 } from "@/lib/ingestion/llm-classifier";
 import { precomputeItemSignals } from "@/lib/ingestion/classifier";
 import { IngestionAiMeter, IngestionCostCapError } from "@/lib/ingestion/ai-budget";
@@ -37,6 +40,7 @@ interface RawOut {
   modalidade: unknown;
   garantiaTipo: unknown;
   provider: unknown;
+  admImobiliaria: unknown;
   isFilledInstance: unknown;
   piiEntities: unknown;
   confidence: unknown;
@@ -126,6 +130,20 @@ describe("classificador LLM — o essencial", () => {
     expect(content).toContain(`docType: ${signals.docType}`);
     expect(content).toContain("TRECHOS QUE FALAM DE GARANTIA");
     expect(content).toContain("Fiança Locatícia");
+  });
+
+  it("anexa os trechos de pagamento e vistoria — a evidência do eixo de administração", () => {
+    const texto =
+      "CONTRATO DE LOCAÇÃO RESIDENCIAL\n" +
+      "1. IMÓVEL\n" +
+      "4.1. Os aluguéis e demais encargos serão cobrados e geridos pela ADMINISTRADORA do imóvel.\n" +
+      "6.3. Reconhecem as partes que será realizado o laudo de vistoria do imóvel.\n" +
+      "8.1. O seguro fiança locatícia contratado junto à seguradora garantirá esta locação.";
+    const content = buildClassifyUserContent(input(texto, "adm.docx"));
+    expect(content).toContain("TRECHOS QUE FALAM DE PAGAMENTO E VISTORIA");
+    expect(content).toContain("geridos pela ADMINISTRADORA");
+    expect(content).toContain("laudo de vistoria");
+    expect(administracaoExcerpts("Texto sem nada disso.")).toBe("");
   });
 });
 
@@ -288,5 +306,71 @@ describe("classificador LLM — custo", () => {
       createLlmItemClassifier({ structured: runner.fn, meter }).classify(input())
     ).rejects.toBeInstanceOf(IngestionCostCapError);
     expect(runner.calls).toHaveLength(0);
+  });
+});
+
+/**
+ * Eixo Administração × Não Administração. No lote de 51 da RE/MAX Trio
+ * (2026-09-01) o planner colapsou os quadrantes porque a cláusula de pagamento
+ * não caiu no índice de blocos — o classificador, que lê o documento inteiro,
+ * é quem tem a evidência. Só o contrato de locação carrega o eixo.
+ */
+describe("classificador LLM — eixo de administração", () => {
+  it("true quando a imobiliária administra; false no pagamento direto", async () => {
+    const adm = await createLlmItemClassifier({
+      structured: fakeRunner({ ...OK, admImobiliaria: true }).fn,
+    }).classify(input());
+    expect(adm.classification.admImobiliaria).toBe(true);
+
+    const direta = await createLlmItemClassifier({
+      structured: fakeRunner({ ...OK, admImobiliaria: false }).fn,
+    }).classify(input());
+    expect(direta.classification.admImobiliaria).toBe(false);
+  });
+
+  it("null quando o texto não decide — e nunca vira false por omissão", async () => {
+    const semCampo = await createLlmItemClassifier({
+      structured: fakeRunner({ ...OK }).fn,
+    }).classify(input());
+    expect(semCampo.classification.admImobiliaria).toBeNull();
+
+    const explicito = await createLlmItemClassifier({
+      structured: fakeRunner({ ...OK, admImobiliaria: null }).fn,
+    }).classify(input());
+    expect(explicito.classification.admImobiliaria).toBeNull();
+  });
+
+  it("valor que não é booleano ('sim') não marca o eixo", async () => {
+    const r = await createLlmItemClassifier({
+      structured: fakeRunner({ ...OK, admImobiliaria: "sim" }).fn,
+    }).classify(input());
+    expect(r.classification.admImobiliaria).toBeNull();
+  });
+
+  it("fora do contrato de locação o eixo é ignorado, mesmo que o modelo afirme", async () => {
+    const venda = await createLlmItemClassifier({
+      structured: fakeRunner({
+        ...OK,
+        docType: "contrato_venda",
+        subOption: "a_vista",
+        modalidade: "a_vista",
+        garantiaTipo: null,
+        admImobiliaria: true,
+      }).fn,
+    }).classify(input());
+    expect(venda.classification.admImobiliaria).toBeNull();
+  });
+
+  it("o schema pede o campo (required) como união boolean|null sem enum", () => {
+    const schema = CLASSIFICATION_SCHEMA as { required: string[]; properties: Record<string, { type: unknown; enum?: unknown }> };
+    expect(schema.required).toContain("admImobiliaria");
+    expect(schema.properties.admImobiliaria.type).toEqual(["boolean", "null"]);
+    expect(schema.properties.admImobiliaria.enum).toBeUndefined();
+  });
+
+  it("o playbook explica o eixo pela cláusula de pagamento, não pela corretagem", () => {
+    expect(CLASSIFY_PLAYBOOK).toContain("## admImobiliaria");
+    expect(CLASSIFY_PLAYBOOK).toContain("geridos pela ADMINISTRADORA");
+    expect(CLASSIFY_PLAYBOOK).toContain("corretagem sozinha não faz true");
   });
 });

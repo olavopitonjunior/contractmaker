@@ -217,6 +217,9 @@ export type AIOperation =
   | "embed_query"
   | "summarize_memory"
   | "clause_generate"
+  // Classificação de cláusula JÁ gravada (botão "Analisar e classificar" de
+  // /clauses) — propõe esteira/tema/tags/notas e mapeia literal→chave.
+  | "clause_classify"
   | "doc_analysis"
   | "extract_ccv_doc"
   | "extract_locacao_doc"

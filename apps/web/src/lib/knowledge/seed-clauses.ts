@@ -41,6 +41,8 @@ type NormalizedClause = {
   subcategory: string;
   isVariable: boolean;
   groupCode: string | null;
+  /** Esteira do acervo — o seed já nasce classificado. */
+  esteira: string;
   source: string;
 };
 
@@ -74,6 +76,7 @@ export async function seedDefaultClauses(opts: {
         subcategory: c.subcategory,
         isVariable: c.isVariable,
         groupCode: c.groupCode,
+        esteira: "venda",
         source: VENDAS_SEED_SOURCE,
       });
     }
@@ -88,6 +91,7 @@ export async function seedDefaultClauses(opts: {
         subcategory: c.subcategory,
         isVariable: c.isVariable,
         groupCode: null, // locação usa tags/subcategory, não G1..G6
+        esteira: "locacao",
         source: LOCACAO_SEED_SOURCE,
       });
     }
@@ -119,6 +123,7 @@ export async function seedDefaultClauses(opts: {
       subcategory: c.subcategory,
       isVariable: c.isVariable,
       groupCode: c.groupCode,
+      esteira: c.esteira,
       status: "approved",
     });
     embedTargets.push(...t);

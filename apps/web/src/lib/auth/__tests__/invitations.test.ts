@@ -12,6 +12,7 @@ import { prisma } from "@/lib/db/prisma";
 import {
   canApproveInvitationForRole,
   canApproveInvitations,
+  canGrantRole,
   getOrgApproverEmails,
   isApprover,
 } from "@/lib/auth/invitations";
@@ -458,5 +459,157 @@ describe("isApprover", () => {
     expect(isApprover("outro@exemplo.com")).toBe(false);
     expect(isApprover(null)).toBe(false);
     expect(isApprover(undefined)).toBe(false);
+  });
+});
+
+// A porta lateral do teto acima: `POST /api/org/members` cria a membership sem
+// passar pela fila de convites. Gated só por `org.members.invite`, e com
+// `requireElevation` no-op, quem podia convidar criava um `admin` em UMA
+// chamada — issue #452.
+describe("canGrantRole — teto da concessão direta", () => {
+  const SO_CONVIDA = { [PERMISSION.ORG_MEMBERS_INVITE]: true };
+
+  it("BLOQUEIA quem só tem invite de conceder admin", async () => {
+    membership("custom", SO_CONVIDA);
+
+    await expect(
+      canGrantRole({ userId: "u-escalador", orgId: ORG, targetRole: "admin" })
+    ).resolves.toEqual({ allowed: false, reason: "role_ceiling" });
+  });
+
+  it("PERMITE admin conceder admin — o teto é subconjunto, não ordem estrita", async () => {
+    membership("admin");
+
+    await expect(
+      canGrantRole({ userId: "u-admin", orgId: ORG, targetRole: "admin" })
+    ).resolves.toEqual({ allowed: true });
+  });
+
+  // O `custom` do convite nega por não conhecer o alvo. Aqui o alvo É
+  // conhecível, e negar cego tiraria da rota uma capacidade legítima.
+  it("resolve `custom` pelo customRoleId e PERMITE quando é subconjunto", async () => {
+    membership("admin");
+    p.customRole.findFirst.mockResolvedValue({
+      permissions: { [PERMISSION.ORG_MEMBERS_INVITE]: true },
+    });
+
+    await expect(
+      canGrantRole({
+        userId: "u-admin",
+        orgId: ORG,
+        targetRole: "custom",
+        targetCustomRoleId: "cr-1",
+      })
+    ).resolves.toEqual({ allowed: true });
+  });
+
+  it("resolve `custom` e BLOQUEIA quando a CustomRole alvo excede quem concede", async () => {
+    membership("custom", SO_CONVIDA);
+    p.customRole.findFirst.mockResolvedValue({
+      permissions: {
+        [PERMISSION.ORG_MEMBERS_INVITE]: true,
+        [PERMISSION.ORG_MEMBERS_APPROVE]: true,
+      },
+    });
+
+    await expect(
+      canGrantRole({
+        userId: "u-escalador",
+        orgId: ORG,
+        targetRole: "custom",
+        targetCustomRoleId: "cr-2",
+      })
+    ).resolves.toEqual({ allowed: false, reason: "role_ceiling" });
+  });
+
+  it("`custom` SEM customRoleId nega em vez de passar vacuamente", async () => {
+    membership("admin");
+
+    await expect(
+      canGrantRole({ userId: "u-admin", orgId: ORG, targetRole: "custom" })
+    ).resolves.toEqual({ allowed: false, reason: "role_ceiling" });
+  });
+
+  // O findFirst é escopado por orgId; id de outro tenant não resolve.
+  it("customRoleId de outra org nega — não vira teto emprestado", async () => {
+    membership("admin");
+    p.customRole.findFirst.mockResolvedValue(null);
+
+    await expect(
+      canGrantRole({
+        userId: "u-admin",
+        orgId: ORG,
+        targetRole: "custom",
+        targetCustomRoleId: "cr-de-outro-tenant",
+      })
+    ).resolves.toEqual({ allowed: false, reason: "role_ceiling" });
+
+    // Asserção sobre o `where`, não só sobre o resultado: com o mock devolvendo
+    // `null` incondicionalmente, apagar o `orgId` do filtro — que é justamente o
+    // que abriria teto emprestado entre tenants — deixaria o teste passar do
+    // mesmo jeito. Sem isto a asserção acima vale por vacuidade.
+    expect(p.customRole.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "cr-de-outro-tenant", orgId: ORG },
+      })
+    );
+  });
+
+  // A guarda de fail-closed: sem membership, `getEffectivePermissions` devolve
+  // `null`. Com um alvo de mapa vazio (papel fora do catálogo) o `.every`
+  // passaria vacuamente e o teto diria "dentro" para quem não tem nada.
+  it("nega quem nem é membro da org, mesmo com alvo de permissões vazias", async () => {
+    p.orgMembership.findUnique.mockResolvedValue(null);
+
+    await expect(
+      canGrantRole({
+        userId: "u-forasteiro",
+        orgId: ORG,
+        targetRole: "papel-que-nao-existe",
+      })
+    ).resolves.toEqual({ allowed: false, reason: "role_ceiling" });
+  });
+
+  // Guarda contra religarem AQUI o curto-circuito de `isApprover`, que é a
+  // fronteira de confiança do fluxo de CONVITE e que esta rota nunca teve. A
+  // assinatura não aceita `email` de propósito; o cast simula exatamente o
+  // engano futuro — se alguém reintroduzir o bypass, este teste quebra.
+  it("NÃO tem bypass por allowlist de e-mail, ao contrário do fluxo de convite", async () => {
+    membership("viewer");
+
+    await expect(
+      canGrantRole({
+        userId: "u-operador",
+        orgId: ORG,
+        targetRole: "admin",
+        email: ENV_APPROVER,
+      } as unknown as Parameters<typeof canGrantRole>[0])
+    ).resolves.toEqual({ allowed: false, reason: "role_ceiling" });
+
+    // Contraste: no fluxo de convite o MESMO e-mail escapa do teto.
+    await expect(
+      canApproveInvitationForRole({
+        userId: "u-operador",
+        orgId: ORG,
+        email: ENV_APPROVER,
+        targetRole: "admin",
+      })
+    ).resolves.toEqual({ allowed: true });
+  });
+
+  // Não-regressão do refactor: `canApproveInvitationForRole` passou a delegar o
+  // subset check, e o resolver agora SABE resolver `custom`. O convite não
+  // carrega customRoleId, então tem de continuar negando.
+  it("o fluxo de convite continua negando `custom` depois do refactor", async () => {
+    membership("admin");
+
+    await expect(
+      canApproveInvitationForRole({
+        userId: "u-admin",
+        orgId: ORG,
+        email: "admin@imobiliaria.com",
+        targetRole: "custom",
+      })
+    ).resolves.toEqual({ allowed: false, reason: "role_ceiling" });
   });
 });

@@ -90,6 +90,8 @@ export type AuditAction =
   | "ORG_REACTIVATED"
   | "ORG_DELETED"
   | "ORG_BRANDING_UPDATED"
+  // Operador ativou modelo com dado pessoal literal no texto (`allowPii`).
+  | "TEMPLATE_ACTIVATE_WITH_PII"
   | "ORG_FEES_UPDATED"
   // iList/RexAPI (integração RE/MAX) — provisioning super-admin + sync + import
   | "ILIST_CONNECTION_UPDATED"

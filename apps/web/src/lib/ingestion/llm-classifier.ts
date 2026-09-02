@@ -42,6 +42,7 @@ import {
 import { INGEST_CLASSIFY_MODEL } from "@/lib/ai/shared/models";
 import {
   runStructured,
+  nullableEnum,
   type StructuredRunner,
 } from "@/lib/ai/shared/anthropic-structured";
 import { detectPii, type ExternalEntity } from "@/lib/ingestion/pii";
@@ -66,6 +67,24 @@ import type { IngestionAiMeter } from "@/lib/ingestion/ai-budget";
  */
 export const MAX_CLASSIFY_HEAD_CHARS = 12_000;
 export const MAX_CLASSIFY_GARANTIA_CHARS = 6_000;
+/** Trechos de pagamento/vistoria — a evidência do eixo de administração. */
+export const MAX_CLASSIFY_ADMINISTRACAO_CHARS = 3_000;
+
+const ADMINISTRACAO_CONTEXT =
+  /administradora|administra[çc][aã]o da loca|geridos pel|cobrados pel|laudo de vistoria|vistoria|diretamente [àa] parte locadora|diretamente ao locador|cr[ée]dito banc[áa]rio/i;
+
+/**
+ * Parágrafos que decidem o eixo Administração × Não Administração. A cláusula
+ * de pagamento costuma ficar depois do recorte de `MAX_CLASSIFY_HEAD_CHARS`;
+ * sem este anexo o modelo decidiria o eixo sem a evidência.
+ */
+export function administracaoExcerpts(text: string): string {
+  return text
+    .split(/\n+/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 20 && ADMINISTRACAO_CONTEXT.test(p))
+    .join("\n\n");
+}
 
 /** Categorias que o LLM pode apontar — as duas que regex não alcança. */
 const EXTERNAL_PII_KINDS = ["person_name", "address"] as const;
@@ -101,34 +120,11 @@ interface RawClassification {
   modalidade: string | null;
   garantiaTipo: string | null;
   provider: string | null;
+  admImobiliaria: boolean | null;
   isFilledInstance: boolean;
   piiEntities: Array<{ kind: string; excerpt: string }>;
   confidence: number;
   reason: string;
-}
-
-/**
- * Campo de vocabulário fechado que também aceita `null`.
- *
- * NÃO use `{ type: ["string","null"], enum: [...valores, null] }`: o validador
- * de `output_config.format` checa cada valor do enum contra o `type` DECLARADO
- * e não destrincha a união — responde 400 ("Enum value 'fiador' does not match
- * declared type '['string','null']'") e derruba o run. Com `anyOf` cada ramo é
- * consistente consigo mesmo, que é o subconjunto padrão que a API aceita.
- *
- * Plano B, caso `anyOf` também seja recusado um dia: `type: "string"` com um
- * valor-sentinela ("nenhum") no enum, traduzido para `null` no parse. Fica
- * documentado e NÃO implementado — trocar ausência por sentinela obriga todo
- * consumidor a conhecer a convenção.
- */
-function nullableEnum(
-  values: readonly string[],
-  description: string
-): Record<string, unknown> {
-  return {
-    anyOf: [{ type: "string", enum: [...values] }, { type: "null" }],
-    description,
-  };
 }
 
 /** JSON Schema da saída — objeto fechado, enums nos valores canônicos. */
@@ -141,6 +137,7 @@ export const CLASSIFICATION_SCHEMA: Record<string, unknown> = {
     "modalidade",
     "garantiaTipo",
     "provider",
+    "admImobiliaria",
     "isFilledInstance",
     "piiEntities",
     "confidence",
@@ -167,6 +164,16 @@ export const CLASSIFICATION_SCHEMA: Record<string, unknown> = {
       type: ["string", "null"],
       description:
         'Rótulo humano do fornecedor da garantia ("Porto Seguro"). Null quando não há.',
+    },
+    // União sem `enum`, como `provider`: é a forma que o `output_config.format`
+    // aceita (ver schema-lint.ts). Null = "o documento não decide", nunca false.
+    admImobiliaria: {
+      type: ["boolean", "null"],
+      description:
+        "Só em contrato de locação. true quando a imobiliária ADMINISTRA a " +
+        "locação (cobra e gere os aluguéis, faz o laudo de vistoria); false " +
+        "quando o pagamento é direto ao locador; null quando o texto não decide " +
+        "ou o documento não é contrato de locação.",
     },
     isFilledInstance: {
       type: "boolean",
@@ -209,7 +216,7 @@ export const CLASSIFICATION_SCHEMA: Record<string, unknown> = {
  * breakpoint de cache — os 20 documentos de um lote compartilham este prefixo
  * inteiro, e é isso que faz a classificação caber no alvo de custo.
  */
-const CLASSIFY_PLAYBOOK = `Você classifica documentos do acervo de uma imobiliária brasileira, para uma
+export const CLASSIFY_PLAYBOOK = `Você classifica documentos do acervo de uma imobiliária brasileira, para uma
 biblioteca de modelos de contrato. Responda SOMENTE com o JSON do schema.
 
 ## Vocabulário FECHADO
@@ -260,6 +267,23 @@ Seguro", "Tokio Marine", "Pottencial", "TOO", "Almada", "Loft", "CredAluga". Nã
 slugifique, não abrevie, não invente. Banco financiador de compra e venda NÃO é
 provider. Sem fornecedor identificado, null.
 
+## admImobiliaria
+
+Só em contrato de locação. É o eixo Administração × Não Administração, e ele
+NÃO está na cláusula de garantia — está na cláusula de pagamento e na de
+vistoria:
+
+- true — a imobiliária ADMINISTRA a locação: "os aluguéis e demais encargos
+  serão cobrados e geridos pela ADMINISTRADORA", pagamento "para [imobiliária]
+  regularmente inscrita no CRECI", laudo de vistoria elaborado pela
+  administradora;
+- false — pagamento DIRETO à parte locadora ("diretamente à PARTE LOCADORA por
+  meio de crédito bancário"), locatária declara ter vistoriado o imóvel;
+- null — o texto não decide, ou o documento não é contrato de locação.
+
+Uma imobiliária que só INTERMEDEIA (corretagem, comissão) não administra: a
+cláusula de corretagem sozinha não faz true.
+
 ## piiEntities
 
 Liste apenas NOMES DE PESSOA e ENDEREÇOS que aparecem no documento — CPF, CNPJ,
@@ -285,6 +309,7 @@ export function buildClassifyUserContent(input: ClassifyItemInput): string {
   const garantia = garantiaExcerpts(input.text)
     .flatMap((e) => e.paragraphs)
     .join("\n\n");
+  const administracao = administracaoExcerpts(input.text);
 
   return [
     `ARQUIVO: ${input.filename}`,
@@ -300,6 +325,10 @@ export function buildClassifyUserContent(input: ClassifyItemInput): string {
     garantia
       ? `TRECHOS QUE FALAM DE GARANTIA:\n${clip(garantia, MAX_CLASSIFY_GARANTIA_CHARS)}`
       : "TRECHOS QUE FALAM DE GARANTIA: nenhum encontrado.",
+    "",
+    administracao
+      ? `TRECHOS QUE FALAM DE PAGAMENTO E VISTORIA (decidem admImobiliaria):\n${clip(administracao, MAX_CLASSIFY_ADMINISTRACAO_CHARS)}`
+      : "TRECHOS QUE FALAM DE PAGAMENTO E VISTORIA: nenhum encontrado.",
     "",
     `DOCUMENTO (início):\n${clip(input.text, MAX_CLASSIFY_HEAD_CHARS)}`,
   ].join("\n");
@@ -326,6 +355,11 @@ function toDocType(v: unknown): IngestDocType | null {
 function toConfidence(raw: unknown): number {
   if (typeof raw !== "number" || !Number.isFinite(raw)) return 0.5;
   return Math.min(1, Math.max(0, raw));
+}
+
+/** `null` quando não é booleano: "sim"/"não"/ausente NÃO viram eixo marcado. */
+function toNullableBool(v: unknown): boolean | null {
+  return typeof v === "boolean" ? v : null;
 }
 
 function toGarantia(v: unknown): GarantiaTipo | null {
@@ -452,6 +486,12 @@ export function createLlmItemClassifier(
         ? ingestDocTypeDef(docType).slots.includes("garantia")
         : false;
       const garantiaTipo = admitsGarantia ? toGarantia(raw.garantiaTipo) : null;
+      // Eixo de administração só existe no CONTRATO de locação: na proposta o
+      // playbook proíbe (`proposta.ts`), e em venda/administração não faz sentido.
+      const admitsAdm = docType
+        ? ingestDocTypeDef(docType).criteria.includes("admImobiliaria")
+        : false;
+      const admImobiliaria = admitsAdm ? toNullableBool(raw.admImobiliaria) : null;
 
       const confidence = toConfidence(raw.confidence);
 
@@ -469,6 +509,7 @@ export function createLlmItemClassifier(
         confidence,
         reason: asString(raw.reason) ?? signals.reason,
         provider: asString(raw.provider),
+        admImobiliaria,
         isFilledInstance: raw.isFilledInstance === true,
         conflicts: conflictsBetween(signals, {
           docType,

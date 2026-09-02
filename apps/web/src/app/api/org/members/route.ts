@@ -10,6 +10,7 @@ import {
 } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { requireElevation, ElevationRequiredError } from "@/lib/security/elevation";
+import { canGrantRole } from "@/lib/auth/invitations";
 import { audit } from "@/lib/security/audit";
 import { sendEmail } from "@/lib/email/client";
 import { WelcomeSetPasswordEmail } from "@/lib/email/templates/password-reset";
@@ -105,7 +106,72 @@ export async function POST(req: NextRequest) {
     );
   }
   const email = parsed.data.email.toLowerCase().trim();
-  const { role, customRoleId, name } = parsed.data;
+  const { role, customRoleId: customRoleIdRaw, name } = parsed.data;
+
+  // Normaliza na origem para que validação, teto e escrita vejam o MESMO valor.
+  // Dois defeitos morrem aqui: (a) `customRoleId: ""` com `role` não-custom
+  // gravava string vazia em vez de `NULL`; (b) `{ role: "admin", customRoleId:
+  // "<id válido> }` passava no zod (o `.refine` exige o id quando role é
+  // custom, mas não o proíbe quando não é) e gravava membership com `role` e
+  // `customRoleId` simultâneos — dado que contradiz qualquer código a jusante
+  // que assuma "customRoleId implica role custom". Ignorar o id sobrando é
+  // menos hostil que 400: o efeito pretendido pelo cliente já é o papel fixo.
+  const customRoleId = role === "custom" ? (customRoleIdRaw ?? null) : null;
+
+  // Ordem importa: validar o papel ANTES de qualquer escrita. Estas duas
+  // checagens ficavam depois do `user.create` — um 400/403 aqui deixava para
+  // trás um `User` órfão com senha placeholder, conta criada para um acesso que
+  // nunca foi concedido.
+  let customRoleName: string | null = null;
+  if (customRoleId) {
+    const customRole = await prisma.customRole.findFirst({
+      where: { id: customRoleId, orgId: ctx.orgId },
+      select: { id: true, name: true },
+    });
+    if (!customRole) {
+      return NextResponse.json(
+        { error: "Role customizado inválido" },
+        { status: 400 }
+      );
+    }
+    customRoleName = customRole.name;
+  }
+
+  // Teto de papel: ninguém concede papel mais poderoso que o próprio. Sem isto
+  // a rota era escalação em UMA chamada — `ORG_MEMBERS_INVITE` bastava para
+  // criar um `admin` (issue #452), sem nunca ter tido `org.members.change_role`.
+  // O `requireElevation` acima não segura nada: é no-op deliberado.
+  //
+  // Vence o 409 de "já é membro" quando as duas condições coexistem, e isso é
+  // decisão: negar antes de contar. A alternativa dava ao ator sem teto uma
+  // resposta que confirma quem já pertence à org.
+  //
+  // Depois do 400 de propósito: customRoleId inexistente ou de outra org é
+  // requisição inválida, e responder "você não pode conceder esse papel" para
+  // um id que não existe manda o operador caçar problema de permissão onde há
+  // erro de digitação.
+  const ceiling = await canGrantRole({
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    targetRole: role,
+    targetCustomRoleId: customRoleId ?? null,
+  });
+  if (!ceiling.allowed) {
+    // Nomeia o papel de verdade: com `role` cru a mensagem dizia `o papel
+    // "custom"` para QUALQUER CustomRole, e numa org com várias delas o
+    // operador não descobria qual foi negada. Mensagem de segurança que não
+    // diz o que foi negado não é acionável.
+    //
+    // Não nomeia a PERMISSÃO que faltou, de propósito: isso descreveria o
+    // conteúdo de um papel a quem não pode concedê-lo, e quem recebe o 403 é
+    // exatamente quem não deveria enumerá-lo.
+    return NextResponse.json(
+      {
+        error: `Você não pode conceder o papel "${customRoleName ?? role}" — ele tem permissões que você não possui`,
+      },
+      { status: 403 }
+    );
+  }
 
   // Detecta se é user novo para enviar fluxo de welcome (definir senha)
   // ou apenas notificação de adição (user já tinha conta).
@@ -133,26 +199,17 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Se customRoleId fornecido, valida que pertence à org
-  if (customRoleId) {
-    const role = await prisma.customRole.findFirst({
-      where: { id: customRoleId, orgId: ctx.orgId },
-    });
-    if (!role) {
-      return NextResponse.json(
-        { error: "Role customizado inválido" },
-        { status: 400 }
-      );
-    }
-  }
-
   const membership = await prisma.orgMembership.create({
     data: {
       userId: user.id,
       orgId: ctx.orgId,
       role,
       customRoleId: customRoleId ?? null,
-      invitedBy: ctx.userId,
+      // O humano REAL: sob impersonação `ctx.userId` é o dono do tenant, não
+      // quem agiu. Mesma correção que o PR #447 fez em `invitedById`/
+      // `approvedById` na tabela irmã — as duas discordarem sobre quem agiu é
+      // pior que qualquer uma das duas errada sozinha.
+      invitedBy: ctx.impersonatedByUserId ?? ctx.userId,
     },
   });
 

@@ -73,6 +73,42 @@ import {
 /** Profundidade de raciocínio — `output_config.effort` da API atual. */
 export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
 
+/**
+ * Campo de JSON Schema com vocabulário FECHADO que também aceita `null`.
+ *
+ * NÃO use `{ type: ["string","null"], enum: [...valores, null] }`: o validador
+ * de `output_config.format` checa cada valor do enum contra o `type` DECLARADO
+ * e não destrincha a união — responde 400 ("Enum value 'venda' does not match
+ * declared type '['string','null']'") e derruba a chamada inteira. Com `anyOf`
+ * cada ramo é consistente consigo mesmo, que é o subconjunto que a API aceita.
+ *
+ * Mora aqui, e não no classificador da ingestão onde nasceu, porque já custou
+ * o mesmo 400 duas vezes: quem monta schema para {@link runStructured} precisa
+ * achar isto sem saber que a ingestão existe.
+ *
+ * Plano B, caso `anyOf` também seja recusado um dia: `type: "string"` com um
+ * valor-sentinela ("nenhum") no enum, traduzido para `null` no parse. Fica
+ * documentado e NÃO implementado — trocar ausência por sentinela obriga todo
+ * consumidor a conhecer a convenção.
+ */
+export function nullableEnum(
+  values: readonly string[],
+  description: string
+): Record<string, unknown> {
+  return {
+    anyOf: [{ type: "string", enum: [...values] }, { type: "null" }],
+    description,
+  };
+}
+
+/** Campo de texto livre que também aceita `null` — mesma armadilha do enum. */
+export function nullableString(description: string): Record<string, unknown> {
+  return {
+    anyOf: [{ type: "string" }, { type: "null" }],
+    description,
+  };
+}
+
 /** Bloco do system prompt. `cache: true` fecha o prefixo cacheável. */
 export interface SystemBlock {
   text: string;

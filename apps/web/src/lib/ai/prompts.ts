@@ -1,3 +1,5 @@
+import { esteiraForModalidade, ESTEIRA_LABEL } from "@/lib/clauses/taxonomy";
+
 export const DEFAULT_SYSTEM_PROMPT = `Você é um assistente jurídico especializado em contratos imobiliários brasileiros. Você atua como um advogado sênior revisando contratos.
 
 ## REGRAS FUNDAMENTAIS
@@ -156,9 +158,13 @@ Existem 2 modelos padronizados de CCV (Compromisso de Compra e Venda):
 
 **CCV Financiamento** (modalidade: financiamento): 17 cláusulas. Pagamento via sinal + financiamento bancário. Posse após registro do contrato de financiamento. Instrumento definitivo com prazo de 45 dias úteis. Inclui cláusula 9.5 obrigatória de rescisão por não obtenção de financiamento.
 
-## BANCO DE CLÁUSULAS VARIÁVEIS (6 GRUPOS)
+## BANCO DE CLÁUSULAS
 
-O banco de cláusulas contém 23 cláusulas padronizadas organizadas em 6 grupos. Cada cláusula tem notas de orientação (agentNotes) com regras de uso. Sempre leia as agentNotes antes de inserir.
+O acervo é separado por ESTEIRA, e a sua busca JÁ VEM FILTRADA pela esteira deste contrato — não tente contorná-la. Cada cláusula tem notas de orientação (agentNotes) com regras de uso. Sempre leia as agentNotes antes de inserir.
+
+### Esteira de COMPRA E VENDA — 6 grupos (G1..G6)
+
+Os grupos são as seis etapas do roteiro de um CCV. \`groupCode\` **só existe nesta esteira**.
 
 **G1 - Sinal, Arras e Início de Pagamento**: Arras confirmatórias (art. 417 CC), rescisão automática por não pagamento do sinal, pagamento proporcional para pluralidade de vendedores.
 
@@ -172,12 +178,20 @@ O banco de cláusulas contém 23 cláusulas padronizadas organizadas em 6 grupos
 
 **G6 - Declarações e Disposições Especiais**: Aptidão para financiamento, contratação eletrônica (MP 2.200/2001), declaração de sócio de PJ, não modificação das condições, pagamento via FGTS (Lei 8.036/1990).
 
-### Regras de Inserção de Cláusulas Variáveis:
+### Regras de Inserção (esteira de compra e venda):
 - Para contratos com **financiamento**: G4 é OBRIGATÓRIO. G3 deve incluir a cláusula de não obtenção de financiamento.
 - Para **pluralidade de vendedores**: usar G1 cláusula de pagamento proporcional.
 - Se **FGTS > 0**: inserir G6 cláusula de FGTS.
 - Se **vendedor é sócio de PJ**: inserir G6 declaração de sócio PJ.
-- Sempre consultar \`query_knowledge_base({ category: "clause", groupCode })\` antes de inserir.`;
+- Consultar \`query_knowledge_base({ category: "clause", groupCode })\` antes de inserir.
+
+### Esteira de LOCAÇÃO — organizada por TEMA (Lei nº 8.245/91)
+
+Locação **não usa G1..G6**. Passar \`groupCode\` aqui é erro: nenhuma cláusula de locação tem grupo, e o filtro devolveria vazio.
+
+Os temas são: garantia locatícia (art. 37 — só uma modalidade por contrato), reajuste e índice, encargos e despesas, uso e destinação, vistoria e conservação, benfeitorias (arts. 35-36), rescisão e multa (art. 4º, sempre proporcional), devolução do imóvel, direito de preferência e ação renovatória.
+
+A busca aqui é semântica: consulte \`query_knowledge_base({ category: "clause", query: "<o tema em linguagem natural>" })\` e leia as agentNotes. A garantia é selecionada pelo formulário via tags de slot — não escolha o tipo de garantia por conta própria.`;
 
 /**
  * Formata `dataJson` como markdown legível em vez de JSON cru. Reduz risco do
@@ -302,6 +316,18 @@ export function buildContextMessage(context: {
     ? `**Template**: ${context.templateName || "N/A"} (modalidade: ${context.templateModalidade})\n\n`
     : "";
 
+  // Esteira DESTE contrato. Dizer isto no turno evita o agente pedir
+  // `groupCode` em locação (onde toda cláusula tem grupo nulo e o filtro
+  // devolveria vazio) e deixa explícito que a busca já vem recortada.
+  const esteira = esteiraForModalidade(context.templateModalidade);
+  const esteiraInfo = esteira
+    ? `**Esteira**: ${ESTEIRA_LABEL[esteira]}. ${
+        esteira === "venda"
+          ? "Use os grupos G1..G6 do roteiro de CCV."
+          : "NÃO use groupCode — locação se organiza por tema, com busca semântica."
+      }\n\n`
+    : "";
+
   const dataMd = dataJsonToMarkdown(context.dataJson);
 
   const contentLabel = context.isGoogleDocs
@@ -311,7 +337,7 @@ export function buildContextMessage(context: {
   const truncated = context.htmlContent.length > 8000;
   const contentSlice = context.htmlContent.substring(0, 8000);
 
-  return `${templateInfo}## DADOS DO CONTRATO
+  return `${templateInfo}${esteiraInfo}## DADOS DO CONTRATO
 
 ${dataMd}
 

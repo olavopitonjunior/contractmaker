@@ -12,6 +12,7 @@ import {
   Minimize2,
   Pencil,
   Trash2,
+  Wand2,
   X,
 } from "lucide-react";
 import { ResizableSheet, useResizableSheet } from "@/components/ui/resizable-sheet";
@@ -54,6 +55,8 @@ interface ClauseDetailSheetProps {
   /** Aviso de que a plataforma tem versão mais recente pra ESTA cláusula. */
   platformUpdate?: PlatformUpdate;
   onEdit: (clause: Clause) => void;
+  /** Ausente em cláusula de plataforma — o tenant não a reclassifica. */
+  onClassify?: (clause: Clause) => void;
 }
 
 /**
@@ -68,6 +71,7 @@ export function ClauseDetailSheet({
   onOpenChange,
   platformUpdate,
   onEdit,
+  onClassify,
 }: ClauseDetailSheetProps) {
   return (
     <ResizableSheet
@@ -85,6 +89,7 @@ export function ClauseDetailSheet({
           clause={clause}
           platformUpdate={platformUpdate}
           onEdit={onEdit}
+          onClassify={onClassify}
           onClose={() => onOpenChange(false)}
         />
       )}
@@ -96,11 +101,13 @@ function ClauseDetailBody({
   clause,
   platformUpdate,
   onEdit,
+  onClassify,
   onClose,
 }: {
   clause: Clause;
   platformUpdate?: PlatformUpdate;
   onEdit: (clause: Clause) => void;
+  onClassify?: (clause: Clause) => void;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -354,6 +361,12 @@ function ClauseDetailBody({
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
+            {onClassify && (
+              <Button type="button" variant="outline" onClick={() => onClassify(clause)}>
+                <Wand2 className="mr-1 h-4 w-4" />
+                Analisar e classificar
+              </Button>
+            )}
             <Button type="button" onClick={() => onEdit(clause)}>
               <Pencil className="mr-1 h-4 w-4" />
               Editar

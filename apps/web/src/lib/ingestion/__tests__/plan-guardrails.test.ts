@@ -260,6 +260,37 @@ describe("guardrails — valores canônicos e as regras de produto", () => {
     expect(kinds(result)).toContain("criteria_axis_not_applicable");
   });
 
+  it("matchCriteria.admImobiliaria contrário ao que o classificador leu é contradição", () => {
+    const result = validateLibraryPlan({
+      plan: plan({
+        templates: [template({ matchCriteria: { garantia: "seguro_fianca", admImobiliaria: true } })],
+        clauses: [],
+      }),
+      items: items([{ admImobiliaria: false }]),
+    });
+    expect(kinds(result)).toContain("criteria_contradicts_classification");
+  });
+
+  it("eixo coerente com o classificador, ou sem leitura (null), não é contradição", () => {
+    const coerente = validateLibraryPlan({
+      plan: plan({
+        templates: [template({ matchCriteria: { garantia: "seguro_fianca", admImobiliaria: true } })],
+        clauses: [],
+      }),
+      items: items([{ admImobiliaria: true }]),
+    });
+    expect(kinds(coerente)).not.toContain("criteria_contradicts_classification");
+
+    const semLeitura = validateLibraryPlan({
+      plan: plan({
+        templates: [template({ matchCriteria: { garantia: "seguro_fianca", admImobiliaria: false } })],
+        clauses: [],
+      }),
+      items: items([{ admImobiliaria: null }]),
+    });
+    expect(kinds(semLeitura)).not.toContain("criteria_contradicts_classification");
+  });
+
   it("no máximo um principal sugerido por modalidade", () => {
     const result = validateLibraryPlan({
       plan: plan({

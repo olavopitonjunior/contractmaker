@@ -23,6 +23,8 @@ import {
 import { resolveAgentProfile } from "./agents/resolve";
 import { incrementClauseUsage } from "./knowledge-usage";
 import { logError } from "@/lib/observability/log";
+import { esteiraForContext, visibleEsteiras } from "@/lib/clauses/taxonomy";
+import type { FormModule } from "@/lib/forms/presets";
 
 /**
  * Piso de similaridade (cosine, Voyage law-2) abaixo do qual um resultado é
@@ -676,12 +678,40 @@ async function knowledgeBaseKeywordFallback(
   topK: number,
   orgId: string,
   reason: string,
-  scopeOpts: KnowledgeScopeOptions = {}
+  scopeOpts: KnowledgeScopeOptions = {},
+  /** Esteira do contrato; `null`/ausente = não estreita (fail-open). */
+  esteira?: FormModule | null
 ): Promise<Record<string, unknown>> {
+  // O filtro de esteira entra DENTRO do array `AND` do escopo, nunca espalhado
+  // ao lado dele. Hoje `knowledgeScopeWhere` não devolve `OR` no topo, então
+  // espalhar até funcionaria — mas por coincidência da implementação atual, e o
+  // docblock de `knowledge-scope.ts` avisa exatamente contra isso. A mesma
+  // forma frágil já apagou o filtro de visibilidade por agente uma vez.
+  const scopeWhere = knowledgeScopeWhere(orgId, scopeOpts);
+  const scopeAnd = Array.isArray(scopeWhere.AND)
+    ? (scopeWhere.AND as Record<string, unknown>[])
+    : [];
+  const esteiraAnd: Record<string, unknown>[] = esteira
+    ? [
+        {
+          OR: [
+            { category: { not: "clause" } },
+            { esteira: null },
+            { esteira: { in: visibleEsteiras(esteira) as string[] } },
+          ],
+        },
+      ]
+    : [];
+
   const baseWhere = {
-    ...knowledgeScopeWhere(orgId, scopeOpts),
+    ...scopeWhere,
     ...(category ? { category } : {}),
     ...(groupCode ? { groupCode } : {}),
+    // Espelha o filtro do caminho vetorial — sem isto, a busca voltaria a
+    // atravessar esteiras exatamente quando o Voyage falha e cai aqui.
+    ...(scopeAnd.length || esteiraAnd.length
+      ? { AND: [...scopeAnd, ...esteiraAnd] }
+      : {}),
   };
   const select = {
     id: true,
@@ -777,6 +807,14 @@ async function handleQueryKnowledgeBase(
     return { error: "query é obrigatório" };
   }
 
+  // Esteira do contrato — direciona a busca de CLÁUSULA (venda × locação).
+  // Lida PRONTA do contexto: `buildAgentContext` a resolve dos valores crus,
+  // antes dos defaults `|| "a_vista"` e `?? "venda"`. Recalcular aqui, a
+  // partir de `context.templateModalidade`, faria contrato importado de
+  // locação parecer venda e esconderia o acervo certo do agente.
+  // Ausente = não filtra (fail-open).
+  const esteira = context.esteira ?? null;
+
   if (!isEmbeddingsConfigured()) {
     // Degradação pro ILIKE (recall inferior) era TOTALMENTE silenciosa aqui —
     // um deploy sem VOYAGE_API_KEY rodava em modo keyword sem nenhum rastro.
@@ -799,7 +837,8 @@ async function handleQueryKnowledgeBase(
       topK,
       context.orgId,
       "VOYAGE_API_KEY não configurada",
-      await ragScopeFor(context)
+      await ragScopeFor(context),
+      esteira
     );
   }
 
@@ -825,6 +864,12 @@ async function handleQueryKnowledgeBase(
     if (groupCode) {
       filters.push(`AND "groupCode" = $${paramIdx++}`);
       params.push(groupCode);
+    }
+    if (esteira) {
+      filters.push(
+        `AND (category <> 'clause' OR esteira IS NULL OR esteira = ANY($${paramIdx++}))`
+      );
+      params.push(visibleEsteiras(esteira));
     }
 
     const rows = await prisma.$queryRawUnsafe<
@@ -919,7 +964,8 @@ async function handleQueryKnowledgeBase(
         topK,
         context.orgId,
         reason,
-        await ragScopeFor(context)
+        await ragScopeFor(context),
+        esteira
       );
       return fallback;
     } catch (fallbackErr) {

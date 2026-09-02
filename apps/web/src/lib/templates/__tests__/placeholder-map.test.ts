@@ -127,6 +127,76 @@ describe("buildLocacaoPlaceholderMap", () => {
     expect(map.data_local_assinatura).toContain("São Paulo/SP, 9 de junho de 2026");
   });
 
+  it("encargos: IPTU e condomínio vêm do form em BRL; zero e ausente ficam vazios", () => {
+    // Fixture base não informa os itens → vazio.
+    expect(map.iptu_valor).toBe("");
+    expect(map.condominio_valor).toBe("");
+
+    const build = (aluguel: Record<string, unknown>) =>
+      buildLocacaoPlaceholderMap(
+        enrichLocacaoData(
+          JSON.parse(JSON.stringify({ ...locacaoBase, aluguel: { ...locacaoBase.aluguel, ...aluguel } })),
+          { administradora: { nome: "ImobPro Ltda", creci: "24.342-J/SP", endereco: "Rua X, 1" } }
+        )
+      );
+    const comEncargos = build({ iptu_mensal: 31.67, condominio_mensal: 676.08 });
+    expect(comEncargos.iptu_valor).toMatch(/R\$\s?31,67/);
+    expect(comEncargos.condominio_valor).toMatch(/R\$\s?676,08/);
+
+    // O form grava 0 quando o campo fica em branco (casa sem condomínio):
+    // "R$ 0,00" numa cláusula de encargos seria afirmação falsa.
+    const zerado = build({ iptu_mensal: 0, condominio_mensal: 0 });
+    expect(zerado.iptu_valor).toBe("");
+    expect(zerado.condominio_valor).toBe("");
+    // Valor que não é número (ditado por voz) também não vira "R$ NaN".
+    expect(build({ condominio_mensal: "31,67" }).condominio_valor).toBe("");
+  });
+
+  it("imovel_identificacao: tipo + unidade + condomínio, como a 1.1 do canônico", () => {
+    // Fixture: apartamento, complemento "apto. 121" (o form repete o tipo no
+    // complemento — a composição não pode sair "apartamento apto. 121").
+    expect(map.imovel_identificacao).toBe("apartamento 121");
+
+    const comCondominio = buildLocacaoPlaceholderMap(
+      enrichLocacaoData(
+        JSON.parse(
+          JSON.stringify({
+            ...locacaoBase,
+            imovel: { ...locacaoBase.imovel, complemento: "33", condominio_nome: "condomínio edifício Siracusa" },
+          })
+        ),
+        {}
+      )
+    );
+    expect(comCondominio.imovel_identificacao).toBe("apartamento 33, do condomínio edifício Siracusa");
+
+    const casa = buildLocacaoPlaceholderMap(
+      enrichLocacaoData(
+        JSON.parse(JSON.stringify({ ...locacaoBase, imovel: { ...locacaoBase.imovel, kind: "casa", complemento: "" } })),
+        {}
+      )
+    );
+    expect(casa.imovel_identificacao).toBe("casa");
+
+    // Sinônimo colado ("apto.121") também cai; sinônimo de OUTRO tipo fica
+    // (prédio misto: loja dentro de apartamento não é redundância).
+    const build = (imovel: Record<string, unknown>) =>
+      buildLocacaoPlaceholderMap(
+        enrichLocacaoData(JSON.parse(JSON.stringify({ ...locacaoBase, imovel: { ...locacaoBase.imovel, ...imovel } })), {})
+      );
+    expect(build({ complemento: "apto.121" }).imovel_identificacao).toBe("apartamento 121");
+    expect(build({ complemento: "Loja 1" }).imovel_identificacao).toBe("apartamento Loja 1");
+    expect(build({ kind: "casa", complemento: "Casa 2" }).imovel_identificacao).toBe("casa 2");
+    // Sinônimo como PREFIXO DE PALAVRA não é sinônimo: "Apenas fundos" fica inteiro.
+    expect(build({ complemento: "Apenas fundos" }).imovel_identificacao).toBe("apartamento Apenas fundos");
+    expect(build({ kind: "casa", complemento: "Casarão dos fundos" }).imovel_identificacao).toBe("casa Casarão dos fundos");
+    // Sinônimo curto vs longo: `conj` não pode sequestrar "Conjunto".
+    expect(build({ kind: "comercial_sala", complemento: "Conjunto 5" }).imovel_identificacao).toBe("sala comercial 5");
+    expect(build({ kind: "comercial_sala", complemento: "Sala comercial 5" }).imovel_identificacao).toBe("sala comercial 5");
+    // Condomínio só com espaço não vira ", do ".
+    expect(build({ complemento: "", condominio_nome: "  " }).imovel_identificacao).toBe("apartamento");
+  });
+
   it("sem administradora cai no fallback e fiador vazio fora da fiança", () => {
     const semAdm = buildLocacaoPlaceholderMap(
       enrichLocacaoData(JSON.parse(JSON.stringify(locacaoBase)))
@@ -308,16 +378,23 @@ describe("administração de locação — engine google_docs", () => {
   // (o deal de adm é um deal de locação). Se um token do catálogo de adm NÃO
   // existir no mapa, o replacePlaceholdersInDoc não o substitui e o
   // cleanupOrphanPlaceholders APAGA o {{token}} → campo em branco no contrato.
-  it("todo token do catálogo administracao_locacao existe em buildLocacaoPlaceholderMap", () => {
-    const enriched = enrichLocacaoData(locacaoBase as Record<string, unknown>, {});
-    const map = buildLocacaoPlaceholderMap(enriched);
-    const mapKeys = Object.keys(map);
-    const admTokens = catalogForModalidade("administracao_locacao").map((d) => d.token);
-    expect(admTokens.length).toBeGreaterThan(0);
-    for (const token of admTokens) {
-      expect(mapKeys).toContain(token);
+  it.each(["administracao_locacao", "locacao", "locacao_comercial", "temporada"])(
+    "todo token do catálogo %s existe em buildLocacaoPlaceholderMap",
+    (modalidade) => {
+      // Clone: enrichLocacaoData muta o imóvel (tipo_texto) e o fixture é compartilhado.
+      const enriched = enrichLocacaoData(JSON.parse(JSON.stringify(locacaoBase)), {});
+      const map = buildLocacaoPlaceholderMap(enriched);
+      const mapKeys = Object.keys(map);
+      // `contrato_numero` é injetado na geração (contract-generation.ts), não no mapa.
+      const tokens = catalogForModalidade(modalidade)
+        .map((d) => d.token)
+        .filter((t) => t !== "contrato_numero");
+      expect(tokens.length).toBeGreaterThan(0);
+      for (const token of tokens) {
+        expect(mapKeys).toContain(token);
+      }
     }
-  });
+  );
 
   // O conjunto de adm é intencionalmente mínimo: só CONTRATANTE (proprietário),
   // imóvel e data. Administradora/foro/assinaturas ficam LITERAIS no modelo da
