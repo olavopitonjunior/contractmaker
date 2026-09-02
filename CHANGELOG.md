@@ -4,6 +4,13 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-02 - A mesma chave entra em todas as cláusulas em que o valor aparece
+
+### Corrigido
+
+- **O passe de IA aceitava só um trecho por chave e descartava o resto em silêncio.** O valor do aluguel aparece na cláusula do preço, na do reajuste e na da multa; a IA propunha os três, o passe inseria o primeiro e ignorava os outros sem registrar nada — o modelo saía com o valor literal em todas as cláusulas menos uma. Foi o que apareceu no modelo de fiador da RE/MAX Trio. Agora chave simples entra em quantos trechos a IA propuser, cada um sob a mesma regra de unicidade; só chave de bloco (qualificação, cláusula de garantia, assinaturas) continua entrando uma vez, porque bloco duplicado no contrato é regressão.
+- **A unicidade era contada sobre o texto original.** Dois trechos sobrepostos passavam ambos até o Google; o segundo não casava nada e só era pego depois, pela conferência, com o motivo genérico "a edição não pegou". A contagem passa a ser feita sobre o texto já com as substituições anteriores da mesma passada — as propostas entram da maior para a menor, como o reverse-merge — e o trecho consumido por outra substituição é recusado antes de gastar a chamada, com o motivo certo ("se sobrepõe a outro já mapeado").
+
 ## [Unreleased] - 2026-09-02 - A IA da ingestão para de cortar o documento em silêncio
 
 ### Corrigido
