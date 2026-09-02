@@ -143,7 +143,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
     token: "imobiliaria_dados_pagamento",
     label: "Dados de recebimento da imobiliária",
     description:
-      "Chave PIX ou banco/agência/conta onde a PRÓPRIA imobiliária recebe a comissão de intermediação (1º aluguel), configurada em Padrão contratual · Locação. Use no lugar da conta/agência/PIX da imobiliária digitada no modelo — conta literal no texto bloqueia a ativação. Vazio quando a imobiliária não informou.",
+      "Chave PIX ou banco/agência/conta onde a PRÓPRIA imobiliária recebe a comissão de intermediação (1º aluguel), cadastrada no Perfil da imobiliária. Use no lugar da conta/agência/PIX da imobiliária digitada no modelo — conta literal no texto bloqueia a ativação. Vazio quando a imobiliária não informou.",
     example: "na chave PIX (CNPJ): 12.345.678/0001-90, de titularidade de Imobiliária Exemplo Ltda.",
     required: false,
     kind: "composed",

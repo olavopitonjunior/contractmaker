@@ -18,7 +18,6 @@ import {
 import {
   contractSettingsSchema,
   locacaoComissaoDefaultsSchema,
-  locacaoRecebimentoSchema,
   locacaoSettingsSchema,
 } from "@/lib/contracts/default-config";
 import { parseParticipantVisibilityJson } from "@/lib/forms/participant-visibility";
@@ -90,10 +89,6 @@ const formSettingsPatchSchema = z.object({
       // `locacao` porque aquele descreve cláusulas e é validado por contrato em
       // `api/contracts/[id]/settings` — ver o comentário no schema.
       locacao_comissao: locacaoComissaoDefaultsSchema.optional(),
-      // Onde a PRÓPRIA imobiliária recebe a comissão — vira a chave
-      // `{{imobiliaria_dados_pagamento}}` do contrato de locação. Mesmo
-      // tratamento: branch mesclado, nunca substituído.
-      locacao_recebimento: locacaoRecebimentoSchema.optional(),
     })
     .optional(),
   /**

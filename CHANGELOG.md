@@ -4,6 +4,18 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-02 - A conta onde a imobiliária recebe a comissão é cadastro, não padrão por formulário
+
+### Alterado
+
+- **"Onde a imobiliária recebe a comissão" sai de Configurações → Formulário e vai para Configurações → Perfil da imobiliária**, ao lado de CNPJ e CRECI. É dado fixo da imobiliária, igual à razão social — não uma condição que muda por formulário. Passa a ser guardado no cadastro da organização (colunas novas, com os mesmos nomes e domínios do cadastro de corretores), e a chave `{{imobiliaria_dados_pagamento}}` dos modelos de locação lê de lá. Medido em produção antes de mover: nenhuma imobiliária tinha preenchido o campo no lugar antigo, então nada foi copiado e nada se perdeu.
+- Quem tem permissão de editar as configurações da organização (dono ou administrador) preenche; salva sozinho, como os outros campos do Perfil.
+
+### Notas
+
+- Os rascunhos de modelo já criados com a conta escrita no texto não mudam sozinhos. Para atualizar um rascunho existente sem reenviar o arquivo, use "Pedir revisão pela IA" na tela de revisão do modelo: o passe de chaves roda de novo sobre o documento que já está lá, com o catálogo atual.
+- Este ajuste chega a produção junto com a migração de banco que cria as colunas; a pré-visualização de PR não roda migrações, então lá o card aparece vazio e não salva — o resto da tela de Perfil segue normal.
+
 ## [Unreleased] - 2026-09-02 - Converter proposta passa a pedir a permissão de criar, e converter lead para de errar o funil
 
 ### Corrigido
@@ -17,7 +29,7 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 ### Adicionado
 
 - **Duas chaves novas nos modelos de locação: `{{imobiliaria_qualificacao}}` e `{{imobiliaria_dados_pagamento}}`.** A primeira imprime razão social, CNPJ, CRECI e sede da imobiliária como intermediadora da locação (vem do perfil da imobiliária, e vale mesmo quando ela não administra o imóvel); a segunda, a chave PIX ou banco/agência/conta onde ela recebe a comissão do primeiro aluguel. Na reingestão dos modelos da RE/MAX Trio, 12 dos 16 rascunhos ficaram barrados pelo gate de dado pessoal exclusivamente pela conta da própria imobiliária, escrita por extenso na cláusula de rateio do primeiro aluguel — o corretor já tinha chave, a imobiliária não. Com a entrada no catálogo, a leitura por IA passa a mapear esse trecho no envio de modelos.
-- **Configurações → Formulário → Padrão contratual · Locação ganha "Onde a imobiliária recebe a comissão"** (PIX ou conta), com o mesmo auto-save das outras seções. Só entra no contrato o que estiver completo: uma chave PIX, ou banco + agência + conta + tipo. Em branco, a chave sai vazia e a geração segue.
+- **Configurações → Perfil da imobiliária ganha "Onde a imobiliária recebe a comissão"** (PIX ou conta), com o mesmo auto-save dos dados cadastrais. Só entra no contrato o que estiver completo: uma chave PIX, ou banco + agência + conta + tipo. Em branco, a chave sai vazia e a geração segue. *(Nesta mesma data a seção nasceu no padrão por formulário e foi movida para o Perfil antes de qualquer imobiliária preenchê-la — ver a seção acima.)*
 
 ### Notas
 

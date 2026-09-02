@@ -228,6 +228,20 @@ model Organization {
   cnpj                 String?
   creci                String?
   legalAddress         String?
+  // Onde a PRÓPRIA imobiliária recebe a comissão de intermediação (1º aluguel)
+  // — impresso pela chave `{{imobiliaria_dados_pagamento}}` na cláusula de
+  // corretagem dos contratos de locação. Dado fixo da imobiliária, editável em
+  // /settings/perfil. Mesmos nomes e domínios de `SplitRecipient` (pixKeyType:
+  // CPF|CNPJ|EMAIL|PHONE|EVP; bankAccountType: corrente|poupanca). Aditivos,
+  // default null = não informado → a chave sai vazia.
+  pixAddressKey        String?
+  pixKeyType           String?
+  bankName             String?
+  bankBranch           String?
+  bankAccount          String?
+  bankAccountType      String?
+  bankHolderName       String?
+  bankHolderDoc        String?
   // Dados fiscais do declarante — usados na DIMOB (registro R01). `legalName`,
   // `cnpj` e `legalAddress` acima também alimentam o R01. Editáveis em
   // /settings/fiscal. Aditivos, default null.

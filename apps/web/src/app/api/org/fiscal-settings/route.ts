@@ -23,6 +23,17 @@ const Body = z.object({
   fiscalUf: z.string().trim().max(2).optional(),
   fiscalMunicipioCode: z.string().trim().max(10).optional(),
   fiscalMunicipioName: z.string().trim().max(120).optional(),
+  // Onde a imobiliária recebe a comissão (Perfil). "" = não informado. Domínios
+  // iguais aos de `SplitRecipient` (`comissionadoRecebimentoSchema`): é a mesma
+  // via de repasse, só que da própria org.
+  pixAddressKey: z.string().trim().max(200).optional(),
+  pixKeyType: z.enum(["CPF", "CNPJ", "EMAIL", "PHONE", "EVP"]).or(z.literal("")).optional(),
+  bankName: z.string().trim().max(80).optional(),
+  bankBranch: z.string().trim().max(20).optional(),
+  bankAccount: z.string().trim().max(30).optional(),
+  bankAccountType: z.enum(["corrente", "poupanca"]).or(z.literal("")).optional(),
+  bankHolderName: z.string().trim().max(200).optional(),
+  bankHolderDoc: z.string().trim().max(18).optional(),
 });
 
 type PermissionValue = (typeof PERMISSION)[keyof typeof PERMISSION];
@@ -64,6 +75,14 @@ export async function GET(req: NextRequest) {
       fiscalUf: true,
       fiscalMunicipioCode: true,
       fiscalMunicipioName: true,
+      pixAddressKey: true,
+      pixKeyType: true,
+      bankName: true,
+      bankBranch: true,
+      bankAccount: true,
+      bankAccountType: true,
+      bankHolderName: true,
+      bankHolderDoc: true,
     },
   });
   return NextResponse.json(org ?? {});
@@ -110,6 +129,14 @@ export async function PATCH(req: NextRequest) {
       fiscalUf: true,
       fiscalMunicipioCode: true,
       fiscalMunicipioName: true,
+      pixAddressKey: true,
+      pixKeyType: true,
+      bankName: true,
+      bankBranch: true,
+      bankAccount: true,
+      bankAccountType: true,
+      bankHolderName: true,
+      bankHolderDoc: true,
     },
   });
 
