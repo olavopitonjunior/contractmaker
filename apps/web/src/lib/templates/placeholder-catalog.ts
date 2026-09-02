@@ -92,6 +92,27 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
     modalidades: LOCACAO,
   },
   {
+    token: "corretagem_qualificacao",
+    label: "Qualificação da corretagem",
+    description:
+      "Nome, CPF/CNPJ e CRECI do(s) corretor(es) que intermediaram a locação, conforme a etapa Comissão do formulário. Sem dado bancário. Vazio quando o negócio não tem corretor informado.",
+    example:
+      "Ana Ribeiro, inscrito(a) no CPF/MF sob nº 529.982.247-25, CRECI nº 12.345-F",
+    required: false,
+    kind: "composed",
+    modalidades: LOCACAO,
+  },
+  {
+    token: "corretagem_dados_pagamento",
+    label: "Dados de repasse da corretagem",
+    description:
+      "Chave PIX ou banco/agência/conta para o repasse da comissão do corretor do negócio. Use no lugar de digitar a conta de alguém no modelo — conta literal no texto do modelo bloqueia a ativação. Vazio quando não há dado de recebimento.",
+    example: "na chave PIX (CPF): 529.982.247-25, de titularidade de Ana Ribeiro",
+    required: false,
+    kind: "composed",
+    modalidades: LOCACAO,
+  },
+  {
     token: "assinaturas",
     label: "Bloco de assinaturas",
     description:

@@ -4,6 +4,61 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-02 - A mesma chave entra em todas as cláusulas em que o valor aparece
+
+### Corrigido
+
+- **O passe de IA aceitava só um trecho por chave e descartava o resto em silêncio.** O valor do aluguel aparece na cláusula do preço, na do reajuste e na da multa; a IA propunha os três, o passe inseria o primeiro e ignorava os outros sem registrar nada — o modelo saía com o valor literal em todas as cláusulas menos uma. Foi o que apareceu no modelo de fiador da RE/MAX Trio. Agora chave simples entra em quantos trechos a IA propuser, cada um sob a mesma regra de unicidade; só chave de bloco (qualificação, cláusula de garantia, assinaturas) continua entrando uma vez, porque bloco duplicado no contrato é regressão.
+- **A unicidade era contada sobre o texto original.** Dois trechos sobrepostos passavam ambos até o Google; o segundo não casava nada e só era pego depois, pela conferência, com o motivo genérico "a edição não pegou". A contagem passa a ser feita sobre o texto já com as substituições anteriores da mesma passada — as propostas entram da maior para a menor, como o reverse-merge — e o trecho consumido por outra substituição é recusado antes de gastar a chamada, com o motivo certo ("se sobrepõe a outro já mapeado").
+
+## [Unreleased] - 2026-09-02 - A IA da ingestão para de cortar o documento em silêncio
+
+### Corrigido
+
+- **Modelo longo perdia o fim sem aviso.** O texto enviado à IA era cortado em 24 mil caracteres — menos que um contrato de locação de 10 páginas. Garantia, foro e assinaturas ficavam fora da leitura, e as chaves dessa parte apareciam como "não mapeadas" sem explicação. O limite sobe para 120 mil caracteres e, quando ainda assim o documento passa dele, o relatório avisa e cada chave da parte cortada diz que ficou fora da leitura.
+- **Resposta cortada virava "nenhuma chave".** Quando a resposta da IA estourava o limite de saída, o JSON vinha pela metade e o passe seguia como se a IA não tivesse proposto nada — um modelo saiu da ingestão com zero chaves por isso. O limite de saída dobra e, se ainda cortar, o relatório diz para rodar a IA de novo em vez de fingir que não havia o que mapear. Quando o documento também passou do limite de leitura, é isso que a chave informa — rodar de novo não traria o que ficou fora.
+- **As rotas de ingestão por upload, por contrato e o "Pedir revisão pela IA" ganham mais tempo** (300 s em vez de 120 s): com o limite de leitura maior, o pior caso estourava o tempo depois de a IA responder e antes de o relatório ser gravado, e a ingestão inteira se perdia.
+
+## [Unreleased] - 2026-09-02 - O relatório da IA diz por que cada chave falta, e para de guardar dado pessoal
+
+### Alterado
+
+- **Cada chave ausente do catálogo agora vem com o motivo.** "Falta a chave X" era a mesma linha para quatro problemas — a IA não propôs nada, propôs um trecho que se repete, propôs um que não existe no texto, ou o Google recusou a edição. O relatório passa a dizer qual foi, com o trecho proposto, e a tela de revisão mostra isso embaixo de cada chave ausente. Chave que a IA nem tentou fica em silêncio, que é a informação certa ali.
+
+### Corrigido
+
+- **O relatório da ingestão guardava CPF, agência e conta do contrato-fonte.** O gate de dado pessoal protege o documento, mas os trechos que a IA recusou eram gravados crus no relatório do modelo e renderizados na revisão. Agora todo trecho passa pela máscara antes de ser gravado — inclusive o trecho que a IA **substituiu** pela chave, que depois disso só existia no relatório (documentos, dados bancários, CEP, telefone, e-mail). A tela mascara de novo ao exibir, então relatórios gravados antes desta versão, que têm o trecho cru no banco, também deixam de mostrá-lo. Nome e endereço não têm detector automático — o documento segue sendo a fonte, não o relatório.
+
+## [Unreleased] - 2026-09-02 - O relatório da IA na ingestão de modelos para de contar o que não entrou
+
+### Corrigido
+
+- **"Preencheu N campos" contava envios, não resultados.** O passe de IA que insere chaves em modelos enviados por upload montava a lista de inseridos **antes** de pedir a edição ao Google e descartava a resposta. Na reingestão da RE/MAX Trio, 11 de 12 modelos declaravam chave inserida que não estava no documento — e o operador ativava o modelo com base nessa contagem. Agora o passe lê quantas ocorrências a API realmente trocou, relê o documento e só declara inserido o que **está lá e cujo trecho original sumiu**. Cada falha ganha nome, no mesmo vocabulário que a conferência de cláusulas já usava: a edição não pegou (formatação invisível partindo o parágrafo), pegou em mais lugares que o esperado (cabeçalho/rodapé), a API disse que trocou mas o documento não mostra, não deu para conferir, ou o Google recusou o lote. "Não consegui conferir" nunca vira "deu certo".
+  - A lista de chaves faltantes passa a ler o documento **depois** do passe; se a releitura falhar, lê o de antes — o relatório erra para o lado pessimista. Chave que a API pôs em lugar não revisado continua contando como faltante até alguém conferir; e quando um parágrafo do bloco é apagado em mais de um lugar (o caso destrutivo), o relatório diz **qual** parágrafo e manda conferir o histórico de versões do Doc.
+  - O rótulo na tela vira "Confirmou N campo(s) no documento". **O número vai cair** em relação ao que aparecia antes; é a contagem antiga que estava errada.
+## [Unreleased] - 2026-09-02 - O contrato gerado passa a dizer que campo saiu em branco
+
+### Adicionado
+
+- **Laudo determinístico de preenchimento na geração por Google Docs.** A geração já era 100% hardcoded (formulário → mapa token→valor → `replaceAllText` → limpeza de órfãos), mas um campo que o modelo pedia e o formulário não trouxe saía **em branco** sem aviso — o replace troca `{{aluguel_dia_vencimento}}` por vazio e a evidência some. Os dois passos já devolviam o que faltava saber (ocorrências por token e a lista de órfãos apagados); os três call sites jogavam os dois fora. Agora o laudo vai para `GenerationPlan.fill` (no jsonb que já existe, sem migration) e a revisão pós-geração o transforma em comentário no contrato: **obrigatório em branco** gera um aviso por campo, com o rótulo do catálogo («Identificação do imóvel»); **opcionais em branco** viram um aviso agregado; **chave que o sistema não produz** (apagada da minuta) vira outro. Tudo aviso, nunca bloqueio — o contrato é gerado sempre; promover a bloqueante é decisão posterior, depois de medir.
+  - O laudo é gravado best-effort e separado do snapshot: não depende do export do Drive, e a geração não falha por causa dele. Laudo malformado no banco é descartado no parse em vez de derrubar o plano — o executor da revisão não tem try/catch nos checks determinísticos, e a exceção prenderia o run até um sweeper repetir o mesmo erro.
+  - Os checks determinísticos ganham o mesmo teto de 50 comentários IA abertos que o estágio LLM já tinha.
+
+### Notas
+
+- Não corrige a ingestão: modelo com chaveamento parcial continua parcial. Isto torna o efeito **visível** em cada contrato gerado; a cobertura total de chaves na ingestão vem nos PRs seguintes.
+- Contrato gerado antes desta versão não tem laudo e não recebe os avisos.
+
+## [Unreleased] - 2026-09-01 - O `{{#if}}` deixa de reprovar a cláusula inteira
+
+### Corrigido
+
+- **O extrator de chaves lia `if`, `each` e `unless` como caminho de dado, e isso reprovava toda cláusula condicional.** `HANDLEBARS_HELPER_NAMES` lista só os helpers que o app registra (`moeda`, `extenso`, `cpf`…), e a paridade com o registro é travada por teste — corretamente. Mas os **block helpers embutidos** do Handlebars vêm da biblioteca, não do app, e não estavam em lista nenhuma: `extractHandlebarsPaths("{{#if x}}")` devolvia `["if", "x"]`, e o catálogo rejeita `if` nas duas esteiras.
+  - **O efeito não era teórico.** `classify/apply` revalida **toda** chave do conteúdo final, não só as que o cliente disse ter mexido. Qualquer cláusula com `{{#if}}` ou `{{#each}}` caía em `chave_invalida` e a proposta de conteúdo era descartada — em silêncio, e depois de o humano já ter aprovado na tela de revisão. O par é o pior possível: a tela **propõe** a tokenização, o usuário aprova, e o servidor recusa sem dizer por quê.
+  - **Medido em produção:** das 20 cláusulas cujo conteúdo tinha ao menos uma chave fora do catálogo, **10 eram falso-positivo puro deste bug**. Depois da correção restam 10 — as que têm chave de fato inválida.
+  - Os embutidos entram em `NON_PATH_TOKENS`, e **não** em `HANDLEBARS_HELPER_NAMES` — aquela lista significa "o que o app registra", e enchê-la com `if` quebraria o teste de paridade que a protege.
+- **O teste que devia ter pego isso passava.** Ele cobria exatamente `{{#if}}`/`{{#each}}`, mas com `toContain`/`not.toContain`: afirmava que os argumentos entram e que `this.numero` não entra, e nunca que `if` e `each` ficam de fora. Virou `toEqual` com lista fechada. Teste de extrator que só usa `toContain` não consegue detectar extração **a mais** — que é o modo de falha desta função.
+
 ## [Unreleased] - 2026-09-01 - A tela de cláusulas para de mentir sobre o que está selecionado e sobre o que falta triar
 
 ### Corrigido
@@ -20,6 +75,7 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
 - Nenhuma mudança de status code e nenhum campo removido: os baldes novos da resposta são aditivos e saem de dentro dos existentes, então a soma continua fechando com o lote elegível.
 - Quando um lote tem falhas **e** abstenções, as duas frases agora somam em vez de competir — em cascata, a falha ganhava e a informação da abstenção sumia.
+
 ## [Unreleased] - 2026-09-01 - O convite avisa na hora, e o papel do Max para de correr risco de clique
 
 ### Corrigido

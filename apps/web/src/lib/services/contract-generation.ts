@@ -21,7 +21,8 @@ import {
   GARANTIA_LABELS,
 } from "@/lib/contracts/template-category";
 import { resolveClauseSlots } from "@/lib/templates/clause-slots";
-import { buildGenerationPlan } from "@/lib/contract-review/plan";
+import { buildGenerationPlan, type GenerationPlan } from "@/lib/contract-review/plan";
+import { buildFillReport, type BuildFillReportInput } from "@/lib/contract-review/fill";
 import { enqueueContractReview } from "@/lib/contract-review/enqueue";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import {
@@ -48,6 +49,15 @@ import { collectPartyFormatIssues } from "@/lib/forms/field-formats";
 import { findMissingRequired, getByPath } from "@/lib/forms/party-required";
 import { resolveAllRequiredFields } from "@/lib/forms/presets";
 import { stripCommissionerReceiving } from "@/lib/forms/redact-datajson";
+import {
+  RECEBIMENTO_SELECT,
+  recebimentoFromRecipient,
+} from "@/lib/forms/commissioner-receiving";
+import {
+  corretagemDadosPagamento,
+  corretoresDe,
+  type RegistroCorretor,
+} from "@/lib/templates/corretagem";
 import {
   GoogleDocsGenerationError,
   googleDocsFailureMessage,
@@ -1016,11 +1026,14 @@ export async function generateContractForDeal(
         map["contrato_versao"] = String(contract.version);
         // Sem replace, o contrato sai com `{{tokens}}` crus — inútil. Deixa propagar
         // para o catch externo, que desfaz o contrato e lança.
-        await replacePlaceholdersInDoc({
-          docId: copy.docId,
+        const replaced = await replacePlaceholdersInDoc({ docId: copy.docId, replacements: map });
+        const orphansRemoved = await cleanupOrphanPlaceholders(copy.docId);
+        await persistFillReport(contract.id, generationPlan, {
+          occurrencesByToken: replaced.occurrencesByToken,
           replacements: map,
+          orphansRemoved,
+          modalidade: template.modalidade,
         });
-        await cleanupOrphanPlaceholders(copy.docId);
 
         // Snapshot real do conteúdo (substitui o stub de htmlContent).
         try {
@@ -1274,6 +1287,55 @@ export async function generateContractForDeal(
 }
 
 /**
+ * Grava o laudo de preenchimento (fill.ts) no plano de geração — jsonb, sem
+ * migration. Best-effort e SEPARADO do snapshot de htmlContent: o laudo não
+ * pode depender do export do Drive dar certo, e a geração não pode falhar por
+ * causa do laudo. É o que a revisão pós-geração lê para avisar "campo em
+ * branco" sem reler o Doc.
+ */
+async function persistFillReport(
+  contractId: string,
+  plan: GenerationPlan,
+  input: BuildFillReportInput
+): Promise<void> {
+  try {
+    const fill = buildFillReport(input);
+    const next: GenerationPlan = { ...plan, fill };
+    await prisma.contract.update({
+      where: { id: contractId },
+      data: { generationPlanJson: next as any },
+    });
+  } catch (err) {
+    console.error("[generation] Falha ao gravar o laudo de preenchimento:", err);
+  }
+}
+
+/**
+ * Cadastro de corretores da org no shape que `corretagemDadosPagamento` entende.
+ *
+ * Filtra por `archivedAt` e NÃO por `active`: `active` responde "dá pra repassar
+ * por aqui?" na esteira de split, e um corretor com repasse suspenso continua
+ * sendo o corretor daquele contrato — omiti-lo faria o parágrafo sumir sem que
+ * ninguém tivesse pedido.
+ */
+async function carregarRegistroCorretores(orgId: string): Promise<RegistroCorretor[]> {
+  // Dois cadastros podem dividir o mesmo documento (o índice único só cobre
+  // `active=true`). `repasseDe` fica com o PRIMEIRO que casa, então a ordem é o
+  // desempate: o ativo antes do rascunho, e o mais antigo antes do mais novo —
+  // mesmo critério de `commissioner-registry.ts`.
+  const rows = await prisma.splitRecipient.findMany({
+    where: { orgId, kind: "commissioner", archivedAt: null },
+    select: { id: true, cpfCnpj: true, ...RECEBIMENTO_SELECT },
+    orderBy: [{ active: "desc" }, { createdAt: "asc" }],
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    cpfCnpj: r.cpfCnpj,
+    recebimento: recebimentoFromRecipient(r),
+  }));
+}
+
+/**
  * Gera o contrato de LOCAÇÃO para um deal. Espelha generateContractForDeal mas
  * troca dois pontos: seleção de template (selectLocacaoTemplate por schemaType)
  * e enrich (enrichLocacaoData). Reusa o pipeline de Google Doc (upload do HTML
@@ -1294,12 +1356,15 @@ export async function generateLocacaoContractForDeal(
     include: { form: true },
   });
 
-  // Sem os dados bancários do corretor — ver a nota em generateContractForDeal.
-  const dataJson = stripCommissionerReceiving(
-    deal.form
+  // O bruto vive SÓ nesta variável local: alimenta a chave de repasse da
+  // corretagem no Doc e nada mais. Não entra no enrich nem em
+  // `Contract.dataJson` — ver a nota em generateContractForDeal.
+  const rawDataJson =
+    (deal.form
       ? (deal.form.dataJson as Record<string, unknown>)
-      : (deal.dataJson as Record<string, unknown>) || {}
-  );
+      : (deal.dataJson as Record<string, unknown>)) || {};
+  // Sem os dados bancários do corretor — ver a nota em generateContractForDeal.
+  const dataJson = stripCommissionerReceiving(rawDataJson);
   const schemaType = deal.form?.schemaType ?? "locacao_residencial_v1";
 
   // dataJson entra na seleção: além da modalidade, garantia e PF/PJ (locatário e
@@ -1467,12 +1532,27 @@ export async function generateLocacaoContractForDeal(
         // cláusula do acervo (ou o fallback canônico). Doc sem o token não casa
         // nada no replaceAllText, então isto é inócuo pros modelos antigos.
         Object.assign(map, slotValues);
+        // Repasse da corretagem: a única chave que o mapa não produz sozinho,
+        // porque o dado bancário foi retirado do dataJson antes do enrich, de
+        // propósito. Resolve aqui (formulário primeiro, cadastro depois),
+        // escreve no Doc do CONTRATO e não volta para o dataJson — o modelo
+        // guarda o token; a conta de alguém, nunca.
+        map["corretagem_dados_pagamento"] =
+          corretoresDe(rawDataJson).length > 0
+            ? corretagemDadosPagamento(rawDataJson, await carregarRegistroCorretores(orgId))
+            : "";
         map["contrato_numero"] = numeroContrato;
         map["contrato_id"] = contract.id;
         map["contrato_versao"] = String(contract.version);
         // Sem replace, o contrato sai com `{{tokens}}` crus — deixa propagar.
-        await replacePlaceholdersInDoc({ docId: copy.docId, replacements: map });
-        await cleanupOrphanPlaceholders(copy.docId);
+        const replaced = await replacePlaceholdersInDoc({ docId: copy.docId, replacements: map });
+        const orphansRemoved = await cleanupOrphanPlaceholders(copy.docId);
+        await persistFillReport(contract.id, generationPlan, {
+          occurrencesByToken: replaced.occurrencesByToken,
+          replacements: map,
+          orphansRemoved,
+          modalidade: template.modalidade,
+        });
 
         // Snapshot real do conteúdo pro htmlContent (export/diff/memória).
         try {
@@ -1789,8 +1869,14 @@ export async function generateAdministracaoContractForDeal(
         map["contrato_id"] = contract.id;
         map["contrato_versao"] = String(contract.version);
         // Sem replace, o contrato sai com `{{tokens}}` crus — deixa propagar.
-        await replacePlaceholdersInDoc({ docId: copy.docId, replacements: map });
-        await cleanupOrphanPlaceholders(copy.docId);
+        const replaced = await replacePlaceholdersInDoc({ docId: copy.docId, replacements: map });
+        const orphansRemoved = await cleanupOrphanPlaceholders(copy.docId);
+        await persistFillReport(contract.id, generationPlan, {
+          occurrencesByToken: replaced.occurrencesByToken,
+          replacements: map,
+          orphansRemoved,
+          modalidade: template.modalidade,
+        });
 
         // Snapshot real do conteúdo pro htmlContent (export/diff/memória).
         try {

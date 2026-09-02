@@ -335,6 +335,29 @@ export const previewSampleDataLocacao = {
     administradora_creci: "24.342-J/SP",
     administradora_endereco: "Rua Roque Petrella, 188, Brooklin, CEP 04581-050, São Paulo/SP",
   },
+  // Corretagem: existe para a pré-visualização mostrar o que
+  // `{{corretagem_qualificacao}}` e `{{corretagem_dados_pagamento}}` produzem —
+  // é decidindo isso que o operador escolhe usar a chave em vez de digitar a
+  // conta de alguém no modelo. Pessoa e chave PIX inventadas.
+  comissao: {
+    taxa_locacao_percent: 10,
+    angariadores: [
+      {
+        nome: "Ana Ribeiro",
+        tipo_pessoa: "fisica",
+        cpf: "52998224725",
+        creci: "12.345-F",
+        forma_comissao: "percentual",
+        percentual: 100,
+        recebimento: {
+          pix_chave: "ana.ribeiro@exemplo.com.br",
+          pix_tipo_chave: "EMAIL",
+          titular_nome: "Ana Ribeiro",
+          titular_doc: "52998224725",
+        },
+      },
+    ],
+  },
 };
 
 export const previewSampleDataLocacaoComercial = {

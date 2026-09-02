@@ -12,7 +12,9 @@ import {
 } from "@/lib/contracts/template-category";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+// 300s: reverse-merge + passe de IA (até 120k chars de entrada, 8192 tokens de
+// saída, não-stream) + releitura do Doc — 120s era apertado no pior caso.
+export const maxDuration = 300;
 
 /**
  * Modalidades e schemaType saem das constantes COMPARTILHADAS

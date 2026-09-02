@@ -56,13 +56,94 @@ describe("extractHandlebarsPaths", () => {
     ).toEqual(["config.multa_rescisoria_meses"]);
   });
 
+  /**
+   * `toEqual` com a lista FECHADA, e não `toContain` — issue #486.
+   *
+   * A versão anterior deste teste usava `toContain`/`not.toContain`: verificava
+   * que os argumentos entram e que `this.numero` não entra, e nunca afirmava
+   * que `if` e `each` ficam de FORA. Por isso passou por meses enquanto o
+   * extrator devolvia `["if", "comissao...", "each", "parcelas"]`.
+   *
+   * Teste de extrator que só usa `toContain` não consegue detectar extração A
+   * MAIS — que é exatamente o modo de falha desta função.
+   */
   it("ignora abertura/fechamento de bloco, mas lê o argumento do bloco", () => {
     const paths = extractHandlebarsPaths(
       "{{#if comissao.comissionados.length}}x{{/if}}{{#each parcelas}}{{this.numero}}{{/each}}"
     );
-    expect(paths).toContain("comissao.comissionados.length");
-    expect(paths).toContain("parcelas");
-    expect(paths).not.toContain("this.numero");
+    expect(paths).toEqual(["comissao.comissionados.length", "parcelas"]);
+  });
+
+  /**
+   * Os block helpers EMBUTIDOS do Handlebars não vêm de
+   * `registerHandlebarsHelpers`, então não estão em `HANDLEBARS_HELPER_NAMES`
+   * (cuja paridade com o registro é travada por outro teste). Sem estarem em
+   * `NON_PATH_TOKENS`, saíam como caminho de dado — e `classify/apply`, que
+   * revalida toda chave do conteúdo final, recusava a proposta inteira com
+   * `chave_invalida`.
+   */
+  it("nenhum block helper nativo sai como caminho de dado", () => {
+    expect(extractHandlebarsPaths("{{#if garantia.tem_fiador}}x{{/if}}")).toEqual([
+      "garantia.tem_fiador",
+    ]);
+    expect(extractHandlebarsPaths("{{#unless x.y}}z{{/unless}}")).toEqual(["x.y"]);
+    expect(extractHandlebarsPaths("{{#with imovel}}{{endereco}}{{/with}}")).toEqual([
+      "imovel",
+      "endereco",
+    ]);
+    expect(extractHandlebarsPaths("{{lookup lista chave}}")).toEqual([
+      "lista",
+      "chave",
+    ]);
+  });
+
+  /**
+   * `this` e `else` já eram excluídos antes desta correção, e pela MESMA
+   * razão — mas nunca tiveram teste próprio. Como o bug do `if` mostrou que
+   * essa classe passa despercebida por anos, a cobertura acompanha o padrão.
+   */
+  it("nenhum token de contexto sai como caminho de dado", () => {
+    expect(
+      extractHandlebarsPaths("{{#each parcelas}}{{this.numero}}{{/each}}")
+    ).toEqual(["parcelas"]);
+    expect(
+      extractHandlebarsPaths("{{#if a.b}}x{{else}}y{{/if}}")
+    ).toEqual(["a.b"]);
+    expect(extractHandlebarsPaths("{{#each l}}{{@index}}{{/each}}")).toEqual([
+      "l",
+    ]);
+    // Forma composta, que é a que cláusula real usa.
+    expect(
+      extractHandlebarsPaths("{{#if a.b}}x{{else if c.d}}y{{/if}}")
+    ).toEqual(["a.b", "c.d"]);
+  });
+
+  /**
+   * O descarte casa o caminho INTEIRO, não segmento — `NON_PATH_TOKENS.has`
+   * recebe o token pontuado completo. Então um campo de negócio que apenas
+   * TERMINE em `if`/`each` continua sendo validado normalmente, e o alcance do
+   * descarte é bem mais estreito do que "qualquer segmento".
+   */
+  it("só descarta o caminho que É o helper, não o que o contém", () => {
+    expect(extractHandlebarsPaths("{{contrato.if}}")).toEqual(["contrato.if"]);
+    expect(extractHandlebarsPaths("{{each_parcela.valor}}")).toEqual([
+      "each_parcela.valor",
+    ]);
+    expect(extractHandlebarsPaths("{{if}}")).toEqual([]);
+  });
+
+  /**
+   * O efeito de ponta a ponta: com o helper vazando, TODA cláusula condicional
+   * era reprovada mesmo com as chaves de dado corretas. Este teste falava a
+   * língua do bug — nenhuma chave rejeitada num texto legítimo.
+   */
+  it("cláusula condicional com chaves válidas não tem nenhuma chave rejeitada", () => {
+    const conteudo =
+      "{{#if garantia.caucao_meses}}Caução de {{garantia.caucao_meses}} meses.{{/if}}";
+    const rejeitadas = validateContentKeys(conteudo, "locacao").filter(
+      (k) => k.tier === "rejeitada"
+    );
+    expect(rejeitadas).toEqual([]);
   });
 
   it("ignora literais, números e comentários", () => {

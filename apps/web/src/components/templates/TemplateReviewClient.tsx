@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { describePiiKinds, type TemplatePiiReport } from "@/lib/templates/pii-gate";
+import { maskForReport, readNotMapped } from "@/lib/templates/insertion-report";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -56,10 +57,13 @@ interface SlotReport {
 }
 interface DraftReport {
   inserted?: { token: string; trecho: string }[];
-  skippedAmbiguous?: { token: string; trecho: string; reason: string }[];
-  notMapped?: string[];
+  skippedAmbiguous?: { token: string; trecho: string; reason: string; paragraph?: string }[];
+  /** `string[]` em relatórios antigos; `{token, reason, trecho?}` desde 2026-09-02. */
+  notMapped?: unknown[];
   missingRequired?: string[];
   slots?: SlotReport[];
+  docTruncated?: boolean;
+  responseTruncated?: boolean;
   ranAt?: string;
   /** Gate de PII do modelo — espelho do último texto lido (ver lib/templates/pii-gate.ts). */
   pii?: TemplatePiiReport;
@@ -81,6 +85,22 @@ const SKIP_REASON: Record<string, string> = {
   ambiguous: "aparece em mais de um lugar",
   "not-found": "não encontrei no texto",
   "unknown-token": "chave fora do catálogo",
+  "already-tokenized": "o trecho já tem uma chave",
+  overlapped: "o trecho se sobrepõe a outro já mapeado nesta passada",
+  // Pós-batch — o passe confere o que a API fez (mesmo vocabulário dos slots).
+  "batch-failed": "o Google recusou a edição",
+  "replace-noop":
+    "o trecho existe no texto, mas a edição não pegou — costuma ser formatação invisível partindo o parágrafo no meio",
+  "over-matched":
+    "a chave entrou em mais lugares do que o esperado (possivelmente no cabeçalho ou rodapé) — confira no documento",
+  "over-removed":
+    "um parágrafo do bloco foi apagado em mais de um lugar do documento, fora do trecho revisado — confira o histórico de versões do Doc",
+  "verify-failed":
+    "a edição foi enviada, mas a conferência no documento não confirmou o resultado",
+  "verify-unavailable":
+    "não consegui conferir o documento agora (Drive indisponível) — rode a IA de novo",
+  "doc-truncated": "o documento é maior que o limite lido pela IA — esta parte ficou fora da leitura",
+  "response-truncated": "a resposta da IA veio cortada antes de chegar aqui — rode a IA de novo",
 };
 
 const SLOT_LABEL: Record<string, string> = {
@@ -255,7 +275,9 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
         slots: prev?.slots,
       }));
       const n = (data.report?.inserted ?? []).length;
-      toast.success(n > 0 ? `A IA preencheu ${n} campo(s).` : "A IA revisou o modelo.");
+      toast.success(
+        n > 0 ? `A IA confirmou ${n} trecho(s) no documento.` : "A IA revisou o modelo."
+      );
       await Promise.all([revalidate(), refreshDocText()]);
       setIframeKey((k) => k + 1);
     } catch (err) {
@@ -293,6 +315,8 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
   }
 
   const catalog = validation?.catalog ?? [];
+  // Por que cada chave ausente está ausente — vem do último passe da IA.
+  const notMappedByToken = new Map(readNotMapped(report?.notMapped).map((n) => [n.token, n]));
   const total = catalog.length;
   const done = catalog.filter((c) => c.present).length;
   const missing = catalog.filter((c) => !c.present);
@@ -610,7 +634,8 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
               </CardHeader>
               <CardContent className="space-y-2 text-xs">
                 <p className="text-muted-foreground">
-                  Preencheu <b className="text-success">{(report.inserted ?? []).length}</b> campo(s).
+                  Confirmou <b className="text-success">{(report.inserted ?? []).length}</b> trecho(s) no
+                  documento.
                   {(report.skippedAmbiguous ?? []).length > 0 && (
                     <>
                       {" "}
@@ -619,12 +644,36 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                     </>
                   )}
                 </p>
+                {/* Os dois podem valer ao mesmo tempo (documento longo tende a
+                    estourar a saída também) e pedem ações diferentes. */}
+                {report.docTruncated && (
+                  <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-warning">
+                    O documento é maior que o limite lido pela IA: o fim do texto ficou fora da
+                    leitura. As chaves dessa parte precisam ser mapeadas à mão.
+                  </p>
+                )}
+                {report.responseTruncated && (
+                  <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-warning">
+                    A resposta da IA veio cortada. Rode a IA de novo — parte dos campos pode ter
+                    ficado de fora.
+                  </p>
+                )}
                 {(report.skippedAmbiguous ?? []).map((s, i) => (
                   <div key={i} className="rounded-md border bg-muted/30 p-2">
                     <code className="rounded bg-muted px-1">{`{{${s.token}}}`}</code>{" "}
                     <span className="text-muted-foreground">— {SKIP_REASON[s.reason] ?? s.reason}.</span>
+                    {/* Máscara também no render: relatório gravado antes de
+                        2026-09-02 tem o trecho cru, e é a única defesa se um
+                        relatório futuro escapar da máscara na gravação. */}
+                    {s.paragraph && (
+                      <p className="mt-1 text-destructive">
+                        Parágrafo apagado: “{maskForReport(s.paragraph)}”
+                      </p>
+                    )}
                     {s.trecho && (
-                      <p className="mt-1 line-clamp-2 italic text-muted-foreground">“{s.trecho}”</p>
+                      <p className="mt-1 line-clamp-2 italic text-muted-foreground">
+                        “{maskForReport(s.trecho)}”
+                      </p>
                     )}
                   </div>
                 ))}
@@ -653,6 +702,16 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                         <span className="ml-1 text-muted-foreground">(bloco)</span>
                       )}
                       <p className="text-muted-foreground">{c.label}</p>
+                      {!c.present && notMappedByToken.get(c.token)?.reason &&
+                        notMappedByToken.get(c.token)!.reason !== "no-mapping" && (
+                          <p className="text-warning">
+                            {SKIP_REASON[notMappedByToken.get(c.token)!.reason] ??
+                              notMappedByToken.get(c.token)!.reason}
+                            {notMappedByToken.get(c.token)!.trecho && (
+                              <> — “{maskForReport(notMappedByToken.get(c.token)!.trecho!)}”</>
+                            )}
+                          </p>
+                        )}
                     </div>
                   </li>
                 ))}

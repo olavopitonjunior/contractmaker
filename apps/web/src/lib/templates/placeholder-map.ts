@@ -10,6 +10,7 @@ import {
   parcelasPagamento,
   hbsExpr,
 } from "./composed-blocks";
+import { corretagemQualificacao, corretagemDadosPagamento } from "./corretagem";
 
 // ============================================================================
 // Mapa de placeholders pra geração engine="google_docs": campos simples
@@ -124,6 +125,13 @@ export function buildLocacaoPlaceholderMap(
     fiador_qualificacao: qualificacaoFiador(enriched),
     clausula_garantia: clausulaGarantia(enriched),
     bloco_administradora: blocoAdministradora(enriched),
+    // Corretagem: identificação sai daqui; o repasse é SOBRESCRITO pelo call
+    // site (`generateLocacaoContractForDeal`), que tem o dado bancário e este
+    // módulo não — ver o cabeçalho de `./corretagem`. A chave é emitida mesmo
+    // vazia de propósito: token ausente do mapa é APAGADO do Doc por
+    // `cleanupOrphanPlaceholders`, e aí o modelo perderia o parágrafo inteiro.
+    corretagem_qualificacao: corretagemQualificacao(enriched),
+    corretagem_dados_pagamento: corretagemDadosPagamento(enriched),
     assinaturas: blocoAssinaturas(enriched),
 
     // Simples formatados
