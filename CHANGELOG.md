@@ -4,6 +4,18 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-02 - A própria imobiliária ganha chaves na cláusula de corretagem
+
+### Adicionado
+
+- **Duas chaves novas nos modelos de locação: `{{imobiliaria_qualificacao}}` e `{{imobiliaria_dados_pagamento}}`.** A primeira imprime razão social, CNPJ, CRECI e sede da imobiliária como intermediadora da locação (vem do perfil da imobiliária, e vale mesmo quando ela não administra o imóvel); a segunda, a chave PIX ou banco/agência/conta onde ela recebe a comissão do primeiro aluguel. Na reingestão dos modelos da RE/MAX Trio, 12 dos 16 rascunhos ficaram barrados pelo gate de dado pessoal exclusivamente pela conta da própria imobiliária, escrita por extenso na cláusula de rateio do primeiro aluguel — o corretor já tinha chave, a imobiliária não. Com a entrada no catálogo, a leitura por IA passa a mapear esse trecho no envio de modelos.
+- **Configurações → Formulário → Padrão contratual · Locação ganha "Onde a imobiliária recebe a comissão"** (PIX ou conta), com o mesmo auto-save das outras seções. Só entra no contrato o que estiver completo: uma chave PIX, ou banco + agência + conta + tipo. Em branco, a chave sai vazia e a geração segue.
+
+### Notas
+
+- A conta da imobiliária vai só para o documento do contrato, nunca para os dados do negócio — o mesmo desenho do repasse do corretor. O modelo guarda a chave; a conta, o padrão da imobiliária.
+- Modelos já criados não mudam sozinhos: o trecho literal continua no documento até o operador trocá-lo pela chave (ou reenviar o modelo).
+
 ## [Unreleased] - 2026-09-02 - Trocar o papel de um membro passa pelo mesmo teto das outras três portas
 
 ### Corrigido
@@ -19,6 +31,7 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 - **Qualquer membro da organização podia abrir um negócio de venda, inclusive quem só deveria olhar.** As seis portas que criam negócio de venda — a criação do formulário público, o botão do funil, a importação do iList, o cadastro por proposta, a importação de contrato e a conversão de lead — não conferiam permissão nenhuma. Bastava estar dentro da organização. O lado de locação sempre exigiu permissão para o mesmo ato, e a diferença não era uma decisão: era uma checagem que nunca foi escrita. Agora as seis pedem "Criar negócio de venda". O preenchimento do formulário pelo proponente, que acontece por link público, não é afetado.
 - **Ninguém que já criava perde o acesso.** Antes de fechar a porta, medimos quem realmente a usava: dos 85 negócios de venda existentes, 84 foram criados por administradores, proprietários da conta, gerentes ou pelo agente Max — e a permissão nova nasce ligada para todos eles. Quem passa a ser barrado é quem nunca criou nada e não deveria poder: o perfil de leitura e os perfis financeiros e de portal. O perfil de leitura continua enxergando o funil inteiro, como antes; o que ele perde é só a criação.
 - **Para o gerente, a permissão fica na tela.** "Criar negócio de venda" entra em Configurações → Gerentes ligada, e o administrador pode desligá-la — mesma tela onde, nesta mesma versão, passou a existir "Criar negócio e contrato de locação".
+
 
 ## [Unreleased] - 2026-09-02 - Dois consertos medidos no smoke de staging da troca pelo gabarito
 

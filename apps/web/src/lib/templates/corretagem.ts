@@ -58,7 +58,8 @@ const TIPO_CONTA_LABEL: Record<string, string> = {
   poupanca: "poupança",
 };
 
-function txt(v: unknown): string {
+/** Texto aparado; `null`/`undefined` viram "". Compartilhado com `./imobiliaria`. */
+export function txt(v: unknown): string {
   return typeof v === "string" ? v.trim() : v == null ? "" : String(v).trim();
 }
 
@@ -67,9 +68,10 @@ function txt(v: unknown): string {
  * repo mora em `lib/clicksign/envelopes.ts`, e puxar um módulo de assinatura
  * para dentro do caminho de render acoplaria as duas coisas por 8 linhas.
  * Documento de tamanho inesperado sai como veio — mascarar por engano seria
- * pior que não mascarar.
+ * pior que não mascarar. Exportada para `./imobiliaria` — a mesma máscara, uma
+ * cópia só.
  */
-function formatDoc(raw: unknown): string {
+export function formatDoc(raw: unknown): string {
   const d = txt(raw).replace(/\D/g, "");
   if (d.length === 11) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
   if (d.length === 14)
@@ -120,8 +122,12 @@ export function corretagemQualificacao(data: Record<string, unknown>): string {
   return linhas.join("; ");
 }
 
-/** Uma via de repasse em prosa. "" quando o dado não serve para pagar. */
-function viaDeRepasse(r: RecebimentoData | null | undefined): string {
+/**
+ * Uma via de repasse em prosa. "" quando o dado não serve para pagar.
+ * Exportada porque a própria imobiliária usa a MESMA via
+ * (`./imobiliaria`): uma frase só para "onde cai o dinheiro", seja de quem for.
+ */
+export function viaDeRepasse(r: RecebimentoData | null | undefined): string {
   if (!r) return "";
   const chave = txt(r.pix_chave);
   const titularNome = txt(r.titular_nome);
