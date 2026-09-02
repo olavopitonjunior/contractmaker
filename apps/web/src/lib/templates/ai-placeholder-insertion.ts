@@ -9,6 +9,7 @@ import {
   type InsertionReport,
   type SkipReason,
   type SkippedToken,
+  type UnmappedReason,
   type UnmappedToken,
 } from "./insertion-report";
 
@@ -19,9 +20,22 @@ export {
   type InsertionReport,
   type SkipReason,
   type SkippedToken,
+  type UnmappedReason,
   type UnmappedToken,
 } from "./insertion-report";
+
 import { catalogForModalidade, requiredTokens, isKnownToken } from "./placeholder-catalog";
+
+/**
+ * Teto do texto enviado à IA. Era 24.000 chars — um contrato de locação de
+ * 10-12 páginas passa disso, e a cauda (garantia, foro, assinaturas) ficava
+ * invisível SEM AVISO: os tokens de lá saíam como "não mapeados" e ninguém
+ * sabia por quê. 120k chars ≈ 35k tokens; Sonnet 4.6 tem 1M de contexto.
+ * Sem chunking de propósito: o estágio determinístico lê o texto inteiro.
+ */
+export const MAX_PROMPT_CHARS = 120_000;
+/** Resposta cortada aqui vira `responseTruncated`, não lista vazia muda. */
+export const MAX_OUTPUT_TOKENS = 8192;
 
 // ============================================================================
 // Pass de IA da ingestão DOCX→template: lê o texto do Doc-modelo da
@@ -94,7 +108,7 @@ REGRAS:
 8. O documento pode já conter placeholders no formato {{alguma_coisa}} — eles já estão prontos. NUNCA inclua no trecho_literal um texto que contenha {{...}}, nem pra "corrigir" o nome do token. Trate essas linhas como intocáveis.
 
 DOCUMENTO:
-${docText.slice(0, 24000)}`;
+${docText.slice(0, MAX_PROMPT_CHARS)}`;
 }
 
 export async function insertPlaceholdersWithAI(input: {
@@ -104,13 +118,16 @@ export async function insertPlaceholdersWithAI(input: {
 }): Promise<InsertionReport> {
   const docText = await getDocPlainText(input.docId);
 
+  const docTruncated = docText.length > MAX_PROMPT_CHARS;
+
   const anthropic = getAnthropicClient();
   const t0 = Date.now();
   let raw = "";
+  let responseTruncated = false;
   try {
     const response = await anthropic.messages.create({
       model: SONNET_MODEL,
-      max_tokens: 4096,
+      max_tokens: MAX_OUTPUT_TOKENS,
       temperature: 0,
       messages: [{ role: "user", content: buildPrompt(input.modalidade, docText) }],
     });
@@ -128,6 +145,9 @@ export async function insertPlaceholdersWithAI(input: {
     });
     const block = response.content.find((b) => b.type === "text");
     raw = block && block.type === "text" ? block.text : "";
+    // Resposta cortada no meio do JSON caía no catch mudo do parse e o passe
+    // seguia com lista VAZIA — foi assim que um modelo saiu com zero chaves.
+    responseTruncated = response.stop_reason === "max_tokens";
   } catch (err) {
     recordAIUsage({
       orgId: input.orgId,
@@ -380,11 +400,20 @@ export async function insertPlaceholdersWithAI(input: {
   // estado real do Doc — e todos os skips continuam em `skippedAmbiguous`.
   const lastSkip = new Map<string, SkippedToken>();
   for (const s of skippedMasked) lastSkip.set(s.token, s);
+  // Sem proposta da IA, o motivo é o truncamento quando houve um. O doc vence
+  // a resposta: o que ficou além do teto NUNCA foi visto, e rodar de novo não
+  // muda o corte — mandar "rode a IA de novo" para essas chaves seria mandar
+  // o operador a uma ação inútil. Resposta cortada só quando o doc coube.
+  const semProposta: UnmappedReason = docTruncated
+    ? "doc-truncated"
+    : responseTruncated
+      ? "response-truncated"
+      : "no-mapping";
   const notMapped: UnmappedToken[] = catalogTokens
     .filter((t) => !present.has(t))
     .map((token) => {
       const s = lastSkip.get(token);
-      return s ? { token, reason: s.reason, trecho: s.trecho } : { token, reason: "no-mapping" };
+      return s ? { token, reason: s.reason, trecho: s.trecho } : { token, reason: semProposta };
     });
 
   return {
@@ -393,5 +422,11 @@ export async function insertPlaceholdersWithAI(input: {
     notMapped,
     missingRequired,
     ranAt: new Date().toISOString(),
+    // SEMPRE gravadas, mesmo falsas: `rerun-ai` faz merge RASO do relatório
+    // antigo com o novo, então chave ausente não apaga a antiga — uma passada
+    // que truncou deixaria `docTruncated: true` grudado para sempre, e o
+    // banner "rode a IA de novo" sobreviveria à própria rodada limpa.
+    docTruncated,
+    responseTruncated,
   };
 }

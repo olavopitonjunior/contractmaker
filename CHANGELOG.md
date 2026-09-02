@@ -4,6 +4,14 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-02 - A IA da ingestão para de cortar o documento em silêncio
+
+### Corrigido
+
+- **Modelo longo perdia o fim sem aviso.** O texto enviado à IA era cortado em 24 mil caracteres — menos que um contrato de locação de 10 páginas. Garantia, foro e assinaturas ficavam fora da leitura, e as chaves dessa parte apareciam como "não mapeadas" sem explicação. O limite sobe para 120 mil caracteres e, quando ainda assim o documento passa dele, o relatório avisa e cada chave da parte cortada diz que ficou fora da leitura.
+- **Resposta cortada virava "nenhuma chave".** Quando a resposta da IA estourava o limite de saída, o JSON vinha pela metade e o passe seguia como se a IA não tivesse proposto nada — um modelo saiu da ingestão com zero chaves por isso. O limite de saída dobra e, se ainda cortar, o relatório diz para rodar a IA de novo em vez de fingir que não havia o que mapear. Quando o documento também passou do limite de leitura, é isso que a chave informa — rodar de novo não traria o que ficou fora.
+- **As rotas de ingestão por upload, por contrato e o "Pedir revisão pela IA" ganham mais tempo** (300 s em vez de 120 s): com o limite de leitura maior, o pior caso estourava o tempo depois de a IA responder e antes de o relatório ser gravado, e a ingestão inteira se perdia.
+
 ## [Unreleased] - 2026-09-02 - O relatório da IA diz por que cada chave falta, e para de guardar dado pessoal
 
 ### Alterado

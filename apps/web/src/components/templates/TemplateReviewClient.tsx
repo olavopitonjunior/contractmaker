@@ -62,6 +62,8 @@ interface DraftReport {
   notMapped?: unknown[];
   missingRequired?: string[];
   slots?: SlotReport[];
+  docTruncated?: boolean;
+  responseTruncated?: boolean;
   ranAt?: string;
   /** Gate de PII do modelo — espelho do último texto lido (ver lib/templates/pii-gate.ts). */
   pii?: TemplatePiiReport;
@@ -96,6 +98,8 @@ const SKIP_REASON: Record<string, string> = {
     "a edição foi enviada, mas a conferência no documento não confirmou o resultado",
   "verify-unavailable":
     "não consegui conferir o documento agora (Drive indisponível) — rode a IA de novo",
+  "doc-truncated": "o documento é maior que o limite lido pela IA — esta parte ficou fora da leitura",
+  "response-truncated": "a resposta da IA veio cortada antes de chegar aqui — rode a IA de novo",
 };
 
 const SLOT_LABEL: Record<string, string> = {
@@ -639,6 +643,20 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                     </>
                   )}
                 </p>
+                {/* Os dois podem valer ao mesmo tempo (documento longo tende a
+                    estourar a saída também) e pedem ações diferentes. */}
+                {report.docTruncated && (
+                  <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-warning">
+                    O documento é maior que o limite lido pela IA: o fim do texto ficou fora da
+                    leitura. As chaves dessa parte precisam ser mapeadas à mão.
+                  </p>
+                )}
+                {report.responseTruncated && (
+                  <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-warning">
+                    A resposta da IA veio cortada. Rode a IA de novo — parte dos campos pode ter
+                    ficado de fora.
+                  </p>
+                )}
                 {(report.skippedAmbiguous ?? []).map((s, i) => (
                   <div key={i} className="rounded-md border bg-muted/30 p-2">
                     <code className="rounded bg-muted px-1">{`{{${s.token}}}`}</code>{" "}

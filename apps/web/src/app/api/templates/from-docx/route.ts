@@ -16,7 +16,11 @@ import {
 } from "@/lib/templates/ingest-template-from-docx";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+// 300s: Drive (upload + conversão) + slots + passe de IA (até 120k chars de
+// entrada, 8192 tokens de saída, não-stream) + releituras do Doc. Com 120s o
+// pior caso estourava DEPOIS do passe e ANTES de gravar o relatório — a
+// ingestão inteira se perdia sem estado parcial.
+export const maxDuration = 300;
 
 const MAX_BYTES = 20 * 1024 * 1024;
 
@@ -62,7 +66,7 @@ function readJsonField(formData: FormData, field: string): unknown {
  * self-call.
  *
  * UM arquivo por request — o pipeline Drive + IA é pesado e cabe no
- * maxDuration de 120s.
+ * maxDuration de 300s.
  *
  * Dedup por conteúdo (SHA-256 do DOCX em `ContractTemplate.sourceHash`):
  * arquivo já ingerido no org (e não arquivado) devolve 409 DUPLICATE_TEMPLATE

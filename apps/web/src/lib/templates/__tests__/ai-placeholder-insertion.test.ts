@@ -368,6 +368,75 @@ describe("insertPlaceholdersWithAI — inserted só depois de conferir", () => {
     expect(readNotMapped("x")).toEqual([]);
   });
 
+  it("documento maior que o teto: a cauda fica fora e o relatório DIZ isso (docTruncated + doc-truncated)", async () => {
+    const { MAX_PROMPT_CHARS } = await import("../ai-placeholder-insertion");
+    // Cabeça com o aluguel; cauda (além do teto) com o vencimento.
+    const head = "O aluguel mensal é de R$ 2.500,00. ";
+    // Filler garantidamente maior que o teto (a frase tem 43 chars).
+    const filler = "Cláusula padrão que não varia por negócio. ".repeat(
+      Math.ceil(MAX_PROMPT_CHARS / 40)
+    );
+    expect((head + filler).length).toBeGreaterThan(MAX_PROMPT_CHARS);
+    const tail = "\nVencimento todo dia 17 (dezessete).";
+    useDoc(head + filler + tail);
+    mockMessagesCreate.mockImplementation(async (arg: { messages: Array<{ content: string }> }) => {
+      // O prompt NÃO pode carregar a cauda.
+      expect(arg.messages[0].content).not.toContain("17 (dezessete)");
+      return aiResponse([{ trecho_literal: "R$ 2.500,00", token: "aluguel_valor" }]);
+    });
+
+    const report = await run();
+    expect(report.docTruncated).toBe(true);
+    expect(report.responseTruncated).toBe(false);
+    expect(report.inserted.map((i) => i.token)).toEqual(["aluguel_valor"]);
+    const venc = report.notMapped.find((n) => n.token === "aluguel_dia_vencimento")!;
+    expect(venc.reason).toBe("doc-truncated");
+  });
+
+  it("resposta cortada em max_tokens: responseTruncated, e não uma lista vazia muda", async () => {
+    useDoc(DOC);
+    mockMessagesCreate.mockResolvedValue({
+      usage: { input_tokens: 100, output_tokens: 8192 },
+      stop_reason: "max_tokens",
+      content: [{ type: "text", text: '{"mapeamentos":[{"trecho_literal":"R$ 2.500,00","token":"aluguel_valor"},{"trecho_lit' }],
+    });
+    const report = await run();
+    expect(report.responseTruncated).toBe(true);
+    expect(report.inserted).toEqual([]);
+    expect(report.notMapped.find((n) => n.token === "aluguel_valor")!.reason).toBe("response-truncated");
+  });
+
+  it("doc E resposta truncados: o doc vence no motivo por token — rodar de novo não muda o corte", async () => {
+    const { MAX_PROMPT_CHARS } = await import("../ai-placeholder-insertion");
+    const head = "O aluguel mensal é de R$ 2.500,00. ";
+    const filler = "Cláusula padrão que não varia por negócio. ".repeat(Math.ceil(MAX_PROMPT_CHARS / 40));
+    useDoc(head + filler + "\nVencimento todo dia 17 (dezessete).");
+    mockMessagesCreate.mockResolvedValue({
+      usage: { input_tokens: 35000, output_tokens: 8192 },
+      stop_reason: "max_tokens",
+      content: [{ type: "text", text: '{"mapeamentos":[{"trecho_literal":"R$ 2.500,00","token":"aluguel_valor"},{"tre' }],
+    });
+    const report = await run();
+    expect(report.docTruncated).toBe(true);
+    expect(report.responseTruncated).toBe(true);
+    for (const n of report.notMapped) expect(n.reason).toBe("doc-truncated");
+  });
+
+  it("documento dentro do teto e resposta inteira: flags PRESENTES e falsas (o merge raso do rerun precisa delas)", async () => {
+    useDoc(DOC);
+    mockMessagesCreate.mockResolvedValue({ ...MAP, stop_reason: "end_turn" });
+    const report = await run();
+    // `false`, não `undefined`: `rerun-ai` faz `{...antigo, ...novo}` — chave
+    // ausente deixaria um `true` de passada anterior grudado para sempre.
+    expect(report.docTruncated).toBe(false);
+    expect(report.responseTruncated).toBe(false);
+    expect({ docTruncated: true, responseTruncated: true, ...report }).toMatchObject({
+      docTruncated: false,
+      responseTruncated: false,
+    });
+    expect(mockMessagesCreate.mock.calls[0][0].max_tokens).toBe(8192);
+  });
+
   it("reply ausente num parágrafo do bloco: a releitura decide se virou leftover", async () => {
     useDoc("8.1. Primeira.\n8.2. Segunda.\n8.3. Terceira.");
     mockMessagesCreate.mockResolvedValue(

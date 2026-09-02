@@ -7,7 +7,9 @@ import { getDocPlainText } from "@/lib/google/docs";
 import { auditTemplateText, readDraftReport } from "@/lib/templates/pii-gate";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+// 300s: o passe de IA lê até 120k chars e pode gerar 8192 tokens numa chamada
+// não-stream, e ainda relê o Doc depois — 120s era apertado no pior caso.
+export const maxDuration = 300;
 
 /** owner/admin da org (impersonation-aware). */
 async function requireOwnerAdmin(userId: string, orgId: string) {
