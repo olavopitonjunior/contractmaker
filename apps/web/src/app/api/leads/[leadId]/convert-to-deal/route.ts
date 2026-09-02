@@ -15,6 +15,8 @@ import { matchDealGroup } from "@/lib/newton/group-match";
 import { resolveManagerForCreate } from "@/lib/deals/manager";
 import { guardDealCreate } from "@/lib/deals/route-helpers";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { getPipelineByKind } from "@/lib/modules/resolve";
+import { MODULE } from "@/lib/modules/catalog";
 
 export const runtime = "nodejs";
 
@@ -74,8 +76,13 @@ export async function POST(
     );
   }
 
-  const pipeline = await prisma.pipeline.findFirst({
-    where: { orgId: apiAuth.org.id },
+  // SEMPRE por kind — é o footgun que o comentário do `getPipelineByKind`
+  // documenta, e aqui ele era real: as 5 orgs de produção que têm pipeline têm
+  // venda E locação, então `findFirst({ orgId })` era ambíguo em TODAS. A
+  // conversão podia cair no pipeline de LOCAÇÃO logo depois de cobrar
+  // DEAL_CREATE ("criar negócio de venda") acima. Nenhuma lead foi convertida
+  // em produção até aqui, então não há negócio no lugar errado a corrigir.
+  const pipeline = await getPipelineByKind(apiAuth.org.id, MODULE.VENDAS, {
     include: { stages: { orderBy: { position: "asc" }, take: 1 } },
   });
   if (!pipeline || pipeline.stages.length === 0) {

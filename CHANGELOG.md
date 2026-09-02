@@ -4,6 +4,14 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-02 - Converter proposta passa a pedir a permissão de criar, e converter lead para de errar o funil
+
+### Corrigido
+
+- **O interruptor "Criar negócio de venda" não fechava tudo o que dizia fechar.** Além das seis portas fechadas nesta mesma versão, existe uma sétima: converter uma proposta em negócio também cria um negócio. Ela pedia só a permissão de converter. Como as duas opções ficam na mesma tela, em Configurações → Gerentes, o administrador que desligasse "Criar negócio de venda" lia a tela como fechada enquanto o gerente seguia abrindo negócio pela conversão, sem nenhum aviso. Não era brecha de segurança — era um controle que mentia. Agora a conversão pede as duas coisas.
+- **E pede a permissão certa para cada tipo.** Converter uma proposta de locação cria um negócio de locação, então passa a cobrar "Criar negócio e contrato de locação"; converter uma proposta de venda cobra "Criar negócio de venda". Cobrar a de venda para as duas seria o rótulo errado. Efeito medido em produção antes de mexer: nas duas organizações que configuraram gerentes, a conversão de venda não muda para ninguém, porque essa permissão já vem ligada no perfil de gerente. O que muda é a conversão de proposta de locação, que passa a exigir a permissão de locação — hoje ligada em uma das duas. A outra reabre com um único visto na mesma tela. Nenhuma proposta havia sido convertida até aqui.
+- **Converter uma lead podia criar o negócio no funil errado.** A busca do funil não dizia se queria o de venda ou o de locação, e as cinco organizações que têm funil têm os dois. O negócio podia nascer no funil de locação logo depois de o sistema ter cobrado a permissão de criar negócio de venda. Agora a busca declara o tipo, e uma organização sem funil de venda recebe uma recusa clara em vez de um negócio no lugar errado. Nenhuma lead havia sido convertida, então não há nada a corrigir no que já existe.
+
 ## [Unreleased] - 2026-09-02 - A própria imobiliária ganha chaves na cláusula de corretagem
 
 ### Adicionado
