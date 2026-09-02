@@ -116,6 +116,12 @@ describe("reverseMergeDocToTemplate — travas no texto plano", () => {
     expect(state).toBe("Locadora: {{locadores_qualificacao}}. Texto fixo do contrato.");
   });
 
+  it("temporada usa o mapa de LOCAÇÃO (família, não prefixo 'locacao')", async () => {
+    useDoc("O aluguel é de R$\u00A03.500,00 por temporada.");
+    const result = await reverseMergeDocToTemplate({ docId: "d", dataJson, modalidade: "temporada" });
+    expect(result.replaced.map((r) => r.token)).toContain("aluguel_valor");
+  });
+
   it("sem nada substituível, não chama batchUpdate nem relê o Doc", async () => {
     useDoc("Documento sem dados do contrato.");
     const result = await run("doc-3");

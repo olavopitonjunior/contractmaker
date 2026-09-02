@@ -131,6 +131,9 @@ export const INGESTION_AI_OPERATIONS = [
   "ingest_classify",
   "ingest_plan",
   "template_placeholder_insertion",
+  // Gabarito (A8): extração dos valores do documento-fonte para o estágio
+  // determinístico. Só roda para item classificado como instância preenchida.
+  "extract_locacao_doc",
   "embed_kb",
 ] as const;
 
@@ -339,6 +342,7 @@ export async function executePlanSlice(
         chunk.map((planned) =>
           applyTemplate({
             orgId: run.orgId,
+            createdBy: run.createdBy,
             template: planned,
             item: itemById.get(planned.sourceItemId) ?? null,
             neutralizeProviders: providerLabels,
@@ -600,6 +604,15 @@ export function knownProviderLabels(
 /** Conversões de template simultâneas por leva — ver o laço da fase 2. */
 const TEMPLATES_CONCURRENCY = 3;
 
+/** `ItemClassification.isFilledInstance`, lido do JSON cru do item. */
+function isFilledInstance(classification: unknown): boolean {
+  return (
+    !!classification &&
+    typeof classification === "object" &&
+    (classification as { isFilledInstance?: unknown }).isFilledInstance === true
+  );
+}
+
 /** Sniff de magic header — mesmo critério de `run-executor.ts`. */
 function isDocx(buffer: Buffer): boolean {
   return (
@@ -613,6 +626,7 @@ function isDocx(buffer: Buffer): boolean {
 
 async function applyTemplate(args: {
   orgId: string;
+  createdBy: string | null;
   template: PlannedTemplate;
   item: ItemRow | null;
   /** Rótulos p/ neutralizar no corpo — ver {@link knownProviderLabels}. */
@@ -659,6 +673,12 @@ async function applyTemplate(args: {
       > | null,
       slotBlocks: template.slotBlocks,
       neutralizeProviders: args.neutralizeProviders,
+      // Gabarito só quando o classificador viu uma INSTÂNCIA preenchida (dados
+      // reais de um cliente): minuta em branco não tem valores para trocar, e
+      // a extração custaria uma chamada por item à toa.
+      extractGabarito: isFilledInstance(item.classification)
+        ? { userId: args.createdBy }
+        : null,
     });
 
     return {

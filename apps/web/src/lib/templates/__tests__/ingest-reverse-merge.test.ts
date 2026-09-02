@@ -18,9 +18,15 @@ const reverseMock = vi.fn();
 vi.mock("@/lib/templates/reverse-merge", () => ({
   reverseMergeDocToTemplate: (...a: unknown[]) => reverseMock(...a),
 }));
+const extractMock = vi.fn();
+vi.mock("@/lib/extraction/locacao-extractor", () => ({
+  extractLocacaoContractDataJson: (...a: unknown[]) => extractMock(...a),
+}));
 const docTextMock = vi.fn();
+const exportPdfMock = vi.fn();
 vi.mock("@/lib/google/docs", () => ({
   getDocPlainText: (...a: unknown[]) => docTextMock(...a),
+  exportDocAsPdf: (...a: unknown[]) => exportPdfMock(...a),
 }));
 vi.mock("@/lib/google/client", () => ({ getDocsClient: () => ({}) }));
 
@@ -59,6 +65,8 @@ beforeEach(() => {
     delete: vi.fn().mockResolvedValue({}),
   });
   uploadMock.mockResolvedValue({ docId: "doc1", webViewLink: "http://doc", embedLink: "http://embed" });
+  extractMock.mockResolvedValue({ dataJson: {}, finalidade: "residencial", finalidadeDetected: false });
+  exportPdfMock.mockResolvedValue(Buffer.from("%PDF-1.4 fake"));
   aiMock.mockImplementation(async () => {
     order.push("ai");
     return {
@@ -152,6 +160,83 @@ describe("ingestTemplateFromDocx — estágio determinístico (gabarito)", () =>
     expect(out.templateId).toBe("tpl1");
     expect(draftReport()?.reverseMerge).toBeUndefined();
     expect((draftReport()?.inserted as unknown[]).length).toBe(1);
+  });
+});
+
+describe("ingestTemplateFromDocx — gabarito extraído do próprio DOCX (A8)", () => {
+  it("extractGabarito: extrai do PDF exportado do Doc, em paralelo com o passe de IA, e alimenta o reverse-merge", async () => {
+    let releaseAi: () => void = () => {};
+    aiMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseAi = () => {
+            order.push("ai");
+            resolve({ inserted: [], skippedAmbiguous: [], notMapped: [], missingRequired: [], ranAt: "" });
+          };
+        })
+    );
+    extractMock.mockImplementation(async (buffer: Buffer, mime: string, ctx: Record<string, unknown>) => {
+      // PDF exportado do Doc — não o DOCX cru (o Gemini lê DOCX de forma irregular).
+      expect(buffer.toString()).toContain("%PDF");
+      expect(mime).toBe("application/pdf");
+      expect(ctx).toEqual({ orgId: "org1", userId: "u1", contractId: null });
+      return { dataJson: { aluguel: { valor: 2500 } }, finalidade: "residencial", finalidadeDetected: true };
+    });
+    const pending = ingestTemplateFromDocx({ ...base, extractGabarito: { userId: "u1" } });
+    // O passe de IA ainda está pendente e a extração JÁ foi chamada (paralelo).
+    await new Promise((r) => setTimeout(r, 0));
+    expect(exportPdfMock).toHaveBeenCalledWith("doc1");
+    expect(extractMock).toHaveBeenCalledTimes(1);
+    expect(reverseMock).not.toHaveBeenCalled();
+    releaseAi();
+    await pending;
+    expect(reverseMock).toHaveBeenCalledTimes(1);
+    const arg = reverseMock.mock.calls[0][0] as { dataJson: Record<string, unknown> };
+    expect(arg.dataJson.aluguel).toEqual({ valor: 2500 });
+  });
+
+  it("export PDF falhando → extrai do DOCX cru (não pior que antes)", async () => {
+    exportPdfMock.mockRejectedValue(new Error("Drive 500"));
+    extractMock.mockImplementation(async (buffer: Buffer, mime: string) => {
+      expect(mime).toContain("wordprocessingml");
+      expect(buffer.length).toBeGreaterThan(4);
+      return { dataJson: { aluguel: { valor: 1 } }, finalidade: "residencial", finalidadeDetected: false };
+    });
+    await ingestTemplateFromDocx({ ...base, extractGabarito: { userId: null } });
+    expect(extractMock).toHaveBeenCalledTimes(1);
+    expect(reverseMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("upload falhando → nenhuma extração é disparada (nada de Gemini órfão)", async () => {
+    uploadMock.mockRejectedValue(new Error("Drive 503"));
+    await expect(ingestTemplateFromDocx({ ...base, extractGabarito: { userId: "u1" } })).rejects.toThrow();
+    expect(extractMock).not.toHaveBeenCalled();
+    expect(exportPdfMock).not.toHaveBeenCalled();
+  });
+
+  it("família locação inteira: temporada e administracao_locacao também extraem", async () => {
+    await ingestTemplateFromDocx({ ...base, modalidade: "temporada", extractGabarito: { userId: "u1" } });
+    await ingestTemplateFromDocx({ ...base, modalidade: "administracao_locacao", extractGabarito: { userId: "u1" } });
+    expect(extractMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("extração falhando → sem gabarito, ingestão segue e nada de reverse-merge", async () => {
+    extractMock.mockRejectedValue(new Error("Gemini 503"));
+    const out = await ingestTemplateFromDocx({ ...base, extractGabarito: { userId: null } });
+    expect(out.templateId).toBe("tpl1");
+    expect(reverseMock).not.toHaveBeenCalled();
+    expect(draftReport()?.reverseMerge).toBeUndefined();
+  });
+
+  it("sourceValues explícito vence: não extrai", async () => {
+    await ingestTemplateFromDocx({ ...base, sourceValues: { aluguel: { valor: 1 } }, extractGabarito: { userId: "u1" } });
+    expect(extractMock).not.toHaveBeenCalled();
+    expect(reverseMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("venda: extractGabarito é ignorado (só locação tem gabarito hoje)", async () => {
+    await ingestTemplateFromDocx({ ...base, modalidade: "a_vista", extractGabarito: { userId: "u1" } });
+    expect(extractMock).not.toHaveBeenCalled();
   });
 });
 

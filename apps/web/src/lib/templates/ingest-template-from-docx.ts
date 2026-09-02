@@ -44,6 +44,8 @@ import {
   type ReverseMergeResult,
 } from "@/lib/templates/reverse-merge";
 import { enrichLocacaoData } from "@/lib/locacao/enrich";
+import { extractLocacaoContractDataJson } from "@/lib/extraction/locacao-extractor";
+import { templateFamilyForModalidade } from "@/lib/contracts/template-category";
 import { extractPlaceholdersFromText } from "@/lib/google/replace-placeholders";
 import { catalogForModalidade, requiredTokens } from "@/lib/templates/placeholder-catalog";
 import { schemaTypeForModalidade } from "@/lib/contracts/template-category";
@@ -53,7 +55,8 @@ import {
   resolveUniqueTemplateName,
   type DuplicateTemplate,
 } from "@/lib/templates/upload-dedup";
-import { getDocPlainText } from "@/lib/google/docs";
+import { exportDocAsPdf, getDocPlainText } from "@/lib/google/docs";
+import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
 import { auditTemplateText, type TemplatePiiReport } from "@/lib/templates/pii-gate";
 import {
   slotDeclarationComment,
@@ -108,6 +111,14 @@ export interface IngestTemplateFromDocxInput {
    * Não é persistido: contém PII do contrato-fonte.
    */
   sourceValues?: Record<string, unknown> | null;
+  /**
+   * Extrair o gabarito do PRÓPRIO documento (Gemini, ~US$0,01), em paralelo
+   * com os slots/neutralização/passe de IA — não soma latência ao teto da
+   * rota. Ignorado quando `sourceValues` já veio. Família locação (locacao,
+   * comercial, temporada, administracao_locacao); venda fica para quando
+   * houver gabarito de venda. Falha = sem gabarito, fluxo antigo.
+   */
+  extractGabarito?: { userId?: string | null } | null;
 }
 
 export interface IngestTemplateFromDocxResult {
@@ -246,6 +257,44 @@ export async function ingestTemplateFromDocx(
     throw err;
   }
 
+  // ─── GABARITO (A8) ────────────────────────────────────────────────────────
+  // Começa AQUI (Doc existe e já está gravado na row) e só é aguardado na hora
+  // do reverse-merge: roda em paralelo com slots, neutralização e passe de IA,
+  // que levam dezenas de segundos. Nasce depois do upload E do update de
+  // propósito — qualquer falha antes daqui deixaria a chamada órfã gastando
+  // Gemini para ninguém.
+  //
+  // DOCX → PDF antes de extrair, como contract-import e re-extract: o Gemini
+  // lê DOCX cru (inlineData) de forma irregular e costuma devolver `{}` mudo —
+  // e `{}` aqui é indistinguível de "sem gabarito". Export falhando cai no
+  // buffer original (não pior que antes). O `.catch` devolve null: a extração
+  // falhando nunca derruba a ingestão.
+  const shouldExtract =
+    !input.sourceValues &&
+    !!input.extractGabarito &&
+    templateFamilyForModalidade(modalidade) === "locacao";
+  const gabaritoPromise: Promise<Record<string, unknown> | null> = shouldExtract
+    ? (async () => {
+        let extractionBuffer: Buffer = buffer;
+        let extractionMime: ImportableMime = DOCX_MIME;
+        try {
+          extractionBuffer = await exportDocAsPdf(uploaded.docId);
+          extractionMime = "application/pdf";
+        } catch (err) {
+          console.warn("[templates/from-docx] export PDF falhou; extraindo do DOCX cru:", err);
+        }
+        const r = await extractLocacaoContractDataJson(extractionBuffer, extractionMime, {
+          orgId,
+          userId: input.extractGabarito?.userId ?? null,
+          contractId: null,
+        });
+        return r.dataJson;
+      })().catch((err) => {
+        console.error("[templates/from-docx] extração do gabarito falhou (segue sem):", err);
+        return null;
+      })
+    : Promise.resolve(null);
+
   // Abre os slots ANTES do pass de IA: com a cláusula variável já trocada pelo
   // token, o mapeamento de placeholders não gasta esforço num texto que vai
   // deixar de existir.
@@ -299,9 +348,10 @@ export async function ingestTemplateFromDocx(
   // valores que a IA já cobriu viram `not-found` sem ruído, e cada valor que
   // sobrou e vira token é PII a menos para o gate abaixo.
   let reverseMerge: ReverseMergeResult | null = null;
-  if (input.sourceValues && Object.keys(input.sourceValues).length > 0) {
+  const sourceValues = input.sourceValues ?? (await gabaritoPromise);
+  if (sourceValues && Object.keys(sourceValues).length > 0) {
     try {
-      const gabarito = gabaritoFromSourceValues(input.sourceValues, modalidade);
+      const gabarito = gabaritoFromSourceValues(sourceValues, modalidade);
       reverseMerge = await reverseMergeDocToTemplate({
         docId: uploaded.docId,
         dataJson: gabarito,
@@ -450,7 +500,7 @@ export function gabaritoFromSourceValues(
   sourceValues: Record<string, unknown>,
   modalidade: string
 ): Record<string, unknown> {
-  if (!modalidade.startsWith("locacao")) return sourceValues;
+  if (templateFamilyForModalidade(modalidade) !== "locacao") return sourceValues;
   // Chaves ANTES do enrich, e sobre uma cópia: `enrichLocacaoData` faz cópia
   // rasa e escreve os defaults dentro do MESMO objeto `config` da entrada.
   const rawConfig = (sourceValues.config ?? null) as Record<string, unknown> | null;

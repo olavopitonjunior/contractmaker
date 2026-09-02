@@ -113,6 +113,9 @@ export async function POST(req: NextRequest) {
   const modalidade = String(formData.get("modalidade") ?? "");
   const name = (String(formData.get("name") ?? "").trim() || null) ?? null;
   const force = String(formData.get("force") ?? "") === "true";
+  // Gabarito ligado por padrão: é o que faz a troca de chaves ser completa.
+  // `gabarito=false` desliga (ex.: minuta em branco, sem valores para trocar).
+  const gabarito = String(formData.get("gabarito") ?? "true") !== "false";
 
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "Campo file ausente" }, { status: 400 });
@@ -180,6 +183,7 @@ export async function POST(req: NextRequest) {
       force,
       matchCriteria,
       slotBlocks,
+      extractGabarito: gabarito ? { userId: effUserId } : null,
     });
     return NextResponse.json(result);
   } catch (err) {
