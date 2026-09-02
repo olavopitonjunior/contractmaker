@@ -41,7 +41,18 @@ import type { FormModule } from "@/lib/forms/presets";
  */
 export type KeyTier = "validada" | "condicional" | "rejeitada";
 
-/** Tokens de bloco/contexto que não são caminho de dado. */
+/**
+ * Tokens de bloco/contexto que não são caminho de dado.
+ *
+ * Inclui os BLOCK HELPERS EMBUTIDOS do Handlebars. Eles não podem viver em
+ * `HANDLEBARS_HELPER_NAMES` porque aquela lista tem paridade travada por teste
+ * com o que `registerHandlebarsHelpers` de fato registra — e `if`/`each` vêm da
+ * biblioteca, não do app. Como não estavam em lista nenhuma,
+ * `extractHandlebarsPaths("{{#if x}}")` devolvia `["if", "x"]`, o catálogo
+ * rejeitava `if`, e `classify/apply` — que revalida TODA chave do conteúdo
+ * final — recusava aplicar proposta de conteúdo em qualquer cláusula
+ * condicional, em silêncio (issue #486).
+ */
 const NON_PATH_TOKENS = new Set([
   "this",
   "else",
@@ -50,6 +61,13 @@ const NON_PATH_TOKENS = new Set([
   "@first",
   "@last",
   "@root",
+  // Block helpers embutidos do Handlebars.
+  "if",
+  "unless",
+  "each",
+  "with",
+  "log",
+  "lookup",
 ]);
 
 const HELPERS = new Set(HANDLEBARS_HELPER_NAMES);
