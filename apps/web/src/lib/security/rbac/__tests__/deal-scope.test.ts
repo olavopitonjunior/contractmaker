@@ -169,6 +169,19 @@ describe("preset gerente + override da org", () => {
     expect(p[PERMISSION.DEAL_VIEW_ALL]).toBeUndefined();
   });
 
+  it("gerente mantém deal.create (retrocompat: já criava venda antes do gate)", () => {
+    const p = resolvePermissions("gerente");
+    expect(p[PERMISSION.DEAL_CREATE]).toBe(true);
+  });
+
+  it("admin pode desligar deal.create do gerente pela tela", () => {
+    const p = resolvePermissions("gerente", null, {
+      [PERMISSION.DEAL_CREATE]: false,
+    });
+    expect(p[PERMISSION.DEAL_CREATE]).toBe(false);
+    expect(MANAGER_CONFIGURABLE_PERMISSIONS).toContain(PERMISSION.DEAL_CREATE);
+  });
+
   it("lease.create é configurável; as demais mutações de locação NÃO são", () => {
     // O lado positivo (LEASE_CREATE presente) só prova algo com o negativo ao
     // lado: as outras chaves de locação seguem fora do alcance do admin.
@@ -229,5 +242,42 @@ describe("retrocompat dos presets existentes (chaves novas)", () => {
     expect(p[PERMISSION.DEAL_VIEW_ALL]).toBe(true);
     expect(p[PERMISSION.DEAL_MANAGER_ASSIGN]).toBe(true);
     expect(p[PERMISSION.CONTRACT_EDIT]).toBe(true);
+  });
+});
+
+describe("deal.create — gate das rotas de criação de venda (2026-09-02)", () => {
+  // Antes deste gate, `POST /api/forms` e as outras 5 rotas de criação de
+  // venda não checavam permissão nenhuma. O par abaixo é o contrato do PR:
+  // ninguém que criava perde, e quem não deveria criar para de poder.
+
+  it("QUEM JÁ CRIAVA continua criando (medido em produção)", () => {
+    // 85 negócios de venda em prod: 76 admin, 4 owner, 3 gerente, 1 Max.
+    // Nenhum criado por viewer, finance ou gestor_financeiro.
+    for (const role of ["owner", "admin", "sales", "gerente", "gestor_locacao"] as const) {
+      expect(resolvePermissions(role)[PERMISSION.DEAL_CREATE]).toBe(true);
+    }
+  });
+
+  it("QUEM NÃO DEVERIA criar para de poder — este é o buraco fechado", () => {
+    // `viewer` é leitura global com PII mascarada e criava negócio de venda.
+    // Sem estas linhas o PR não afirma nada: o lado positivo acima passaria
+    // igual se a chave estivesse em todos os presets.
+    for (const role of ["viewer", "finance", "gestor_financeiro", "vistoriador", "proprietario", "inquilino"] as const) {
+      expect(resolvePermissions(role)[PERMISSION.DEAL_CREATE]).toBeUndefined();
+    }
+  });
+
+  it("viewer mantém a LEITURA do pipeline — o gate é só de criação", () => {
+    const p = resolvePermissions("viewer");
+    expect(p[PERMISSION.DEAL_CREATE]).toBeUndefined();
+    expect(p[PERMISSION.DEAL_VIEW_ALL]).toBe(true);
+  });
+
+  it("deal.create é chave própria, não apelido de deal.edit", () => {
+    // finance/viewer não têm nenhuma das duas, mas gestor_financeiro tem
+    // DEAL_VIEW_ALL sem DEAL_EDIT — reusar DEAL_EDIT como gate teria dado
+    // um resultado diferente e silencioso.
+    expect(PERMISSION.DEAL_CREATE).toBe("deal.create");
+    expect(PERMISSION.DEAL_CREATE).not.toBe(PERMISSION.DEAL_EDIT);
   });
 });

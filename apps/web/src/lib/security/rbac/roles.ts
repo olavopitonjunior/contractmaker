@@ -122,6 +122,7 @@ function salesAccess(): PermissionMap {
     // Pipeline (retrocompat 2026-07): sales sempre operou o kanban inteiro —
     // grants explícitos preservam o status quo com as chaves novas.
     [PERMISSION.DEAL_VIEW_ALL]: true,
+    [PERMISSION.DEAL_CREATE]: true,
     [PERMISSION.DEAL_EDIT]: true,
     [PERMISSION.DEAL_MANAGER_ASSIGN]: true,
     [PERMISSION.CONTRACT_CREATE]: true,
@@ -171,6 +172,12 @@ function gerenteAccess(): PermissionMap {
     [PERMISSION.ORG_SETTINGS_READ]: true,
     [PERMISSION.KYC_VIEW_STATUS]: true,
     [PERMISSION.DEAL_VIEW_ASSIGNED_ONLY]: true,
+    // Retrocompat 2026-09-02: o gerente JÁ criava negócio de venda — as rotas
+    // de venda não checavam permissão nenhuma. Medido em produção: 3 dos 85
+    // negócios de venda foram criados por gerentes. Sem este grant, fechar o
+    // gate seria regressão. O admin pode desligar em /settings/gerentes, que é
+    // o motivo de a chave estar em MANAGER_CONFIGURABLE_PERMISSIONS.
+    [PERMISSION.DEAL_CREATE]: true,
     [PERMISSION.DEAL_EDIT]: true,
     [PERMISSION.ENVELOPE_VIEW]: true,
     [PERMISSION.PROPOSAL_VIEW_OWN_ONLY]: true,
@@ -234,6 +241,7 @@ function gestorLocacaoAccess(): PermissionMap {
     [PERMISSION.REPORT_VIEW]: true,
     // Pipeline (retrocompat 2026-07): gestor de locação opera a esteira inteira.
     [PERMISSION.DEAL_VIEW_ALL]: true,
+    [PERMISSION.DEAL_CREATE]: true,
     [PERMISSION.DEAL_EDIT]: true,
     [PERMISSION.DEAL_MANAGER_ASSIGN]: true,
     [PERMISSION.CONTRACT_CREATE]: true,
