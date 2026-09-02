@@ -17,6 +17,16 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 - Não corrige a ingestão: modelo com chaveamento parcial continua parcial. Isto torna o efeito **visível** em cada contrato gerado; a cobertura total de chaves na ingestão vem nos PRs seguintes.
 - Contrato gerado antes desta versão não tem laudo e não recebe os avisos.
 
+## [Unreleased] - 2026-09-01 - O `{{#if}}` deixa de reprovar a cláusula inteira
+
+### Corrigido
+
+- **O extrator de chaves lia `if`, `each` e `unless` como caminho de dado, e isso reprovava toda cláusula condicional.** `HANDLEBARS_HELPER_NAMES` lista só os helpers que o app registra (`moeda`, `extenso`, `cpf`…), e a paridade com o registro é travada por teste — corretamente. Mas os **block helpers embutidos** do Handlebars vêm da biblioteca, não do app, e não estavam em lista nenhuma: `extractHandlebarsPaths("{{#if x}}")` devolvia `["if", "x"]`, e o catálogo rejeita `if` nas duas esteiras.
+  - **O efeito não era teórico.** `classify/apply` revalida **toda** chave do conteúdo final, não só as que o cliente disse ter mexido. Qualquer cláusula com `{{#if}}` ou `{{#each}}` caía em `chave_invalida` e a proposta de conteúdo era descartada — em silêncio, e depois de o humano já ter aprovado na tela de revisão. O par é o pior possível: a tela **propõe** a tokenização, o usuário aprova, e o servidor recusa sem dizer por quê.
+  - **Medido em produção:** das 20 cláusulas cujo conteúdo tinha ao menos uma chave fora do catálogo, **10 eram falso-positivo puro deste bug**. Depois da correção restam 10 — as que têm chave de fato inválida.
+  - Os embutidos entram em `NON_PATH_TOKENS`, e **não** em `HANDLEBARS_HELPER_NAMES` — aquela lista significa "o que o app registra", e enchê-la com `if` quebraria o teste de paridade que a protege.
+- **O teste que devia ter pego isso passava.** Ele cobria exatamente `{{#if}}`/`{{#each}}`, mas com `toContain`/`not.toContain`: afirmava que os argumentos entram e que `this.numero` não entra, e nunca que `if` e `each` ficam de fora. Virou `toEqual` com lista fechada. Teste de extrator que só usa `toContain` não consegue detectar extração **a mais** — que é o modo de falha desta função.
+
 ## [Unreleased] - 2026-09-01 - A tela de cláusulas para de mentir sobre o que está selecionado e sobre o que falta triar
 
 ### Corrigido
@@ -33,6 +43,7 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
 - Nenhuma mudança de status code e nenhum campo removido: os baldes novos da resposta são aditivos e saem de dentro dos existentes, então a soma continua fechando com o lote elegível.
 - Quando um lote tem falhas **e** abstenções, as duas frases agora somam em vez de competir — em cascata, a falha ganhava e a informação da abstenção sumia.
+
 ## [Unreleased] - 2026-09-01 - O convite avisa na hora, e o papel do Max para de correr risco de clique
 
 ### Corrigido
