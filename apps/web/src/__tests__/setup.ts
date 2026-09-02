@@ -76,6 +76,12 @@ vi.mock("@/lib/db/prisma", () => {
     },
     orgInvitation: {
       count: vi.fn().mockResolvedValue(0),
+      // `findPendingInvitation` — status pendente por (org, email); `create`,
+      // o convite em si. Ambos exercidos pelo teto de papel na criação (#474).
+      findFirst: vi.fn().mockResolvedValue(null),
+      findUnique: vi.fn().mockResolvedValue(null),
+      create: vi.fn(),
+      update: vi.fn(),
     },
     // Catálogo de garantias locatícias (tipo × garantidor). Vazio por padrão =
     // org cai nos defaults em código, que é o caminho da maioria dos testes.
