@@ -4,6 +4,13 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-02 - O admin passa a poder liberar o gerente para abrir negócio de locação
+
+### Corrigido
+
+- **O gerente não conseguia criar formulário de locação, e não havia como liberá-lo.** Criar o formulário público de locação exige a permissão "criar negócio e contrato de locação", que o gerente não tem por padrão — até aí, o desenho. O problema é que essa permissão não aparecia em Configurações → Gerentes: o admin abria a tela procurando o que ligar e não encontrava nada, enquanto o gerente levava "sem autorização" a cada tentativa. Do lado de vendas o mesmo gerente sempre criou formulário sem pedir nada a ninguém, então a diferença lia como defeito. A permissão passa a estar na tela, desligada por padrão — quem liga é o admin, e vale para todos os gerentes da organização.
+- **O rótulo da permissão dizia menos do que ela faz.** Chamava-se "Criar contrato de locação", mas é ela que abre o formulário público, o cadastro de negócio a partir de imóvel/proposta e a aprovação da ficha. Passa a se chamar "Criar negócio e contrato de locação" — quem procura o checkbox certo agora o encontra pelo nome. Ligá-la não amplia o que o gerente enxerga: as rotas que ela destrava continuam aplicando o escopo de "só os negócios dele" por cima.
+
 ## [Unreleased] - 2026-09-02 - Modelo enviado por upload troca os valores do documento pelas chaves, sem interpretar
 
 ### Adicionado

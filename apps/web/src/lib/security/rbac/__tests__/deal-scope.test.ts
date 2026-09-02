@@ -151,6 +151,39 @@ describe("preset gerente + override da org", () => {
     expect(p[PERMISSION.DEAL_EDIT]).toBe(false);
   });
 
+  it("gerente nasce SEM lease.create (criar locação é opt-in do admin)", () => {
+    const p = resolvePermissions("gerente");
+    expect(p[PERMISSION.LEASE_VIEW]).toBe(true);
+    expect(p[PERMISSION.LEASE_CREATE]).toBeUndefined();
+  });
+
+  it("override liga lease.create — destrava POST /api/locacao/forms", () => {
+    // Regressão 2026-09-02 (RE/MAX Ativa): o gerente levava 403 ao criar o
+    // formulário público de locação e o admin não tinha o checkbox, porque
+    // LEASE_CREATE estava fora da whitelist. O escopo de view não muda.
+    const p = resolvePermissions("gerente", null, {
+      [PERMISSION.LEASE_CREATE]: true,
+    });
+    expect(p[PERMISSION.LEASE_CREATE]).toBe(true);
+    expect(p[PERMISSION.DEAL_VIEW_ASSIGNED_ONLY]).toBe(true);
+    expect(p[PERMISSION.DEAL_VIEW_ALL]).toBeUndefined();
+  });
+
+  it("lease.create é configurável; as demais mutações de locação NÃO são", () => {
+    // O lado positivo (LEASE_CREATE presente) só prova algo com o negativo ao
+    // lado: as outras chaves de locação seguem fora do alcance do admin.
+    expect(MANAGER_CONFIGURABLE_PERMISSIONS).toContain(PERMISSION.LEASE_CREATE);
+    expect(MANAGER_CONFIGURABLE_PERMISSIONS).not.toContain(
+      PERMISSION.LEASE_TERMINATE
+    );
+    expect(MANAGER_CONFIGURABLE_PERMISSIONS).not.toContain(
+      PERMISSION.PROPERTY_DELETE
+    );
+    expect(MANAGER_CONFIGURABLE_PERMISSIONS).not.toContain(
+      PERMISSION.CREDIT_ANALYSIS_DECIDE
+    );
+  });
+
   it("whitelist não contém chaves de view/scope nem org/members", () => {
     expect(MANAGER_CONFIGURABLE_PERMISSIONS).not.toContain(
       PERMISSION.DEAL_VIEW_ALL
