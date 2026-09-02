@@ -17,6 +17,17 @@ export type PlaceholderModalidade =
   | "financiamento"
   | "administracao_locacao";
 
+/**
+ * Como o reverse-merge pode trocar o VALOR deste token no documento-fonte:
+ * - `unique` (default): só quando o valor ocorre exatamente 1 vez — trocar
+ *   "casa" em todas as ocorrências destruiria "casa de máquinas".
+ * - `all`: todas as ocorrências, desde que o valor seja específico
+ *   (`isSpecificValue`): o valor do aluguel está na cláusula do preço, na do
+ *   reajuste e na da multa, e é o mesmo negócio em todas.
+ * Só faz sentido em token `simple`; composto continua `unique`.
+ */
+export type MatchPolicy = "unique" | "all";
+
 export interface PlaceholderDef {
   token: string;
   label: string;
@@ -25,6 +36,7 @@ export interface PlaceholderDef {
   required: boolean;
   kind: PlaceholderKind;
   modalidades: PlaceholderModalidade[];
+  matchPolicy?: MatchPolicy;
 }
 
 // Temporada usa o mesmo schema residencial, então o mesmo catálogo de tokens.
@@ -155,6 +167,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   // ——— Simples ———
   {
     token: "imovel_endereco_completo",
+    matchPolicy: "all",
     label: "Endereço completo do imóvel",
     description: "Rua, número, complemento, bairro, CEP e cidade/UF do imóvel.",
     example: "Avenida Brigadeiro Faria Lima, nº 3500, apto. 121, Itaim Bibi, CEP 04538-132, São Paulo/SP",
@@ -192,6 +205,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "imovel_matricula",
+    matchPolicy: "all",
     label: "Matrícula do imóvel",
     description: "Número da matrícula (com cartório quando informado).",
     example: "152.834 do 5º RI de São Paulo/SP",
@@ -201,6 +215,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "imovel_inscricao_iptu",
+    matchPolicy: "all",
     label: "Inscrição IPTU/contribuinte",
     description: "Número de contribuinte municipal do imóvel.",
     example: "112.345.6789-0",
@@ -210,6 +225,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "iptu_valor",
+    matchPolicy: "all",
     label: "IPTU mensal",
     description:
       "Valor mensal do IPTU na cláusula de encargos/despesas da locação, em BRL. " +
@@ -221,6 +237,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "condominio_valor",
+    matchPolicy: "all",
     label: "Condomínio mensal",
     description:
       "Valor mensal das despesas ordinárias de condomínio na cláusula de " +
@@ -233,6 +250,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "aluguel_valor",
+    matchPolicy: "all",
     label: "Valor do aluguel",
     description: "Aluguel mensal formatado em BRL.",
     example: "R$ 3.500,00",
@@ -242,6 +260,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "aluguel_valor_extenso",
+    matchPolicy: "all",
     label: "Valor do aluguel por extenso",
     description: "Aluguel mensal por extenso.",
     example: "três mil e quinhentos reais",
@@ -251,6 +270,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "aluguel_dia_vencimento",
+    matchPolicy: "all",
     label: "Dia de vencimento",
     description: "Dia do mês do vencimento do aluguel (número + extenso).",
     example: "10 (dez)",
@@ -260,6 +280,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "vigencia_meses",
+    matchPolicy: "all",
     label: "Prazo da locação",
     description: "Prazo em meses (número + extenso).",
     example: "30 (trinta)",
@@ -269,6 +290,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "vigencia_inicio",
+    matchPolicy: "all",
     label: "Início da vigência",
     description: "Data de início por extenso.",
     example: "1º de julho de 2026",
@@ -278,6 +300,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "vigencia_fim",
+    matchPolicy: "all",
     label: "Término da vigência",
     description: "Data de término por extenso (véspera do mesmo dia N meses depois).",
     example: "31 de dezembro de 2028",
@@ -296,6 +319,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "multa_atraso_percent",
+    matchPolicy: "all",
     label: "Multa de atraso (%)",
     description: "Percentual da multa moratória (número + extenso).",
     example: "10% (dez por cento)",
@@ -305,6 +329,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "juros_mensais_atraso",
+    matchPolicy: "all",
     label: "Juros de mora (% a.m.)",
     description: "Percentual de juros mensais (número + extenso).",
     example: "1% (um por cento)",
@@ -314,6 +339,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "multa_rescisoria_meses",
+    matchPolicy: "all",
     label: "Multa contratual (aluguéis)",
     description: "Quantidade de aluguéis da multa por infração (número + extenso).",
     example: "3 (três)",
@@ -332,6 +358,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "data_local_assinatura",
+    matchPolicy: "all",
     label: "Local e data da assinatura",
     description: "Cidade/UF e data por extenso do fecho.",
     example: "São Paulo/SP, 9 de junho de 2026",
@@ -341,6 +368,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "preco_total",
+    matchPolicy: "all",
     label: "Preço total",
     description: "Preço total do imóvel formatado em BRL.",
     example: "R$ 1.250.000,00",
@@ -350,6 +378,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "preco_total_extenso",
+    matchPolicy: "all",
     label: "Preço total por extenso",
     description: "Preço total por extenso.",
     example: "um milhão, duzentos e cinquenta mil reais",
@@ -359,6 +388,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "sinal_valor",
+    matchPolicy: "all",
     label: "Sinal/arras",
     description: "Valor do sinal formatado em BRL.",
     example: "R$ 125.000,00",
@@ -368,6 +398,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
   {
     token: "comissao_valor",
+    matchPolicy: "all",
     label: "Comissão (valor)",
     description: "Valor da comissão de corretagem em BRL.",
     example: "R$ 75.000,00",
@@ -396,6 +427,11 @@ export function requiredTokens(modalidade: string): string[] {
   return catalogForModalidade(modalidade)
     .filter((d) => d.required)
     .map((d) => d.token);
+}
+
+/** Política de casamento do reverse-merge para o token (default `unique`). */
+export function matchPolicyFor(token: string, modalidade: string): MatchPolicy {
+  return catalogForModalidade(modalidade).find((d) => d.token === token)?.matchPolicy ?? "unique";
 }
 
 export function isKnownToken(token: string, modalidade: string): boolean {

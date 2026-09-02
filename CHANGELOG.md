@@ -4,6 +4,17 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-02 - O modelo criado a partir de um contrato troca o valor em todas as cláusulas
+
+### Alterado
+
+- **Valor que se repete deixa de ficar literal por "aparecer mais de uma vez".** Ao criar um modelo a partir de um contrato pronto, o sistema troca cada valor do contrato pela chave correspondente — mas só quando o valor aparecia uma única vez. O valor do aluguel está na cláusula do preço, na do reajuste e na da multa; a data de início, no preâmbulo e na vigência. Ficavam literais, sem aviso. Agora os campos de valor (aluguel, vencimento, vigência, IPTU, condomínio, multas, juros, matrícula, inscrição, endereço, data de assinatura, preço, sinal, comissão) são trocados em **todas** as ocorrências, desde que o valor seja específico o bastante — moeda, CPF/CNPJ válido, CEP, data, "10 (dez)", ou texto longo. "casa" e "São Paulo" continuam não sendo trocados em todo lugar, de propósito: destruiriam "casa de máquinas" e "Foro de São Paulo". Quando um campo desses tem valor repetido mas genérico, o relatório gravado na criação do modelo registra o motivo ("genérico demais para trocar em todo lugar") e a contagem — a tela de revisão ainda não mostra esse relatório; isso fica para quando o motor entrar na ingestão.
+- **Só chaves do catálogo entram nessa troca.** As chaves cruas que o sistema deriva do formulário (área do imóvel, tipo de garantia, campos fiscais, nome solto de uma parte) não são mais candidatas — eram genéricas demais para trocar às cegas, e a validação do modelo as marcava como desconhecidas de qualquer forma. A qualificação completa de cada parte continua sendo trocada como bloco.
+
+### Corrigido
+
+- **Valor em reais com espaço "fixo" não casava em documento digitado à mão** (#503). O sistema formata moeda com um espaço não separável depois do `R$`; um documento digitado ou importado traz espaço comum, e a comparação era literal — o valor do aluguel ficava sem chave, em silêncio. A comparação passa a tratar os dois espaços como iguais e a edição vai com o texto exatamente como está no documento.
+
 ## [Unreleased] - 2026-09-02 - A mesma chave entra em todas as cláusulas em que o valor aparece
 
 ### Corrigido

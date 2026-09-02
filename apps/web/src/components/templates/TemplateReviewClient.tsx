@@ -99,6 +99,7 @@ const SKIP_REASON: Record<string, string> = {
     "a edição foi enviada, mas a conferência no documento não confirmou o resultado",
   "verify-unavailable":
     "não consegui conferir o documento agora (Drive indisponível) — rode a IA de novo",
+  "not-specific": "o valor se repete, mas é genérico demais para trocar em todo lugar",
   "doc-truncated": "o documento é maior que o limite lido pela IA — esta parte ficou fora da leitura",
   "response-truncated": "a resposta da IA veio cortada antes de chegar aqui — rode a IA de novo",
 };
