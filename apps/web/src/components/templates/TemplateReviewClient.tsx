@@ -64,6 +64,11 @@ interface DraftReport {
   slots?: SlotReport[];
   docTruncated?: boolean;
   responseTruncated?: boolean;
+  /** Estágio determinístico (gabarito → chaves). Só existe quando houve gabarito. */
+  reverseMerge?: {
+    replaced?: { token: string; value: string; occurrences?: number }[];
+    skipped?: { token: string; value: string; reason: string; occurrences?: number }[];
+  };
   ranAt?: string;
   /** Gate de PII do modelo — espelho do último texto lido (ver lib/templates/pii-gate.ts). */
   pii?: TemplatePiiReport;
@@ -100,6 +105,8 @@ const SKIP_REASON: Record<string, string> = {
   "verify-unavailable":
     "não consegui conferir o documento agora (Drive indisponível) — rode a IA de novo",
   "not-specific": "o valor se repete, mas é genérico demais para trocar em todo lugar",
+  "too-short": "o valor é curto demais para ser trocado com segurança",
+  stopword: "o valor é uma palavra comum de contrato (não se troca às cegas)",
   "doc-truncated": "o documento é maior que o limite lido pela IA — esta parte ficou fora da leitura",
   "response-truncated": "a resposta da IA veio cortada antes de chegar aqui — rode a IA de novo",
 };
@@ -682,6 +689,53 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
             </Card>
           )}
 
+          {/* Troca pelo gabarito (reverse-merge) */}
+          {report?.reverseMerge && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Troca pelo gabarito</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-xs">
+                <p className="text-muted-foreground">
+                  Sem IA: cada valor conhecido do documento-fonte foi trocado pela chave.
+                  Confirmou{" "}
+                  <b className="text-success">{(report.reverseMerge.replaced ?? []).length}</b>{" "}
+                  valor(es)
+                  {(report.reverseMerge.replaced ?? []).some((r) => (r.occurrences ?? 1) > 1) && (
+                    <> (alguns em mais de um trecho)</>
+                  )}
+                  .
+                  {(report.reverseMerge.skipped ?? []).filter((s) => s.reason !== "not-found").length > 0 && (
+                    <>
+                      {" "}
+                      Deixou{" "}
+                      <b className="text-warning">
+                        {(report.reverseMerge.skipped ?? []).filter((s) => s.reason !== "not-found").length}
+                      </b>{" "}
+                      para revisão.
+                    </>
+                  )}
+                </p>
+                {(report.reverseMerge.skipped ?? [])
+                  .filter((s) => s.reason !== "not-found")
+                  .map((s, i) => (
+                    <div key={i} className="rounded-md border bg-muted/30 p-2">
+                      <code className="rounded bg-muted px-1">{`{{${s.token}}}`}</code>{" "}
+                      <span className="text-muted-foreground">
+                        — {SKIP_REASON[s.reason] ?? s.reason}
+                        {s.occurrences !== undefined && <> ({s.occurrences}×)</>}.
+                      </span>
+                      {s.value && (
+                        <p className="mt-1 line-clamp-2 italic text-muted-foreground">
+                          “{maskForReport(s.value)}”
+                        </p>
+                      )}
+                    </div>
+                  ))}
+              </CardContent>
+            </Card>
+          )}
+
           {/* Catálogo */}
           <Card>
             <CardHeader className="pb-2">
@@ -708,9 +762,16 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                           <p className="text-warning">
                             {SKIP_REASON[notMappedByToken.get(c.token)!.reason] ??
                               notMappedByToken.get(c.token)!.reason}
+                            {notMappedByToken.get(c.token)!.occurrences !== undefined && (
+                              <> ({notMappedByToken.get(c.token)!.occurrences}×)</>
+                            )}
                             {notMappedByToken.get(c.token)!.trecho && (
                               <> — “{maskForReport(notMappedByToken.get(c.token)!.trecho!)}”</>
                             )}
+                            {!notMappedByToken.get(c.token)!.trecho &&
+                              notMappedByToken.get(c.token)!.sourceValue && (
+                                <> — gabarito: “{maskForReport(notMappedByToken.get(c.token)!.sourceValue!)}”</>
+                              )}
                           </p>
                         )}
                     </div>

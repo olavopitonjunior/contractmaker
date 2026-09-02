@@ -467,5 +467,6 @@ export async function insertPlaceholdersWithAI(input: {
     // banner "rode a IA de novo" sobreviveria à própria rodada limpa.
     docTruncated,
     responseTruncated,
+    unconfirmed: Array.from(unconfirmed).filter((t) => !confirmed.has(t)).sort(),
   };
 }

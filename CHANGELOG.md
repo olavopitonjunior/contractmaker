@@ -4,6 +4,13 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-02 - A revisão do modelo mostra o que foi trocado pelo gabarito, e a ingestão está pronta para receber o gabarito
+
+### Adicionado
+
+- **Tela de revisão do modelo ganha o card "Troca pelo gabarito".** Ao criar um modelo a partir de um contrato, o sistema já trocava cada valor conhecido do contrato pela chave, sem IA — e gravava o relatório dessa troca sem que ninguém o visse. Agora a revisão mostra quantos valores foram confirmados e quais ficaram para revisão, com o motivo ("aparece em mais de um lugar", "genérico demais para trocar em todo lugar", "curto demais") e a contagem. É onde quem revisa vê o que foi trocado em todas as ocorrências antes de ativar. No catálogo, a chave ausente que tinha gabarito mostra o valor (mascarado) e quantas vezes ele aparece no texto.
+- **A ingestão por upload está pronta para o gabarito.** Quando o modelo vier com os valores do documento-fonte (o extrator, na próxima entrega), a troca determinística roda depois da leitura por IA e antes da conferência final: o que a IA cobriu já não está no texto, e cada valor que sobrou e vira chave é um dado pessoal a menos no modelo. O relatório da IA é reconciliado com o texto final — chave posta pela troca deixa de aparecer como "não mapeada" — e cada chave ainda ausente diz o que o gabarito sabe dela. Sem gabarito, nada muda. O gabarito não é guardado; o que vai para o relatório sai mascarado — "mascarado" cobre o que tem detector automático (documentos, dados bancários, CEP, telefone, e-mail); nome e endereço não têm. E o gabarito nunca leva valores padrão do sistema (multa, juros): só o que veio do documento — um "10% (dez por cento)" inventado casaria a cláusula errada.
+
 ## [Unreleased] - 2026-09-02 - O modelo criado a partir de um contrato troca o valor em todas as cláusulas
 
 ### Alterado
