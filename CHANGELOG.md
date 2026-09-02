@@ -4,6 +4,14 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-02 - "Pedir revisão pela IA" para de perder a resposta em silêncio
+
+### Corrigido
+
+- **A revisão por IA de um modelo já cheio de chaves não inseria nada e não avisava.** Nesse cenário o modelo responde o JSON dentro de uma cerca de código e emenda uma "nota de revisão" citando as chaves já presentes. A leitura da resposta ia do primeiro ao último sinal de chave do texto inteiro, pegava a nota junto, falhava e seguia como se o modelo não tivesse proposto nada: "Confirmou 0 trecho" e todos os campos como "sem proposta". Medido em produção nos rascunhos da RE/MAX Trio em 02/09. Agora a resposta é lida pelo primeiro objeto JSON completo (com preferência pela cerca de código), o que faz os trechos propostos entrarem — inclusive a qualificação e a conta da imobiliária na cláusula de rateio.
+- **Quando a resposta realmente não puder ser lida, a tela diz isso** ("a resposta da IA não pôde ser lida — rode a IA de novo"), em vez de listar os campos como não propostos. Resposta cortada por limite de tamanho continua com o aviso próprio, que é a causa mais específica.
+- O pedido ao modelo passa a dizer explicitamente: só o JSON, sem cerca de código nem comentários antes ou depois.
+
 ## [Unreleased] - 2026-09-02 - A conta onde a imobiliária recebe a comissão é cadastro, não padrão por formulário
 
 ### Alterado

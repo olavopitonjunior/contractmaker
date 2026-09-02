@@ -98,7 +98,7 @@ CATÁLOGO DE TOKENS (modalidade ${modalidade}):
 ${catalogo}
 
 REGRAS:
-1. Responda APENAS JSON válido: { "mapeamentos": [ { "trecho_literal": "...", "token": "..." } ] }
+1. Responda APENAS o JSON, e nada mais: { "mapeamentos": [ { "trecho_literal": "...", "token": "..." } ] } — sem cerca de código, sem comentário, nota ou explicação antes ou depois. Qualquer texto fora do JSON é descartado.
 2. trecho_literal deve ser CÓPIA EXATA, caractere a caractere, de um trecho do documento — e deve ser ÚNICO no documento. Se o valor aparece mais de uma vez (ex. um nome repetido), inclua contexto ao redor até o trecho ficar único; nesse caso o trecho inteiro será substituído pelo token, então só faça isso quando o contexto INTEIRO corresponder ao conteúdo do token.
 3. Use SOMENTE tokens do catálogo. Não invente.
 4. Tokens [composed] cobrem blocos inteiros (ex.: a qualificação completa das partes no preâmbulo, a cláusula de garantia inteira, o bloco de assinaturas) — mapeie o bloco INTEIRO de texto correspondente. Blocos multi-parágrafo são aceitos (preserve as quebras de linha do documento no trecho_literal).
@@ -109,6 +109,78 @@ REGRAS:
 
 DOCUMENTO:
 ${docText.slice(0, MAX_PROMPT_CHARS)}`;
+}
+
+type Mapeamento = { trecho_literal?: string; token?: string };
+
+/**
+ * Primeiro objeto JSON completo a partir de `start`, respeitando strings e
+ * escapes — `}` dentro de `"trecho_literal"` não fecha nada. Devolve o texto
+ * do objeto ou null se as chaves não fecharem.
+ */
+function balancedObject(text: string, start: number): string | null {
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === "\\") i++;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+/**
+ * Lê `{ "mapeamentos": [...] }` de uma resposta que pode vir em cerca de
+ * código e/ou cercada de prosa (antes OU depois, inclusive citando
+ * `{{tokens}}`). Tenta, nesta ordem: o objeto que contém a chave
+ * "mapeamentos"; o conteúdo do primeiro bloco cercado; cada `{` do texto como
+ * início de objeto balanceado. `ok: false` = nenhum candidato parseou com
+ * `mapeamentos` array — o chamador marca `responseUnparsed` em vez de fingir
+ * que a IA não propôs nada. Exportada só para teste.
+ */
+export function extractMapeamentos(raw: string): { ok: boolean; mapeamentos: Mapeamento[] } {
+  const candidates: string[] = [];
+  // 1) O objeto que CONTÉM a chave "mapeamentos" — é o alvo, esteja onde
+  //    estiver: prosa com {{tokens}} antes dele não o esconde.
+  const keyIdx = raw.indexOf('"mapeamentos"');
+  if (keyIdx !== -1) {
+    const objStart = raw.lastIndexOf("{", keyIdx);
+    const obj = objStart !== -1 ? balancedObject(raw, objStart) : null;
+    if (obj) candidates.push(obj);
+  }
+  // 2) Conteúdo do primeiro bloco cercado (```json … ```), com qualquer caixa.
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) candidates.push(fenced[1]);
+  // 3) Cada `{` do texto como início de objeto balanceado — pulando os
+  //    `{{token}}` de prosa inteiros (o `{` interno também não é candidato)
+  //    e parando cedo: depois de alguns objetos completos, o resto é prosa.
+  for (let i = raw.indexOf("{"); i !== -1 && candidates.length < 6; i = raw.indexOf("{", i + 1)) {
+    if (raw[i + 1] === "{") {
+      const close = raw.indexOf("}}", i);
+      i = close === -1 ? raw.length : close + 1;
+      continue;
+    }
+    const obj = balancedObject(raw, i);
+    if (obj) candidates.push(obj);
+  }
+  for (const text of candidates) {
+    try {
+      const parsed = JSON.parse(text) as { mapeamentos?: unknown };
+      if (Array.isArray(parsed.mapeamentos)) return { ok: true, mapeamentos: parsed.mapeamentos as Mapeamento[] };
+    } catch {
+      // próximo candidato
+    }
+  }
+  return { ok: false, mapeamentos: [] };
 }
 
 export async function insertPlaceholdersWithAI(input: {
@@ -164,16 +236,17 @@ export async function insertPlaceholdersWithAI(input: {
     throw err;
   }
 
-  let mapeamentos: Array<{ trecho_literal?: string; token?: string }> = [];
-  const match = raw.match(/\{[\s\S]*\}/);
-  if (match) {
-    try {
-      const parsed = JSON.parse(match[0]) as { mapeamentos?: typeof mapeamentos };
-      if (Array.isArray(parsed.mapeamentos)) mapeamentos = parsed.mapeamentos;
-    } catch {
-      // JSON inválido — segue com lista vazia; relatório aponta notMapped.
-    }
-  }
+  // Extração por balanceamento, não por regex gananciosa: num Doc já cheio de
+  // `{{tokens}}` o Sonnet responde o JSON em cerca de código e emenda uma
+  // "Nota de revisão" citando `{{placeholders}}` — o `/\{[\s\S]*\}/` de antes
+  // ia até o último `}` da nota, o parse quebrava e o passe seguia MUDO com
+  // lista vazia (medido em produção em 02/09/2026, "Confirmou 0 trecho" nos
+  // 16 rascunhos da Trio). Falha de parse agora é sinal, nunca silêncio.
+  const extracted = extractMapeamentos(raw);
+  const mapeamentos = extracted.mapeamentos;
+  // Resposta cortada por `max_tokens` também não parseia — a causa mais
+  // específica vence, senão a tela mostraria dois banners para um problema.
+  const responseUnparsed = !extracted.ok && !responseTruncated;
 
   /**
    * Candidato a inserção: passou nas travas do texto plano e gerou requests.
@@ -447,7 +520,9 @@ export async function insertPlaceholdersWithAI(input: {
     ? "doc-truncated"
     : responseTruncated
       ? "response-truncated"
-      : "no-mapping";
+      : responseUnparsed
+        ? "response-unparsed"
+        : "no-mapping";
   const notMapped: UnmappedToken[] = catalogTokens
     .filter((t) => !present.has(t))
     .map((token) => {
@@ -467,6 +542,7 @@ export async function insertPlaceholdersWithAI(input: {
     // banner "rode a IA de novo" sobreviveria à própria rodada limpa.
     docTruncated,
     responseTruncated,
+    responseUnparsed,
     unconfirmed: Array.from(unconfirmed).filter((t) => !confirmed.has(t)).sort(),
   };
 }
