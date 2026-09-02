@@ -272,6 +272,53 @@ export async function guardDealScope(params: {
 }
 
 /**
+ * Gate de CRIAÇÃO de negócio. Irmão do `guardDealScope`, para as rotas que
+ * ainda não têm deal nenhum para ancorar o escopo — só a org e o ator.
+ *
+ * Por que existe (2026-09-02): as seis rotas que criam negócio de VENDA
+ * (`/api/forms`, `/api/pipeline/deals`, `new-from-ilist`, `new-from-proposal`,
+ * `import-contract`, `leads/[id]/convert-to-deal`) não checavam permissão
+ * nenhuma — qualquer membro com sessão criava negócio, `viewer` inclusive.
+ * O lado de locação sempre exigiu LEASE_CREATE; a assimetria não era decisão
+ * de produto, era ausência de gate.
+ *
+ * `via: "bearer"` segue direto, espelhando `guardDealScope` e `loadScopedDeal`:
+ * no caminho de token quem governa é o escopo do próprio token (`deals:rw` /
+ * `documents:rw`), não o papel do dono. Mudar isso aqui seria mudar o contrato
+ * de M2M do repo inteiro num PR sobre outra coisa.
+ */
+export async function guardDealCreate(params: {
+  userId: string;
+  orgId: string;
+  via?: string;
+  permission: PermissionKey;
+}): Promise<NextResponse | null> {
+  const { userId, orgId, via, permission } = params;
+  if (via === "bearer") return null;
+
+  // Ator EFETIVO, pelo mesmo motivo documentado no `guardDealScope`: sob
+  // impersonação o `userId` é o do super_admin, que não tem membership no
+  // tenant — sem isto, "testar como" negaria criação em toda org. Não é
+  // hipótese: dos 85 negócios de venda em produção, um foi criado exatamente
+  // assim (admin da plataforma atuando numa org de que não é membro).
+  //
+  // Os chamadores atuais passam `auth.actor.effectiveUserId`, que JÁ está
+  // resolvido — então esta chamada é no-op para eles. É deliberado: o helper
+  // não depende de o caller ter resolvido, e `getEffectiveUserId` é
+  // idempotente (devolve o próprio id fora da impersonação). Quem passar o id
+  // cru, como fazem os chamadores do `guardDealScope`, também fica correto.
+  const effUserId = await getEffectiveUserId(userId);
+  const eff = await getEffectivePermissions(effUserId, orgId);
+  if (!eff || !can(eff, permission)) {
+    return NextResponse.json(
+      { error: "PERMISSION_DENIED", permission },
+      { status: 403 }
+    );
+  }
+  return null;
+}
+
+/**
  * Versão do `guardDealScope` ancorada no CONTRATO — pras rotas
  * `/api/contracts/[id]/*` que não usam `requireApiAuth`.
  */

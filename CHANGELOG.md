@@ -4,6 +4,22 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-02 - Trocar o papel de um membro passa pelo mesmo teto das outras três portas
+
+### Corrigido
+
+- **A tela de membros deixava conceder um papel mais poderoso que o de quem concede.** Existem quatro maneiras de dar papel a alguém — convidar, aprovar convite, adicionar direto e trocar o papel de quem já é membro. As três primeiras já perguntavam se o papel que está sendo dado cabe dentro do papel de quem está dando; a quarta não perguntava nada. **Hoje ninguém consegue explorar isso**, porque só o dono e o administrador podem trocar papéis, e os dois já concedem tudo. O que fecha é o amanhã: a tela de papéis permite criar um papel personalizado com essa mesma capacidade, e no dia em que alguém criasse um, esse caminho daria acesso total numa única ação, sem fila e sem aprovação. Agora ele recusa, dizendo qual papel foi negado, e a recusa fica registrada na trilha de auditoria.
+- **Trocar alguém de papel personalizado para um papel comum deixava o papel antigo pendurado no cadastro.** O registro ficava com os dois ao mesmo tempo. Não mudava o que a pessoa podia fazer — o papel comum é que valia —, mas contradizia qualquer leitura posterior do dado. Agora o vínculo antigo é desfeito junto.
+- **Escolher "papel personalizado" sem escolher qual deixava a pessoa sem acesso nenhum, em silêncio.** A requisição era aceita, respondia sucesso, e o membro perdia tudo. A checagem que impedia isso existia, mas só valia quando quem agia era administrador; para o dono da conta, passava direto. Agora recusa sempre, dizendo o que falta.
+
+## [Unreleased] - 2026-09-02 - Criar negócio de venda passa a pedir permissão
+
+### Corrigido
+
+- **Qualquer membro da organização podia abrir um negócio de venda, inclusive quem só deveria olhar.** As seis portas que criam negócio de venda — a criação do formulário público, o botão do funil, a importação do iList, o cadastro por proposta, a importação de contrato e a conversão de lead — não conferiam permissão nenhuma. Bastava estar dentro da organização. O lado de locação sempre exigiu permissão para o mesmo ato, e a diferença não era uma decisão: era uma checagem que nunca foi escrita. Agora as seis pedem "Criar negócio de venda". O preenchimento do formulário pelo proponente, que acontece por link público, não é afetado.
+- **Ninguém que já criava perde o acesso.** Antes de fechar a porta, medimos quem realmente a usava: dos 85 negócios de venda existentes, 84 foram criados por administradores, proprietários da conta, gerentes ou pelo agente Max — e a permissão nova nasce ligada para todos eles. Quem passa a ser barrado é quem nunca criou nada e não deveria poder: o perfil de leitura e os perfis financeiros e de portal. O perfil de leitura continua enxergando o funil inteiro, como antes; o que ele perde é só a criação.
+- **Para o gerente, a permissão fica na tela.** "Criar negócio de venda" entra em Configurações → Gerentes ligada, e o administrador pode desligá-la — mesma tela onde, nesta mesma versão, passou a existir "Criar negócio e contrato de locação".
+
 ## [Unreleased] - 2026-09-02 - Dois consertos medidos no smoke de staging da troca pelo gabarito
 
 ### Corrigido

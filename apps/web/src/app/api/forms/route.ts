@@ -14,6 +14,8 @@ import { getPipelineByKind } from "@/lib/modules/resolve";
 import { assertFeatureEnabled, ModuleDisabledError } from "@/lib/modules/guard";
 import { FEATURE, MODULE } from "@/lib/modules/catalog";
 import { resolveManagerForCreate } from "@/lib/deals/manager";
+import { guardDealCreate } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { z } from "zod";
 
 // Janela do soft-block de título repetido (recriação manual de card).
@@ -42,6 +44,17 @@ const postBodySchema = z
 export async function POST(request: NextRequest) {
   const auth = await requireApiAuth(request, { scope: "documents:rw" });
   if (isAuthFailure(auth)) return authFailureResponse(auth);
+
+  // Criar negócio de venda exige DEAL_CREATE (2026-09-02). Até aqui esta rota
+  // não checava permissão nenhuma: qualquer membro com sessão criava negócio,
+  // `viewer` inclusive, enquanto o lado de locação sempre exigiu LEASE_CREATE.
+  const deniedCreate = await guardDealCreate({
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    via: auth.ident.via,
+    permission: PERMISSION.DEAL_CREATE,
+  });
+  if (deniedCreate) return deniedCreate;
 
   // Este endpoint cria SalesForm de vendas (schemaType compra_venda_v1).
   // Gate por sub-função Vendas → Formulário público.

@@ -90,7 +90,17 @@ async function upsertMaxRole(
   const permissions = {
     // Vendas: o `/api/forms` não checa permissão, mas o dia em que checar não
     // pode ser o dia em que o Max para sem ninguém entender por quê.
+    //
+    // 2026-09-02: esse dia chegou. As rotas de criação de venda passaram a
+    // exigir DEAL_CREATE, e a chave entra aqui pelo motivo que o comentário
+    // acima antecipou. Na prática o Max não dependia disto — ele chama por
+    // Bearer, e o guard libera o caminho de token antes de olhar a permissão
+    // (o escopo `deals:rw` é que governa ali). O grant é cinto de segurança:
+    // se um dia o bypass de Bearer sair, o Max não para em silêncio. Por isso
+    // também NÃO houve backfill dos CustomRole já gravados — nada quebra sem
+    // ele, e o `update: { permissions }` abaixo reescreve no próximo sync.
     [PERMISSION.DEAL_VIEW_ASSIGNED_ONLY]: true,
+    [PERMISSION.DEAL_CREATE]: true,
     // Locação: só a criação. Sem editar, renovar ou rescindir.
     [PERMISSION.LEASE_VIEW]: true,
     [PERMISSION.LEASE_CREATE]: true,
