@@ -84,6 +84,38 @@ describe("TemplateReviewClient — motivo por chave ausente", () => {
     expect(screen.queryByText(/R\$ 2\.500,00/)).toBeNull();
   });
 
+  it("card 'Troca pelo gabarito': confirmados, deixados para revisão com motivo/ocorrências, valor mascarado; not-found não polui", async () => {
+    installFetch([{ token: "imovel_matricula", present: false }]);
+    const template = {
+      ...base,
+      draftReport: {
+        ranAt: "2026-09-02T12:00:00.000Z",
+        inserted: [],
+        skippedAmbiguous: [],
+        notMapped: [
+          { token: "imovel_matricula", reason: "not-specific", sourceValue: "Bloco A", occurrences: 2 },
+        ],
+        reverseMerge: {
+          replaced: [{ token: "aluguel_valor", value: "R$ 2.500,00", occurrences: 3 }],
+          skipped: [
+            { token: "imovel_matricula", value: "Bloco A", reason: "not-specific", occurrences: 2 },
+            { token: "locatarios_qualificacao", value: "Ana, CPF 529.982.247-25", reason: "not-found" },
+          ],
+        },
+      },
+    };
+    render(<TemplateReviewClient template={template} />);
+    await waitFor(() => expect(screen.getByText("Troca pelo gabarito")).toBeTruthy());
+    expect(screen.getByText(/alguns em mais de um trecho/)).toBeTruthy();
+    expect(screen.getAllByText(/genérico demais para trocar em todo lugar/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/\(2×\)/).length).toBeGreaterThan(0);
+    // not-found não vira linha (não é ação para o operador) — o CPF nem chega a renderizar.
+    expect(screen.queryByText(/529\.982\.247-25/)).toBeNull();
+    expect(screen.queryByText(/não encontrei no texto/)).toBeNull();
+    // No catálogo, a chave ausente mostra o gabarito.
+    expect(screen.getByText(/gabarito: “Bloco A”/)).toBeTruthy();
+  });
+
   it("relatório antigo com notMapped: string[] renderiza sem quebrar e sem motivo", async () => {
     installFetch([{ token: "aluguel_dia_vencimento", present: false }]);
     const template = {
