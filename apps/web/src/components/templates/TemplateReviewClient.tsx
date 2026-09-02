@@ -56,7 +56,7 @@ interface SlotReport {
 }
 interface DraftReport {
   inserted?: { token: string; trecho: string }[];
-  skippedAmbiguous?: { token: string; trecho: string; reason: string }[];
+  skippedAmbiguous?: { token: string; trecho: string; reason: string; paragraph?: string }[];
   notMapped?: string[];
   missingRequired?: string[];
   slots?: SlotReport[];
@@ -81,6 +81,19 @@ const SKIP_REASON: Record<string, string> = {
   ambiguous: "aparece em mais de um lugar",
   "not-found": "não encontrei no texto",
   "unknown-token": "chave fora do catálogo",
+  "already-tokenized": "o trecho já tem uma chave",
+  // Pós-batch — o passe confere o que a API fez (mesmo vocabulário dos slots).
+  "batch-failed": "o Google recusou a edição",
+  "replace-noop":
+    "o trecho existe no texto, mas a edição não pegou — costuma ser formatação invisível partindo o parágrafo no meio",
+  "over-matched":
+    "a chave entrou em mais lugares do que o esperado (possivelmente no cabeçalho ou rodapé) — confira no documento",
+  "over-removed":
+    "um parágrafo do bloco foi apagado em mais de um lugar do documento, fora do trecho revisado — confira o histórico de versões do Doc",
+  "verify-failed":
+    "a edição foi enviada, mas a conferência no documento não confirmou o resultado",
+  "verify-unavailable":
+    "não consegui conferir o documento agora (Drive indisponível) — rode a IA de novo",
 };
 
 const SLOT_LABEL: Record<string, string> = {
@@ -255,7 +268,9 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
         slots: prev?.slots,
       }));
       const n = (data.report?.inserted ?? []).length;
-      toast.success(n > 0 ? `A IA preencheu ${n} campo(s).` : "A IA revisou o modelo.");
+      toast.success(
+        n > 0 ? `A IA confirmou ${n} campo(s) no documento.` : "A IA revisou o modelo."
+      );
       await Promise.all([revalidate(), refreshDocText()]);
       setIframeKey((k) => k + 1);
     } catch (err) {
@@ -610,7 +625,8 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
               </CardHeader>
               <CardContent className="space-y-2 text-xs">
                 <p className="text-muted-foreground">
-                  Preencheu <b className="text-success">{(report.inserted ?? []).length}</b> campo(s).
+                  Confirmou <b className="text-success">{(report.inserted ?? []).length}</b> campo(s) no
+                  documento.
                   {(report.skippedAmbiguous ?? []).length > 0 && (
                     <>
                       {" "}
@@ -623,6 +639,9 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                   <div key={i} className="rounded-md border bg-muted/30 p-2">
                     <code className="rounded bg-muted px-1">{`{{${s.token}}}`}</code>{" "}
                     <span className="text-muted-foreground">— {SKIP_REASON[s.reason] ?? s.reason}.</span>
+                    {s.paragraph && (
+                      <p className="mt-1 text-destructive">Parágrafo apagado: “{s.paragraph}”</p>
+                    )}
                     {s.trecho && (
                       <p className="mt-1 line-clamp-2 italic text-muted-foreground">“{s.trecho}”</p>
                     )}
