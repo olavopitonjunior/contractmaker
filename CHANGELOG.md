@@ -4,6 +4,18 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-02 - Modelo enviado por upload troca os valores do documento pelas chaves, sem interpretar
+
+### Adicionado
+
+- **O gabarito é extraído do próprio arquivo.** Ao subir um modelo de locação, o sistema lê os valores do documento (partes, imóvel, aluguel, vigência, garantia — a mesma extração, pelo mesmo caminho via PDF, que a importação de contrato já usa) em paralelo com a leitura por IA, e troca cada valor encontrado no texto pela chave correspondente — em todas as cláusulas em que ele aparece, quando o valor é específico. É a troca "hardcoded" que faltava: o que estava preenchido no documento vira chave sem que a IA precise adivinhar o trecho; a IA só entra antes, nos blocos, e a conferência final diz o que ainda falta. Custa cerca de um centavo de dólar por modelo e entra no custo do lote. `gabarito=false` no envio desliga (minuta em branco não tem o que trocar).
+- **No lote da Central de ingestão, só os documentos classificados como instância preenchida** (dados reais de um cliente) pedem o gabarito; minuta em branco segue como antes.
+
+### Notas
+
+- O custo do passe de chaves por IA já entrava no custo do lote — a extração do gabarito passa a entrar também.
+- Venda ainda não tem gabarito nesta entrega; o encanamento é o mesmo e liga quando o extrator de venda entrar.
+
 ## [Unreleased] - 2026-09-02 - A revisão do modelo mostra o que foi trocado pelo gabarito, e a ingestão está pronta para receber o gabarito
 
 ### Adicionado

@@ -26,6 +26,15 @@ vi.mock("@/lib/google/upload-file-as-gdoc", () => ({
 }));
 
 const insertPlaceholdersMock = vi.fn();
+// Gabarito (A8): a rota liga a extração por padrão; aqui ela não pode bater no
+// Gemini. `{}` = sem valores → o estágio determinístico não roda.
+vi.mock("@/lib/extraction/locacao-extractor", () => ({
+  extractLocacaoContractDataJson: vi.fn().mockResolvedValue({
+    dataJson: {},
+    finalidade: "residencial",
+    finalidadeDetected: false,
+  }),
+}));
 vi.mock("@/lib/templates/ai-placeholder-insertion", () => ({
   insertPlaceholdersWithAI: (...args: unknown[]) => insertPlaceholdersMock(...args),
 }));
@@ -39,6 +48,7 @@ vi.mock("@/lib/templates/apply-clause-slot", () => ({
 const getDocPlainTextMock = vi.fn();
 vi.mock("@/lib/google/docs", () => ({
   getDocPlainText: (...args: unknown[]) => getDocPlainTextMock(...args),
+  exportDocAsPdf: vi.fn().mockResolvedValue(Buffer.from("%PDF")),
 }));
 
 import { POST } from "../from-docx/route";

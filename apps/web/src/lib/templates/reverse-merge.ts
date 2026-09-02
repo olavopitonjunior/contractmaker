@@ -5,6 +5,7 @@ import {
   buildVendaPlaceholderMap,
 } from "./placeholder-map";
 import { catalogForModalidade } from "./placeholder-catalog";
+import { templateFamilyForModalidade } from "@/lib/contracts/template-category";
 import { isSpecificValue, normalizeSpaces } from "./specific-value";
 import type { SkipReason } from "./insertion-report";
 
@@ -125,9 +126,12 @@ export async function reverseMergeDocToTemplate(input: {
   dataJson: Record<string, unknown>;
   modalidade: string;
 }): Promise<ReverseMergeResult> {
-  const map = input.modalidade.startsWith("locacao")
-    ? buildLocacaoPlaceholderMap(input.dataJson)
-    : buildVendaPlaceholderMap(input.dataJson);
+  // Família, não prefixo: `temporada` e `administracao_locacao` não começam
+  // com "locacao" de propósito (ver template-category) e usam o mapa de locação.
+  const map =
+    templateFamilyForModalidade(input.modalidade) === "locacao"
+      ? buildLocacaoPlaceholderMap(input.dataJson)
+      : buildVendaPlaceholderMap(input.dataJson);
   const catalog = catalogForModalidade(input.modalidade);
   const eligible = new Set(catalog.map((d) => d.token));
   const policyOf = new Map(catalog.map((d) => [d.token, d.matchPolicy ?? "unique"] as const));

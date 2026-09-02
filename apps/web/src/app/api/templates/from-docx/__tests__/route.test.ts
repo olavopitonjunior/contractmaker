@@ -20,6 +20,19 @@ vi.mock("@/lib/google/upload-file-as-gdoc", () => ({
 vi.mock("@/lib/google/client", () => ({
   isGoogleDocsFeatureEnabled: vi.fn().mockReturnValue(true),
 }));
+// Gabarito (A8): a rota liga a extração por padrão; aqui ela não pode bater no
+// Gemini. `{}` = sem valores → o estágio determinístico não roda.
+vi.mock("@/lib/google/docs", () => ({
+  getDocPlainText: vi.fn().mockResolvedValue(""),
+  exportDocAsPdf: vi.fn().mockResolvedValue(Buffer.from("%PDF")),
+}));
+vi.mock("@/lib/extraction/locacao-extractor", () => ({
+  extractLocacaoContractDataJson: vi.fn().mockResolvedValue({
+    dataJson: {},
+    finalidade: "residencial",
+    finalidadeDetected: false,
+  }),
+}));
 vi.mock("@/lib/templates/ai-placeholder-insertion", () => ({
   insertPlaceholdersWithAI: vi.fn().mockResolvedValue({ inserted: 3 }),
 }));
