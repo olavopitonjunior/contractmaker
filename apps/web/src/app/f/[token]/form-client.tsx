@@ -11,6 +11,8 @@ interface FormPageClientProps {
   schemaType: string;
   initialData: Record<string, unknown>;
   requiredFieldsByStep: readonly (readonly string[])[];
+  /** Piso do wizard ainda vale? Ver LocacaoFormWizard.requiredFloorEnabled. */
+  requiredFloorEnabled: boolean;
   /** Catálogo de garantias da org — só usado no wizard de locação. */
   garantiaOptions?: readonly GarantiaOptionLike[];
   prefilled?: boolean;
@@ -35,6 +37,7 @@ export function FormPageClient({
   schemaType,
   initialData,
   requiredFieldsByStep,
+  requiredFloorEnabled,
   garantiaOptions,
   prefilled,
   proposalAttachmentUrl,
@@ -75,6 +78,7 @@ export function FormPageClient({
             initialData={initialData}
             schemaType={schemaType}
             requiredFieldsByStep={requiredFieldsByStep}
+            requiredFloorEnabled={requiredFloorEnabled}
             garantiaOptions={garantiaOptions}
             readOnly={locked}
             viewerIsMember={viewerIsMember}

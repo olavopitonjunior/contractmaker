@@ -55,6 +55,38 @@ export interface FormRequiredScope {
 export async function resolveFormRequiredFields(
   form: FormRequiredScope,
 ): Promise<string[][]> {
+  return (await resolveFormRequiredConfig(form)).byStep;
+}
+
+export interface FormRequiredConfig {
+  /** Obrigatórios por step (7 posições). */
+  byStep: string[][];
+  /**
+   * A imobiliária CONFIGUROU a obrigatoriedade deste módulo?
+   *
+   * É o que decide se o piso histórico do wizard (nome da parte, valor do
+   * aluguel — ver `LocacaoFormWizard`) ainda vale. Org que nunca abriu
+   * /settings/formulario continua com o piso; org que configurou passa a mandar
+   * inteiramente, inclusive para AFROUXAR. Sem isso, a configuração era
+   * respeitada só para endurecer, e um campo que a imobiliária desmarcou
+   * continuava barrando o cliente sem que ninguém conseguisse desligá-lo.
+   *
+   * VENDA fica sempre `false` (piso inalterado): a obrigatoriedade de venda é
+   * resolvida ao vivo desde sempre e o piso dela não foi revisado aqui — mudar
+   * os dois módulos de uma vez misturaria duas decisões de produto.
+   */
+  moduleConfigured: boolean;
+}
+
+/**
+ * Igual a `resolveFormRequiredFields`, mas devolve também se o módulo foi
+ * configurado — as duas coisas saem da MESMA leitura de `OrgFormSettings`, e
+ * separá-las em duas funções abriria espaço para o asterisco e o gate lerem
+ * estados diferentes da configuração.
+ */
+export async function resolveFormRequiredConfig(
+  form: FormRequiredScope,
+): Promise<FormRequiredConfig> {
   const isLocacao = form.schemaType?.startsWith("locacao") ?? false;
   const settings = await prisma.orgFormSettings.findUnique({
     where: { orgId: form.orgId },
@@ -66,17 +98,23 @@ export async function resolveFormRequiredFields(
     },
   });
 
+  // `locacaoSettingsForForm` devolve null exatamente quando o snapshot é
+  // null/"legado" — ou seja, "esta org não configurou locação". Reusar a mesma
+  // função (em vez de reimplementar a condição) mantém as duas leituras
+  // amarradas: se a regra do snapshot mudar, o piso acompanha.
+  const locacaoSettings = locacaoSettingsForForm(settings, form.requiredPreset);
+
   const resolved = isLocacao
-    ? resolveAllRequiredFieldsForModule(
-        "locacao",
-        locacaoSettingsForForm(settings, form.requiredPreset),
-      )
+    ? resolveAllRequiredFieldsForModule("locacao", locacaoSettings)
     : resolveAllRequiredFieldsForModule(
         "venda",
         moduleFormSettings(settings, "venda"),
       );
 
-  return resolved.map((paths) => Array.from(paths));
+  return {
+    byStep: resolved.map((paths) => Array.from(paths)),
+    moduleConfigured: isLocacao && locacaoSettings !== null,
+  };
 }
 
 /**

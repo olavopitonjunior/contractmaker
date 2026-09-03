@@ -22,6 +22,8 @@ import { notifyDealEvent } from "@/lib/notifications/deal-events";
 import {
   schemaForLocacaoType,
   collectLocacaoFinalizeIssues,
+  assertLocacaoFinalizable,
+  LocacaoFinalizeBlockedError,
 } from "@/lib/forms/validation-locacao";
 import { resolveFormRequiredFields } from "@/lib/forms/required-snapshot";
 import { findMissingRequired, getByPath } from "@/lib/forms/party-required";
@@ -184,8 +186,23 @@ export async function PATCH(
       // Mesma restauração da esteira de venda: o autosave de quem não é membro
       // devolve os angariadores sem o `recebimento`, que a redação tirou do
       // GET, e o merge os apagaria.
-      transform: (merged, fresh) =>
-        preserveCommissionerReceiving(merged, fresh.dataJson, { viewerIsMember }),
+      transform: (merged, fresh) => {
+        const out = preserveCommissionerReceiving(merged, fresh.dataJson, {
+          viewerIsMember,
+        });
+        // Veto do finalize SOB O LOCK, sobre o estado RESULTANTE. O piso do
+        // wizard (nome da parte, valor do aluguel) deixou de valer sempre —
+        // passou a ceder à configuração da org —, então a garantia tem que
+        // existir no servidor. Aqui, e não no gate pré-lock ao lado de
+        // `missingRequired`, porque lá se mede o `preview`: um auto-save
+        // concorrente de outra aba ou de um subtoken pode apagar o nome entre
+        // a leitura e a gravação, e o finalize passaria. Lançar aborta a
+        // transação: nem `dataJson` nem `status` são gravados.
+        if (requestedStatus === "completo" && fresh.status !== "completo") {
+          assertLocacaoFinalizable(out);
+        }
+        return out;
+      },
       extraData: (fresh) => {
         const newStatus = requestedStatus ?? fresh.status;
         const isFinalizing =
@@ -214,6 +231,20 @@ export async function PATCH(
     // (operador deletando o deal com ?deleteForm=true durante um auto-save).
     if (error instanceof FormNotFoundError) {
       return NextResponse.json({ error: "Form not found" }, { status: 404 });
+    }
+    // Veto do finalize (assertLocacaoFinalizable, dentro do transform sob o
+    // lock): a transação foi abortada, nada foi gravado. Mesmo formato do 422
+    // de `required_fields_missing` — o cliente já sabe destacar `missingRequired`.
+    if (error instanceof LocacaoFinalizeBlockedError) {
+      return NextResponse.json(
+        {
+          error: "Campos obrigatórios não preenchidos",
+          reason: "finalize_blocked",
+          missingRequired: error.issues.map((i) => i.path),
+          validationIssues: error.issues,
+        },
+        { status: 422 }
+      );
     }
     throw error;
   }

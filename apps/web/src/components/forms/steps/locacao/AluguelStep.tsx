@@ -110,7 +110,9 @@ export function AluguelStep({ form }: { form: UseFormReturn<any> }) {
       </CardHeader>
       <CardContent className="space-y-4 pt-0">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <FormField form={form} name="aluguel.valor" label="Valor do aluguel (R$)" required>
+          {/* Sem `required` cravado: vem do RequiredFieldsContext (preset da
+              org ou piso do wizard). Ver _PartyFields. */}
+          <FormField form={form} name="aluguel.valor" label="Valor do aluguel (R$)">
             <MoneyField form={form} name="aluguel.valor" placeholder="Ex: 2.500,00" />
           </FormField>
           <FormField form={form} name="aluguel.dia_vencimento" label="Dia de vencimento">
