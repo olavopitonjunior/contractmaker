@@ -19,8 +19,16 @@
  * `restore-paragraph` é ESTRUTURAL por necessidade: `replaceAllText` não cria
  * parágrafo (o `\n` no texto de troca não é documentado como quebra), então
  * devolver um trecho de várias linhas exige apagar o intervalo e inserir texto
- * novo — em um batch SEPARADO e DEPOIS do de texto, porque os índices absolutos
- * mudam a cada edição.
+ * novo, com a estrutura RELIDA antes de cada restauração — os índices absolutos
+ * mudam a cada edição, e reaproveitá-los apagaria o intervalo errado.
+ *
+ * ORDEM: estrutural PRIMEIRO, texto depois. Restaurar antes deixa o texto
+ * devolvido disponível para uma edição de texto na mesma chamada ("devolve a
+ * cláusula e chaveia um campo dentro dela"), e `replaceAllText` não usa
+ * índices, então o batch de texto não se importa com a estrutura ter mudado. O
+ * planejamento segue a mesma ordem, de propósito: se o texto simulado descrever
+ * um estado que a execução não produz, uma edição legítima falha como
+ * `replace-noop` sem que ninguém entenda por quê.
  */
 import type { docs_v1 } from "googleapis";
 import { batchUpdateDoc, getDocPlainText, getDocStructure } from "@/lib/google/docs";
@@ -131,19 +139,27 @@ export async function applyDocEdits(input: {
     results[i] = { op: ops[i].op, status: "skipped", reason, target };
   };
 
+  // PASSO 1 — estruturais. Planejadas ANTES das de texto porque é nessa ordem
+  // que são executadas: restaurar primeiro deixa o texto novo disponível para
+  // uma edição de texto na mesma chamada ("devolve a cláusula e chaveia um campo
+  // dentro dela"), e `replaceAllText` não usa índices, então o batch de texto
+  // não se importa com a estrutura ter mudado. Planejar na ordem do array —
+  // como estava — fazia o texto simulado descrever um estado que a execução
+  // nunca produzia, e uma edição legítima falhava como `replace-noop`.
   ops.forEach((op, i) => {
-    if (op.op === "restore-paragraph") {
-      const current = op.current.trim();
-      const source = op.source.trim();
-      if (!source) return recusar(i, "empty-source", current);
-      if (countOccurrences(sim, current) === 0) return recusar(i, "not-found", current);
-      if (countOccurrences(sim, current) > 1) return recusar(i, "ambiguous", current);
-      estruturais.push({ index: i, target: current, current, source });
-      // O texto simulado reflete a restauração para as edições seguintes.
-      aplicarSim(current, source);
-      return;
-    }
+    if (op.op !== "restore-paragraph") return;
+    const current = op.current.trim();
+    const source = op.source.trim();
+    if (!source) return recusar(i, "empty-source", current);
+    if (countOccurrences(sim, current) === 0) return recusar(i, "not-found", current);
+    if (countOccurrences(sim, current) > 1) return recusar(i, "ambiguous", current);
+    estruturais.push({ index: i, target: current, current, source });
+    aplicarSim(current, source);
+  });
 
+  // PASSO 2 — de texto, contra o simulado que JÁ inclui as restaurações.
+  ops.forEach((op, i) => {
+    if (op.op === "restore-paragraph") return;
     const phrase = op.phrase.trim();
     if (!phrase) return recusar(i, "not-found", phrase);
 
@@ -189,41 +205,7 @@ export async function applyDocEdits(input: {
     aplicarSim(phrase, replacement);
   });
 
-  // ── BATCH DE TEXTO ──────────────────────────────────────────────────────
-  const pendentes: PlannedText[] = [];
-  if (requests.length > 0) {
-    let replies: docs_v1.Schema$Response[] | null = null;
-    try {
-      const res = await batchUpdateDoc(docId, requests);
-      replies = res?.data?.replies ?? [];
-    } catch (err) {
-      console.error("[doc-edit] batchUpdate falhou:", err);
-    }
-    if (replies === null) {
-      // batchUpdate é atômico: nada entrou.
-      for (const p of planejadas) {
-        results[p.index] = { op: p.op, status: "failed", reason: "batch-failed", target: p.target };
-      }
-    } else {
-      for (const p of planejadas) {
-        const reply = replies[p.requestIdx];
-        // Reply ausente não decide nada — fica para a releitura.
-        const changed =
-          reply === undefined ? null : Number(reply.replaceAllText?.occurrencesChanged ?? 0);
-        if (changed === 0) {
-          results[p.index] = { op: p.op, status: "failed", reason: "replace-noop", target: p.target };
-        } else if (changed !== null && changed > 1) {
-          // Casou onde a trava de unicidade não olhou (cabeçalho/rodapé não
-          // entram no texto plano). Editar ali é tão ruim quanto não editar.
-          results[p.index] = { op: p.op, status: "failed", reason: "over-matched", target: p.target };
-        } else {
-          pendentes.push(p);
-        }
-      }
-    }
-  }
-
-  // ── BATCH ESTRUTURAL (depois, com a estrutura RELIDA) ───────────────────
+  // ── BATCH ESTRUTURAL (PRIMEIRO, com a estrutura RELIDA a cada uma) ─────
   const estruturaisOk: PlannedStructural[] = [];
   for (const e of estruturais) {
     let doc: docs_v1.Schema$Document;
@@ -269,6 +251,40 @@ export async function applyDocEdits(input: {
     }
   }
 
+  // ── BATCH DE TEXTO (depois; `replaceAllText` não usa índices) ───────────
+  const pendentes: PlannedText[] = [];
+  if (requests.length > 0) {
+    let replies: docs_v1.Schema$Response[] | null = null;
+    try {
+      const res = await batchUpdateDoc(docId, requests);
+      replies = res?.data?.replies ?? [];
+    } catch (err) {
+      console.error("[doc-edit] batchUpdate falhou:", err);
+    }
+    if (replies === null) {
+      // batchUpdate é atômico: nada entrou.
+      for (const p of planejadas) {
+        results[p.index] = { op: p.op, status: "failed", reason: "batch-failed", target: p.target };
+      }
+    } else {
+      for (const p of planejadas) {
+        const reply = replies[p.requestIdx];
+        // Reply ausente não decide nada — fica para a releitura.
+        const changed =
+          reply === undefined ? null : Number(reply.replaceAllText?.occurrencesChanged ?? 0);
+        if (changed === 0) {
+          results[p.index] = { op: p.op, status: "failed", reason: "replace-noop", target: p.target };
+        } else if (changed !== null && changed > 1) {
+          // Casou onde a trava de unicidade não olhou (cabeçalho/rodapé não
+          // entram no texto plano). Editar ali é tão ruim quanto não editar.
+          results[p.index] = { op: p.op, status: "failed", reason: "over-matched", target: p.target };
+        } else {
+          pendentes.push(p);
+        }
+      }
+    }
+  }
+
   // ── VERIFICAÇÃO (o documento decide) ────────────────────────────────────
   let finalText: string | null = null;
   try {
@@ -306,9 +322,18 @@ export async function applyDocEdits(input: {
         ? { op: p.op, status: "applied", target: p.target }
         : { op: p.op, status: "failed", reason: "verify-failed", target: p.target };
   }
+  // As de texto podem ter ALTERADO o que a restauração devolveu (é para isso
+  // que a ordem é estrutural→texto). Então o que se procura no documento não é
+  // o texto-fonte literal: é ele com as substituições que de fato entraram —
+  // senão uma edição bem-sucedida faria a restauração parecer ter falhado.
+  const aplicadasDeTexto = pendentes.filter((p) => results[p.index]?.status === "applied");
   for (const e of estruturaisOk) {
-    const primeiraLinha = e.source.split("\n")[0]!.trim();
-    const restaurou = finalText.includes(primeiraLinha);
+    const esperado = aplicadasDeTexto.reduce(
+      (acc, p) => acc.split(p.needle).join(p.replacement),
+      e.source
+    );
+    const primeiraLinha = esperado.split("\n")[0]!.trim();
+    const restaurou = primeiraLinha.length === 0 || finalText.includes(primeiraLinha);
     const sumiu = countOccurrences(finalText, e.current) === 0;
     results[e.index] =
       restaurou && sumiu

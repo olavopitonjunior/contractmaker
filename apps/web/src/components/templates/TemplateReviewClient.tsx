@@ -161,10 +161,6 @@ const SEVERITY_STYLE: Record<string, string> = {
   info: "border-border bg-muted/40",
 };
 
-/**
- * Um achado semântico. Mostra o que está errado e ONDE — o excerto é o que
- * permite ao operador achar o parágrafo no Doc ao lado sem procurar às cegas.
- */
 /** Verbo do conserto → o que o botão diz que vai fazer. */
 const FIX_LABEL: Record<string, string> = {
   rekey: "Corrigir a chave",
@@ -172,6 +168,11 @@ const FIX_LABEL: Record<string, string> = {
   "restore-paragraph": "Restaurar o parágrafo",
 };
 
+/**
+ * Um achado semântico. Mostra o que está errado e ONDE — o excerto é o que
+ * permite ao operador achar o parágrafo no Doc ao lado sem procurar às cegas —
+ * e o botão do conserto, quando existe conserto automático.
+ */
 function SemanticFindingRow({
   finding,
   onFix,
@@ -1044,8 +1045,10 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
         </div>
       </div>
 
-      {/* Mapeamento manual */}
-      {missing.length > 0 && (
+      {/* Mapeamento manual — só em rascunho: modelo ativo não muda de texto
+          debaixo de contrato já gerado (a rota devolve 409, e um painel que
+          convida a uma ação recusada é pior que painel ausente). */}
+      {missing.length > 0 && status !== "active" && (
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-1.5 text-sm">
@@ -1092,7 +1095,7 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                   draggable
                   onDragStart={(e) => e.dataTransfer.setData("text/plain", c.token)}
                   onClick={() => mapField(c.token, selText)}
-                  disabled={mapping}
+                  disabled={mapping || fixingId !== null}
                   title={c.description || c.label}
                   className="inline-flex cursor-grab items-center gap-1 rounded-full border border-brand-accent/40 bg-brand-accent/5 px-2.5 py-1 text-[11px] font-medium text-brand-accent hover:bg-brand-accent/10 active:cursor-grabbing disabled:opacity-50"
                 >

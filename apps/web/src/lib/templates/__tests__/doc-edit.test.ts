@@ -289,6 +289,34 @@ describe("várias edições numa chamada", () => {
     expect(batchUpdateDocMock.mock.calls[0][1]).toHaveLength(2);
   });
 
+  it("restaura PRIMEIRO e edita o texto devolvido na mesma chamada", async () => {
+    // A ordem importa: enquanto o batch de texto ia antes do estrutural, uma
+    // edição sobre o texto restaurado era planejada contra um estado que a
+    // execução nunca produzia — o replace casava 0 e saía como `replace-noop`,
+    // sem que ninguém entendesse por quê.
+    const colapsado = "{{imobiliaria_qualificacao}}";
+    const original =
+      "a) R$ 2.500,00 à imobiliária intermediadora Trio Ltda, CRECI 79.434-J, pela intermediação;";
+    const antes = ["4.1.1. Rateio:", colapsado];
+    const depois = [antes[0], original.replace(", CRECI 79.434-J", "")].join("\n");
+
+    getDocPlainTextMock.mockResolvedValueOnce(antes.join("\n")).mockResolvedValueOnce(depois);
+    getDocStructureMock.mockResolvedValue(fakeDoc(antes));
+
+    const out = await run([
+      { op: "restore-paragraph", current: colapsado, source: original },
+      { op: "remove-leftover", phrase: ", CRECI 79.434-J" },
+    ]);
+
+    expect(out.results.map((r) => r.status)).toEqual(["applied", "applied"]);
+    // Dois batches: o estrutural primeiro, o de texto depois.
+    expect(batchUpdateDocMock).toHaveBeenCalledTimes(2);
+    expect(batchUpdateDocMock.mock.calls[0][1][0]).toHaveProperty("deleteContentRange");
+    expect(batchUpdateDocMock.mock.calls[1][1][0].replaceAllText.containsText.text).toBe(
+      ", CRECI 79.434-J"
+    );
+  });
+
   it("uma edição recusada não impede as outras", async () => {
     const doc = "a) {{corretagem_qualificacao}} aqui;\nb) X, CRECI 12345-F.";
     getDocPlainTextMock

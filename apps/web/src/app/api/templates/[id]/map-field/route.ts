@@ -86,11 +86,24 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   const template = await prisma.contractTemplate.findFirst({
     where: { id: params.id, orgId: org.id },
-    select: { googleTemplateDocId: true, modalidade: true, engine: true },
+    select: { googleTemplateDocId: true, modalidade: true, engine: true, status: true },
   });
   if (!template) return NextResponse.json({ error: "Template não encontrado." }, { status: 404 });
   if (template.engine !== "google_docs" || !template.googleTemplateDocId) {
     return NextResponse.json({ error: "Modelo não é Google Docs." }, { status: 400 });
+  }
+  // Mesma trava do `doc-edit`: modelo ATIVO não muda de texto debaixo de
+  // contrato já gerado. As duas rotas escrevem pelo mesmo `applyDocEdits`, e
+  // codificar a regra só numa delas deixaria a outra como porta aberta — o
+  // invariante viraria decoração.
+  if (template.status === "active") {
+    return NextResponse.json(
+      {
+        error: "Modelo ativo não pode ser editado. Volte-o para rascunho primeiro.",
+        code: "TEMPLATE_ACTIVE",
+      },
+      { status: 409 }
+    );
   }
 
   try {
