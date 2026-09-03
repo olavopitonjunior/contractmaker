@@ -126,6 +126,31 @@ describe("planInsertion — travas do texto plano", () => {
     expect(reasons(p)).toEqual({ imovel_matricula: "overlapped" });
   });
 
+  it("a lista de rateio entra como UMA chave, sem levar o cabeçalho", () => {
+    // O caso da Trio: a 4.1.1 abre a lista e os itens somam um aluguel. Chaveado
+    // item por item o resultado é sempre errado (cada chave de corretagem
+    // imprime a lista inteira de beneficiários), então a lista é uma chave só —
+    // e o cabeçalho, que é texto fixo, fica FORA dela.
+    const cabecalho =
+      "4.1.1. O pagamento correspondente ao primeiro aluguel será rateado da seguinte forma:";
+    const lista = [
+      "a) R$ 2.500,00 (dois mil e quinhentos reais), a ser pago diretamente à imobiliária intermediadora Trio Ltda;",
+      "b) R$ 1.500,00 (mil e quinhentos reais), a ser pago diretamente ao(à) corretor(a) intermediador(a) Ana Ribeiro.",
+    ].join("\n");
+    const doc = [cabecalho, lista, "4.1.2. Os valores acima serão retidos no primeiro repasse."].join("\n");
+
+    const p = plan(doc, [M("rateio_primeiro_aluguel", lista)]);
+
+    expect(p.candidates.map((c) => c.token)).toEqual(["rateio_primeiro_aluguel"]);
+    expect(p.simulatedText).toContain(cabecalho);
+    expect(p.simulatedText).toContain("{{rateio_primeiro_aluguel}}");
+    expect(p.simulatedText).not.toContain("Ana Ribeiro");
+    // Bloco multi-parágrafo: o 1º item vira a chave, o 2º é esvaziado.
+    expect(p.candidates[0].rest.map((r) => r.par)).toEqual([
+      "b) R$ 1.500,00 (mil e quinhentos reais), a ser pago diretamente ao(à) corretor(a) intermediador(a) Ana Ribeiro.",
+    ]);
+  });
+
   it("o plano carrega a impressão do texto contra o qual foi montado", async () => {
     const { commitInsertion, PlanTextMismatchError } = await import("../ai-placeholder-insertion");
     const p = plan("LOCADOR: João da Silva, brasileiro.", [

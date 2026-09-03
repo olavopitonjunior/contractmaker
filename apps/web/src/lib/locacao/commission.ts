@@ -188,3 +188,55 @@ export function aplicarPadraoComissao<T extends ComissaoSeedInput>(
     taxa_locacao_valor: padrao.taxa_locacao_valor,
   };
 }
+
+/**
+ * Rateio do PRIMEIRO aluguel: quanto cabe à imobiliária e quanto a cada
+ * corretor, em R$.
+ *
+ * É a conta da cláusula que a Trio escreve como uma lista — "a) R$ X à
+ * imobiliária intermediadora; b) R$ Y ao corretor; c) R$ Z ao corretor" — e
+ * cuja soma, nos contratos reais, fecha um aluguel inteiro. Por isso os
+ * corretores recebem de DENTRO da taxa de locação, não além dela: a parte da
+ * imobiliária é a taxa MENOS a soma das partes dos corretores.
+ *
+ * A parte de cada corretor é `valor_primeiro_aluguel` quando informada; sem
+ * ela, a comissão do mês 1 (que é o que a UI pré-preenche). Nunca negativa: se
+ * a soma passar da taxa, a parte da imobiliária é 0 e `excede` fica `true` —
+ * quem mostra isso ao operador é a UI, porque o render não tem como avisar.
+ */
+export interface RateioPrimeiroAluguel {
+  /** Parte da imobiliária, em R$. Nunca negativa. */
+  imobiliaria: number;
+  /** Parte de cada angariador, na ordem do array de entrada. */
+  angariadores: number[];
+  /** Taxa de locação efetiva — o total que a lista deve somar. */
+  total: number;
+  /** A soma das partes dos corretores passou da taxa de locação. */
+  excede: boolean;
+}
+
+export interface AngariadorRateioInput extends AngariadorCalcInput {
+  valor_primeiro_aluguel?: unknown;
+}
+
+export function rateioPrimeiroAluguel(
+  valorAluguel: unknown,
+  comissao:
+    | (ComissaoCalcInput & { angariadores?: readonly AngariadorRateioInput[] | null })
+    | null
+    | undefined
+): RateioPrimeiroAluguel {
+  const total = taxaLocacaoEfetiva(valorAluguel, comissao);
+  const lista = Array.isArray(comissao?.angariadores) ? comissao!.angariadores! : [];
+  const angariadores = lista.map((a) => {
+    const informado = positiveNumber(a?.valor_primeiro_aluguel);
+    return informado > 0 ? round2(informado) : angariadorValorMensal(a, valorAluguel);
+  });
+  const soma = round2(angariadores.reduce((acc, v) => acc + v, 0));
+  return {
+    imobiliaria: round2(Math.max(0, total - soma)),
+    angariadores,
+    total,
+    excede: soma > total,
+  };
+}

@@ -57,9 +57,11 @@ import {
 import {
   corretagemDadosPagamento,
   corretoresDe,
+  viaDeRepasse,
   type RegistroCorretor,
 } from "@/lib/templates/corretagem";
 import { imobiliariaDadosPagamento } from "@/lib/templates/imobiliaria";
+import { rateioPrimeiroAluguel } from "@/lib/templates/rateio";
 import {
   GoogleDocsGenerationError,
   googleDocsFailureMessage,
@@ -1549,6 +1551,15 @@ export async function generateLocacaoContractForDeal(
         map["imobiliaria_dados_pagamento"] = imobiliariaDadosPagamento(
           await loadOrgRecebimento(orgId)
         );
+        // Rateio do 1º aluguel: a lista nomeia beneficiário E via de pagamento,
+        // então ela só fica completa aqui, onde as duas fontes de repasse
+        // existem — o cadastro de corretores e o Perfil da imobiliária. Usa
+        // `rawDataJson` pelo mesmo motivo da corretagem: o dado bancário foi
+        // retirado do dataJson enriquecido de propósito.
+        map["rateio_primeiro_aluguel"] = rateioPrimeiroAluguel(rawDataJson, {
+          imobiliariaVia: viaDeRepasse(await loadOrgRecebimento(orgId)),
+          registro: await carregarRegistroCorretores(orgId),
+        });
         map["contrato_numero"] = numeroContrato;
         map["contrato_id"] = contract.id;
         map["contrato_versao"] = String(contract.version);

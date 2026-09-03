@@ -150,6 +150,17 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
     modalidades: LOCACAO,
   },
   {
+    token: "rateio_primeiro_aluguel",
+    label: "Rateio do primeiro aluguel",
+    description:
+      "A LISTA INTEIRA de quem recebe o primeiro aluguel, um item por beneficiário, com valor em R$ e por extenso, qualificação e via de pagamento (ex.: 'a) R$ 2.500,00 (dois mil e quinhentos reais), a ser pago diretamente à imobiliária intermediadora …; b) R$ 1.200,00 …, a ser pago diretamente ao(à) corretor(a) intermediador(a) …'). Cobre do PRIMEIRO item da lista ao ÚLTIMO — nunca o cabeçalho que a introduz (ex.: '4.1.1. O pagamento correspondente ao primeiro aluguel será rateado da seguinte forma:'), que é texto fixo do modelo. NÃO use corretagem_qualificacao nem corretagem_dados_pagamento item por item: cada uma imprime a lista inteira de corretores, então com dois beneficiários o bloco se repete em todos os itens.",
+    example:
+      "a) R$ 2.500,00 (dois mil e quinhentos reais), a ser pago diretamente à imobiliária intermediadora Imobiliária Exemplo Ltda., como honorários pela intermediação imobiliária na presente locação, por meio da chave PIX (CNPJ) 12.345.678/0001-90;\nb) R$ 1.200,00 (mil e duzentos reais), a ser pago diretamente ao(à) corretor(a) intermediador(a) Ana Ribeiro, CRECI nº 12345-F.",
+    required: false,
+    kind: "composed",
+    modalidades: LOCACAO,
+  },
+  {
     token: "assinaturas",
     label: "Bloco de assinaturas",
     description:

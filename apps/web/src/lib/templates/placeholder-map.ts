@@ -12,6 +12,7 @@ import {
 } from "./composed-blocks";
 import { corretagemQualificacao, corretagemDadosPagamento } from "./corretagem";
 import { imobiliariaQualificacao } from "./imobiliaria";
+import { rateioPrimeiroAluguel } from "./rateio";
 
 // ============================================================================
 // Mapa de placeholders pra geração engine="google_docs": campos simples
@@ -140,6 +141,12 @@ export function buildLocacaoPlaceholderMap(
     // contrato, nunca para o dataJson. Emitida vazia pelo mesmo motivo acima.
     imobiliaria_qualificacao: imobiliariaQualificacao(enriched),
     imobiliaria_dados_pagamento: "",
+    // Rateio do 1º aluguel: a LISTA inteira numa chave só. Como os itens
+    // nomeiam beneficiário E via de pagamento, o caminho puro do mapa produz a
+    // lista sem as vias (não tem banco); o call site sobrescreve com a versão
+    // completa, igual às duas chaves de repasse acima. Emitida mesmo vazia pelo
+    // mesmo motivo delas.
+    rateio_primeiro_aluguel: rateioPrimeiroAluguel(enriched),
     assinaturas: blocoAssinaturas(enriched),
 
     // Simples formatados

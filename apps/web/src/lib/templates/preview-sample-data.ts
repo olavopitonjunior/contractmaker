@@ -341,6 +341,10 @@ export const previewSampleDataLocacao = {
   // conta de alguém no modelo. Pessoa e chave PIX inventadas.
   comissao: {
     taxa_locacao_percent: 10,
+    // DOIS corretores, com `valor_primeiro_aluguel`: é o que faz a cláusula de
+    // rateio (`{{rateio_primeiro_aluguel}}`) aparecer na prévia com mais de um
+    // item — com um beneficiário só, o operador não vê o que a chave resolve,
+    // que é justamente a lista. Pessoas e chaves PIX inventadas.
     angariadores: [
       {
         nome: "Ana Ribeiro",
@@ -349,11 +353,27 @@ export const previewSampleDataLocacao = {
         creci: "12.345-F",
         forma_comissao: "percentual",
         percentual: 100,
+        valor_primeiro_aluguel: 180,
         recebimento: {
           pix_chave: "ana.ribeiro@exemplo.com.br",
           pix_tipo_chave: "EMAIL",
           titular_nome: "Ana Ribeiro",
           titular_doc: "52998224725",
+        },
+      },
+      {
+        nome: "Bruno Tavares",
+        tipo_pessoa: "fisica",
+        cpf: "11144477735",
+        creci: "54.321-F",
+        forma_comissao: "percentual",
+        percentual: 50,
+        valor_primeiro_aluguel: 120,
+        recebimento: {
+          pix_chave: "11144477735",
+          pix_tipo_chave: "CPF",
+          titular_nome: "Bruno Tavares",
+          titular_doc: "11144477735",
         },
       },
     ],
