@@ -12,6 +12,7 @@ import { MoneyInput } from "@/components/forms/MoneyInput";
 import { DecimalInput } from "@/components/forms/DecimalInput";
 import { FormField } from "@/components/forms/fields/FormField";
 import { ConjugeFields } from "@/components/forms/steps/ConjugeFields";
+import { isMarried } from "@/lib/forms/estado-civil";
 import {
   maskCPF,
   maskCNPJ,
@@ -142,8 +143,12 @@ export function PessoaFisicaLocacaoFields({
   prefix: string;
 }) {
   const estadoCivil = form.watch(`${prefix}.estado_civil`);
-  const showConjuge =
-    estadoCivil === "Casado(a)" || estadoCivil === "União Estável";
+  // Mesmo predicado do finalize (`collectConjugeIssues` → `isMarried`). A
+  // igualdade estrita com "Casado(a)"/"União Estável" escondia os campos para
+  // "casado"/"União estável" (o que o OCR devolve) enquanto o finalize cobrava
+  // nome e CPF do cônjuge — pendência sem campo na tela. Vale para locador,
+  // locatário e fiador: os três renderizam por aqui.
+  const showConjuge = isMarried(estadoCivil);
 
   return (
     <div className="space-y-4">
