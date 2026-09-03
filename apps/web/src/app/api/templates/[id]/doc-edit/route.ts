@@ -52,6 +52,11 @@ const OpSchema = z.discriminatedUnion("op", [
     current: z.string().min(1),
     source: z.string().min(2),
   }),
+  z.object({
+    op: z.literal("replace-block"),
+    paragraphs: z.array(z.string().min(1)).min(1).max(20),
+    token: z.string().trim().min(1),
+  }),
 ]);
 
 const Body = z
@@ -114,7 +119,14 @@ function auditableOps(ops: readonly DocEditOp[]) {
         ? { op: o.op, from: o.fromToken, to: o.toToken, phrase: maskForReport(o.phrase).slice(0, 240) }
         : o.op === "map-field"
           ? { op: o.op, token: o.token, phrase: maskForReport(o.phrase).slice(0, 240) }
-          : { op: o.op, phrase: maskForReport(o.phrase).slice(0, 240) }
+          : o.op === "replace-block"
+            ? {
+                op: o.op,
+                token: o.token,
+                paragraphs: o.paragraphs.length,
+                primeiro: maskForReport(o.paragraphs[0] ?? "").slice(0, 240),
+              }
+            : { op: o.op, phrase: maskForReport(o.phrase).slice(0, 240) }
   );
 }
 

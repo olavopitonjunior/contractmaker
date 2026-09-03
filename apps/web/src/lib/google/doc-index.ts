@@ -74,6 +74,58 @@ export interface ParagraphRange {
  * insere o texto novo no lugar herda a formatação do parágrafo, em vez de
  * fundir-se com o seguinte.
  */
+/** Parágrafos do corpo, com o intervalo de cada um. */
+function paragraphsOf(doc: docs_v1.Schema$Document): Array<{ texto: string; range: ParagraphRange }> {
+  const out: Array<{ texto: string; range: ParagraphRange }> = [];
+  for (const block of doc.body?.content || []) {
+    const para = block.paragraph;
+    if (!para) continue;
+    const elements = (para.elements || []).filter(
+      (el) => el.textRun?.content && el.startIndex !== undefined && el.startIndex !== null
+    );
+    if (elements.length === 0) continue;
+    const conteudo = elements.map((el) => el.textRun!.content!).join("");
+    const start = elements[0]!.startIndex!;
+    const semNewline = conteudo.replace(/\n+$/, "").length;
+    out.push({
+      texto: conteudo.replace(/\n+$/, "").trim(),
+      range: { startIndex: start, endIndex: start + semNewline },
+    });
+  }
+  return out;
+}
+
+/**
+ * Intervalo que cobre uma sequência CONSECUTIVA de parágrafos, do início do
+ * primeiro ao fim do último.
+ *
+ * Exigir que sejam consecutivos não é detalhe: sem isso, três parágrafos
+ * espalhados pelo documento produziriam um intervalo que engole tudo que está
+ * entre eles — e o que está entre eles é contrato. Ambíguo (a mesma sequência
+ * aparece duas vezes) devolve `null` pelo mesmo motivo de sempre: apagar
+ * intervalo é destrutivo, e escolher um dos dois seria arbitrário.
+ */
+export function findBlockRange(
+  doc: docs_v1.Schema$Document,
+  textos: readonly string[]
+): ParagraphRange | null {
+  const alvos = textos.map((t) => t.trim()).filter(Boolean);
+  if (alvos.length === 0) return null;
+
+  const paras = paragraphsOf(doc);
+  let achado: ParagraphRange | null = null;
+  for (let i = 0; i + alvos.length <= paras.length; i += 1) {
+    const casa = alvos.every((t, k) => paras[i + k]!.texto === t);
+    if (!casa) continue;
+    if (achado) return null; // a mesma sequência aparece mais de uma vez
+    achado = {
+      startIndex: paras[i]!.range.startIndex,
+      endIndex: paras[i + alvos.length - 1]!.range.endIndex,
+    };
+  }
+  return achado;
+}
+
 export function findParagraphRange(
   doc: docs_v1.Schema$Document,
   text: string

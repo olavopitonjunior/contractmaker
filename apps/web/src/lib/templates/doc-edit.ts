@@ -32,7 +32,7 @@
  */
 import type { docs_v1 } from "googleapis";
 import { batchUpdateDoc, getDocPlainText, getDocStructure } from "@/lib/google/docs";
-import { findParagraphRange } from "@/lib/google/doc-index";
+import { findBlockRange, findParagraphRange } from "@/lib/google/doc-index";
 import { countOccurrences } from "@/lib/templates/apply-clause-slot";
 import { isKnownToken } from "@/lib/templates/placeholder-catalog";
 
@@ -44,7 +44,22 @@ export type DocEditOp =
   /** Sobra do titular ao lado da chave (CRECI, CPF, conta): remove o trecho. */
   | { op: "remove-leftover"; phrase: string; replacement?: string }
   /** A chave engoliu a cláusula: devolve o texto do contrato-fonte. */
-  | { op: "restore-paragraph"; current: string; source: string };
+  | { op: "restore-paragraph"; current: string; source: string }
+  /**
+   * Um BLOCO de parágrafos — que pode já conter chaves — vira UMA chave
+   * composta.
+   *
+   * É a operação que faltava, e a falta tinha custo: os 16 modelos da Trio
+   * tiveram a lista de rateio do 1º aluguel chaveada item a item
+   * (`{{corretagem_qualificacao}}` num item, `{{corretagem_dados_pagamento}}`
+   * noutro), e cada uma dessas chaves imprime a lista INTEIRA de beneficiários —
+   * um item sai com nome sem conta, o outro com conta sem nome. A chave certa
+   * (`rateio_primeiro_aluguel`) passou a existir, e NADA conseguia aplicá-la:
+   * `map-field` recusa trecho que já tem chave (trava correta, para não apagar
+   * campo por acidente) e o passe de IA recusa trecho já tokenizado pelo mesmo
+   * motivo. A migração ficava sem caminho.
+   */
+  | { op: "replace-block"; paragraphs: string[]; token: string };
 
 export type DocEditReason =
   // Decididos no texto plano, antes de qualquer escrita.
@@ -55,6 +70,8 @@ export type DocEditReason =
   | "token-missing-in-phrase"
   | "phrase-has-token"
   | "empty-source"
+  | "empty-block"
+  | "block-not-consecutive"
   // Decididos pela resposta da API e pela releitura.
   | "batch-failed"
   | "replace-noop"
@@ -88,12 +105,15 @@ interface PlannedText {
   requestIdx: number;
 }
 
-/** Uma edição estrutural (só `restore-paragraph`). */
+/** Uma edição estrutural: apaga um intervalo e insere texto no lugar. */
 interface PlannedStructural {
   index: number;
+  op: "restore-paragraph" | "replace-block";
   target: string;
-  current: string;
-  source: string;
+  /** Parágrafos a substituir, na ordem em que aparecem no Doc. */
+  paragrafos: string[];
+  /** Texto que entra no lugar. */
+  texto: string;
 }
 
 const HAS_PLACEHOLDER = /\{\{[^{}]+\}\}/;
@@ -147,19 +167,56 @@ export async function applyDocEdits(input: {
   // como estava — fazia o texto simulado descrever um estado que a execução
   // nunca produzia, e uma edição legítima falhava como `replace-noop`.
   ops.forEach((op, i) => {
-    if (op.op !== "restore-paragraph") return;
-    const current = op.current.trim();
-    const source = op.source.trim();
-    if (!source) return recusar(i, "empty-source", current);
-    if (countOccurrences(sim, current) === 0) return recusar(i, "not-found", current);
-    if (countOccurrences(sim, current) > 1) return recusar(i, "ambiguous", current);
-    estruturais.push({ index: i, target: current, current, source });
-    aplicarSim(current, source);
+    if (op.op === "restore-paragraph") {
+      const current = op.current.trim();
+      const source = op.source.trim();
+      if (!source) return recusar(i, "empty-source", current);
+      if (countOccurrences(sim, current) === 0) return recusar(i, "not-found", current);
+      if (countOccurrences(sim, current) > 1) return recusar(i, "ambiguous", current);
+      estruturais.push({
+        index: i,
+        op: "restore-paragraph",
+        target: current,
+        paragrafos: [current],
+        texto: source,
+      });
+      aplicarSim(current, source);
+      return;
+    }
+
+    if (op.op === "replace-block") {
+      const paragrafos = op.paragraphs.map((x) => x.trim()).filter(Boolean);
+      if (paragrafos.length === 0) return recusar(i, "empty-block", op.token);
+      if (!isKnownToken(op.token, modalidade)) return recusar(i, "unknown-token", op.token);
+      // Cada parágrafo tem de ser único: o intervalo a apagar é decidido pela
+      // estrutura, e um parágrafo repetido tornaria a escolha arbitrária.
+      for (const par of paragrafos) {
+        const conta = countOccurrences(sim, par);
+        if (conta === 0) return recusar(i, "not-found", par);
+        if (conta > 1) return recusar(i, "ambiguous", par);
+      }
+      // Consecutivos no texto: o intervalo vai do primeiro ao último, e o que
+      // estiver entre eles seria apagado junto. Conferido de novo na estrutura
+      // antes de escrever (`findBlockRange`), mas recusar aqui evita a chamada.
+      const juntos = paragrafos.join("\n");
+      if (countOccurrences(sim, juntos) !== 1) {
+        return recusar(i, "block-not-consecutive", paragrafos[0]!);
+      }
+      estruturais.push({
+        index: i,
+        op: "replace-block",
+        target: paragrafos[0]!,
+        paragrafos,
+        texto: `{{${op.token}}}`,
+      });
+      aplicarSim(juntos, `{{${op.token}}}`);
+      return;
+    }
   });
 
-  // PASSO 2 — de texto, contra o simulado que JÁ inclui as restaurações.
+  // PASSO 2 — de texto, contra o simulado que JÁ inclui as estruturais.
   ops.forEach((op, i) => {
-    if (op.op === "restore-paragraph") return;
+    if (op.op === "restore-paragraph" || op.op === "replace-block") return;
     const phrase = op.phrase.trim();
     if (!phrase) return recusar(i, "not-found", phrase);
 
@@ -214,20 +271,24 @@ export async function applyDocEdits(input: {
     } catch (err) {
       console.error("[doc-edit] não consegui ler a estrutura:", err);
       results[e.index] = {
-        op: "restore-paragraph",
+        op: e.op,
         status: "failed",
         reason: "verify-unavailable",
         target: e.target,
       };
       continue;
     }
-    // Uma restauração por batch, relendo a estrutura antes de cada uma: os
-    // índices absolutos mudam a cada edição, e reaproveitá-los apagaria o
-    // intervalo errado.
-    const range = findParagraphRange(doc, e.current);
+    // Uma edição por batch, relendo a estrutura antes de cada uma: os índices
+    // absolutos mudam a cada edição, e reaproveitá-los apagaria o intervalo
+    // errado. O bloco tem de estar CONSECUTIVO na estrutura — o intervalo vai
+    // do primeiro parágrafo ao último, e o que estiver no meio some junto.
+    const range =
+      e.paragrafos.length === 1
+        ? findParagraphRange(doc, e.paragrafos[0]!)
+        : findBlockRange(doc, e.paragrafos);
     if (!range) {
       results[e.index] = {
-        op: "restore-paragraph",
+        op: e.op,
         status: "failed",
         reason: "structure-not-found",
         target: e.target,
@@ -237,13 +298,13 @@ export async function applyDocEdits(input: {
     try {
       await batchUpdateDoc(docId, [
         { deleteContentRange: { range: { startIndex: range.startIndex, endIndex: range.endIndex } } },
-        { insertText: { location: { index: range.startIndex }, text: e.source } },
+        { insertText: { location: { index: range.startIndex }, text: e.texto } },
       ]);
       estruturaisOk.push(e);
     } catch (err) {
       console.error("[doc-edit] batchUpdate estrutural falhou:", err);
       results[e.index] = {
-        op: "restore-paragraph",
+        op: e.op,
         status: "failed",
         reason: "batch-failed",
         target: e.target,
@@ -330,15 +391,17 @@ export async function applyDocEdits(input: {
   for (const e of estruturaisOk) {
     const esperado = aplicadasDeTexto.reduce(
       (acc, p) => acc.split(p.needle).join(p.replacement),
-      e.source
+      e.texto
     );
     const primeiraLinha = esperado.split("\n")[0]!.trim();
-    const restaurou = primeiraLinha.length === 0 || finalText.includes(primeiraLinha);
-    const sumiu = countOccurrences(finalText, e.current) === 0;
+    const entrou = primeiraLinha.length === 0 || finalText.includes(primeiraLinha);
+    // TODOS os parágrafos do bloco têm de ter saído — um sobrevivente significa
+    // que o intervalo apagado não era o que se pensava.
+    const sumiu = e.paragrafos.every((par) => countOccurrences(finalText, par) === 0);
     results[e.index] =
-      restaurou && sumiu
-        ? { op: "restore-paragraph", status: "applied", target: e.target }
-        : { op: "restore-paragraph", status: "failed", reason: "verify-failed", target: e.target };
+      entrou && sumiu
+        ? { op: e.op, status: "applied", target: e.target }
+        : { op: e.op, status: "failed", reason: "verify-failed", target: e.target };
   }
 
   return { results, finalText, appliedAt: appliedAt() };

@@ -216,6 +216,84 @@ describe("restore-paragraph — devolver a cláusula que a chave engoliu", () =>
   });
 });
 
+describe("replace-block — a migração que não tinha caminho", () => {
+  // O caso real dos 16 modelos da Trio: a lista de rateio chaveada item a item.
+  // Cada chave de corretagem imprime a lista INTEIRA de beneficiários, então um
+  // item sai com nome sem conta e o outro com conta sem nome. A chave certa
+  // existe desde o #554 e NADA conseguia aplicá-la — `map-field` e o passe de IA
+  // recusam trecho que já tem chave, e a trava dos dois está certa.
+  const cabecalho = "4.1.1. O pagamento correspondente ao primeiro aluguel será rateado assim:";
+  const itens = [
+    "a) R$0000 (três mil...), a ser pago à imobiliária intermediadora {{imobiliaria_qualificacao}};",
+    "b) R$ 1.315,15, a ser pago à corretora intermediadora {{corretagem_dados_pagamento}}",
+    "c) R$ 1.315,15, a ser pago ao corretor intermediador {{corretagem_qualificacao}}.",
+  ];
+  const depois = "4.1.2. A comprovação do pagamento servirá como quitação.";
+  const doc = [cabecalho, ...itens, depois];
+
+  it("troca o bloco inteiro por UMA chave, preservando o cabeçalho", async () => {
+    getDocPlainTextMock
+      .mockResolvedValueOnce(doc.join("\n"))
+      .mockResolvedValueOnce([cabecalho, "{{rateio_primeiro_aluguel}}", depois].join("\n"));
+    getDocStructureMock.mockResolvedValue(fakeDoc(doc));
+
+    const out = await run([
+      { op: "replace-block", paragraphs: itens, token: "rateio_primeiro_aluguel" },
+    ]);
+
+    expect(out.results[0]).toMatchObject({ op: "replace-block", status: "applied" });
+    const reqs = batchUpdateDocMock.mock.calls[0][1];
+    // O intervalo vai do início do item a) ao fim do item c) — nem antes nem depois.
+    const inicioA = 1 + cabecalho.length + 1;
+    expect(reqs[0].deleteContentRange.range.startIndex).toBe(inicioA);
+    expect(reqs[1].insertText.text).toBe("{{rateio_primeiro_aluguel}}");
+  });
+
+  it("bloco NÃO consecutivo é recusado antes de qualquer escrita", async () => {
+    // Apagar do primeiro ao último engoliria o que está no meio — e o que está
+    // no meio é contrato.
+    getDocPlainTextMock.mockResolvedValue(doc.join("\n"));
+    const out = await run([
+      {
+        op: "replace-block",
+        paragraphs: [itens[0]!, itens[2]!], // pula o b)
+        token: "rateio_primeiro_aluguel",
+      },
+    ]);
+    expect(out.results[0]).toMatchObject({ status: "skipped", reason: "block-not-consecutive" });
+    expect(batchUpdateDocMock).not.toHaveBeenCalled();
+  });
+
+  it("parágrafo repetido no documento é recusado", async () => {
+    getDocPlainTextMock.mockResolvedValue([...doc, itens[0]!].join("\n"));
+    const out = await run([
+      { op: "replace-block", paragraphs: [itens[0]!], token: "rateio_primeiro_aluguel" },
+    ]);
+    expect(out.results[0]).toMatchObject({ status: "skipped", reason: "ambiguous" });
+  });
+
+  it("chave fora do catálogo da modalidade é recusada", async () => {
+    getDocPlainTextMock.mockResolvedValue(doc.join("\n"));
+    const out = await run(
+      [{ op: "replace-block", paragraphs: itens, token: "rateio_primeiro_aluguel" }],
+      "a_vista"
+    );
+    expect(out.results[0]).toMatchObject({ status: "skipped", reason: "unknown-token" });
+  });
+
+  it("sobrevivente do bloco na releitura é falha, não sucesso", async () => {
+    // Se um parágrafo continua lá, o intervalo apagado não era o que se pensava.
+    getDocPlainTextMock
+      .mockResolvedValueOnce(doc.join("\n"))
+      .mockResolvedValueOnce([cabecalho, "{{rateio_primeiro_aluguel}}", itens[2]!, depois].join("\n"));
+    getDocStructureMock.mockResolvedValue(fakeDoc(doc));
+    const out = await run([
+      { op: "replace-block", paragraphs: itens, token: "rateio_primeiro_aluguel" },
+    ]);
+    expect(out.results[0]).toMatchObject({ status: "failed", reason: "verify-failed" });
+  });
+});
+
 describe("o documento é quem decide", () => {
   it("lote recusado pelo Google: nada é declarado aplicado", async () => {
     getDocPlainTextMock.mockResolvedValue("b) pago a X, CRECI 12345-F.");
