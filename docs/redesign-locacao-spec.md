@@ -269,7 +269,8 @@ componente já é desenhado com slot de bullets explicáveis.
 
 **D) Geração de contrato** — reusa o editor Google Docs + `ChatPanel` + `SendEnvelopeDialog`. O
 chat in-app monta o contrato (template locação residencial/comercial), gestor revisa, libera p/
-ClickSign. Signatários: locador, locatário, fiador?, garantidora?, testemunhas? (opt-in, igual
+ClickSign. Signatários: locador (`lessor`), locatário (`lessee`), fiador (`surety`) e cônjuge do fiador
+(`guarantor_spouse`) quando a garantia é fiança; garantidora? e testemunhas? (opt-in, igual
 ao `SendEnvelopeDialog`).
 
 ### 5.2 Portal do proprietário (`/portal/owner`, público autenticado)

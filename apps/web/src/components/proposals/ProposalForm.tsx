@@ -811,8 +811,9 @@ export function ProposalForm({
                         />
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        O fiador entra no documento; ele não é adicionado como
-                        signatário da proposta.
+                        O fiador entra no documento; ele não assina a proposta.
+                        No contrato de locação ele (e o cônjuge) assinam como
+                        Fiador e Cônjuge do fiador.
                       </p>
                     </div>
                   )}

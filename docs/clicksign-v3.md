@@ -76,7 +76,7 @@ Memória [feedback_clicksign_v3_quirks]. Cada um destes já custou tempo:
 
 - Host `app.clicksign.com` + `?access_token=` **na query**. Bearer devolve 401 enganoso.
 - `documentation` vai **com máscara** (helper `formatCpfCnpj`).
-- Requirement usa `action="agree"` + `role` (mapping em `executor.ts::defaultRoleForSourceKind`).
+- Requirement usa `action="agree"` + `role` (default em `roles.ts::defaultRoleForSourceKind`; lista canônica `CLICKSIGN_ROLES` no mesmo arquivo — as rotas derivam o zod dela). Locação usa as qualificações nativas `lessor`/`lessee`/`surety`/`guarantor_spouse` (02/09/2026); cônjuge de locador/locatário segue `consenting`.
 - `communicate_by` foi removido — e-mail sai via `signer.email` + `activateEnvelope`.
 - Status canônico vive em `/events`, **não** em `/signers`.
 - Webhook não traz `envelope.id` — o lookup é por `documentClicksignId === document.key`.

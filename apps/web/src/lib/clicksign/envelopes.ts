@@ -170,6 +170,10 @@ export async function removeSigner(
  *   - Anuente       → "consenting"
  *   - Advogado      → "attorney"
  *   - Interessado   → "party"
+ *   - Locador       → "lessor"
+ *   - Locatário     → "lessee"
+ *   - Fiador        → "surety"
+ *   - Cônjuge do fiador → "guarantor_spouse"
  * (tipo e labels em `./roles`)
  */
 
