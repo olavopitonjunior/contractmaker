@@ -72,6 +72,8 @@ interface ClausesPageClientProps {
   platformUpdates?: PlatformUpdate[];
   /** Módulo de locação do tenant. Desligado = tela fica em venda, sem seletor. */
   locacaoEnabled?: boolean;
+  /** Owner/admin: só eles entram na revisão da biblioteca. */
+  podeRevisar?: boolean;
 }
 
 const ALL = "all";
@@ -87,6 +89,7 @@ export function ClausesPageClient({
   clauses,
   platformUpdates = [],
   locacaoEnabled = false,
+  podeRevisar = false,
 }: ClausesPageClientProps) {
   const atualizacoes = useMemo(
     () => new Map(platformUpdates.map((u) => [u.orgClauseId, u])),
@@ -388,14 +391,17 @@ export function ClausesPageClient({
         {/*
           A conferência do acervo mora na mesma tela que a dos modelos, e o
           caminho tem de existir DAQUI: quem está olhando as cláusulas é quem
-          quer saber se elas vão sobreviver à geração.
+          quer saber se elas vão sobreviver à geração. Só para owner/admin — a
+          tela é deles, e botão que leva a 404 é pior que botão nenhum.
         */}
-        <Button size="sm" variant="outline" asChild>
-          <Link href="/templates/revisao">
-            <ClipboardCheck className="mr-1.5 h-4 w-4" />
-            Revisar biblioteca
-          </Link>
-        </Button>
+        {podeRevisar && (
+          <Button size="sm" variant="outline" asChild>
+            <Link href="/templates/revisao">
+              <ClipboardCheck className="mr-1.5 h-4 w-4" />
+              Revisar biblioteca
+            </Link>
+          </Button>
+        )}
         <Button size="sm" variant="outline" onClick={() => setGenerateOpen(true)}>
           <Sparkles className="mr-1.5 h-4 w-4" />
           Gerar com IA

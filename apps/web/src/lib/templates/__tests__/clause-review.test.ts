@@ -120,6 +120,45 @@ describe("reviewClauseLibrary", () => {
     expect(rows[0]!.chavesVazias).toEqual([]);
   });
 
+  it("`{{this.campo}}` dentro de {{#each}} NÃO vira aviso de chave vazia", async () => {
+    // O idioma dos laços do projeto inteiro (vendedores, comissionados,
+    // parcelas). `this` só existe no contexto do laço, então resolvê-lo contra
+    // a raiz da amostra daria `undefined` SEMPRE — um alarme que nunca apaga e
+    // que ensina o operador a ignorar a coluna toda, com os verdadeiros junto.
+    findMany.mockResolvedValue([
+      clausula({
+        esteira: "venda",
+        content:
+          "{{#each comissao.comissionados}}{{this.nome}}, CPF {{this.cpf}}.{{/each}}",
+      }),
+    ]);
+    const { rows } = await reviewClauseLibrary({ orgId: "org1" });
+    expect(rows[0]!.chavesVazias).toEqual([]);
+  });
+
+  it("cláusula de financiamento não acusa vazio por ser provada também à vista", async () => {
+    // `esteira` não distingue modalidade: uma cláusula de financiamento é
+    // "venda". Provando só contra a amostra à vista — que não tem
+    // `pagamento.alienacao_fiduciaria` —, TODA cláusula de financiamento
+    // acusaria chave vazia para sempre.
+    findMany.mockResolvedValue([
+      clausula({
+        esteira: "venda",
+        content: "Fica constituída {{pagamento.alienacao_fiduciaria}} em favor do banco.",
+      }),
+    ]);
+    const { rows } = await reviewClauseLibrary({ orgId: "org1" });
+    expect(rows[0]!.chavesVazias).toEqual([]);
+  });
+
+  it("chave vazia em TODAS as amostras da esteira ainda é acusada", async () => {
+    findMany.mockResolvedValue([
+      clausula({ esteira: "venda", content: "Multa de {{pagamento.campo_que_nao_existe}}." }),
+    ]);
+    const { rows } = await reviewClauseLibrary({ orgId: "org1" });
+    expect(rows[0]!.chavesVazias).toEqual(["pagamento.campo_que_nao_existe"]);
+  });
+
   it("trunca no teto e avisa, em vez de devolver o acervo inteiro", async () => {
     findMany.mockResolvedValue([clausula({ id: "a" }), clausula({ id: "b" })]);
     const { rows, truncado } = await reviewClauseLibrary({ orgId: "org1", max: 1 });

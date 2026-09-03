@@ -1,4 +1,5 @@
 import { auth, getUserOrg } from "@/lib/auth/auth";
+import { isOrgOwnerAdmin } from "@/lib/auth/org-role";
 import { prisma } from "@/lib/db/prisma";
 import { PenLine, KeyRound, Library, ClipboardCheck } from "lucide-react";
 import Link from "next/link";
@@ -51,6 +52,7 @@ export default async function TemplatesPage({
   const org = await getUserOrg(session.user.id);
   if (!org) return <p className="text-muted-foreground p-6">Sem organizacao.</p>;
 
+  const podeRevisar = await isOrgOwnerAdmin(session.user.id, org.id);
   const showArchived = searchParams?.archived === "1";
   const autoIngest = searchParams?.ingest === "1";
   const repoTab =
@@ -150,13 +152,18 @@ export default async function TemplatesPage({
           da biblioteca é a pergunta que se faz ANTES de escolher uma aba, e
           enterrá-la numa delas foi exatamente como o botão "Revisar" de cada
           modelo passou despercebido.
+
+          Só para quem pode entrar: a tela é owner/admin, e um botão que leva a
+          404 é pior que botão nenhum.
         */}
-        <Button size="sm" variant="outline" asChild>
-          <Link href="/templates/revisao">
-            <ClipboardCheck className="mr-1.5 h-4 w-4" />
-            Revisar biblioteca
-          </Link>
-        </Button>
+        {podeRevisar && (
+          <Button size="sm" variant="outline" asChild>
+            <Link href="/templates/revisao">
+              <ClipboardCheck className="mr-1.5 h-4 w-4" />
+              Revisar biblioteca
+            </Link>
+          </Button>
+        )}
       </PageHeader>
 
       {openRun && (

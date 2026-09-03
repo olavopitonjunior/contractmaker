@@ -79,18 +79,39 @@ function esteirasDe(esteira: string | null): EsteiraProva[] {
   return ["venda", "locacao"];
 }
 
-/** Amostra de dados por esteira — a mesma que a prévia dos modelos usa. */
-function amostraDe(esteira: EsteiraProva): Record<string, unknown> {
-  return getPreviewSampleData(esteira === "locacao" ? "locacao" : "a_vista");
-}
+/**
+ * Amostras por esteira — TODAS as modalidades dela, não uma.
+ *
+ * Uma só não serve, e o motivo é concreto: a amostra de financiamento tem
+ * campos que a de à vista não tem (`pagamento.alienacao_fiduciaria`,
+ * `pagamento.fgts`), e cláusula de financiamento existe no acervo por regra do
+ * produto (G4 é obrigatória lá). Provando "venda" só contra à vista, toda
+ * cláusula de financiamento acusaria chave vazia para sempre — um alarme que
+ * nunca apaga e que o operador aprende a ignorar, junto com os verdadeiros.
+ *
+ * `esteira` não distingue modalidade (a coluna só tem venda|locacao|ambas), e é
+ * por isso que a prova varre as duas de cada lado.
+ */
+const AMOSTRAS: Record<EsteiraProva, readonly string[]> = {
+  venda: ["a_vista", "financiamento"],
+  locacao: ["locacao", "locacao_comercial"],
+};
 
 /**
  * Caminhos de dado (`{{aluguel.valor}}`) citados no texto.
  *
- * Só o que é inequivocamente um caminho: nada de bloco (`{{#if}}`, `{{/each}}`),
- * de parcial (`{{>`), de comentário (`{{!`) nem de helper com argumento
- * (`{{moeda x}}` tem espaço). O objetivo é achar lacuna silenciosa, e um falso
- * positivo aqui custa a confiança no painel inteiro — na dúvida, não acusa.
+ * Só o que é inequivocamente um caminho lido da RAIZ do contrato: nada de bloco
+ * (`{{#if}}`, `{{/each}}`), de parcial (`{{>`), de comentário (`{{!`) nem de
+ * helper com argumento (`{{moeda x}}` tem espaço). O objetivo é achar lacuna
+ * silenciosa, e um falso positivo aqui custa a confiança no painel inteiro — na
+ * dúvida, não acusa.
+ *
+ * `this.*` fica de fora por isso. Dentro de um `{{#each}}` ele aponta para o
+ * item do laço, que só existe no contexto do laço e nunca na raiz — resolvê-lo
+ * contra a amostra daria `undefined` SEMPRE, independentemente do valor real.
+ * E não é caso raro: `{{this.nome}}`, `{{this.letra}}`, `{{this.numero}}` são o
+ * idioma dos laços de vendedores, compradores, comissionados e parcelas em todo
+ * o projeto.
  */
 function caminhosDe(texto: string): string[] {
   const out = new Set<string>();
@@ -98,7 +119,8 @@ function caminhosDe(texto: string): string[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(texto))) {
     const caminho = m[1]!;
-    if (caminho === "else" || caminho === "this") continue;
+    if (caminho === "else") continue;
+    if (caminho === "this" || caminho.startsWith("this.")) continue;
     // Sem ponto = pode ser helper sem argumento tanto quanto campo raiz; só
     // acusamos caminho aninhado, onde a intenção de ler um dado é clara.
     if (!caminho.includes(".")) continue;
@@ -151,19 +173,49 @@ export async function reviewClauseLibrary(input: {
     const problemas: ClauseReviewProblem[] = [];
     const vazias = new Set<string>();
 
+    const caminhos = caminhosDe(c.content);
     for (const esteira of provadaEm) {
-      const data = amostraDe(esteira);
-      const out = checkClauseContent(
-        { id: c.id, content: c.content, chunkTotal: c.chunkTotal, tags: c.tags },
-        data
-      );
-      if (!("html" in out)) {
-        problemas.push({ esteira, reason: out.reason, message: maskForReport(out.message) });
+      const modalidades = AMOSTRAS[esteira];
+      const falhas: Array<{ reason: ClauseSlotFailureReason; message: string }> = [];
+      // Quantas amostras desta esteira renderizaram, e em quantas delas cada
+      // caminho saiu vazio. Só acusa o que é vazio em TODAS — vazio em uma só é
+      // lacuna da amostra, não da cláusula.
+      let renderizou = 0;
+      const vaziasEm = new Map<string, number>();
+
+      for (const modalidade of modalidades) {
+        const data = getPreviewSampleData(modalidade);
+        const out = checkClauseContent(
+          { id: c.id, content: c.content, chunkTotal: c.chunkTotal, tags: c.tags },
+          data
+        );
+        if (!("html" in out)) {
+          falhas.push(out);
+          continue;
+        }
+        renderizou += 1;
+        for (const caminho of caminhos) {
+          const v = resolveCaminho(data, caminho);
+          if (v === undefined || v === null || v === "") {
+            vaziasEm.set(caminho, (vaziasEm.get(caminho) ?? 0) + 1);
+          }
+        }
+      }
+
+      // A falha só conta quando nenhuma amostra da esteira passou: defeito de
+      // conteúdo (não compila, está em chunks, sobra chave) é invariante ao
+      // dado. Quebrar só numa modalidade é sinal de amostra incompleta, e
+      // reportar isso como "a geração descartaria" seria mentira.
+      if (falhas.length > 0 && renderizou === 0) {
+        problemas.push({
+          esteira,
+          reason: falhas[0]!.reason,
+          message: maskForReport(falhas[0]!.message),
+        });
         continue;
       }
-      for (const caminho of caminhosDe(c.content)) {
-        const v = resolveCaminho(data, caminho);
-        if (v === undefined || v === null || v === "") vazias.add(caminho);
+      for (const [caminho, n] of vaziasEm) {
+        if (n === renderizou) vazias.add(caminho);
       }
     }
 

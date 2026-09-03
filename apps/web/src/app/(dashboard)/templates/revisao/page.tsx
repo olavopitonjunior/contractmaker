@@ -2,8 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { auth, getUserOrg } from "@/lib/auth/auth";
-import { getEffectiveUserId } from "@/lib/auth/impersonation";
-import { prisma } from "@/lib/db/prisma";
+import { isOrgOwnerAdmin } from "@/lib/auth/org-role";
 import { LibraryReviewClient } from "@/components/templates/LibraryReviewClient";
 
 export const metadata = {
@@ -22,12 +21,7 @@ export default async function LibraryReviewPage() {
   const org = await getUserOrg(session.user.id);
   if (!org) return null;
 
-  const effUserId = await getEffectiveUserId(session.user.id);
-  const membership = await prisma.orgMembership.findFirst({
-    where: { userId: effUserId, orgId: org.id },
-    select: { role: true },
-  });
-  if (!membership || !["owner", "admin"].includes(membership.role)) notFound();
+  if (!(await isOrgOwnerAdmin(session.user.id, org.id))) notFound();
 
   return (
     <div className="space-y-4">

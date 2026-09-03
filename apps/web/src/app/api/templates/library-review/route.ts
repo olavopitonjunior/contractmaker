@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth, getUserOrg } from "@/lib/auth/auth";
-import { getEffectiveUserId } from "@/lib/auth/impersonation";
-import { prisma } from "@/lib/db/prisma";
+import { isOrgOwnerAdmin } from "@/lib/auth/org-role";
 import { isGoogleDocsConfigured } from "@/lib/google/client";
 import { reviewLibrary } from "@/lib/templates/library-review";
 import { reviewClauseLibrary } from "@/lib/templates/clause-review";
@@ -27,21 +26,12 @@ const Body = z.object({
   scope: z.enum(["templates", "clauses", "all"]).default("all"),
 });
 
-async function requireOwnerAdmin(userId: string, orgId: string) {
-  const effUserId = await getEffectiveUserId(userId);
-  const m = await prisma.orgMembership.findFirst({
-    where: { userId: effUserId, orgId },
-    select: { role: true },
-  });
-  return !!m && ["owner", "admin"].includes(m.role);
-}
-
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const org = await getUserOrg(session.user.id);
   if (!org) return NextResponse.json({ error: "No organization" }, { status: 400 });
-  if (!(await requireOwnerAdmin(session.user.id, org.id))) {
+  if (!(await isOrgOwnerAdmin(session.user.id, org.id))) {
     return NextResponse.json({ error: "Apenas owner/admin." }, { status: 403 });
   }
 

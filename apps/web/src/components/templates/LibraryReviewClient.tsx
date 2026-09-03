@@ -35,12 +35,17 @@ interface Resposta {
   templatesIndisponivel?: string;
 }
 
-/** Por que a geração descartaria a cláusula, em português de operador. */
+/**
+ * Por que a geração descartaria a cláusula, em português de operador.
+ *
+ * Sem `provider_mismatch`: aquele motivo nasce da ELEIÇÃO entre candidatas de um
+ * slot, que esta revisão não faz — ela prova uma linha de cada vez. Deixar a
+ * entrada aqui sugeriria que o painel detecta uma coisa que ele não detecta.
+ */
 const MOTIVO_CLAUSULA: Record<string, string> = {
   render_error: "o texto não compila como Handlebars",
   residual_placeholder: "sobra uma chave depois do preenchimento",
   chunked_content: "a linha está partida em pedaços no acervo",
-  provider_mismatch: "não há cláusula do garantidor escolhido",
 };
 
 const FIX_LABEL: Record<string, string> = {
@@ -114,7 +119,15 @@ export function LibraryReviewClient() {
     }
     setCorrigindo(null);
     if (feitos) toast.success(`${feitos} conserto(s) aplicado(s) em "${row.name}".`);
-    if (falhas.length) toast.error(falhas[0]!);
+    // A CONTA das falhas, não só a primeira: com 4 de 6 falhando, mostrar uma
+    // deixaria o operador achando que as outras 3 passaram.
+    if (falhas.length) {
+      toast.error(
+        falhas.length === 1
+          ? falhas[0]!
+          : `${falhas.length} consertos não foram aplicados. O primeiro: ${falhas[0]}`
+      );
+    }
     await revisar();
   }
 
