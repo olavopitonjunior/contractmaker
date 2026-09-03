@@ -301,21 +301,17 @@ describe("collapsed-paragraph — a cláusula virou uma chave só", () => {
     expect(hits[0].excerpt).not.toContain("111.444.777-35");
   });
 
-  it("DÍVIDA CONHECIDA: colapso sem termo de valor passa em silêncio", () => {
-    // Este teste descreve um FALSO NEGATIVO deliberado, não um comportamento
-    // desejado. Ao trocar o gatilho de comprimento pela linguagem de cláusula,
-    // um colapso genuíno cuja redação não use R$, %, "deverá" ou "pagamento" —
-    // prazo, posse, foro — deixa de ser apontado.
+  it("colapso de cláusula SEM valor (posse, vistoria) é acusado — não só as de R$", () => {
+    // Este caso já foi o oposto, e por pouco tempo: quando o gatilho de
+    // comprimento saiu, cláusula sem termo de valor passou a escapar, e o teste
+    // registrava a dívida em vez de escondê-la. As fixtures reais de locação
+    // têm cláusulas inteiras de prazo, posse e vistoria que nenhum termo de
+    // valor alcançava — o buraco era real, não hipotético —, então
+    // `CLAUSE_LANGUAGE` ganhou os termos de OBJETO.
     //
-    // A troca foi escolhida porque os dois erros não custam o mesmo: o falso
-    // positivo vinha COM UM BOTÃO que devolvia nome, RG e CPF ao modelo, e o
-    // falso negativo custa um colapso que segue invisível, como era antes de a
-    // regra existir. Numa regra que proponhe reescrever contrato, silêncio é
-    // preferível a um remédio perigoso.
-    //
-    // Se alguém alargar `CLAUSE_LANGUAGE` para fechar este buraco, este caso
-    // vira o oposto (esperar 1 achado) — e aí a rede de PII é o que precisa
-    // segurar o falso positivo que voltar junto.
+    // O que tornou seguro alargar foi a rede de PII: qualificação de pessoa
+    // física carrega CPF, então mesmo que um termo volte a casar com uma delas,
+    // o conserto vira `manual` em vez de um botão que devolve o dado ao modelo.
     const abre = "5.1. Da posse do imóvel:";
     const fecha = "5.2. As benfeitorias necessárias serão indenizadas na forma da lei.";
     const clausulaSemValor =
@@ -324,6 +320,26 @@ describe("collapsed-paragraph — a cláusula virou uma chave só", () => {
       "LOCADOR até aquele momento.";
     const doc = [abre, "{{locatarios_qualificacao}}", fecha].join("\n");
     const source = [abre, clausulaSemValor, fecha].join("\n");
+    const hits = byCategory(run(doc, { sourceText: source }).findings, "collapsed-paragraph");
+    expect(hits).toHaveLength(1);
+    // Fonte sem dado pessoal: aqui restaurar É o conserto certo.
+    expect(hits[0].suggestedFix?.op).toBe("restore-paragraph");
+  });
+
+  it("os termos de objeto NÃO casam com qualificação — nem a de pessoa jurídica", () => {
+    // A rede de PII cobre pessoa física (CPF é obrigatório na qualificação).
+    // Pessoa JURÍDICA pura NÃO é coberta por ela — nome, endereço e CNPJ não
+    // bloqueiam a ativação —, então, para esse padrão, este caso é a única
+    // proteção contra o falso positivo voltar. Por isso ele existe separado.
+    const abre = "Pelo presente instrumento particular, as partes:";
+    const fecha = "Têm entre si justo e contratado o presente contrato de locação.";
+    const qualificacaoPJ =
+      "IMOBILIÁRIA HORIZONTE LTDA., pessoa jurídica de direito privado, inscrita no CNPJ " +
+      "sob o nº 12.345.678/0001-90, com sede na Avenida Brasil, nº 2.400, conjunto 32, " +
+      "bairro Centro, Campinas/SP, CEP 13010-000, neste ato representada na forma de seu " +
+      "contrato social, doravante denominada ADMINISTRADORA";
+    const doc = [abre, "{{imobiliaria_qualificacao}}", fecha].join("\n");
+    const source = [abre, qualificacaoPJ, fecha].join("\n");
     expect(
       byCategory(run(doc, { sourceText: source }).findings, "collapsed-paragraph")
     ).toHaveLength(0);

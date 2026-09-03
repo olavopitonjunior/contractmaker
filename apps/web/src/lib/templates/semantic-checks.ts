@@ -122,8 +122,32 @@ const ONLY_TOKEN_RE =
 const IMOB_HINT = /imobili[áa]ria[^.;\n]{0,24}?(?:intermediadora|administradora|corretora)/i;
 /** Pista de que a frase fala do corretor pessoa como parte. */
 const CORRETOR_HINT = /corretor[a-zç()/]{0,6}[^.;\n]{0,24}?(?:intermediador|angariador)/i;
-/** Linguagem de cláusula: um parágrafo assim não era uma qualificação. */
-const CLAUSE_LANGUAGE = /R\$|%|por cento|dever[áa]|ser[áa]\s+pag|pagament/i;
+/**
+ * Linguagem de cláusula: um parágrafo assim não era uma qualificação.
+ *
+ * Os termos de VALOR (R$, %, deverá, pagamento) vieram do incidente que
+ * originou a regra — um item de rateio. Os de OBJETO (prazo, vigência, posse,
+ * vistoria, foro, comarca, rescisão) entraram depois, medidos contra as
+ * fixtures reais de locação: elas têm cláusulas inteiras de prazo, posse e
+ * vistoria que nenhum termo de valor alcançava, e um colapso ali passava em
+ * silêncio.
+ *
+ * Nenhum deles casa com as linhas de qualificação das mesmas fixtures — foi
+ * verificado, não suposto. `obrigaç` foi DESCARTADO por isso: aparece dentro do
+ * próprio parágrafo de qualificação do fiador ("por todas obrigações por este
+ * assumidas"). Termos genéricos (imóvel, contrato) ficam fora pelo mesmo
+ * motivo: casariam com qualquer texto.
+ *
+ * O que torna seguro alargar é a rede de PII logo abaixo: qualificação de
+ * pessoa física carrega CPF por exigência legal, então mesmo que um termo volte
+ * a casar com uma delas, o conserto proposto vira `manual` em vez de um botão
+ * que devolve o dado ao modelo. A rede tem limite conhecido — nome, endereço e
+ * CNPJ não bloqueiam —, então qualificação de PESSOA JURÍDICA pura não está
+ * coberta por ela; nenhum termo daqui casa com esse padrão nas fixtures, mas
+ * isso é constatação sobre a amostra, não garantia estrutural.
+ */
+const CLAUSE_LANGUAGE =
+  /R\$|%|por cento|dever[áa]|ser[áa]\s+pag|pagament|prazo|vig[eê]nc|posse|vistoria|foro|comarca|rescis/i;
 const CRECI_RE = /\bCRECI\b[^\n]{0,24}?\d[\d.\-/]{2,12}[A-Za-z]?/gi;
 const PIX_RE = /\bchave\s+PIX\b[^\n]{0,60}/gi;
 const REF_RE =
