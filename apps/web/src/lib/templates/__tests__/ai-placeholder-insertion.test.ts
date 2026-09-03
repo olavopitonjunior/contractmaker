@@ -518,6 +518,80 @@ describe("insertPlaceholdersWithAI — inserted só depois de conferir", () => {
     expect(out.mapeamentos).toEqual([{ trecho_literal: "R$ 2.500,00", token: "aluguel_valor" }]);
   });
 
+  // Medido em produção em 02/09/2026 (issue #530): para `imobiliaria_qualificacao`
+  // a IA propôs o item a) INTEIRO da cláusula de rateio (valor + rótulo +
+  // qualificação + conta); longest-first, ele entrou, a proposta certa para
+  // `imobiliaria_dados_pagamento` virou `overlapped` e o parágrafo colapsou em
+  // `{{imobiliaria_qualificacao}};` — com o gate de PII liberando por cima.
+  it("chave de DADO que engole a proposta da vizinha é recusada (engulfs-neighbor); a vizinha entra", async () => {
+    const qual = "Imobiliária Exemplo Ltda, inscrita no CRECI/SP sob nº 12345-J, CNPJ sob nº 12.345.678/0001-90, com sede na Rua das Flores, nº 100, Centro";
+    const conta = "na conta corrente nº 12345-6 mantida na agência 0001, do Banco Exemplo (PIX 12.345.678/0001-90)";
+    const itemA = `a) R$ 3.000,00 (três mil reais), a ser pago diretamente à imobiliária intermediadora ${qual}, como honorários pela intermediação, por meio ${conta};`;
+    useDoc(`4.2. O primeiro aluguel será rateado assim:\n${itemA}\nb) R$ 1.000,00 ao corretor.`);
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([
+        { trecho_literal: itemA, token: "imobiliaria_qualificacao" },
+        { trecho_literal: conta, token: "imobiliaria_dados_pagamento" },
+      ])
+    );
+    const report = await run();
+    const skip = report.skippedAmbiguous.find((s) => s.token === "imobiliaria_qualificacao");
+    expect(skip?.reason).toBe("engulfs-neighbor");
+    expect(skip?.neighbor).toBe("imobiliaria_dados_pagamento");
+    // A vizinha não vira `overlapped`: entra, e o parágrafo mantém o resto.
+    expect(report.inserted.map((i) => i.token)).toEqual(["imobiliaria_dados_pagamento"]);
+    expect(state).toContain("a ser pago diretamente à imobiliária intermediadora");
+    expect(state).toContain("por meio {{imobiliaria_dados_pagamento}};");
+    expect(state).not.toContain("agência 0001");
+    // O motivo chega ao `notMapped` com o nome da vizinha preservado.
+    expect(report.notMapped.find((n) => n.token === "imobiliaria_qualificacao")?.reason).toBe("engulfs-neighbor");
+  });
+
+  it("controle: bloco composto que NÃO é chave de dado pode conter a vizinha (cláusula de garantia engloba a qualificação do fiador)", async () => {
+    const fiador = "Fulano de Tal, brasileiro, casado, CPF 529.982.247-25";
+    const clausula = `8.1. Assinam também o presente contrato, como FIADOR, ${fiador}, que fica solidariamente responsável.`;
+    useDoc(`7. MULTA\n${clausula}\n9. FORO`);
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([
+        { trecho_literal: clausula, token: "clausula_garantia" },
+        { trecho_literal: fiador, token: "fiador_qualificacao" },
+      ])
+    );
+    const report = await run();
+    expect(report.inserted.map((i) => i.token)).toEqual(["clausula_garantia"]);
+    expect(report.skippedAmbiguous.find((s) => s.token === "fiador_qualificacao")?.reason).toBe("overlapped");
+    expect(report.skippedAmbiguous.some((s) => s.reason === "engulfs-neighbor")).toBe(false);
+  });
+
+  it("vizinha que não vai entrar (segunda proposta de bloco já aplicado) NÃO derruba a chave de dado", async () => {
+    // Duas propostas para `clausula_garantia`: a maior entra; a segunda,
+    // menor, é só o texto da qualificação do locador — e por acaso está
+    // contida na proposta de `locadores_qualificacao`. Ela nunca seria
+    // aplicada (bloco já visto), então não pode contar como vizinha.
+    const qualLocador = "Maria Exemplo, brasileira, solteira, CPF 529.982.247-25, residente na Rua A, 1";
+    const garantia = "8.1. Como garantia, a PARTE LOCATÁRIA depositará caução de R$ 9.000,00 na conta da PARTE LOCADORA.";
+    useDoc(`PARTE LOCADORA, ${qualLocador}, e PARTE LOCATÁRIA.\n7. MULTA\n${garantia}\n9. FORO`);
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([
+        { trecho_literal: garantia, token: "clausula_garantia" },
+        { trecho_literal: qualLocador, token: "locadores_qualificacao" },
+        { trecho_literal: "Maria Exemplo, brasileira", token: "clausula_garantia" },
+      ])
+    );
+    const report = await run();
+    expect(report.inserted.map((i) => i.token).sort()).toEqual(["clausula_garantia", "locadores_qualificacao"]);
+    expect(report.skippedAmbiguous.some((s) => s.reason === "engulfs-neighbor")).toBe(false);
+  });
+
+  it("DATA_KEYS é exatamente o conjunto de *_qualificacao/*_dados_pagamento do catálogo (chave nova exige decisão)", async () => {
+    const { DATA_KEYS } = await import("../ai-placeholder-insertion");
+    const { PLACEHOLDER_CATALOG } = await import("../placeholder-catalog");
+    const fromCatalog = new Set(
+      PLACEHOLDER_CATALOG.map((d) => d.token).filter((t) => /_qualificacao$|_dados_pagamento$/.test(t))
+    );
+    expect(Array.from(DATA_KEYS).sort()).toEqual(Array.from(fromCatalog).sort());
+  });
+
   it("extractMapeamentos: cerca em maiúsculas e cerca aberta sem fechamento (corte) também são lidas", async () => {
     const { extractMapeamentos } = await import("../ai-placeholder-insertion");
     const upper = "```JSON\n" + JSON.stringify({ mapeamentos: [{ trecho_literal: "x", token: "t" }] }) + "\n```";

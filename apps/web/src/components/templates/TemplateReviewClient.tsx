@@ -57,7 +57,7 @@ interface SlotReport {
 }
 interface DraftReport {
   inserted?: { token: string; trecho: string }[];
-  skippedAmbiguous?: { token: string; trecho: string; reason: string; paragraph?: string }[];
+  skippedAmbiguous?: { token: string; trecho: string; reason: string; paragraph?: string; neighbor?: string }[];
   /** `string[]` em relatórios antigos; `{token, reason, trecho?}` desde 2026-09-02. */
   notMapped?: unknown[];
   missingRequired?: string[];
@@ -93,6 +93,8 @@ const SKIP_REASON: Record<string, string> = {
   "unknown-token": "chave fora do catálogo",
   "already-tokenized": "o trecho já tem uma chave",
   overlapped: "o trecho se sobrepõe a outro já mapeado nesta passada",
+  "engulfs-neighbor":
+    "o trecho proposto engoliria também o trecho de outra chave (a qualificação e a conta ficam em chaves separadas) — mapeie só o dado desta chave",
   // Pós-batch — o passe confere o que a API fez (mesmo vocabulário dos slots).
   "batch-failed": "o Google recusou a edição",
   "replace-noop":
@@ -677,7 +679,15 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                 {(report.skippedAmbiguous ?? []).map((s, i) => (
                   <div key={i} className="rounded-md border bg-muted/30 p-2">
                     <code className="rounded bg-muted px-1">{`{{${s.token}}}`}</code>{" "}
-                    <span className="text-muted-foreground">— {SKIP_REASON[s.reason] ?? s.reason}.</span>
+                    <span className="text-muted-foreground">
+                      — {SKIP_REASON[s.reason] ?? s.reason}
+                      {s.neighbor ? (
+                        <>
+                          {" "}(chave vizinha: <code className="rounded bg-muted px-1">{`{{${s.neighbor}}}`}</code>)
+                        </>
+                      ) : null}
+                      .
+                    </span>
                     {/* Máscara também no render: relatório gravado antes de
                         2026-09-02 tem o trecho cru, e é a única defesa se um
                         relatório futuro escapar da máscara na gravação. */}
@@ -772,6 +782,12 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                               notMappedByToken.get(c.token)!.reason}
                             {notMappedByToken.get(c.token)!.occurrences !== undefined && (
                               <> ({notMappedByToken.get(c.token)!.occurrences}×)</>
+                            )}
+                            {notMappedByToken.get(c.token)!.neighbor && (
+                              <>
+                                {" "}(chave vizinha:{" "}
+                                <code className="rounded bg-muted px-1">{`{{${notMappedByToken.get(c.token)!.neighbor}}}`}</code>)
+                              </>
                             )}
                             {notMappedByToken.get(c.token)!.trecho && (
                               <> — “{maskForReport(notMappedByToken.get(c.token)!.trecho!)}”</>

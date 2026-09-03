@@ -111,7 +111,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
     token: "corretagem_qualificacao",
     label: "Qualificação da corretagem",
     description:
-      "Nome, CPF/CNPJ e CRECI do(s) corretor(es) que intermediaram a locação, conforme a etapa Comissão do formulário. Sem dado bancário. Vazio quando o negócio não tem corretor informado.",
+      "Nome, CPF/CNPJ e CRECI do(s) corretor(es) que intermediaram a locação, conforme a etapa Comissão do formulário. Cobre SÓ a qualificação (do nome ao CRECI): sem valor em R$, sem rótulo fixo e SEM a conta/PIX (essa parte é de corretagem_dados_pagamento). Vazio quando o negócio não tem corretor informado.",
     example:
       "Ana Ribeiro, inscrito(a) no CPF/MF sob nº 529.982.247-25, CRECI nº 12.345-F",
     required: false,
@@ -122,7 +122,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
     token: "corretagem_dados_pagamento",
     label: "Dados de repasse da corretagem",
     description:
-      "Chave PIX ou banco/agência/conta para o repasse da comissão do corretor do negócio. Use no lugar de digitar a conta de alguém no modelo — conta literal no texto do modelo bloqueia a ativação. Vazio quando não há dado de recebimento.",
+      "Chave PIX ou banco/agência/conta para o repasse da comissão do corretor do negócio. Cobre SÓ o trecho da conta/PIX, sem o nome/CPF/CRECI do corretor (esses são de corretagem_qualificacao). Use no lugar de digitar a conta de alguém no modelo — conta literal no texto do modelo bloqueia a ativação. Vazio quando não há dado de recebimento.",
     example: "na chave PIX (CPF): 529.982.247-25, de titularidade de Ana Ribeiro",
     required: false,
     kind: "composed",
@@ -132,7 +132,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
     token: "imobiliaria_qualificacao",
     label: "Qualificação da imobiliária intermediadora",
     description:
-      "Razão social, CNPJ, CRECI e sede da PRÓPRIA imobiliária como intermediadora da locação (quem recebe a comissão do 1º aluguel) — vem do perfil da imobiliária, não do formulário. Use no trecho que nomeia a imobiliária na cláusula de corretagem, mesmo quando ela não administra o imóvel. Vazio quando o perfil não tem razão social.",
+      "Razão social, CNPJ, CRECI e sede da PRÓPRIA imobiliária como intermediadora da locação (quem recebe a comissão do 1º aluguel) — vem do perfil da imobiliária, não do formulário. Cobre SÓ da razão social até a sede: sem o valor em R$, sem o rótulo 'a ser pago à imobiliária intermediadora' e SEM a conta/PIX (essa parte é de imobiliaria_dados_pagamento, na mesma frase). Use mesmo quando ela não administra o imóvel. Vazio quando o perfil não tem razão social.",
     example:
       "Imobiliária Exemplo Ltda., inscrita no CNPJ sob nº 12.345.678/0001-90, CRECI nº 12345-J, com sede na Rua das Flores, nº 100, Centro, São Paulo/SP",
     required: false,
@@ -143,7 +143,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
     token: "imobiliaria_dados_pagamento",
     label: "Dados de recebimento da imobiliária",
     description:
-      "Chave PIX ou banco/agência/conta onde a PRÓPRIA imobiliária recebe a comissão de intermediação (1º aluguel), cadastrada no Perfil da imobiliária. Use no lugar da conta/agência/PIX da imobiliária digitada no modelo — conta literal no texto bloqueia a ativação. Vazio quando a imobiliária não informou.",
+      "Chave PIX ou banco/agência/conta onde a PRÓPRIA imobiliária recebe a comissão de intermediação (1º aluguel), cadastrada no Perfil da imobiliária. Cobre SÓ o trecho da conta/PIX (ex.: 'na conta corrente nº … agência … banco … (PIX …)'), sem a razão social/CNPJ/sede (esses são de imobiliaria_qualificacao). Use no lugar da conta digitada no modelo — conta literal no texto bloqueia a ativação. Vazio quando a imobiliária não informou.",
     example: "na chave PIX (CNPJ): 12.345.678/0001-90, de titularidade de Imobiliária Exemplo Ltda.",
     required: false,
     kind: "composed",

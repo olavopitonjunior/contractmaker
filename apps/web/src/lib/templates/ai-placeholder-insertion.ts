@@ -106,6 +106,7 @@ REGRAS:
 6. NÃO mapeie texto fixo do contrato (cláusulas padrão que não variam por negócio).
 7. Se não encontrar correspondência pra um token, simplesmente não o inclua.
 8. O documento pode já conter placeholders no formato {{alguma_coisa}} — eles já estão prontos. NUNCA inclua no trecho_literal um texto que contenha {{...}}, nem pra "corrigir" o nome do token. Trate essas linhas como intocáveis.
+9. Tokens de DADO — qualificações (*_qualificacao) e dados de pagamento (*_dados_pagamento) — cobrem APENAS o dado em si: da razão social/nome até o último dado da qualificação; ou só a chave PIX / banco, agência e conta. NUNCA inclua neles rótulos fixos ("a ser pago diretamente à imobiliária intermediadora"), valores em R$, nem o trecho que pertence a outro token. Dois tokens vizinhos no mesmo parágrafo NUNCA se sobrepõem: se a qualificação e a conta estão na mesma frase, são DOIS mapeamentos, um para cada token, cada um só com a sua parte. Um trecho que engole o de outro token é recusado.
 
 DOCUMENTO:
 ${docText.slice(0, MAX_PROMPT_CHARS)}`;
@@ -182,6 +183,28 @@ export function extractMapeamentos(raw: string): { ok: boolean; mapeamentos: Map
   }
   return { ok: false, mapeamentos: [] };
 }
+
+/**
+ * Chaves de DADO: cobrem só o dado em si (uma qualificação, uma via de
+ * pagamento) e convivem com vizinhas no mesmo parágrafo. Uma proposta para
+ * uma delas que CONTÉM a proposta de outra chave é recusada
+ * (`engulfs-neighbor`) em vez de aplicada — medido em produção em 02/09/2026:
+ * o item a) inteiro da cláusula de rateio entrou como `imobiliaria_qualificacao`
+ * e o parágrafo colapsou, com o gate de PII liberando por cima. Conjunto
+ * EXPLÍCITO de propósito (não derivado por sufixo): o teste do catálogo quebra
+ * quando entrar uma chave nova, para a decisão ser tomada e não herdada.
+ */
+export const DATA_KEYS: ReadonlySet<string> = new Set([
+  "locadores_qualificacao",
+  "locatarios_qualificacao",
+  "fiador_qualificacao",
+  "vendedores_qualificacao",
+  "compradores_qualificacao",
+  "corretagem_qualificacao",
+  "corretagem_dados_pagamento",
+  "imobiliaria_qualificacao",
+  "imobiliaria_dados_pagamento",
+]);
 
 export async function insertPlaceholdersWithAI(input: {
   docId: string;
@@ -311,6 +334,30 @@ export async function insertPlaceholdersWithAI(input: {
     if (!isKnownToken(token, input.modalidade)) {
       skippedAmbiguous.push({ token, trecho, reason: "unknown-token" });
       continue;
+    }
+    // Chave de DADO que engole a proposta de outra chave: recusada ANTES de
+    // consumir o texto simulado — assim a vizinha (menor, vem depois na ordem
+    // longest-first) entra normalmente, em vez de sair como `overlapped` ao
+    // lado de um bloco que levou o parágrafo inteiro. A regra 9 do prompt pede
+    // isto; a trava garante. Só conta como vizinha uma proposta de bloco
+    // COMPOSTO ainda não aplicado nesta passada: o caso real é sempre
+    // composto contra composto (qualificação × conta), e uma segunda proposta
+    // de bloco já visto — ou um token simples curto que por acaso aparece
+    // dentro da qualificação — não pode derrubar uma chave válida.
+    if (DATA_KEYS.has(token)) {
+      const neighbor = ordenados.find(
+        (o) =>
+          o.token !== token &&
+          o.trecho.length < trecho.length &&
+          composedTokens.has(o.token) &&
+          !seenComposed.has(o.token) &&
+          !HAS_PLACEHOLDER.test(o.trecho) &&
+          trecho.includes(o.trecho)
+      );
+      if (neighbor) {
+        skippedAmbiguous.push({ token, trecho, reason: "engulfs-neighbor", neighbor: neighbor.token });
+        continue;
+      }
     }
     // Segunda proposta de bloco composto é descartada SEM entrar no relatório,
     // de propósito: não é falha a corrigir, é o passe recusando duplicar um
@@ -527,7 +574,9 @@ export async function insertPlaceholdersWithAI(input: {
     .filter((t) => !present.has(t))
     .map((token) => {
       const s = lastSkip.get(token);
-      return s ? { token, reason: s.reason, trecho: s.trecho } : { token, reason: semProposta };
+      return s
+        ? { token, reason: s.reason, trecho: s.trecho, ...(s.neighbor ? { neighbor: s.neighbor } : {}) }
+        : { token, reason: semProposta };
     });
 
   return {
