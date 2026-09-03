@@ -52,6 +52,49 @@ describe("scoreInsertion", () => {
     expect(s.fp).toBe(1);
   });
 
+  it("casa o MÁXIMO possível quando a mesma chave é esperada em duas posições vizinhas", () => {
+    // Com tolerância de ±1, as janelas de 3 e 5 se sobrepõem em 4. O casamento
+    // guloso pegaria o observado 4 para o esperado 3 e deixaria o esperado 5
+    // sem par, reportando 1 tp / 1 fn / 1 fp onde existe atribuição 1:1
+    // perfeita. O erro seria pessimista — mas o módulo existe para o número
+    // não mentir em nenhuma direção.
+    const g = gold({
+      expected: [
+        { token: "assinaturas", paragraphIndex: 3 },
+        { token: "assinaturas", paragraphIndex: 5 },
+      ],
+    });
+    const texto = ["a", "b", "c", "d", "{{assinaturas}}", "{{assinaturas}}"].join("\n");
+    const s = scoreInsertion({ gold: g, simulatedText: texto, plan: emptyPlan });
+    expect(s).toMatchObject({ tp: 2, fn: 0, fp: 0 });
+  });
+
+  it("o resultado não depende da ordem em que o gabarito foi escrito", () => {
+    const texto = ["a", "b", "c", "d", "{{assinaturas}}", "{{assinaturas}}"].join("\n");
+    const direta = scoreInsertion({
+      gold: gold({
+        expected: [
+          { token: "assinaturas", paragraphIndex: 3 },
+          { token: "assinaturas", paragraphIndex: 5 },
+        ],
+      }),
+      simulatedText: texto,
+      plan: emptyPlan,
+    });
+    const invertida = scoreInsertion({
+      gold: gold({
+        expected: [
+          { token: "assinaturas", paragraphIndex: 5 },
+          { token: "assinaturas", paragraphIndex: 3 },
+        ],
+      }),
+      simulatedText: texto,
+      plan: emptyPlan,
+    });
+    expect(invertida.tp).toBe(direta.tp);
+    expect(invertida.fn).toBe(direta.fn);
+  });
+
   it("chave que faltou é fn", () => {
     const s = scoreInsertion({
       gold: gold(),

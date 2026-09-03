@@ -61,7 +61,13 @@ export interface CaseScore {
   semantic: Record<string, number>;
   /** Motivos de descarte do planejador, por motivo. */
   skipped: Record<string, number>;
-  /** Colocações proibidas que o plano produziu (subconjunto de `fp`). */
+  /**
+   * Colocações proibidas que o plano produziu. Contadas de forma INDEPENDENTE
+   * do casamento: normalmente são `fp`, mas se um gabarito marcar a mesma
+   * posição como esperada e proibida, a colocação aparece aqui e como `tp`.
+   * Isso é um erro de anotação do gabarito, e é bom que fique visível em vez de
+   * ser silenciado por uma regra de precedência inventada aqui.
+   */
   forbiddenHits: GoldPlacement[];
 }
 
@@ -87,6 +93,49 @@ function matches(a: GoldPlacement, b: GoldPlacement): boolean {
   return a.token === b.token && Math.abs(a.paragraphIndex - b.paragraphIndex) <= INDEX_TOLERANCE;
 }
 
+/**
+ * Emparelhamento bipartido máximo entre esperados e observados (Kuhn, caminho
+ * aumentante). Devolve, para cada esperado, o índice do observado que ficou com
+ * ele, ou -1.
+ *
+ * Os conjuntos aqui têm dezenas de elementos por caso, então O(V·E) é
+ * irrelevante — o que importa é o resultado não depender da ordem em que o
+ * gabarito foi escrito.
+ */
+function matchMaximum(
+  expected: readonly GoldPlacement[],
+  observed: readonly GoldPlacement[]
+): number[] {
+  const candidatos = expected.map((want) =>
+    observed.map((o, j) => (matches(o, want) ? j : -1)).filter((j) => j !== -1)
+  );
+  /** Para cada observado, qual esperado o tomou. */
+  const donoDoObservado = new Array<number>(observed.length).fill(-1);
+
+  const tentar = (i: number, visitados: boolean[]): boolean => {
+    for (const j of candidatos[i]) {
+      if (visitados[j]) continue;
+      visitados[j] = true;
+      // Livre, ou o dono atual consegue outro par: qualquer um dos dois serve.
+      if (donoDoObservado[j] === -1 || tentar(donoDoObservado[j], visitados)) {
+        donoDoObservado[j] = i;
+        return true;
+      }
+    }
+    return false;
+  };
+
+  for (let i = 0; i < expected.length; i += 1) {
+    tentar(i, new Array<boolean>(observed.length).fill(false));
+  }
+
+  const matchedTo = new Array<number>(expected.length).fill(-1);
+  donoDoObservado.forEach((i, j) => {
+    if (i !== -1) matchedTo[i] = j;
+  });
+  return matchedTo;
+}
+
 export function scoreInsertion(input: {
   gold: GoldCase;
   /** `plan.simulatedText` — o documento como ficaria se o lote entrasse. */
@@ -102,18 +151,21 @@ export function scoreInsertion(input: {
     perToken[token][key] += 1;
   };
 
-  // Cada observado casa com NO MÁXIMO um esperado: sem isso, uma chave posta
-  // duas vezes no lugar certo contaria dois acertos e esconderia a duplicação.
-  const usadas = new Set<number>();
-  for (const want of input.gold.expected) {
-    const hit = observed.findIndex((o, i) => !usadas.has(i) && matches(o, want));
-    if (hit === -1) {
-      bump(want.token, "fn");
-    } else {
-      usadas.add(hit);
-      bump(want.token, "tp");
-    }
-  }
+  // Casamento MÁXIMO, não guloso. Cada observado casa com no máximo um
+  // esperado — sem isso, uma chave posta duas vezes no lugar certo contaria
+  // dois acertos e esconderia a duplicação. Mas percorrer os esperados em
+  // ordem, pegando o primeiro observado livre, subconta: com a tolerância de
+  // ±1, duas posições esperadas da MESMA chave têm janelas que se sobrepõem, e
+  // o primeiro esperado pode consumir o observado que era o único par possível
+  // do segundo. O erro é sempre pessimista (nunca esconde uma falha real), mas
+  // faria um plano bom parecer pior — e a razão de este módulo existir é o
+  // número não mentir. Os casos com chave repetida são justamente os da Trio
+  // (bloco duplicado, cláusula colapsada) que o corpus vai receber.
+  const matchedTo = matchMaximum(input.gold.expected, observed);
+  input.gold.expected.forEach((want, i) => {
+    bump(want.token, matchedTo[i] === -1 ? "fn" : "tp");
+  });
+  const usadas = new Set(matchedTo.filter((j) => j !== -1));
   observed.forEach((o, i) => {
     if (!usadas.has(i)) bump(o.token, "fp");
   });
