@@ -260,6 +260,91 @@ describe("collapsed-paragraph — a cláusula virou uma chave só", () => {
     expect(byCategory(run(doc, { sourceText: source }).findings, "collapsed-paragraph")).toHaveLength(0);
   });
 
+  it("qualificação LONGA continua calando — o tamanho não faz de um parágrafo uma cláusula", () => {
+    // Medido na staging em 03/09/2026, e o defeito era grave: a regra tinha o
+    // comprimento como segundo gatilho (`|| source.length > 400`). A
+    // qualificação completa de dois locadores passa disso sem ter nada de
+    // cláusula, e a regra promovia o trabalho BEM FEITO a "erro" — propondo
+    // restaurar nome, RG e CPF das pessoas dentro do modelo.
+    const abre = "Pelo presente instrumento particular, as partes abaixo qualificadas:";
+    const fecha = "Resolvem celebrar o presente contrato de locação residencial.";
+    const qualificacaoLonga =
+      "HELENA CASTRO VILABOIM, brasileira, viúva, engenheira civil, portadora da cédula de " +
+      "identidade RG nº 12.345.678-9 SSP/SP, inscrita no CPF sob o nº 111.444.777-35, " +
+      "residente e domiciliada na Rua das Acácias, nº 1.200, apartamento 74, bairro Jardim " +
+      "Paulistano, São Paulo/SP, CEP 01455-000, e ROBERTO ALMEIDA VILABOIM, brasileiro, " +
+      "solteiro, arquiteto, portador da cédula de identidade RG nº 98.765.432-1 SSP/SP, " +
+      "residente e domiciliado no mesmo endereço acima descrito";
+    expect(qualificacaoLonga.length).toBeGreaterThan(400);
+    const doc = [abre, "{{locadores_qualificacao}}", fecha].join("\n");
+    const source = [abre, qualificacaoLonga, fecha].join("\n");
+    expect(
+      byCategory(run(doc, { sourceText: source }).findings, "collapsed-paragraph")
+    ).toHaveLength(0);
+  });
+
+  it("colapso REAL cujo fonte tem PII não oferece restaurar — pede ajuste manual", () => {
+    // Segunda rede, independente da primeira. Uma heurística pode errar; o
+    // conserto que ela propõe não pode desfazer o gate de PII devolvendo o dado
+    // de um terceiro ao modelo.
+    const itemComCpf =
+      "a) R$ 2.500,00 (dois mil e quinhentos reais), a ser pago a Marcos Antônio Ferreira, " +
+      "inscrito no CPF sob o nº 111.444.777-35, como honorários pela intermediação;";
+    const doc = [anterior, "{{imobiliaria_qualificacao}}", posterior].join("\n");
+    const source = [anterior, itemComCpf, posterior].join("\n");
+    const hits = byCategory(run(doc, { sourceText: source }).findings, "collapsed-paragraph");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].severity).toBe("error");
+    expect(hits[0].suggestedFix).toEqual({ op: "manual" });
+    expect(hits[0].message).toMatch(/dado pessoal/i);
+    // E o excerto que vai para a tela continua mascarado.
+    expect(hits[0].excerpt).not.toContain("111.444.777-35");
+  });
+
+  it("colapso de cláusula SEM valor (posse, vistoria) é acusado — não só as de R$", () => {
+    // Este caso já foi o oposto, e por pouco tempo: quando o gatilho de
+    // comprimento saiu, cláusula sem termo de valor passou a escapar, e o teste
+    // registrava a dívida em vez de escondê-la. As fixtures reais de locação
+    // têm cláusulas inteiras de prazo, posse e vistoria que nenhum termo de
+    // valor alcançava — o buraco era real, não hipotético —, então
+    // `CLAUSE_LANGUAGE` ganhou os termos de OBJETO.
+    //
+    // O que tornou seguro alargar foi a rede de PII: qualificação de pessoa
+    // física carrega CPF, então mesmo que um termo volte a casar com uma delas,
+    // o conserto vira `manual` em vez de um botão que devolve o dado ao modelo.
+    const abre = "5.1. Da posse do imóvel:";
+    const fecha = "5.2. As benfeitorias necessárias serão indenizadas na forma da lei.";
+    const clausulaSemValor =
+      "A posse será transmitida ao LOCATÁRIO na data da assinatura, mediante termo de " +
+      "vistoria assinado pelas partes, permanecendo o imóvel sob responsabilidade do " +
+      "LOCADOR até aquele momento.";
+    const doc = [abre, "{{locatarios_qualificacao}}", fecha].join("\n");
+    const source = [abre, clausulaSemValor, fecha].join("\n");
+    const hits = byCategory(run(doc, { sourceText: source }).findings, "collapsed-paragraph");
+    expect(hits).toHaveLength(1);
+    // Fonte sem dado pessoal: aqui restaurar É o conserto certo.
+    expect(hits[0].suggestedFix?.op).toBe("restore-paragraph");
+  });
+
+  it("os termos de objeto NÃO casam com qualificação — nem a de pessoa jurídica", () => {
+    // A rede de PII cobre pessoa física (CPF é obrigatório na qualificação).
+    // Pessoa JURÍDICA pura NÃO é coberta por ela — nome, endereço e CNPJ não
+    // bloqueiam a ativação —, então, para esse padrão, este caso é a única
+    // proteção contra o falso positivo voltar. Por isso ele existe separado.
+    const abre = "Pelo presente instrumento particular, as partes:";
+    const fecha = "Têm entre si justo e contratado o presente contrato de locação.";
+    const qualificacaoPJ =
+      "IMOBILIÁRIA HORIZONTE LTDA., pessoa jurídica de direito privado, inscrita no CNPJ " +
+      "sob o nº 12.345.678/0001-90, com sede na Avenida Brasil, nº 2.400, conjunto 32, " +
+      "bairro Centro, Campinas/SP, CEP 13010-000, neste ato representada na forma de seu " +
+      "contrato social, doravante denominada ADMINISTRADORA";
+    const doc = [abre, "{{imobiliaria_qualificacao}}", fecha].join("\n");
+    const source = [abre, qualificacaoPJ, fecha].join("\n");
+    expect(
+      byCategory(run(doc, { sourceText: source }).findings, "collapsed-paragraph")
+    ).toHaveLength(0);
+  });
+
   it("sem fonte, só avisa quando o parágrafo anterior abre uma lista ou fala de comissão", () => {
     const doc = [anterior, "{{imobiliaria_qualificacao}}", posterior].join("\n");
     const hits = byCategory(run(doc).findings, "collapsed-paragraph");
