@@ -24,6 +24,8 @@ import { copyContractGoogleDoc } from "@/lib/google/copy-doc";
 import { trashDriveFile } from "@/lib/google/org-oauth";
 import { replacePlaceholdersInDoc } from "@/lib/google/replace-placeholders";
 import { enrichLocacaoData } from "@/lib/locacao/enrich";
+import { templateFamilyForModalidade } from "@/lib/contracts/template-category";
+import { textFingerprint } from "@/lib/ingestion/pii";
 import { buildLocacaoGoogleDocsMap } from "./gdoc-replacement-map";
 import { getPreviewSampleData } from "./preview-sample-data";
 import type { RecebimentoData } from "@/lib/forms/commissioner-receiving";
@@ -70,6 +72,68 @@ export async function renderGoogleDocsPreview(
   return promessa;
 }
 
+/** A família do modelo não tem construtor de mapa — não há prévia honesta. */
+export class PreviewFamiliaNaoSuportadaError extends Error {
+  constructor(readonly familia: string) {
+    super(
+      "Ainda não sei montar uma prévia preenchida para esta família de modelo. " +
+        "Use o documento ao lado para conferir as chaves."
+    );
+    this.name = "PreviewFamiliaNaoSuportadaError";
+  }
+}
+
+/**
+ * O mapa da FAMÍLIA do modelo — não sempre o de locação.
+ *
+ * A geração despacha por família (`buildVendaPlaceholderMap` para venda), e a
+ * ingestão aceita `google_docs` em venda e proposta. Uma prévia que rodasse o
+ * mapa de locação sobre dados de venda não daria erro: daria um mapa quase
+ * vazio, e `cleanupOrphanPlaceholders` apagaria em silêncio as chaves que o
+ * modelo tem — entregando ao operador uma prévia limpa e ERRADA. Que é
+ * exatamente o defeito que esta tela existe para não repetir.
+ *
+ * `proposta` não tem construtor em lugar nenhum do código: recusa explícita, em
+ * vez de prévia inventada.
+ */
+async function montarMapa(
+  input: RenderGoogleDocsPreviewInput
+): Promise<Record<string, string>> {
+  const familia = templateFamilyForModalidade(input.modalidade);
+  // A amostra é o `dataJson` CRU — inclusive com o `recebimento` fictício dos
+  // corretores, que na geração de verdade é retirado antes do enrich. Aqui isso
+  // é desejável: é o que faz a via de repasse aparecer na cláusula, que é
+  // exatamente o que o operador precisa ver antes de ativar o modelo.
+  const raw = getPreviewSampleData(input.modalidade);
+  const clone = () => JSON.parse(JSON.stringify(raw)) as Record<string, unknown>;
+
+  if (familia === "locacao") {
+    return buildLocacaoGoogleDocsMap({
+      enriched: enrichLocacaoData(clone(), {}),
+      rawDataJson: raw,
+      registro: input.registro ?? [],
+      // O Perfil REAL da org: é justamente o que o operador precisa conferir —
+      // se a conta da imobiliária sai certa na cláusula de corretagem.
+      orgRecebimento: input.orgRecebimento ?? null,
+      contrato: { numero: "EXEMPLO-0001", id: "exemplo", versao: "1" },
+    });
+  }
+
+  if (familia === "venda") {
+    const { enrichContractData } = await import("@/lib/services/contract-generation");
+    const { buildVendaPlaceholderMap } = await import("./placeholder-map");
+    const map = buildVendaPlaceholderMap(
+      enrichContractData(clone() as never) as unknown as Record<string, unknown>
+    );
+    map.contrato_numero = "EXEMPLO-0001";
+    map.contrato_id = "exemplo";
+    map.contrato_versao = "1";
+    return map;
+  }
+
+  throw new PreviewFamiliaNaoSuportadaError(familia);
+}
+
 async function render(
   input: RenderGoogleDocsPreviewInput
 ): Promise<GoogleDocsPreviewResult> {
@@ -80,7 +144,12 @@ async function render(
   let revisionKey = "";
   try {
     const head = await getDocHeadRevision(docId);
-    revisionKey = `${head ?? "sem-revisao"}::${SAMPLE_VERSION}`;
+    // O Perfil da org entra na chave: ele é IMPRESSO na prévia (a conta onde a
+    // imobiliária recebe), e o operador que acabou de corrigir a conta em
+    // /settings/perfil e volta para conferir receberia o HTML anterior — a
+    // staleness exata que a feature existe para evitar, só que na outra ponta.
+    const orgKey = textFingerprint(JSON.stringify(input.orgRecebimento ?? null));
+    revisionKey = `${head ?? "sem-revisao"}::${SAMPLE_VERSION}::${orgKey}`;
   } catch {
     // Sem a revisão, não há como saber se o cache serve: renderiza de novo.
     revisionKey = "";
@@ -92,21 +161,7 @@ async function render(
     }
   }
 
-  // A amostra é o `dataJson` CRU — inclusive com o `recebimento` fictício dos
-  // corretores, que na geração de verdade é retirado antes do enrich. Aqui isso
-  // é desejável: é o que faz a via de repasse aparecer na cláusula, que é
-  // exatamente o que o operador precisa ver antes de ativar o modelo.
-  const raw = getPreviewSampleData(modalidade);
-  const enriched = enrichLocacaoData(JSON.parse(JSON.stringify(raw)), {});
-  const map = buildLocacaoGoogleDocsMap({
-    enriched,
-    rawDataJson: raw,
-    registro: input.registro ?? [],
-    // O Perfil REAL da org: é justamente o que o operador precisa conferir —
-    // se a conta da imobiliária sai certa na cláusula de corretagem.
-    orgRecebimento: input.orgRecebimento ?? null,
-    contrato: { numero: "EXEMPLO-0001", id: "exemplo", versao: "1" },
-  });
+  const map = await montarMapa(input);
 
   let copiaId: string | null = null;
   try {

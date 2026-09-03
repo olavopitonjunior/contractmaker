@@ -90,6 +90,15 @@ export async function POST(
         });
         return NextResponse.json({ mode: "google_docs_sample", ...previa });
       } catch (err) {
+        // Família sem construtor de mapa não é falha de integração: é uma
+        // capacidade que não existe. 422 com a razão, em vez de 502 genérico —
+        // e nunca uma prévia inventada.
+        if (err instanceof Error && err.name === "PreviewFamiliaNaoSuportadaError") {
+          return NextResponse.json(
+            { error: err.message, code: "PREVIEW_FAMILIA_NAO_SUPORTADA" },
+            { status: 422 }
+          );
+        }
         console.error("[templates/preview] prévia com amostra falhou:", err);
         const { googleErrorMessage } = await import("@/lib/google/auth-error");
         return NextResponse.json({ error: googleErrorMessage(err) }, { status: 502 });

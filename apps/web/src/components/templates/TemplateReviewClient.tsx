@@ -35,7 +35,11 @@ import {
   Info,
   MousePointerClick,
 } from "lucide-react";
-import { matchCriteriaSummary, modalidadeLabel } from "@/lib/contracts/template-category";
+import {
+  matchCriteriaSummary,
+  modalidadeLabel,
+  templateFamilyForModalidade,
+} from "@/lib/contracts/template-category";
 
 interface CatalogEntry {
   token: string;
@@ -281,6 +285,11 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
   const [fixingId, setFixingId] = useState<string | null>(null);
   const [iframeKey, setIframeKey] = useState(0);
   const [aba, setAba] = useState<"documento" | "previa">("documento");
+  // Só há prévia preenchida onde existe construtor de mapa. Proposta não tem —
+  // e oferecer o botão para depois recusar seria pior que não oferecer.
+  const temPrevia = ["locacao", "venda"].includes(
+    templateFamilyForModalidade(template.modalidade)
+  );
   const [previaHtml, setPreviaHtml] = useState<string | null>(null);
   const [previaErro, setPreviaErro] = useState<string | null>(null);
   const [previaCarregando, setPreviaCarregando] = useState(false);
@@ -751,17 +760,19 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
             >
               Documento
             </Button>
-            <Button
-              size="sm"
-              variant={aba === "previa" ? "default" : "outline"}
-              className="h-7 text-xs"
-              onClick={() => {
-                setAba("previa");
-                if (!previaHtml) void gerarPrevia();
-              }}
-            >
-              Prévia com dados de exemplo
-            </Button>
+            {temPrevia && (
+              <Button
+                size="sm"
+                variant={aba === "previa" ? "default" : "outline"}
+                className="h-7 text-xs"
+                onClick={() => {
+                  setAba("previa");
+                  if (!previaHtml) void gerarPrevia();
+                }}
+              >
+                Prévia com dados de exemplo
+              </Button>
+            )}
             <a
               href={`https://docs.google.com/document/d/${template.docId}/edit`}
               target="_blank"

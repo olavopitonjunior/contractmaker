@@ -101,6 +101,38 @@ describe("renderGoogleDocsPreview", () => {
     expect(copyMock).toHaveBeenCalledTimes(2);
   });
 
+  it("modelo de VENDA usa o mapa de venda, não o de locação", async () => {
+    // Rodar o mapa de locação sobre dados de venda não daria erro: daria um
+    // mapa quase vazio, e o `cleanupOrphanPlaceholders` apagaria em silêncio as
+    // chaves que o modelo tem — uma prévia limpa e ERRADA, que é o defeito que
+    // esta tela existe para não repetir.
+    await renderGoogleDocsPreview(input({ modalidade: "a_vista" }));
+    const map = replaceMock.mock.calls[0][0].replacements as Record<string, string>;
+    expect(map.vendedores_qualificacao).toBeTruthy();
+    // Chaves que só existem em locação não podem aparecer num modelo de venda.
+    expect(map.locadores_qualificacao).toBeUndefined();
+    expect(map.rateio_primeiro_aluguel).toBeUndefined();
+  });
+
+  it("família sem construtor de mapa recusa em vez de inventar prévia", async () => {
+    await expect(
+      renderGoogleDocsPreview(input({ modalidade: "proposta_venda" }))
+    ).rejects.toMatchObject({ name: "PreviewFamiliaNaoSuportadaError" });
+    // Recusado ANTES de copiar: nada é criado no Drive.
+    expect(copyMock).not.toHaveBeenCalled();
+  });
+
+  it("mudar o Perfil da org invalida o cache — a conta dela sai impressa na prévia", async () => {
+    const args = input({ orgRecebimento: { pix_chave: "antiga@exemplo.test" } as never });
+    await renderGoogleDocsPreview(args);
+    const depois = await renderGoogleDocsPreview({
+      ...args,
+      orgRecebimento: { pix_chave: "nova@exemplo.test" } as never,
+    });
+    expect(depois.cached).toBe(false);
+    expect(copyMock).toHaveBeenCalledTimes(2);
+  });
+
   it("dois pedidos simultâneos geram UMA cópia só", async () => {
     const args = input();
     const [a, b] = await Promise.all([
