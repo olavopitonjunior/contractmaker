@@ -1,17 +1,40 @@
-export type TargetKind =
-  | "vendedor"
-  | "comprador"
-  | "imovel"
-  | "diligenciado"
-  // Dependentes do VENDEDOR — sempre diligenciados junto (decisão do usuário
-  // 2026-05-22). targetIndex referencia o índice do vendedor titular.
-  | "conjuge_vendedor"
-  | "procurador_vendedor"
-  | "representante_vendedor"
-  // Locação (análise de crédito Serasa, 2026-06-10). fiador vive em
-  // garantia.fiador (objeto, sem índice).
-  | "locatario"
-  | "fiador";
+/**
+ * Tupla runtime dos alvos de certidão — fonte para o `z.enum` das rotas (antes
+ * a rota de dispatch mantinha uma cópia literal que divergia).
+ *
+ * Venda: vendedor/comprador/imóvel/diligenciado + dependentes do VENDEDOR
+ * (sempre diligenciados junto, decisão do usuário 2026-05-22; targetIndex
+ * referencia o índice do vendedor titular).
+ *
+ * Locação (planner com `esteira: "locacao"`, 2026-09-02): locatário, fiador
+ * (vive em `garantia.fiador` — objeto sem índice, targetIndex sempre 0),
+ * cônjuge do fiador (`garantia.fiador.conjuge`, idem) e locador (opt-in).
+ * `locatario`/`fiador` já existiam para a análise de crédito Serasa
+ * (2026-06-10); `CertidaoJob.targetKind` é String no schema — sem migração.
+ */
+export const TARGET_KINDS = [
+  "vendedor",
+  "comprador",
+  "imovel",
+  "diligenciado",
+  "conjuge_vendedor",
+  "procurador_vendedor",
+  "representante_vendedor",
+  "locatario",
+  "fiador",
+  "conjuge_fiador",
+  "locador",
+] as const;
+
+export type TargetKind = (typeof TARGET_KINDS)[number];
+
+/** Alvos que só existem no shape de locação. */
+export const LOCACAO_TARGET_KINDS: ReadonlySet<TargetKind> = new Set<TargetKind>([
+  "locatario",
+  "fiador",
+  "conjuge_fiador",
+  "locador",
+]);
 
 export type JobStatus =
   | "pending"

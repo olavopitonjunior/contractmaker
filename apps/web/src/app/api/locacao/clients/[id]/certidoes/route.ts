@@ -7,7 +7,7 @@ import { ensureLocacaoAccess, isRouteError } from "@/lib/locacao/route-helpers";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { endpointInfo } from "@/lib/certidoes/endpoints";
 import { sanitizePayload } from "@/lib/certidoes/infosimples";
-import { runBatch } from "@/lib/certidoes/executor";
+import { runBatch, getMonthlySpend } from "@/lib/certidoes/executor";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -51,6 +51,16 @@ export async function POST(
     return NextResponse.json(
       { error: "Preencha um CPF/CNPJ válido no cliente antes de emitir certidões." },
       { status: 422 }
+    );
+  }
+
+  // Guarda de orçamento (2026-09-02): esta rota disparava consultas pagas sem
+  // olhar o teto mensal — o mesmo 402 do POST /api/deals/[id]/certidoes.
+  const spend = await getMonthlySpend(ctx.orgId);
+  if (spend.exceeded) {
+    return NextResponse.json(
+      { error: "Budget mensal de certidoes Infosimples atingido", spend },
+      { status: 402 }
     );
   }
 

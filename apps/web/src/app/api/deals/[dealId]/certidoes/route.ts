@@ -13,7 +13,11 @@ import { checkGovBrAuth } from "@/lib/certidoes/govbr-auth";
 import { checkOnrAuth } from "@/lib/certidoes/onr-auth";
 import { audit } from "@/lib/security/audit";
 import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
-import { FEATURE } from "@/lib/modules/catalog";
+import { certidoesFeatureForKind } from "@/lib/modules/catalog";
+import { TARGET_KINDS } from "@/lib/certidoes/types";
+import { esteiraForDealKind } from "@/lib/certidoes/target-paths";
+import { monthlySpendWhere } from "@/lib/certidoes/budget";
+import { withOrgBudgetLock } from "@/lib/security/budget-lock";
 import { z } from "zod";
 import { guardDealScope } from "@/lib/deals/route-helpers";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
@@ -28,11 +32,6 @@ async function authorizeDeal(dealId: string) {
   if (!session?.user) return { error: "Unauthorized", status: 401 as const };
   const org = await getUserOrg(session.user.id);
   if (!org) return { error: "No organization", status: 400 as const };
-  // Certidões = sub-função do módulo Vendas. Tenant só-locação não acessa.
-  const modulesView = await getOrgModules(org.id);
-  if (!isFeatureEnabled(modulesView, FEATURE.VENDAS_CERTIDOES)) {
-    return { error: "MODULE_DISABLED", status: 403 as const };
-  }
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
     include: {
@@ -44,6 +43,13 @@ async function authorizeDeal(dealId: string) {
   if (!deal) return { error: "Deal not found", status: 404 as const };
   if (deal.pipeline.orgId !== org.id) {
     return { error: "Forbidden", status: 403 as const };
+  }
+  // Certidões = sub-função do módulo do NEGÓCIO (2026-09-02): venda gateia por
+  // `vendas.certidoes`, locação por `locacao.certidoes` (default OFF). Antes a
+  // chave de Vendas valia para tudo e tenant só-locação nunca entrava.
+  const modulesView = await getOrgModules(org.id);
+  if (!isFeatureEnabled(modulesView, certidoesFeatureForKind(deal.kind))) {
+    return { error: "MODULE_DISABLED", status: 403 as const };
   }
   // Escopo do gerente + DEAL_EDIT (esta variante serve o POST, que dispara
   // consultas pagas). Fora do escopo → 404 pra não vazar existência.
@@ -76,12 +82,6 @@ async function authorizeDealRead(req: NextRequest, dealId: string) {
   const authResult = await requireAuth(req, { scope: "documents:r" });
   if (!authResult.ok) return { response: authResult.response };
   const { ctx } = authResult;
-  const modulesView = await getOrgModules(ctx.orgId);
-  if (!isFeatureEnabled(modulesView, FEATURE.VENDAS_CERTIDOES)) {
-    return {
-      response: NextResponse.json({ error: "MODULE_DISABLED" }, { status: 403 }),
-    };
-  }
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
     include: {
@@ -97,6 +97,13 @@ async function authorizeDealRead(req: NextRequest, dealId: string) {
   if (deal.pipeline.orgId !== ctx.orgId) {
     return {
       response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
+    };
+  }
+  // Gate pela feature do módulo do negócio (ver authorizeDeal).
+  const modulesView = await getOrgModules(ctx.orgId);
+  if (!isFeatureEnabled(modulesView, certidoesFeatureForKind(deal.kind))) {
+    return {
+      response: NextResponse.json({ error: "MODULE_DISABLED" }, { status: 403 }),
     };
   }
   // Escopo do gerente (leitura — sem permission).
@@ -181,18 +188,9 @@ const extractSchema = z.object({
     .array(
       z.object({
         endpoint: z.string(),
-        targetKind: z.enum([
-          "vendedor",
-          "comprador",
-          "imovel",
-          "diligenciado",
-          "conjuge_vendedor",
-          "procurador_vendedor",
-          "representante_vendedor",
-          // Locação (análise de crédito Serasa) — retry/seleção não pode 400.
-          "locatario",
-          "fiador",
-        ]),
+        // Fonte única (lib/certidoes/types.ts) — a cópia literal que vivia
+        // aqui ficava para trás a cada alvo novo e devolvia 400 no retry.
+        targetKind: z.enum(TARGET_KINDS),
         targetIndex: z.number().int().min(0),
       })
     )
@@ -281,6 +279,7 @@ export async function POST(
       expandAll: !!selectedJobs,
       govBrActive: govbr.active,
       onrActive: onr.active,
+      esteira: esteiraForDealKind(deal.kind),
     }
   );
 
@@ -497,88 +496,122 @@ export async function POST(
 
   // Create all job rows atomically, including persisted skipped jobs so the
   // UI can render them with a "Complementar dados" action (FIX-O).
-  await prisma.$transaction([
-    ...supersedeTargets.map((t) =>
-      prisma.certidaoJob.updateMany({
-        where: {
-          dealId: params.dealId,
-          endpoint: { in: supersedeEndpointsFor(t.endpoint) },
-          // Diligenciado com âncora → casa por pessoa; resto por índice posicional.
-          ...(t.diligentedPersonId
-            ? { targetKind: "diligenciado", diligentedPersonId: t.diligentedPersonId }
-            : { targetKind: t.targetKind, targetIndex: t.targetIndex }),
-          status: { in: TERMINAL_REPLACEABLE },
-        },
-        data: { status: "replaced" },
-      })
-    ),
-    ...effectiveJobs.map((p) => {
-      const info = endpointInfo(p.endpoint);
-      const provider = info.provider ?? "infosimples";
-      // Cada provider tem seu sanitizer (campos sensíveis diferentes). Sem
-      // o split, segredos Serasa (client_secret/access_token) iam pro DB.
-      const sanitized =
-        provider === "serasa"
-          ? sanitizeSerasaPayload(p.requestPayload)
-          : sanitizePayload(p.requestPayload);
-      return prisma.certidaoJob.create({
-        data: {
-          dealId: params.dealId,
-          userId,
-          batchId,
-          provider,
-          orgId: org.id,
-          endpoint: p.endpoint,
-          label: p.label,
-          targetKind: p.targetKind,
-          targetIndex: p.targetIndex,
-          diligentedPersonId: p.diligentedPersonId ?? null,
-          requestPayload: sanitized as object,
-          status: info.initialStatus ?? "pending",
-          costCents: null,
-          // J.5 (Phase J) — cache portalUrl pra UI renderizar CTA quando
-          // job falhar permanentemente, sem precisar re-consultar catálogo.
-          portalUrl: info.portalUrl ?? null,
-        },
+  //
+  // Sob advisory lock por org (lib/security/budget-lock.ts, o mesmo do
+  // ClickSign): o check de orçamento lá em cima e a criação aqui eram
+  // leitura-agregado → escrita sem serialização, então dois disparos paralelos
+  // passavam os dois pelo teto. A releitura acontece DENTRO do lock; se o
+  // gasto mudou no meio, o lote é recusado com 402 em vez de criado.
+  // 20s: o lote de pior caso (expandAll, vários vendedores + imóvel) são
+  // dezenas de `create` sequenciais + supersede sob o lock; o default de 5s
+  // do Prisma estouraria (P2028) onde antes havia uma única viagem em lote.
+  const LOCK_TIMEOUT_MS = 20_000;
+  const budgetHit = await withOrgBudgetLock("infosimples", org.id, async (tx) => {
+    if (infosimplesCostCents > 0) {
+      const agg = await tx.certidaoJob.aggregate({
+        where: monthlySpendWhere(org.id, "infosimples"),
+        _sum: { costCents: true },
       });
-    }),
-    ...effectiveSkipped.map((s) => {
-      // J.5 — portalUrl do catálogo tem precedência sobre externalLink do
-      // planner; UI usa portalUrl como fonte única de verdade.
-      let portalUrl: string | null = s.externalLink ?? null;
-      try {
-        portalUrl = endpointInfo(s.endpoint).portalUrl ?? portalUrl;
-      } catch {
-        /* endpoint placeholder sem catálogo — mantém externalLink */
+      const spentNow = agg._sum.costCents ?? 0;
+      if (spentNow + infosimplesCostCents > spend.budgetCents) {
+        return { spentCents: spentNow, budgetCents: spend.budgetCents, exceeded: true };
       }
-      return prisma.certidaoJob.create({
-        data: {
-          dealId: params.dealId,
-          userId,
-          batchId,
-          endpoint: s.endpoint,
-          label: s.label,
-          targetKind: s.targetKind,
-          targetIndex: s.targetIndex,
-          diligentedPersonId: s.diligentedPersonId ?? null,
-          requestPayload: {
-            missingField: s.missingField,
-            missingFields: s.missingFields,
-            ...(s.externalLink ? { externalLink: s.externalLink } : {}),
-          } as object,
-          status: "skipped",
-          errorMessage: s.reason,
-          costCents: 0,
-          missingFields: s.missingFields?.length
-            ? s.missingFields.map((mf) => mf.path)
-            : s.missingField
-            ? [s.missingField]
-            : [],
-          portalUrl,
-        },
-      });
-    }),
-  ]);
+    }
+    const ops = [
+      ...supersedeTargets.map((t) =>
+        tx.certidaoJob.updateMany({
+          where: {
+            dealId: params.dealId,
+            endpoint: { in: supersedeEndpointsFor(t.endpoint) },
+            // Diligenciado com âncora → casa por pessoa; resto por índice posicional.
+            ...(t.diligentedPersonId
+              ? { targetKind: "diligenciado", diligentedPersonId: t.diligentedPersonId }
+              : { targetKind: t.targetKind, targetIndex: t.targetIndex }),
+            status: { in: TERMINAL_REPLACEABLE },
+          },
+          data: { status: "replaced" },
+        })
+      ),
+      ...effectiveJobs.map((p) => {
+        const info = endpointInfo(p.endpoint);
+        const provider = info.provider ?? "infosimples";
+        // Cada provider tem seu sanitizer (campos sensíveis diferentes). Sem
+        // o split, segredos Serasa (client_secret/access_token) iam pro DB.
+        const sanitized =
+          provider === "serasa"
+            ? sanitizeSerasaPayload(p.requestPayload)
+            : sanitizePayload(p.requestPayload);
+        return tx.certidaoJob.create({
+          data: {
+            dealId: params.dealId,
+            userId,
+            batchId,
+            provider,
+            orgId: org.id,
+            endpoint: p.endpoint,
+            label: p.label,
+            targetKind: p.targetKind,
+            targetIndex: p.targetIndex,
+            diligentedPersonId: p.diligentedPersonId ?? null,
+            requestPayload: sanitized as object,
+            status: info.initialStatus ?? "pending",
+            costCents: null,
+            // J.5 (Phase J) — cache portalUrl pra UI renderizar CTA quando
+            // job falhar permanentemente, sem precisar re-consultar catálogo.
+            portalUrl: info.portalUrl ?? null,
+          },
+        });
+      }),
+      ...effectiveSkipped.map((s) => {
+        // J.5 — portalUrl do catálogo tem precedência sobre externalLink do
+        // planner; UI usa portalUrl como fonte única de verdade.
+        let portalUrl: string | null = s.externalLink ?? null;
+        try {
+          portalUrl = endpointInfo(s.endpoint).portalUrl ?? portalUrl;
+        } catch {
+          /* endpoint placeholder sem catálogo — mantém externalLink */
+        }
+        return tx.certidaoJob.create({
+          data: {
+            dealId: params.dealId,
+            userId,
+            batchId,
+            endpoint: s.endpoint,
+            label: s.label,
+            targetKind: s.targetKind,
+            targetIndex: s.targetIndex,
+            diligentedPersonId: s.diligentedPersonId ?? null,
+            requestPayload: {
+              missingField: s.missingField,
+              missingFields: s.missingFields,
+              ...(s.externalLink ? { externalLink: s.externalLink } : {}),
+            } as object,
+            status: "skipped",
+            errorMessage: s.reason,
+            costCents: 0,
+            missingFields: s.missingFields?.length
+              ? s.missingFields.map((mf) => mf.path)
+              : s.missingField
+              ? [s.missingField]
+              : [],
+            portalUrl,
+          },
+        });
+      }),
+    ];
+    for (const op of ops) await op;
+    return null;
+  }, { timeoutMs: LOCK_TIMEOUT_MS });
+  if (budgetHit) {
+    return NextResponse.json(
+      {
+        error: "Este lote estouraria o budget mensal Infosimples",
+        spend: budgetHit,
+        plan: { ...plan, jobs: effectiveJobs, skipped: effectiveSkipped, totalCostCents },
+      },
+      { status: 402 }
+    );
+  }
 
   // Audit dedicado pra dispatch de Serasa — separa visibilidade na trilha
   // LGPD. CERTIDAO_BATCH_DISPATCH continua sendo gravado pelos demais

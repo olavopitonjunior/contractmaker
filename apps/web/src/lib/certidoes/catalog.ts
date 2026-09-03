@@ -151,12 +151,17 @@ export function listCoveredCategories(): EndpointCategory[] {
     cats.add(e.category);
   }
   // Deterministic order for UI consistency
+  // `cadastro` (Receita CPF/CNPJ) e `fgts` (CRF) ficavam fora da ordem e por
+  // isso nunca viravam chip no picker, embora existam no catálogo. Serasa
+  // (score/negativacao/vinculos) continua fora: não está integrado.
   const order: EndpointCategory[] = [
     "federal",
+    "cadastro",
     "civel",
     "trabalhista",
     "fiscal",
     "protesto",
+    "fgts",
     "municipal",
     "registro",
   ];

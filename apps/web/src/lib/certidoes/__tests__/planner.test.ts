@@ -1246,3 +1246,176 @@ describe("ONR_MATRIC_FINALIDADE — guard de NaN", () => {
     expect(matric?.requestPayload.finalidade).toBe(3);
   });
 });
+
+// 2026-09-02 — esteira de LOCAÇÃO: o planner passa a ler o shape do formulário
+// de locação (locatarios[], garantia.fiador objeto, imovel singular) quando o
+// caller diz `esteira: "locacao"`. Nunca por sniffing do JSON.
+describe("planCertidoesForDeal — esteira locação", () => {
+  const LOCATARIO_SP = {
+    tipo_pessoa: "fisica" as const,
+    nome: "Lucas Locatário",
+    cpf: "52998224725",
+    data_nascimento: "1990-02-10",
+    uf: "SP",
+    cidade: "Sao Paulo",
+  };
+  const FIADOR_CASADO = {
+    tipo_pessoa: "fisica" as const,
+    nome: "Fernando Fiador",
+    cpf: "11144477735",
+    data_nascimento: "1975-07-01",
+    estado_civil: "Casado(a)",
+    uf: "SP",
+    cidade: "Campinas",
+    conjuge: { nome: "Carla Fiadora", cpf: "22233344405" },
+  };
+  const LOCADOR_RJ = {
+    tipo_pessoa: "fisica" as const,
+    nome: "Laura Locadora",
+    cpf: "33344455596",
+    data_nascimento: "1960-01-20",
+    uf: "RJ",
+    cidade: "Rio de Janeiro",
+  };
+  const IMOVEL_SP = {
+    rua: "Rua Augusta, 1200",
+    cidade: "Sao Paulo",
+    uf: "SP",
+    matricula: "9999",
+    sql: "123.456.0789-0",
+  };
+
+  const data = {
+    locatarios: [LOCATARIO_SP],
+    locadores: [LOCADOR_RJ],
+    garantia: { tipo: "fiador", fiador: FIADOR_CASADO },
+    imovel: IMOVEL_SP,
+  };
+  // onrActive: sem credencial ONR a matrícula vira skip e o imóvel não gera job.
+  const plan = planCertidoesForDeal(data, undefined, null, { esteira: "locacao", onrActive: true });
+  const kinds = new Set(plan.jobs.map((j) => j.targetKind));
+
+  it("enumera locatário, fiador, cônjuge do fiador e locador; nenhum vendedor/comprador", () => {
+    expect(kinds.has("locatario")).toBe(true);
+    expect(kinds.has("fiador")).toBe(true);
+    expect(kinds.has("conjuge_fiador")).toBe(true);
+    expect(kinds.has("locador")).toBe(true);
+    expect(kinds.has("vendedor")).toBe(false);
+    expect(kinds.has("comprador")).toBe(false);
+  });
+
+  it("fiador e cônjuge têm índice 0 (objeto, não array); cônjuge herda UF/cidade do fiador", () => {
+    const fiadorJobs = plan.jobs.filter((j) => j.targetKind === "fiador");
+    const conjugeJobs = plan.jobs.filter((j) => j.targetKind === "conjuge_fiador");
+    expect(fiadorJobs.length).toBeGreaterThan(0);
+    expect(conjugeJobs.length).toBeGreaterThan(0);
+    expect(fiadorJobs.every((j) => j.targetIndex === 0)).toBe(true);
+    expect(conjugeJobs.every((j) => j.targetIndex === 0)).toBe(true);
+    const cndtConjuge = conjugeJobs.find((j) => j.endpoint === "tribunal/tst/cndt");
+    expect(cndtConjuge?.requestPayload).toMatchObject({ cpf: "22233344405" });
+  });
+
+  it("tiers: locatário/fiador/cônjuge = padrão; locador = opcional; imóvel = imovel", () => {
+    const tierOf = (k: string) => new Set(plan.jobs.filter((j) => j.targetKind === k).map((j) => j.tier));
+    expect(tierOf("locatario")).toEqual(new Set(["padrao"]));
+    expect(tierOf("fiador").has("padrao")).toBe(true);
+    expect(tierOf("conjuge_fiador").has("padrao")).toBe(true);
+    expect(tierOf("locador")).toEqual(new Set(["opcional"]));
+    expect(tierOf("imovel").has("imovel")).toBe(true);
+  });
+
+  it("locatário, fiador e locador herdam a região do imóvel além do próprio endereço", () => {
+    // Fiador (Campinas/SP) e imóvel (São Paulo/SP) são da mesma UF: o dedupe por
+    // UF fica com a região do imóvel (vence). O locador (RJ) mostra as duas.
+    const regionsOf = (k: string) =>
+      new Set(plan.jobs.filter((j) => j.targetKind === k && j.region).map((j) => j.region!.kind));
+    expect(regionsOf("fiador").has("imovel")).toBe(true);
+    expect(regionsOf("locatario").has("imovel")).toBe(true);
+    expect(regionsOf("locador").has("imovel")).toBe(true);
+    expect(regionsOf("locador").has("endereco")).toBe(true);
+  });
+
+  it("o imóvel singular entra como imoveis[0]; skip de imóvel aponta para `imovel`, não `imoveis.0`", () => {
+    const semMatricula = planCertidoesForDeal(
+      { ...data, imovel: { rua: "Rua A", cidade: "Sao Paulo", uf: "SP", sql: "123.456.0789-0" } },
+      undefined,
+      null,
+      { esteira: "locacao", onrActive: true }
+    );
+    expect(semMatricula.jobs.some((j) => j.targetKind === "imovel")).toBe(true);
+    const paths = semMatricula.skipped.flatMap((s) => s.missingFields.map((f) => f.path));
+    expect(paths.some((p) => p.startsWith("imoveis."))).toBe(false);
+    expect(paths.some((p) => p === "imovel.matricula" || p.startsWith("imovel."))).toBe(true);
+  });
+
+  it("skip de fiador aponta para garantia.fiador (não `fiadores.0`)", () => {
+    const semNascimento = planCertidoesForDeal(
+      {
+        ...data,
+        garantia: { tipo: "fiador", fiador: { ...FIADOR_CASADO, data_nascimento: undefined } },
+      },
+      undefined,
+      null,
+      { esteira: "locacao" }
+    );
+    const skipFiador = semNascimento.skipped.find((s) => s.targetKind === "fiador");
+    expect(skipFiador).toBeDefined();
+    expect(skipFiador!.missingFields[0].path).toMatch(/^garantia\.fiador\./);
+    expect(skipFiador!.missingFields[0].path).not.toMatch(/fiadores/);
+  });
+
+  it("garantia caução → sem fiador; fiador PJ → sem cônjuge; sem locatários → nada", () => {
+    const caucao = planCertidoesForDeal(
+      { ...data, garantia: { tipo: "caucao", fiador: FIADOR_CASADO } },
+      undefined,
+      null,
+      { esteira: "locacao" }
+    );
+    expect(caucao.jobs.some((j) => j.targetKind === "fiador")).toBe(false);
+    expect(caucao.jobs.some((j) => j.targetKind === "conjuge_fiador")).toBe(false);
+
+    const pj = planCertidoesForDeal(
+      {
+        ...data,
+        garantia: {
+          tipo: "fiador",
+          fiador: {
+            tipo_pessoa: "juridica",
+            razao_social: "Fiança Ltda",
+            cnpj: "11222333000181",
+            uf: "SP",
+            conjuge: { nome: "X", cpf: "22233344405" },
+          },
+        },
+      },
+      undefined,
+      null,
+      { esteira: "locacao" }
+    );
+    expect(pj.jobs.some((j) => j.targetKind === "fiador")).toBe(true);
+    expect(pj.jobs.some((j) => j.targetKind === "conjuge_fiador")).toBe(false);
+  });
+
+  it("pesquisa de bens ONR inclui fiador e cônjuge (tier pesquisa), não o locatário", () => {
+    const comOnr = planCertidoesForDeal(data, undefined, null, { esteira: "locacao", onrActive: true });
+    const onr = comOnr.jobs.filter((j) => j.endpoint === "onr/mapa-registro-imoveis");
+    const onrKinds = new Set(onr.map((j) => j.targetKind));
+    expect(onrKinds.has("fiador")).toBe(true);
+    expect(onrKinds.has("conjuge_fiador")).toBe(true);
+    expect(onrKinds.has("locatario")).toBe(false);
+    expect(onr.every((j) => j.tier === "pesquisa")).toBe(true);
+  });
+
+  it("regressão: sem `esteira`, um dataJson de venda planeja exatamente como antes (locação ignorada)", () => {
+    const venda = planCertidoesForDeal({
+      vendedores: [VENDEDOR_PF_SP],
+      compradores: [COMPRADOR_PF_RJ],
+      imoveis: [{ rua: "Rua X", cidade: "Sao Paulo", uf: "SP", matricula: "1" }],
+      locatarios: [LOCATARIO_SP],
+    });
+    const vk = new Set(venda.jobs.map((j) => j.targetKind));
+    expect(vk.has("vendedor")).toBe(true);
+    expect(vk.has("comprador")).toBe(true);
+    expect(vk.has("locatario")).toBe(false);
+  });
+});

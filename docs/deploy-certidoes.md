@@ -44,7 +44,7 @@ No painel do projeto Vercel → Settings → Environment Variables, adicione em
 | Nome | Valor | Obrigatório |
 |---|---|---|
 | `INFOSIMPLES_TOKEN` | token da sua conta Infosimples | ✅ — sem isso, a POST `/certidoes` retorna erro |
-| `INFOSIMPLES_MONTHLY_BUDGET_CENTS` | `5000` (R$ 50,00) | ⚠ default 5000 se ausente |
+| `INFOSIMPLES_MONTHLY_BUDGET_CENTS` | `20000` (R$ 200,00) | ⚠ default 20000 (R$ 200) se ausente — fonte única em `lib/certidoes/budget.ts`, usada pelo executor, pelo monitor e pela API do dashboard |
 | `CRON_SECRET` | `openssl rand -base64 32` | ⚠ recomendado — sem ele, qualquer um pode chamar o cron |
 
 Obter `INFOSIMPLES_TOKEN`: cadastre em [infosimples.com](https://infosimples.com),
@@ -57,7 +57,7 @@ O [vercel.json](../apps/web/vercel.json) já declara o cron diário às 9h:
 ```json
 {
   "crons": [
-    { "path": "/api/cron/certidoes/poll-portal", "schedule": "0 9 * * *" }
+    { "path": "/api/cron/certidoes/poll-portal", "schedule": "*/5 * * * *" }
   ]
 }
 ```

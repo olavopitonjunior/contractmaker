@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authOrBearer, hasScope } from "@/lib/auth/auth-or-bearer";
 import { prisma } from "@/lib/db/prisma";
 import { getUserOrg } from "@/lib/auth/auth";
+import { monthlyBudgetCents, monthlySpendWhere } from "@/lib/certidoes/budget";
 
 /**
  * GET /api/org/infosimples-budget
@@ -55,9 +56,10 @@ export async function GET(req: NextRequest) {
 
   const jobs = await prisma.certidaoJob.findMany({
     where: {
-      orgId: org.id,
+      // Mesma contagem que bloqueia o disparo (lib/certidoes/budget.ts):
+      // jobs de deal da org + jobs sem deal. Só conta o que custou.
+      ...monthlySpendWhere(org.id, "infosimples", monthStart),
       createdAt: { gte: monthStart, lt: monthEnd },
-      // Só conta o que custou — pending/failed sem cost ficam zerados.
       costCents: { not: null },
     },
     select: { costCents: true, endpoint: true },
@@ -70,10 +72,9 @@ export async function GET(req: NextRequest) {
       (spentByEndpoint[j.endpoint] ?? 0) + (j.costCents ?? 0);
   }
 
-  const budgetCents = parseInt(
-    process.env.INFOSIMPLES_MONTHLY_BUDGET_CENTS ?? "5000000",
-    10
-  );
+  // Era `?? "5000000"` (R$ 50.000) enquanto o executor bloqueava em R$ 200:
+  // o dashboard e o Newton mostravam um teto 250× maior que o real.
+  const budgetCents = monthlyBudgetCents("infosimples");
   const remainingCents = budgetCents - spentCents;
   const pct = budgetCents > 0 ? spentCents / budgetCents : 0;
   const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;

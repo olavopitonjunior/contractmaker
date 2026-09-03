@@ -55,7 +55,8 @@ Documento arquitetural único para o módulo de certidões do Contractmaker. Des
 
 ## 2. Estados do `CertidaoJob` (string livre no schema)
 
-12 estados semânticos produzidos por `classifyOutcome()` em
+16 estados (`queued`/`pending`/`fetching`/`awaiting_portal`, 3 transitórios
+com retry, 9 terminais) produzidos por `classifyOutcome()` em
 [outcome-classifier.ts](../apps/web/src/lib/certidoes/outcome-classifier.ts).
 
 | Status | Terminal? | Retry auto? | Significado | UX (CertidoesTab) |
@@ -287,7 +288,33 @@ Suite de certidões precisa ficar ≥ 83/83 (baseline Phase J).
 
 ---
 
-## 7. Referências cruzadas
+## 7. Locação (2026-09-02)
+
+O mesmo motor atende o negócio de locação. O caller diz a esteira — nunca é
+inferida do JSON:
+
+- `planCertidoesForDeal(dataJson, email, diligenciados, { esteira: "locacao" })`
+  lê `locatarios[]`, `garantia.fiador` (objeto; só quando `garantia.tipo ===
+  "fiador"` e com identidade), `garantia.fiador.conjuge` (fiador PF), `locadores[]`
+  e `imovel` (singular → `imoveis[0]` para o loop de imóvel não mudar).
+- `TargetKind` (tupla `TARGET_KINDS` em `types.ts`, fonte do `z.enum` das rotas)
+  ganhou `conjuge_fiador` e `locador`; `locatario`/`fiador` já existiam. Fiador e
+  cônjuge usam `targetIndex: 0` por convenção (não são array).
+- Tiers: locatário/fiador/cônjuge = `padrao` (herdam região do imóvel + endereço,
+  como o lado vendedor); locador = `opcional`; imóvel = `imovel` (IPTU é do
+  locador — opt-in); pesquisa de bens ONR inclui fiador e cônjuge.
+- Caminhos de "Corrigir dados": `lib/certidoes/target-paths.ts::basePathForTarget`
+  (`locatarios.i`, `locadores.i`, `garantia.fiador`, `garantia.fiador.conjuge`,
+  `imovel`). O planner rebaseia `imoveis.N` → `imovel` num pós-passo.
+- Gate: `certidoesFeatureForKind(deal.kind)` → `vendas.certidoes` (ON) ou
+  `locacao.certidoes` (OFF por padrão). Vale para `GET /plan`, `GET/POST
+  /certidoes` e `/complete`.
+- Orçamento: `lib/certidoes/budget.ts` é a fonte única (teto default R$ 200 e
+  contagem "deals da org + jobs sem deal"); a criação dos jobs roda sob
+  `withOrgBudgetLock("infosimples", orgId)` com releitura do gasto.
+- Serasa fica fora das telas de locação até a integração existir.
+
+## 8. Referências cruzadas
 
 - [CLAUDE.md](../CLAUDE.md) — seção "Phase J — Estados ricos de certidão + retry automático"
 - [Mapeamento_Certidoes.md](../Mapeamento_Certidoes.md) — doc mestre de certidões por estado

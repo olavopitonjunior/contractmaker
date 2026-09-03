@@ -17,16 +17,33 @@ import type { Prisma } from "@prisma/client";
 export async function withOrgBudgetLock<T>(
   namespace: string,
   orgId: string,
-  fn: (tx: Prisma.TransactionClient) => Promise<T>
+  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  options: {
+    /**
+     * Teto da transação interativa (default do Prisma: 5s). Quem cria MUITAS
+     * linhas sob o lock (lote de certidões com dezenas de `create` sequenciais
+     * + supersede) precisa de mais — senão estoura P2028 num caminho que antes
+     * era uma única viagem em lote. O ClickSign (1 envelope) fica no default.
+     */
+    timeoutMs?: number;
+    /** Espera máxima por um slot no pool antes de abrir a transação. */
+    maxWaitMs?: number;
+  } = {}
 ): Promise<T> {
-  return prisma.$transaction(async (tx) => {
-    // Dois int32 estáveis a partir de hash do namespace e do orgId — a forma
-    // de 2 argumentos do advisory lock evita colisão entre namespaces.
-    const nsKey = hash32(namespace);
-    const orgKey = hash32(orgId);
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${nsKey}::int, ${orgKey}::int)`;
-    return fn(tx);
-  });
+  return prisma.$transaction(
+    async (tx) => {
+      // Dois int32 estáveis a partir de hash do namespace e do orgId — a forma
+      // de 2 argumentos do advisory lock evita colisão entre namespaces.
+      const nsKey = hash32(namespace);
+      const orgKey = hash32(orgId);
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${nsKey}::int, ${orgKey}::int)`;
+      return fn(tx);
+    },
+    {
+      ...(options.timeoutMs != null ? { timeout: options.timeoutMs } : {}),
+      ...(options.maxWaitMs != null ? { maxWait: options.maxWaitMs } : {}),
+    }
+  );
 }
 
 /** FNV-1a 32-bit → int32 assinado (range aceito pelo pg_advisory_xact_lock). */
