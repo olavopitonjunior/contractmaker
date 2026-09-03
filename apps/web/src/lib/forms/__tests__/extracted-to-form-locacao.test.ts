@@ -357,8 +357,15 @@ describe("labels do wizard de locação", () => {
     expect(LOCACAO_COMERCIAL_STEP_LABELS).toHaveLength(7);
     expect(LOCACAO_STEP_LABELS[6]).toBe("Comissão");
     // Guard do index-shift do wizard: partes em 1-2, imóvel em 3, aluguel em 4.
-    expect(LOCACAO_STEP_LABELS[1]).toBe("Locador(es)");
-    expect(LOCACAO_STEP_LABELS[2]).toBe("Locatário(s)");
+    // 2026-09-03: o LOCATÁRIO passou à frente do locador.
+    expect(LOCACAO_STEP_LABELS[1]).toBe("Locatário(s)");
+    expect(LOCACAO_STEP_LABELS[2]).toBe("Locador(es)");
+    // O array COMERCIAL tem que acompanhar: é o mesmo wizard, e ele já
+    // renderiza locatário no slot 1 nos dois ramos. Renumerar só o residencial
+    // faria a aba dizer "Locador(es)" sobre os campos do locatário — e passou
+    // batido no CI justamente porque não havia asserção para este par.
+    expect(LOCACAO_COMERCIAL_STEP_LABELS[1]).toBe("Locatário(s)");
+    expect(LOCACAO_COMERCIAL_STEP_LABELS[2]).toBe("Locador(es)");
     expect(LOCACAO_STEP_LABELS[3]).toBe("Imóvel");
     expect(LOCACAO_STEP_LABELS[4]).toBe("Aluguel e Reajuste");
   });

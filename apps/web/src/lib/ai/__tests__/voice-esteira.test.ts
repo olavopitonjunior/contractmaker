@@ -8,13 +8,15 @@ import { STEP_PATHS } from "@/lib/forms/participant-visibility";
 /**
  * O ditado por voz existia so em venda. Um mapa unico de step -> campos nao
  * servia para as duas esteiras: os indices COLIDEM (em venda 1 e Vendedor, em
- * locacao 1 e Locador) e o filtro por `pathScope` zerava em locacao, fazendo a
+ * locacao 1 e Locatario desde 2026-09-03) e o filtro por `pathScope` zerava em
+ * locacao, fazendo a
  * rota devolver `{}` em silencio.
  */
 describe("voice-extract — schema por esteira", () => {
   it("os indices de step significam coisas diferentes em cada esteira", () => {
     expect(SCHEMAS.venda[1].paths[0].path).toMatch(/^vendedores\./);
-    expect(SCHEMAS.locacao[1].paths[0].path).toMatch(/^locadores\./);
+    expect(SCHEMAS.locacao[1].paths[0].path).toMatch(/^locatarios\./);
+    expect(SCHEMAS.locacao[2].paths[0].path).toMatch(/^locadores\./);
     expect(SCHEMAS.venda[3].paths[0].path).toMatch(/^imoveis\./);
     expect(SCHEMAS.locacao[3].paths[0].path).toMatch(/^imovel\./);
   });
@@ -40,12 +42,13 @@ describe("voice-extract — schema por esteira", () => {
 
   it("prompt de locacao cita os paths de locacao, nao os de venda", () => {
     const prompt = buildVoicePrompt(1, undefined, "locacao");
-    expect(prompt).toContain("locadores.0.nome");
+    expect(prompt).toContain("locatarios.0.nome");
     expect(prompt).not.toContain("vendedores.0.nome");
   });
 
   it("pathScope do locador nao zera mais o prompt", () => {
-    const prompt = buildVoicePrompt(1, ["locadores"], "locacao");
+    // Locador e a etapa 2 desde 2026-09-03.
+    const prompt = buildVoicePrompt(2, ["locadores"], "locacao");
     expect(prompt).not.toContain("Retorne {}");
     expect(prompt).toContain("locadores.0.cpf");
   });
