@@ -25,6 +25,7 @@ import {
 } from "@/lib/forms/validation-locacao";
 import { resolveFormRequiredFields } from "@/lib/forms/required-snapshot";
 import { findMissingRequired, getByPath } from "@/lib/forms/party-required";
+import { missingFiadorName } from "@/lib/forms/garantia-fiador-flip";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
 import { MODULE } from "@/lib/modules/catalog";
@@ -141,6 +142,23 @@ export async function PATCH(
           error: "Campos obrigatórios não preenchidos",
           reason: "required_fields_missing",
           missingRequired,
+        },
+        { status: 422 }
+      );
+    }
+    // Garantia por fiador exige o fiador NOMEADO (2026-09-02). Era só aviso;
+    // virou bloqueio quando um documento atribuído ao fiador passou a definir a
+    // modalidade sozinho: sem isto, "tipo=fiador" com fiador vazio chegava ao
+    // contrato (preâmbulo mutilado, cláusula de fiança sem fiador, linha de
+    // assinatura em branco). Só o nome bloqueia; CPF/endereço/cônjuge seguem
+    // como aviso, pelo mesmo motivo do comentário acima.
+    const missingFiador = missingFiadorName(preview);
+    if (missingFiador) {
+      return NextResponse.json(
+        {
+          error: "Garantia por fiador exige o nome do fiador",
+          reason: "fiador_incompleto",
+          missingRequired: [missingFiador],
         },
         { status: 422 }
       );

@@ -6,6 +6,8 @@ import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { archiveAttachment } from "@/lib/attachments/archive";
 import { guardDealScope } from "@/lib/deals/route-helpers";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { applyFiadorFlip } from "@/lib/forms/garantia-fiador-flip";
+import type { Prisma } from "@prisma/client";
 
 export const runtime = "nodejs";
 
@@ -75,7 +77,17 @@ export async function PATCH(
 
   const attachment = await prisma.dealAttachment.findUnique({
     where: { id: params.attachmentId },
-    include: { deal: { select: { pipeline: { select: { orgId: true } } } } },
+    include: {
+      deal: {
+        select: {
+          kind: true,
+          pipeline: { select: { orgId: true } },
+          // Locação: mover um doc para o fiador define a modalidade da garantia
+          // (paridade com a etapa 0 do form público) — precisa do dataJson.
+          form: { select: { id: true, dataJson: true } },
+        },
+      },
+    },
   });
   if (!attachment) {
     return NextResponse.json({ error: "Anexo não encontrado" }, { status: 404 });
@@ -112,10 +124,54 @@ export async function PATCH(
     return NextResponse.json({ error: "Nada para atualizar" }, { status: 400 });
   }
 
-  await prisma.dealAttachment.update({
+  // "Mover para Fiador" num negócio de locação vira a garantia para fiador no
+  // dataJson do form — a mesma regra do seletor da etapa 0 (adapter.onAssign),
+  // que na aba admin não tem "Aplicar aos campos" para carregá-la. Só o tipo e
+  // a limpeza da modalidade anterior; `garantia.fiador` não é tocado.
+  let garantiaFlipped = false;
+  let formUpdate: Prisma.PrismaPromise<unknown> | null = null;
+  if (
+    parsed.data.assignment &&
+    attachment.deal.kind === "locacao" &&
+    attachment.deal.form
+  ) {
+    const dataJson = structuredClone(
+      (attachment.deal.form.dataJson as Record<string, unknown> | null) ?? {}
+    );
+    const readPath = (path: string): unknown =>
+      path.split(".").reduce<unknown>(
+        (cur, seg) =>
+          cur && typeof cur === "object" ? (cur as Record<string, unknown>)[seg] : undefined,
+        dataJson
+      );
+    const writePath = (path: string, value: unknown) => {
+      const segs = path.split(".");
+      let cur = dataJson as Record<string, unknown>;
+      for (const seg of segs.slice(0, -1)) {
+        const next = cur[seg];
+        if (!next || typeof next !== "object") cur[seg] = {};
+        cur = cur[seg] as Record<string, unknown>;
+      }
+      cur[segs[segs.length - 1]] = value;
+    };
+    garantiaFlipped = applyFiadorFlip(parsed.data.assignment.kind, readPath, writePath);
+    if (garantiaFlipped) {
+      formUpdate = prisma.salesForm.update({
+        where: { id: attachment.deal.form.id },
+        data: { dataJson: dataJson as Prisma.InputJsonValue },
+      });
+    }
+  }
+
+  const attachmentUpdate = prisma.dealAttachment.update({
     where: { id: attachment.id },
     data,
   });
+  if (formUpdate) {
+    await prisma.$transaction([attachmentUpdate, formUpdate]);
+  } else {
+    await attachmentUpdate;
+  }
 
   await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
     action: "ATTACHMENT_RECLASSIFY",
@@ -126,10 +182,11 @@ export async function PATCH(
       dealId: attachment.dealId,
       assignment: parsed.data.assignment ?? null,
       category: parsed.data.category ?? attachment.category,
+      garantiaFlipped,
     },
   });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, garantiaFlipped });
 }
 
 /**

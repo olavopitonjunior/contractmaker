@@ -4,6 +4,28 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-02 - Fiador e cônjuge do fiador sempre no seletor de documentos da locação
+
+### Adicionado
+
+- **"Fiador" e "Cônjuge do fiador" aparecem sempre em "Atribuir a:" na etapa Documentos do formulário de locação.** Antes só apareciam depois de escolher a garantia por fiador na etapa 5, que vem depois — num formulário novo o grupo nunca existia. Cônjuge do fiador continua fora quando o fiador é pessoa jurídica.
+- **Atribuir um documento ao fiador (ou ao cônjuge dele) já define a garantia como fiador**, com aviso na tela. Caução, seguro ou título que estivessem marcados são limpos, para o contrato não sair com duas garantias. Os dados do fiador continuam entrando pelo "Aplicar aos campos", como para as outras partes. Vale também ao mover um documento para o fiador na aba Documentos do negócio e ao aplicar um documento pelo servidor.
+- **O link individual do fiador passa a atribuir e aplicar sozinho o documento de identidade que ele envia**, como já acontecia para locador e locatário.
+
+### Alterado
+
+- **Garantia por fiador exige o fiador nomeado para avançar da etapa Garantia e para concluir o formulário.** Era só um aviso; virou bloqueio porque agora a modalidade pode ser definida por um documento antes de alguém qualificar o fiador. CPF, endereço e cônjuge continuam como avisos.
+- **O contrato não mostra mais fragmentos de fiador quando ele não tem nome**: preâmbulo, cláusula de fiança (cai no texto genérico do art. 37) e linha de assinatura. Vale para os modelos canônicos residencial e comercial (v2 e v3) e para os blocos compostos dos modelos do Google Docs.
+- O link do fiador, o painel de links e a recomendação de e-mail do cônjuge do fiador aparecem também quando já há um fiador identificado, não só quando a garantia está marcada como fiador.
+
+### Corrigido
+
+- **Os campos do cônjuge aparecem para "casado", "casada" e "União estável"** (o que o OCR devolve), não só para "Casado(a)" e "União Estável" escritos exatamente assim. Antes o formulário cobrava nome e CPF do cônjuge no final sem mostrar o campo. Vale para locador, locatário e fiador.
+
+### Notas
+
+- Os modelos canônicos `.hbs` mudaram: depois do deploy, rodar `sync-templates --apply` em staging e em produção.
+
 ## [Unreleased] - 2026-09-02 - Serasa sai das telas de locação até a integração existir
 
 ### Removido

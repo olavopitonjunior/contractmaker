@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { GARANTIA_TIPO_LABELS } from "@/lib/locacao/validators";
+import { garantiaTemFiador } from "@/lib/forms/garantia-fiador-flip";
 import { ExternalLink, Home, Receipt, ShieldCheck, User, Users } from "lucide-react";
 import {
   PartyLinksPanel,
@@ -122,10 +123,13 @@ export function LocacaoDadosTab({
   const isEmpty =
     locadores.length === 0 && locatarios.length === 0 && !enderecoImovel && valorAluguel <= 0;
 
+  // Fiador entra quando a garantia é fiador OU quando já há um fiador
+  // identificado (doc atribuído a ele define a modalidade) — mesma regra do
+  // LocacaoFormWizard.
   const partyRoles: PartyLinksPanelProps["roles"] = [
     "locador",
     "locatario",
-    ...(garantia.tipo === "fiador" ? (["fiador"] as const) : []),
+    ...(garantiaTemFiador({ garantia }) ? (["fiador"] as const) : []),
   ];
 
   // Comissão é do OPERADOR (não vem do link público) — editável mesmo antes de

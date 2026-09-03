@@ -636,12 +636,22 @@ export function DocumentosStep({
         !selfAssignedRef.current.has(d.id)
     );
     if (pending.length === 0) return;
+    let assignMessage: string | null = null;
     for (const d of pending) {
       selfAssignedRef.current.add(d.id);
       // Entra no set do Fix 3 também: o assignment agora é persistido e o
       // effect de auto-reapply não deve reaplicar em cima.
       autoAppliedRef.current.add(d.id);
       ensureSlot(selfAssignment.kind, selfAssignment.index);
+      // É uma atribuição de verdade (o link é do próprio participante), então o
+      // efeito colateral de atribuição vale aqui — o fiador no link dele define
+      // a modalidade. Uma mensagem só, mesmo com vários docs.
+      assignMessage =
+        adapter.onAssign?.(
+          selfAssignment.kind,
+          selfAssignment.index,
+          form as UseFormReturn<Record<string, unknown>>
+        ) ?? assignMessage;
       adapter.apply(
         { category: d.category, fields: d.fields || {}, confidence: d.confidence ?? 0 },
         selfAssignment,
@@ -679,6 +689,7 @@ export function DocumentosStep({
     toast.success(
       `${pending.length} documento(s) aplicado(s) automaticamente aos seus dados`
     );
+    if (assignMessage) toast.info(assignMessage);
   }, [docs, hydrated, selfAssignment, form, adapter, ensureSlot, token]);
 
   // Applies the OCR result for a single attachment to its card. Runs inside
@@ -1030,6 +1041,11 @@ export function DocumentosStep({
         index = Number(rawIdx) || 0;
         ensureSlot(kind, index);
       }
+      // Efeito colateral da ATRIBUIÇÃO (não do apply): em locação, doc no
+      // fiador vira a garantia para fiador. Só aqui e no self-assign do link
+      // individual — o restore (Fix 3) não passa por este handler de propósito.
+      const assignMessage = adapter.onAssign?.(kind, index, form as UseFormReturn<Record<string, unknown>>);
+      if (assignMessage) toast.info(assignMessage);
       // Troca manual tira o doc do trilho de auto-aplicação persistida (Fix 3):
       // a escolha agora é do operador na sessão atual, aplicada via "Aplicar aos
       // campos". `assignmentPersisted:false` impede o effect de reaplicar sozinho.

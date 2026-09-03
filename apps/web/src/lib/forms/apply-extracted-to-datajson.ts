@@ -4,6 +4,7 @@ import {
   type Assignment,
 } from "@/lib/forms/extracted-to-form";
 import { mapExtractedToLocacaoForm } from "@/lib/forms/extracted-to-form-locacao";
+import { applyFiadorFlip } from "@/lib/forms/garantia-fiador-flip";
 
 /**
  * Server-safe autofill: aplica o resultado de OCR de um documento sobre o
@@ -88,6 +89,18 @@ export function applyExtractedToDataJson(
     formAdapter,
     { skipIfDirty: options.skipIfDirty ?? true }
   );
+
+  // Paridade com a etapa 0 (adapter.onAssign): aplicar um doc ao fiador pelo
+  // servidor também define a modalidade. Fora do mapper e SEM `skipIfDirty` —
+  // `garantia.tipo` tem default "caucao" no schema e chegaria "preenchido".
+  // Não conta em `filled`: não é campo do documento.
+  if (options.kind === "locacao") {
+    applyFiadorFlip(
+      assignment.kind,
+      (path) => getByPath(merged, path),
+      (path, value) => setByPath(merged, path, value)
+    );
+  }
 
   return { merged, filled };
 }

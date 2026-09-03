@@ -1,5 +1,6 @@
 ﻿import Handlebars from 'handlebars';
 import { isExplicitlyUnmarried } from '@/lib/forms/estado-civil';
+import { fiadorHasName } from '@/lib/forms/garantia-fiador-flip';
 
 function valorPorExtenso(valor: number): string {
   if (Number.isNaN(valor) || valor === null || valor === undefined) return '';
@@ -116,6 +117,7 @@ export const HANDLEBARS_HELPER_NAMES: readonly string[] = [
   'gt',
   'existe',
   'temConjuge',
+  'temFiador',
 ];
 
 export function registerHandlebarsHelpers(): void {
@@ -255,6 +257,21 @@ export function registerHandlebarsHelpers(): void {
   Handlebars.registerHelper('temConjuge', (estadoCivil: unknown) =>
     !isExplicitlyUnmarried(estadoCivil)
   );
+
+  /**
+   * `temFiador garantia` — a garantia é fiança E o fiador está nomeado.
+   * Substitui `(eq garantia.tipo "fiador")` no preâmbulo, na cláusula 8.1 e no
+   * bloco de assinaturas: desde que um documento atribuído ao fiador passou a
+   * definir a modalidade (2026-09-02), `tipo === "fiador"` com o fiador ainda
+   * vazio é um estado alcançável — e sem este guard o contrato saía com ", e,
+   * na qualidade de FIADOR(A), , têm entre si", uma cláusula de fiança sem
+   * fiador qualificado e uma linha de assinatura em branco.
+   */
+  Handlebars.registerHelper('temFiador', (garantia: unknown) => {
+    if (!garantia || typeof garantia !== 'object') return false;
+    const g = garantia as { tipo?: unknown; fiador?: unknown };
+    return g.tipo === 'fiador' && fiadorHasName(g.fiador);
+  });
 }
 
 let helpersRegistered = false;
