@@ -4,6 +4,7 @@ import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/db/prisma";
 import { getDocPlainText } from "@/lib/google/docs";
 import { googleErrorMessage } from "@/lib/google/auth-error";
+import { splitDocParagraphs } from "@/lib/templates/insertion-report";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,9 +49,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: googleErrorMessage(err) }, { status: 502 });
   }
 
-  const paragraphs = text
-    .split(/\n+/)
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0);
-  return NextResponse.json({ paragraphs });
+  // Divisor compartilhado: `paragraphIndex` desta rota, das checagens
+  // semânticas e da tela precisam apontar para o MESMO parágrafo.
+  return NextResponse.json({ paragraphs: splitDocParagraphs(text) });
 }

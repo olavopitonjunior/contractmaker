@@ -23,6 +23,7 @@ import {
 import { getDocPlainText } from "@/lib/google/docs";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { getEffectiveUserId } from "@/lib/auth/impersonation";
+import { countBySeverity, readSemanticReport } from "@/lib/templates/semantic-checks";
 
 /**
  * Escopo multitenant deny-by-default.
@@ -39,6 +40,22 @@ const NOT_FOUND = () =>
 async function resolveOrgId(userId: string): Promise<string | null> {
   const org = await getUserOrg(userId);
   return org?.id ?? null;
+}
+
+/**
+ * Contagem semântica do último `validate-gdoc`, para o audit da ativação
+ * forçada. `null` no relatório significa NÃO MEDIDO (modelo revisado antes das
+ * checagens existirem) — e o metadata diz isso, em vez de registrar zero.
+ */
+function semanticAuditMetadata(draftReport: unknown): Record<string, unknown> {
+  const semantic = readSemanticReport(draftReport);
+  if (!semantic) return { semantic: "unmeasured" };
+  const counts = countBySeverity(semantic.findings);
+  return {
+    semanticErrors: counts.error,
+    semanticWarnings: counts.warning,
+    semanticCheckedAt: semantic.checkedAt,
+  };
 }
 
 export async function GET(
@@ -266,13 +283,19 @@ export async function PATCH(
       result: "SUCCESS",
       resource: params.id,
       resourceType: "ContractTemplate",
-      metadata: piiOverride.report
-        ? {
-            kinds: piiOverride.report.kinds,
-            count: piiOverride.report.count,
-            checkedAt: piiOverride.report.checkedAt,
-          }
-        : { unmeasured: true },
+      metadata: {
+        ...(piiOverride.report
+          ? {
+              kinds: piiOverride.report.kinds,
+              count: piiOverride.report.count,
+              checkedAt: piiOverride.report.checkedAt,
+            }
+          : { unmeasured: true }),
+        // Estado semântico no momento da ativação forçada. Não é gate (as
+        // regras são heurísticas), mas quem depois for entender um contrato
+        // gerado errado precisa saber que a tela AVISOU e o modelo subiu assim.
+        ...semanticAuditMetadata(template.draftReport),
+      },
     });
   }
 

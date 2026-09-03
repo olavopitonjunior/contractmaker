@@ -146,4 +146,20 @@ describe("POST /api/templates/[id]/validate-gdoc — reconciliação de slot", (
 
     expect(body.slots[0].applied).toBe(false);
   });
+  it("a resposta HTTP não carrega as frases cruas do conserto semântico", async () => {
+    // O achado semântico traz, em processo, o parágrafo do contrato ORIGINAL
+    // para quem for aplicar a correção no Doc. Pela rede vai só o verbo: hoje
+    // nada consome o conserto, e mandar o trecho seria expor texto de contrato
+    // num payload sem leitor.
+    templateFindUnique.mockResolvedValue(template());
+    getDocPlainTextMock.mockResolvedValue(
+      "a) pago à imobiliária intermediadora {{corretagem_qualificacao}};"
+    );
+
+    const body = await (await call()).json();
+
+    expect(body.semantic.findings).toHaveLength(1);
+    expect(body.semantic.findings[0].suggestedFix).toEqual({ op: "rekey" });
+    expect(JSON.stringify(body.semantic)).not.toContain("phrase");
+  });
 });
