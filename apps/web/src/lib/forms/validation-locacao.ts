@@ -484,7 +484,7 @@ export const LOCACAO_SCHEMA_TYPE = "locacao_residencial_v1" as const;
 // `OrgFormSettings.locacaoCustomRequiredPaths[].step` e em
 // `participantVisibilityJson.locacao.<papel>[]`. Trocar as posições aqui sem
 // remapear o que está gravado faria uma org configurada exigir campos na etapa
-// errada. A migration `20260903_locacao_swap_locador_locatario` cuida disso, e
+// errada. A migration `20260903200000_locacao_locatario_antes_do_locador` cuida disso, e
 // ela RECALCULA o step a partir do próprio path (em vez de trocar 1↔2), para
 // ser idempotente — um swap literal se desfaz se rodar duas vezes.
 export const LOCACAO_STEP_LABELS = [
@@ -579,10 +579,13 @@ export type DadosLocacaoComercialForm = z.infer<typeof dadosLocacaoComercialSche
 
 export const LOCACAO_COMERCIAL_SCHEMA_TYPE = "locacao_comercial_v1" as const;
 
+// Espelha a ORDEM de LOCACAO_STEP_LABELS — o wizard é o mesmo componente e
+// renumerar só o array residencial faria a locação comercial exibir a aba
+// "Locador(es)" enquanto renderiza os campos do locatário.
 export const LOCACAO_COMERCIAL_STEP_LABELS = [
   "Documentos",
-  "Locador(es)",
   "Locatário(s)",
+  "Locador(es)",
   "Imóvel e Destinação",
   "Aluguel e Reajuste",
   "Garantia e Observações",
