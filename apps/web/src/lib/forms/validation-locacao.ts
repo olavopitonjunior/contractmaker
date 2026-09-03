@@ -608,6 +608,90 @@ type FinalizeIssue = { path: string; message: string };
 const isBlankStr = (v: unknown): boolean =>
   v === null || v === undefined || String(v).trim() === "";
 
+/**
+ * Bloqueio DURO do finalize de locação.
+ *
+ * Existe porque o piso de obrigatoriedade do `LocacaoFormWizard` (nome da
+ * parte, valor do aluguel) deixou de valer sempre: ele passou a ceder à
+ * configuração da imobiliária. O piso era client-side e, portanto, nunca foi
+ * garantia de verdade — mas era o que na prática impedia finalizar uma locação
+ * com parte sem nome (que `dealDataToSigners` joga em `missing`, e a parte não
+ * assina na ClickSign) ou com aluguel zero. Ao afrouxar o piso sem isto aqui, a
+ * trava visível viraria contrato quebrado na assinatura.
+ *
+ * ESTREITO DE PROPÓSITO: só AUSÊNCIA de dado estrutural. Problema de FORMATO
+ * (o CPF que o OCR trouxe torto) continua em `collectLocacaoFinalizeIssues`,
+ * como warning na resposta — o cliente não pode ficar preso por isso. Não
+ * transformar aquela lista inteira em bloqueio.
+ *
+ * Fiador fica FORA: já tem guarda própria (`missingFiadorName`) com `reason`
+ * dedicado na rota, e é condicional ao tipo de garantia.
+ */
+export function collectLocacaoHardBlockIssues(
+  data: Record<string, unknown>
+): FinalizeIssue[] {
+  const issues: FinalizeIssue[] = [];
+
+  for (const [list, label] of [
+    ["locadores", "locador"],
+    ["locatarios", "locatário"],
+  ] as const) {
+    const parties = Array.isArray(data[list])
+      ? (data[list] as Array<Record<string, unknown> | null | undefined>)
+      : [];
+    if (parties.length === 0) {
+      issues.push({ path: list, message: `Informe ao menos um ${label}.` });
+      continue;
+    }
+    parties.forEach((raw, i) => {
+      const parte = raw ?? {};
+      // Mesmo par PF/PJ do piso do wizard: numa PJ o campo de identidade é a
+      // razão social, e cobrar `nome` ali seria pendência num campo que a
+      // ficha de empresa nem renderiza.
+      const isPJ = parte.tipo_pessoa === "juridica";
+      const field = isPJ ? "razao_social" : "nome";
+      if (isBlankStr(parte[field])) {
+        issues.push({
+          path: `${list}.${i}.${field}`,
+          message: isPJ
+            ? `Razão social do ${label} é obrigatória.`
+            : `Nome do ${label} é obrigatório.`,
+        });
+      }
+    });
+  }
+
+  const aluguel = (data.aluguel as Record<string, unknown> | undefined) ?? {};
+  if (!(Number(aluguel.valor) > 0)) {
+    issues.push({
+      path: "aluguel.valor",
+      message: "Informe o valor do aluguel (maior que zero).",
+    });
+  }
+
+  return issues;
+}
+
+/** Erro de veto do finalize — lançado de dentro do lock, vira 422 na rota. */
+export class LocacaoFinalizeBlockedError extends Error {
+  constructor(public readonly issues: FinalizeIssue[]) {
+    super("LOCACAO_FINALIZE_BLOCKED");
+    this.name = "LocacaoFinalizeBlockedError";
+  }
+}
+
+/**
+ * Veta o finalize quando falta dado estrutural. Feito para rodar DENTRO do
+ * `transform` de `mergeSalesFormDataJson`, que roda sob o row lock sobre o
+ * estado RESULTANTE do merge: medir o `preview` pré-lock deixaria passar o
+ * finalize que corre junto com um auto-save de outra aba/subtoken. Lançar aqui
+ * aborta a transação — nada é gravado, nem o `status`.
+ */
+export function assertLocacaoFinalizable(data: Record<string, unknown>): void {
+  const issues = collectLocacaoHardBlockIssues(data);
+  if (issues.length > 0) throw new LocacaoFinalizeBlockedError(issues);
+}
+
 export function collectLocacaoFinalizeIssues(
   data: Record<string, unknown>
 ): FinalizeIssue[] {

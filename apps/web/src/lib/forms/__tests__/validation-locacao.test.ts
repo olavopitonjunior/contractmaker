@@ -3,6 +3,9 @@ import {
   dadosLocacaoSchema,
   dadosLocacaoComercialSchema,
   collectLocacaoFinalizeIssues,
+  collectLocacaoHardBlockIssues,
+  assertLocacaoFinalizable,
+  LocacaoFinalizeBlockedError,
   sumEncargosMensais,
   seedOutrosEncargos,
   comissaoLocacaoSchema,
@@ -600,5 +603,95 @@ describe("pessoa física de locação: nome_mae e sexo", () => {
     expect(parsed.locadores[0]).toMatchObject({ nome_mae: "Ana Locadora", sexo: "M" });
     expect(parsed.locatarios[0]).toMatchObject({ nome_mae: "", sexo: "" });
     expect(parsed.garantia?.fiador).toMatchObject({ sexo: "F", nome_mae: "" });
+  });
+});
+
+// ============================================================================
+// Bloqueio duro do finalize (collectLocacaoHardBlockIssues).
+//
+// Estes casos são a rede que substitui o piso do LocacaoFormWizard, que passou
+// a ceder à configuração da imobiliária. O controle que importa é o par: o
+// payload completo tem de sair LIMPO, senão "bloqueia tudo" passaria por
+// "bloqueia o que falta".
+// ============================================================================
+describe("collectLocacaoHardBlockIssues", () => {
+  const paths = (d: Record<string, unknown>) =>
+    collectLocacaoHardBlockIssues(d).map((i) => i.path);
+
+  it("não acusa nada num payload estruturalmente completo (controle)", () => {
+    expect(collectLocacaoHardBlockIssues(baseValid)).toEqual([]);
+  });
+
+  it("bloqueia locador PF sem nome", () => {
+    expect(
+      paths({ ...baseValid, locadores: [{ tipo_pessoa: "fisica", nome: "  " }] })
+    ).toEqual(["locadores.0.nome"]);
+  });
+
+  it("bloqueia locatário PJ sem razão social — e cobra razao_social, não nome", () => {
+    expect(
+      paths({
+        ...baseValid,
+        locatarios: [{ tipo_pessoa: "juridica", nome: "irrelevante" }],
+      })
+    ).toEqual(["locatarios.0.razao_social"]);
+  });
+
+  it("aceita PJ identificada só pela razão social", () => {
+    expect(
+      collectLocacaoHardBlockIssues({
+        ...baseValid,
+        locatarios: [{ tipo_pessoa: "juridica", razao_social: "Acme LTDA" }],
+      })
+    ).toEqual([]);
+  });
+
+  it("acusa a parte que falta pelo ÍNDICE, sem culpar a que está preenchida", () => {
+    expect(
+      paths({
+        ...baseValid,
+        locadores: [
+          { tipo_pessoa: "fisica", nome: "João Locador" },
+          { tipo_pessoa: "fisica", nome: "" },
+        ],
+      })
+    ).toEqual(["locadores.1.nome"]);
+  });
+
+  it("bloqueia lista de partes vazia", () => {
+    expect(paths({ ...baseValid, locadores: [] })).toEqual(["locadores"]);
+  });
+
+  it("bloqueia aluguel zerado e ausente", () => {
+    expect(paths({ ...baseValid, aluguel: { valor: 0 } })).toEqual([
+      "aluguel.valor",
+    ]);
+    expect(paths({ ...baseValid, aluguel: {} })).toEqual(["aluguel.valor"]);
+  });
+
+  it("NÃO bloqueia por formato — CPF torto do OCR segue como warning", () => {
+    const comCpfTorto = {
+      ...baseValid,
+      locadores: [{ tipo_pessoa: "fisica", nome: "João Locador", cpf: "123" }],
+    };
+    expect(collectLocacaoHardBlockIssues(comCpfTorto)).toEqual([]);
+    expect(
+      collectLocacaoFinalizeIssues(comCpfTorto).some((i) =>
+        i.path.startsWith("locadores.0.cpf")
+      )
+    ).toBe(true);
+  });
+
+  it("assertLocacaoFinalizable lança com os issues e passa quando está completo", () => {
+    expect(() => assertLocacaoFinalizable(baseValid)).not.toThrow();
+    try {
+      assertLocacaoFinalizable({ ...baseValid, aluguel: { valor: 0 } });
+      throw new Error("deveria ter lançado");
+    } catch (e) {
+      expect(e).toBeInstanceOf(LocacaoFinalizeBlockedError);
+      expect((e as LocacaoFinalizeBlockedError).issues.map((i) => i.path)).toEqual([
+        "aluguel.valor",
+      ]);
+    }
   });
 });
