@@ -1,6 +1,7 @@
 import { auth, getUserOrg } from "@/lib/auth/auth";
+import { isOrgOwnerAdmin } from "@/lib/auth/org-role";
 import { prisma } from "@/lib/db/prisma";
-import { PenLine, KeyRound, Library } from "lucide-react";
+import { PenLine, KeyRound, Library, ClipboardCheck } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
@@ -51,6 +52,7 @@ export default async function TemplatesPage({
   const org = await getUserOrg(session.user.id);
   if (!org) return <p className="text-muted-foreground p-6">Sem organizacao.</p>;
 
+  const podeRevisar = await isOrgOwnerAdmin(session.user.id, org.id);
   const showArchived = searchParams?.archived === "1";
   const autoIngest = searchParams?.ingest === "1";
   const repoTab =
@@ -144,7 +146,25 @@ export default async function TemplatesPage({
       <PageHeader
         title="Templates de Contrato"
         description="Cada tipo de contrato tem um modelo padrão — é ele que gera o documento."
-      />
+      >
+        {/*
+          No cabeçalho, e não na barra de ações da aba "Modelos": a conferência
+          da biblioteca é a pergunta que se faz ANTES de escolher uma aba, e
+          enterrá-la numa delas foi exatamente como o botão "Revisar" de cada
+          modelo passou despercebido.
+
+          Só para quem pode entrar: a tela é owner/admin, e um botão que leva a
+          404 é pior que botão nenhum.
+        */}
+        {podeRevisar && (
+          <Button size="sm" variant="outline" asChild>
+            <Link href="/templates/revisao">
+              <ClipboardCheck className="mr-1.5 h-4 w-4" />
+              Revisar biblioteca
+            </Link>
+          </Button>
+        )}
+      </PageHeader>
 
       {openRun && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-violet-300 bg-violet-50/50 p-3 text-sm dark:border-violet-900 dark:bg-violet-950/20">
