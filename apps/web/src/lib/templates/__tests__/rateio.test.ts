@@ -145,6 +145,26 @@ describe("rateioPrimeiroAluguel — a lista da cláusula", () => {
     expect(itens[0]).not.toContain("corretor(a) intermediador(a)");
   });
 
+  it("contrato IMPORTADO (comissionados) rateia igual ao de locação (angariadores)", () => {
+    // `corretoresDe` aceita os dois vocabulários — locação grava
+    // `angariadores`, e um contrato importado passa pelo extrator de CCV, que
+    // fala o de venda (`comissionados`). Enquanto o cálculo lia
+    // `comissao.angariadores` por conta própria, o importado saía com a
+    // imobiliária recebendo o aluguel INTEIRO e o corretor sumindo sem aviso:
+    // valor errado num contrato assinado, não só um item faltando.
+    const corretor = { nome: "Ana Ribeiro", cpf: "529.982.247-25", valor_primeiro_aluguel: 1500 };
+    const taxa = { forma_taxa_locacao: "valor_fixo", taxa_locacao_valor: 5000 };
+
+    const comAngariadores = render(dados({ comissao: { ...taxa, angariadores: [corretor] } }));
+    const comComissionados = render(dados({ comissao: { ...taxa, comissionados: [corretor] } }));
+
+    expect(comComissionados).toBe(comAngariadores);
+    expect(comComissionados.split("\n")).toHaveLength(2);
+    expect(comComissionados).toContain("R$ 3.500,00");
+    expect(comComissionados).toContain("R$ 1.500,00");
+    expect(comComissionados).toContain("Ana Ribeiro");
+  });
+
   it("resolve a via do corretor pelo cadastro quando o formulário não a traz", () => {
     const registro: RegistroCorretor[] = [
       {

@@ -200,9 +200,15 @@ export function aplicarPadraoComissao<T extends ComissaoSeedInput>(
  * imobiliária é a taxa MENOS a soma das partes dos corretores.
  *
  * A parte de cada corretor é `valor_primeiro_aluguel` quando informada; sem
- * ela, a comissão do mês 1 (que é o que a UI pré-preenche). Nunca negativa: se
- * a soma passar da taxa, a parte da imobiliária é 0 e `excede` fica `true` —
- * quem mostra isso ao operador é a UI, porque o render não tem como avisar.
+ * ela, a comissão do mês 1 (que é o que o campo mostra como padrão). Nunca
+ * negativa: se a soma passar da taxa, a parte da imobiliária é 0 e `excede`
+ * fica `true`.
+ *
+ * `excede` existe porque o render NÃO tem como avisar: a cláusula simplesmente
+ * sai sem a imobiliária, sem "R$ 0,00" e sem linha nenhuma. Quem avisa é
+ * `ComissaoLocacaoSection` — um erro de digitação no valor de um corretor zera
+ * a comissão da própria imobiliária num contrato assinado, e isso não pode
+ * acontecer em silêncio.
  */
 export interface RateioPrimeiroAluguel {
   /** Parte da imobiliária, em R$. Nunca negativa. */

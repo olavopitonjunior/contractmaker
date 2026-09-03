@@ -93,11 +93,21 @@ export function rateioPrimeiroAluguel(
 ): string {
   const comissao = (data?.comissao ?? {}) as Record<string, unknown>;
   const aluguel = (data?.aluguel ?? {}) as Record<string, unknown>;
-  const valores = rateioValores(aluguel.valor, comissao as never);
-  if (valores.total <= 0) return "";
-
   const registro = options.registro ?? [];
+  // A MESMA lista nas duas pontas. `corretoresDe` aceita `angariadores` (o
+  // vocabulário de locação) OU `comissionados` (o de venda, que é o que um
+  // contrato IMPORTADO carrega, porque passou pelo extrator de CCV). Deixar o
+  // cálculo ler `comissao.angariadores` por conta própria produzia, num
+  // contrato importado, uma lista com a imobiliária recebendo o aluguel INTEIRO
+  // e o corretor sumindo sem aviso — valor errado num contrato assinado, não só
+  // um item faltando. Passar a lista resolvida também garante que o valor do
+  // índice i pertence ao corretor do índice i.
   const corretores = corretoresDe(data);
+  const valores = rateioValores(aluguel.valor, {
+    ...comissao,
+    angariadores: corretores,
+  } as never);
+  if (valores.total <= 0) return "";
 
   const itens: ItemRateio[] = [];
   if (valores.imobiliaria > 0) {
