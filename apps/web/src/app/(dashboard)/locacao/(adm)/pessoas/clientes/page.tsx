@@ -5,7 +5,6 @@ import { UserPlus } from "lucide-react";
 import { ClientesTable, type ClienteRow } from "@/components/locacao/ClientesTable";
 import { NovoClienteDialog } from "@/components/locacao/NovoClienteDialog";
 import { ImportarCrmDialog } from "@/components/locacao/ImportarCrmDialog";
-import { summarizeSerasaJobs } from "@/lib/locacao/client-credit";
 import { LEASE_INSURERS, matchInsurerKey } from "@/lib/locacao/insurers";
 import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { getEffectivePermissions, can } from "@/lib/security/rbac/check";
@@ -36,17 +35,12 @@ export default async function LocacaoClientesPage() {
     include: {
       createdBy: { select: { name: true, email: true } },
       insurerAnalyses: { select: { seguradora: true, status: true } },
-      certidaoJobs: {
-        where: { provider: "serasa" },
-        select: { status: true, resultData: true },
-      },
     },
     orderBy: { createdAt: "desc" },
     take: 500,
   });
 
   const rows: ClienteRow[] = clients.map((c) => {
-    const serasa = summarizeSerasaJobs(c.certidaoJobs);
     return {
       id: c.id,
       nome: c.nome,
@@ -54,8 +48,6 @@ export default async function LocacaoClientesPage() {
       tipoPessoa: c.tipoPessoa,
       phone: c.phone ?? "—",
       createdByName: c.createdBy?.name ?? c.createdBy?.email ?? "—",
-      serasaLabel: serasa.label,
-      serasaTone: serasa.tone,
       // Todas as seguradoras do roster com o status de cada (null = não enviado).
       insurers: LEASE_INSURERS.map((ins) => {
         const a = c.insurerAnalyses.find((x) => matchInsurerKey(x.seguradora) === ins.key);

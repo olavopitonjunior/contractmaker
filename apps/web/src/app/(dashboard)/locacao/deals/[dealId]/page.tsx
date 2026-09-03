@@ -128,24 +128,6 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
   });
   const orgName = orgRow?.legalName ?? orgRow?.name ?? undefined;
 
-  // Análise de crédito (Serasa) — jobs do deal + consent LGPD.
-  const serasaJobs = await prisma.certidaoJob.findMany({
-    where: { dealId: deal.id, provider: "serasa" },
-    orderBy: { createdAt: "desc" },
-    take: 20,
-    select: {
-      id: true,
-      label: true,
-      endpoint: true,
-      status: true,
-      resultData: true,
-      attachmentId: true,
-      createdAt: true,
-    },
-  });
-  const compliance = (deal.complianceJson as Record<string, unknown> | null) ?? null;
-  const serasaConsent = compliance?.serasaConsent as { at?: string } | undefined;
-
   const lease = await prisma.leaseContract.findFirst({
     where: { dealId: deal.id, orgId: org.id },
     include: {
@@ -277,20 +259,6 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
         isLatest: v.isLatest,
       }))}
       orgName={orgName}
-      serasaConsent={!!serasaConsent?.at}
-      serasaJobs={serasaJobs.map((j) => {
-        const result = (j.resultData as { situacao?: string; detalhes?: string } | null) ?? null;
-        return {
-          id: j.id,
-          label: j.label,
-          endpoint: j.endpoint,
-          status: j.status,
-          situacao: result?.situacao ?? null,
-          detalhes: result?.detalhes ?? null,
-          attachmentId: j.attachmentId,
-          createdAt: j.createdAt.toISOString(),
-        };
-      })}
       versions={versions.map((v) => ({
         id: v.id,
         version: v.version,

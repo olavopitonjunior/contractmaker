@@ -84,7 +84,7 @@ export function ClientDocumentsCard({
       <CardContent>
         {documents.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Nenhum documento. Anexe RG, comprovante de renda, etc. PDFs de consultas Serasa aparecem
+            Nenhum documento. Anexe RG, comprovante de renda, etc. PDFs de certidões emitidas aparecem
             aqui automaticamente.
           </p>
         ) : (

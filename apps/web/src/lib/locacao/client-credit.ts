@@ -1,6 +1,10 @@
 // Helpers puros pra resumir a análise de crédito Serasa de um cliente a partir
-// dos CertidaoJob (provider="serasa"). Compartilhado entre a listagem e o
-// detalhe. Sem I/O — recebe os jobs já carregados.
+// dos CertidaoJob (provider="serasa"). Sem I/O — recebe os jobs já carregados.
+//
+// Sem caller desde 2026-09-02, de propósito: o Serasa não está integrado e a
+// listagem de clientes deixou de mostrar o selo. Mantido para religar quando a
+// integração existir — sem caller e sem teste, então regressão aqui só aparece
+// no dia do religamento.
 
 export type SerasaTone = "pending" | "ok" | "bad" | "info";
 
