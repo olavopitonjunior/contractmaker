@@ -9,8 +9,40 @@ import {
   isReceitaCertidaoNaoEmitida,
   isDataDivergente,
   isOnrLoginFailure,
+  isTokenAuthFailure,
   mapInfosimplesCodeToCategory,
 } from "../error-codes";
+
+describe("isTokenAuthFailure + 601 ambíguo (token inválido ≠ 'não encontrado' do e-proc)", () => {
+  const AUTH = "Não foi possível se autenticar com o token informado.";
+  it("casa a mensagem real do 601 de token (staging 03/09) e variações", () => {
+    expect(isTokenAuthFailure(AUTH)).toBe(true);
+    expect(isTokenAuthFailure("Erro ao autenticar com o token")).toBe(true);
+    expect(isTokenAuthFailure("Token informado inválido")).toBe(true);
+    expect(isTokenAuthFailure("O token informado está expirado")).toBe(true);
+    expect(isTokenAuthFailure("Token informado não autorizado")).toBe(true);
+  });
+  it("NÃO casa 'não encontrado', dado inválido nem 'token inválido' solto (obter_detalhes de protesto também é token)", () => {
+    expect(
+      isTokenAuthFailure("Não foi possível encontrar o que você procura na fonte consultada.")
+    ).toBe(false);
+    expect(isTokenAuthFailure("CPF inválido")).toBe(false);
+    expect(isTokenAuthFailure("Token inválido")).toBe(false);
+    expect(isTokenAuthFailure("token de obter_detalhes expirado")).toBe(false);
+    expect(isTokenAuthFailure("Não foi possível se autenticar com o certificado digital")).toBe(false);
+    expect(isTokenAuthFailure(null)).toBe(false);
+  });
+  it("601 com mensagem de token → account_issue; 601 'não encontrado' segue genuine_no_data", () => {
+    expect(mapInfosimplesCodeToCategory(601, AUTH)).toBe("account_issue");
+    expect(
+      mapInfosimplesCodeToCategory(
+        601,
+        "Não foi possível encontrar o que você procura na fonte consultada."
+      )
+    ).toBe("genuine_no_data");
+    expect(mapInfosimplesCodeToCategory(601)).toBe("genuine_no_data");
+  });
+});
 
 describe("isOnrLoginFailure (probe ONR — detecta login por mensagem, não por 608)", () => {
   it("casa 'Não foi possível realizar o login' (608 ONR real)", () => {

@@ -168,6 +168,42 @@ describe("classifyOutcome — Phase J", () => {
     );
   });
 
+  it("601 'não foi possível se autenticar com o token' → failed_permanent account_issue, sem retry, sem custo, mensagem do admin", () => {
+    const receitaCpf: EndpointInfo = {
+      id: "receita-federal/cpf",
+      label: "Receita Federal — Situação CPF",
+      costCents: 4,
+      scope: "federal",
+      appliesTo: ["pessoa"],
+      category: "federal",
+      portalUrl: "https://servicos.receita.fazenda.gov.br/",
+    };
+    const resp = {
+      code: 601,
+      code_message: "Não foi possível se autenticar com o token informado.",
+      data: [],
+      errors: [],
+      header: { billable: false, token_name: null },
+    } as unknown as InfosimplesResponse;
+    const out = classifyOutcome(
+      resp,
+      {
+        ...normEmpty,
+        situacao: "nao_emitida",
+        detalhes: "Não foi possível se autenticar com o token informado.",
+        failureCategory: "account_issue",
+      },
+      receitaCpf,
+      { attachmentId: null, retryAttempts: 0, maxRetries: 3 }
+    );
+    expect(out.status).toBe("failed_permanent");
+    expect(out.failureCategory).toBe("account_issue");
+    expect(out.nextRetryAt).toBeNull();
+    expect(out.costCents).toBe(0);
+    expect(out.portalUrl).toBeNull();
+    expect(out.errorMessage).toMatch(/INFOSIMPLES_TOKEN/);
+  });
+
   it("eproc-lista 601 'não encontrado' (evidência explícita) continua fechando como success negativa", () => {
     const eprocLista: EndpointInfo = {
       id: "tribunal/tjsp/eproc-lista",
