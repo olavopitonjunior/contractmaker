@@ -8,6 +8,7 @@ import {
   findCertidaoRecommendations,
   findSignatureRecommendations,
   isPartySubApplicable,
+  expandPartyUmbrellaPaths,
 } from "../party-required";
 
 // Helper: getValue sobre um objeto de valores do form.
@@ -375,5 +376,70 @@ describe("findSignatureRecommendations — e-mail das sub-partes", () => {
     expect(findSignatureRecommendations("locatarios", 1, get)).toEqual([
       { list: "locatarios", idx: 0, sub: "conjuge", field: "email" },
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// expandPartyUmbrellaPaths — fecha a divergência asterisco x gate em VENDA.
+//
+// `useRequiredField` já acende o asterisco de `vendedores.0.nome` quando o
+// preset pede só o guarda-chuva `vendedores`, mas `effectiveRequiredPaths` dá o
+// guarda-chuva por satisfeito com qualquer array não-vazio. Sem a expansão o
+// campo aparece marcado e o "Próximo" passa em branco.
+//
+// Até 2026-09-03 o buraco era tapado por um `required` cravado no register de
+// VendedorStep/CompradorStep — que barrava, mas nenhuma configuração desligava
+// e a mensagem virava "Revise os campos da etapa 1", sem nomear o campo.
+// ---------------------------------------------------------------------------
+describe("expandPartyUmbrellaPaths", () => {
+  const ler = (data: Record<string, unknown>) => (path: string) =>
+    getByPath(data, path);
+
+  it("guarda-chuva vira o nome de CADA parte existente", () => {
+    const data = { vendedores: [{ tipo_pessoa: "fisica" }, { tipo_pessoa: "fisica" }] };
+    const out = expandPartyUmbrellaPaths(["vendedores"], ler(data));
+    expect(out).toContain("vendedores.0.nome");
+    expect(out).toContain("vendedores.1.nome");
+    // O guarda-chuva PERMANECE: é ele que cobre a lista vazia.
+    expect(out).toContain("vendedores");
+  });
+
+  it("PJ é cobrada por razao_social, não por nome", () => {
+    const data = { compradores: [{ tipo_pessoa: "juridica" }] };
+    const out = expandPartyUmbrellaPaths(["compradores"], ler(data));
+    expect(out).toContain("compradores.0.razao_social");
+    expect(out).not.toContain("compradores.0.nome");
+  });
+
+  it("NÃO expande lista que a org tirou do preset", () => {
+    const data = { vendedores: [{ tipo_pessoa: "fisica" }] };
+    const out = expandPartyUmbrellaPaths(["compradores"], ler(data));
+    expect(out.some((p) => p.startsWith("vendedores."))).toBe(false);
+  });
+
+  it("lista vazia não gera path de nome — quem cobra é o guarda-chuva", () => {
+    const data = { vendedores: [] };
+    const out = expandPartyUmbrellaPaths(["vendedores"], ler(data));
+    expect(out).toEqual(["vendedores"]);
+  });
+
+  it("valor não-array não derruba a expansão", () => {
+    const data = { vendedores: "lixo" };
+    expect(() => expandPartyUmbrellaPaths(["vendedores"], ler(data))).not.toThrow();
+  });
+
+  it("o gate passa a NOMEAR o campo que falta", () => {
+    const data = { vendedores: [{ tipo_pessoa: "fisica", nome: "" }] };
+    const paths = expandPartyUmbrellaPaths(["vendedores"], ler(data));
+    const faltando = findMissingRequired(paths, ler(data));
+    expect(faltando).toContain("vendedores.0.nome");
+  });
+
+  // Controle anti-vacuidade: com o nome PREENCHIDO nada pode faltar, senão os
+  // testes acima passariam mesmo se a função marcasse tudo como pendente.
+  it("CONTROLE: parte nomeada não gera pendência", () => {
+    const data = { vendedores: [{ tipo_pessoa: "fisica", nome: "Ana Souza" }] };
+    const paths = expandPartyUmbrellaPaths(["vendedores"], ler(data));
+    expect(findMissingRequired(paths, ler(data))).toEqual([]);
   });
 });

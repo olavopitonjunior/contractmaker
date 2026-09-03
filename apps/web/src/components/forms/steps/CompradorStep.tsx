@@ -43,18 +43,14 @@ function PessoaFisicaFields({
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* `required` explícito: a obrigatoriedade vem do próprio register
-            abaixo, não do preset da org. */}
-        <FormField
-          form={form}
-          name={`${prefix}.nome`}
-          label="Nome Completo"
-          required
-        >
+        {/* Ver VendedorStep: a obrigatoriedade do nome é da imobiliária
+            (`compradores.0.nome` tem checkbox em Configurações → Formulário).
+            Aqui fica só regra de FORMATO, e só para campo preenchido. */}
+        <FormField form={form} name={`${prefix}.nome`} label="Nome Completo">
           <Input
             {...form.register(`${prefix}.nome`, {
-              required: "Nome é obrigatório",
-              minLength: { value: 2, message: "Nome muito curto" },
+              validate: (v) =>
+                !v || String(v).trim().length >= 2 || "Nome muito curto",
             })}
             placeholder="Nome completo"
           />
