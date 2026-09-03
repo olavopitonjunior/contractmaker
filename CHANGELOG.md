@@ -4,6 +4,17 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-02 - Locador, locatário, fiador e cônjuge do fiador assinam com a qualificação certa
+
+### Alterado
+
+- **No envio do contrato de locação para assinatura, cada parte vai à ClickSign com a qualificação própria**: Locador, Locatário, Fiador e Cônjuge do fiador. Antes locador e locatário assinavam como "Interessado" e fiador e cônjuge como "Anuente", indistinguíveis no certificado. As quatro opções entram no menu "Assina como" e valem como padrão ao montar a lista de signatários; o operador continua podendo trocar. Cônjuge de locador ou locatário segue como Anuente (não há qualificação própria na ClickSign).
+- Envelopes já enviados não mudam; os que exibiam "Anuente"/"Interessado" continuam assim.
+
+### Notas
+
+- A lista de qualificações passa a ter uma fonte única no código; as três cópias que existiam em rotas e validadores foram substituídas por ela.
+
 ## [Unreleased] - 2026-09-02 - Fiador e cônjuge do fiador sempre no seletor de documentos da locação
 
 ### Adicionado

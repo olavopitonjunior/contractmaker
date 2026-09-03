@@ -436,7 +436,9 @@ async function createEnvelopeFromBuffer(input: {
       // porque `EnvelopeSigner` NÃO persiste `subKind` (é transiente, resolvido
       // em memória na criação) e daqui não dá pra recuperar que este signer é
       // cônjuge/procurador. Se um dia o role puder chegar null aqui, a correção
-      // é persistir o subKind, não passar um argumento que não existe.
+      // é persistir o subKind, não passar um argumento que não existe — sem
+      // ele, o cônjuge do fiador cairia em "surety" (papel do titular) em vez
+      // de "guarantor_spouse".
       const role: ClicksignRole =
         (localSigner.role as ClicksignRole | null) ??
         defaultRoleForSourceKind(localSigner.sourceKind);

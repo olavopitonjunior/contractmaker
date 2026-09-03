@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { CLICKSIGN_ROLES } from "@/lib/clicksign/roles";
 import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
 import {
@@ -44,17 +45,9 @@ const sendSchema = z.object({
         subKind: z
           .enum(["titular", "conjuge", "procurador", "representante", "avulso"])
           .optional(),
-        role: z.enum([
-          "sign",
-          "buyer",
-          "seller",
-          "intervening",
-          "realestate",
-          "witness",
-          "consenting",
-          "attorney",
-          "party",
-        ]),
+        // Fonte única: lib/clicksign/roles.ts (antes havia 3 cópias literais
+        // desta lista, que divergiam a cada qualificação nova).
+        role: z.enum(CLICKSIGN_ROLES),
       })
     )
     .optional(),
@@ -78,19 +71,7 @@ const sendSchema = z.object({
         subKind: z
           .enum(["titular", "conjuge", "procurador", "representante", "avulso"])
           .optional(),
-        role: z
-          .enum([
-            "sign",
-            "buyer",
-            "seller",
-            "intervening",
-            "realestate",
-            "witness",
-            "consenting",
-            "attorney",
-            "party",
-          ])
-          .optional(),
+        role: z.enum(CLICKSIGN_ROLES).optional(),
         group: z.number().int().positive().optional().nullable(),
       })
     )
