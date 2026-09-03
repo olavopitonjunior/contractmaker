@@ -440,6 +440,63 @@ export function rankSlotCandidates(
 }
 
 /**
+ * As três provas que uma cláusula do acervo tem de passar para entrar num
+ * contrato: row íntegra, Handlebars que compila e render sem chave sobrando.
+ *
+ * Está separada de `resolveClauseContent` para ter um SEGUNDO chamador: a
+ * revisão da base de cláusulas (`clause-review.ts`), que roda a mesma prova
+ * contra dados de exemplo e mostra o resultado antes de existir um contrato.
+ * Hoje a descoberta é tardia por construção — a cláusula quebrada só se revela
+ * na hora da geração, e o modo de falha é silencioso: entra o texto canônico e
+ * o contrato sai sem a redação que a imobiliária escreveu. Antecipar isso é o
+ * ponto da revisão, e antecipar com uma CÓPIA das regras não serviria: a prova
+ * do painel tem de ser a mesma que a geração aplica, ou o painel vira opinião.
+ *
+ * Sem `slot` de propósito: nem toda cláusula do acervo preenche um slot (as de
+ * G1..G6 o agente insere no editor), e a falha é a mesma nos dois casos.
+ */
+export function checkClauseContent(
+  hit: ClauseHit,
+  data: Record<string, unknown>
+): { html: string } | { reason: ClauseSlotFailureReason; message: string } {
+  // Defesa em profundidade contra o chunking do acervo. A criação já grava
+  // cláusula de slot como row única (`noChunk` em lib/ai/knowledge.ts), mas uma
+  // row LEGADA multi-chunk tem `content` = preview de 500 chars cortado no meio
+  // da frase. O `where` já filtra `parentId: null` (as filhas herdam as mesmas
+  // tags e nascem approved); isto pega o parent que sobrou.
+  if ((hit.chunkTotal ?? 1) > 1) {
+    return {
+      reason: "chunked_content",
+      message:
+        `cláusula gravada em ${hit.chunkTotal} chunks — o content da raiz é só um ` +
+        `preview. Reingira a cláusula (o seed grava row única).`,
+    };
+  }
+
+  let rendered: string;
+  try {
+    rendered = renderContratoHTML(hit.content, data);
+  } catch (err) {
+    return {
+      reason: "render_error",
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  const residual = RESIDUAL_PLACEHOLDER.exec(rendered);
+  if (residual) {
+    return {
+      reason: "residual_placeholder",
+      message: `sobrou chave Handlebars após o render: ${rendered
+        .slice(residual.index, residual.index + 60)
+        .replace(/\s+/g, " ")}`,
+    };
+  }
+
+  return { html: rendered };
+}
+
+/**
  * Valida e renderiza o `content` da cláusula do acervo contra o dataJson
  * enriquecido. Devolve o HTML, ou a falha que manda o slot pro fallback
  * canônico.
@@ -449,53 +506,11 @@ function resolveClauseContent(
   hit: ClauseHit,
   data: Record<string, unknown>
 ): { html: string } | { failure: ClauseSlotFailure } {
-  // Defesa em profundidade contra o chunking do acervo. A criação já grava
-  // cláusula de slot como row única (`noChunk` em lib/ai/knowledge.ts), mas uma
-  // row LEGADA multi-chunk tem `content` = preview de 500 chars cortado no meio
-  // da frase. O `where` já filtra `parentId: null` (as filhas herdam as mesmas
-  // tags e nascem approved); isto pega o parent que sobrou.
-  if ((hit.chunkTotal ?? 1) > 1) {
-    return {
-      failure: {
-        slot,
-        knowledgeItemId: hit.id,
-        reason: "chunked_content",
-        message:
-          `cláusula gravada em ${hit.chunkTotal} chunks — o content da raiz é só um ` +
-          `preview. Reingira a cláusula (o seed grava row única).`,
-      },
-    };
-  }
-
-  let rendered: string;
-  try {
-    rendered = renderContratoHTML(hit.content, data);
-  } catch (err) {
-    return {
-      failure: {
-        slot,
-        knowledgeItemId: hit.id,
-        reason: "render_error",
-        message: err instanceof Error ? err.message : String(err),
-      },
-    };
-  }
-
-  const residual = RESIDUAL_PLACEHOLDER.exec(rendered);
-  if (residual) {
-    return {
-      failure: {
-        slot,
-        knowledgeItemId: hit.id,
-        reason: "residual_placeholder",
-        message: `sobrou chave Handlebars após o render: ${rendered
-          .slice(residual.index, residual.index + 60)
-          .replace(/\s+/g, " ")}`,
-      },
-    };
-  }
-
-  return { html: rendered };
+  const out = checkClauseContent(hit, data);
+  if ("html" in out) return out;
+  return {
+    failure: { slot, knowledgeItemId: hit.id, reason: out.reason, message: out.message },
+  };
 }
 
 /**

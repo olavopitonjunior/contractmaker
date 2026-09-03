@@ -14,6 +14,17 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 ### Notas
 
 - O defeito já estava em produção (veio com a checagem semântica e a edição no app). A tela de revisão da biblioteca não o criou — ela o tornou visível, e é assim que ele foi encontrado.
+## [Unreleased] - 2026-09-03 - A biblioteca inteira numa tela
+
+### Adicionado
+
+- **"Revisar biblioteca": modelos E cláusulas conferidos de uma vez.** A revisão era modelo a modelo, e a pergunta que importa não é sobre um modelo: é se a biblioteca está pronta. Foi assim que os 16 modelos da RE/MAX Trio chegaram a "prontos" com 10 erros semânticos, e assim que, depois de corrigidos à mão, **16 de 16** seguiram com a lista de rateio chaveada item a item sem ninguém notar — cada tela dizia a verdade sobre si, e ninguém tinha a visão de conjunto. O botão fica no cabeçalho de **Templates** e no de **Banco de cláusulas**, visível antes de escolher qualquer aba: enterrá-lo dentro de uma delas foi exatamente como o botão "Revisar" de cada modelo passou despercebido.
+- **A base de cláusulas ganha a prova que só existia dentro da geração.** Cláusula que não compila, que sobra com `{{chave}}` depois do preenchimento ou que está partida em pedaços no acervo é **descartada em silêncio** na hora de gerar: entra o texto canônico, o contrato sai bonito e sem a redação que a imobiliária escreveu, e o único registro é uma linha de log no servidor. A revisão roda a MESMA função que a geração usa para descartar, contra os dados de exemplo, e mostra o resultado antes de existir um contrato. Cláusula não classificada é provada nas **duas** esteiras, porque é nas duas que ela é lida.
+- **Correção assistida por modelo**, com a lista do que será feito antes de aplicar. Os consertos vão um por vez, e cada um é recalculado no servidor no momento de aplicar — um conserto muda o documento sob os seguintes.
+
+### Interno
+
+- O painel **delega** à validação individual em vez de reimplementar as contagens. Duas fontes de verdade sobre "dá para ativar?" deixariam o operador entre duas telas que discordam sem ter como decidir qual está certa.
 
 ## [Unreleased] - 2026-09-03 - A migração que não tinha ferramenta
 
