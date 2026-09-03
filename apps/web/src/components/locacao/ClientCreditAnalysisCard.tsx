@@ -1,5 +1,10 @@
 "use client";
 
+// Sem caller desde 2026-09-02, de propósito: o Serasa não está integrado
+// (custo provisório, sem teto) e a decisão foi tirar qualquer menção das telas
+// de locação até a integração existir. Mantido para religar na ficha do
+// cliente quando isso acontecer — não é código morto por esquecimento.
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
