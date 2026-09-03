@@ -23,6 +23,10 @@ import { emitNotification } from "@/lib/notifications/emit";
 import { dedupConjuges } from "@/lib/forms/dedup-conjuges";
 import { syncDealClientName } from "@/lib/forms/sync-deal-client-name";
 import { dadosContratoSchema } from "@/lib/forms/validation";
+import {
+  assertLocacaoFinalizable,
+  LocacaoFinalizeBlockedError,
+} from "@/lib/forms/validation-locacao";
 import { sendFormSummary } from "@/lib/forms/form-summary-mailer";
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
 import {
@@ -163,9 +167,18 @@ export async function PATCH(
         const preservado = preserveCommissionerReceiving(merged, fresh.dataJson, {
           viewerIsMember,
         });
-        return decideFinalize(fresh).isFinalizing
-          ? dedupConjuges(preservado)
-          : preservado;
+        if (!decideFinalize(fresh).isFinalizing) return preservado;
+        // Segunda porta do finalize de LOCAÇÃO. Esta rota é a de venda, mas
+        // aceita qualquer token e transiciona qualquer `schemaType` para
+        // "completo" — nenhum dos gates de locação mora aqui. Enquanto o piso
+        // do wizard valia sempre, isso era latente; com o piso cedendo à
+        // configuração da imobiliária, seria a porta por onde uma locação sem
+        // nome de parte chegaria à ClickSign. Mesmo veto da rota de locação,
+        // sob o mesmo lock.
+        if (form.schemaType?.startsWith("locacao")) {
+          assertLocacaoFinalizable(preservado);
+        }
+        return dedupConjuges(preservado);
       },
       extraData: (fresh) => {
         const { newStatus, isFinalizing } = decideFinalize(fresh);
@@ -210,6 +223,20 @@ export async function PATCH(
     // (operador deletando o deal com ?deleteForm=true durante um auto-save).
     if (error instanceof FormNotFoundError) {
       return NextResponse.json({ error: "Form not found" }, { status: 404 });
+    }
+    // Locação finalizada por esta rota sem dado estrutural — mesma resposta que
+    // /api/locacao/forms/[token] dá, para o cliente não ver dois contratos
+    // diferentes conforme a porta.
+    if (error instanceof LocacaoFinalizeBlockedError) {
+      return NextResponse.json(
+        {
+          error: "Campos obrigatórios não preenchidos",
+          reason: "finalize_blocked",
+          missingRequired: error.issues.map((i) => i.path),
+          validationIssues: error.issues,
+        },
+        { status: 422 }
+      );
     }
     throw error;
   }

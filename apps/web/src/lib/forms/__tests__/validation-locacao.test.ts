@@ -4,6 +4,7 @@ import {
   dadosLocacaoComercialSchema,
   collectLocacaoFinalizeIssues,
   collectLocacaoHardBlockIssues,
+  locacaoHardBlockPaths,
   assertLocacaoFinalizable,
   LocacaoFinalizeBlockedError,
   sumEncargosMensais,
@@ -680,6 +681,55 @@ describe("collectLocacaoHardBlockIssues", () => {
         i.path.startsWith("locadores.0.cpf")
       )
     ).toBe(true);
+  });
+
+  it("locacaoHardBlockPaths lista os paths PREENCHIDOS OU NÃO — é a fonte do asterisco", () => {
+    // Preenchido: nenhum issue, mas o path continua na lista (o campo segue
+    // sendo exigido para concluir, e o asterisco tem de continuar aceso).
+    expect(collectLocacaoHardBlockIssues(baseValid)).toEqual([]);
+    expect(locacaoHardBlockPaths(baseValid)).toEqual([
+      "locadores.0.nome",
+      "locatarios.0.nome",
+      "aluguel.valor",
+    ]);
+  });
+
+  it("locacaoHardBlockPaths acompanha PF/PJ e múltiplas partes", () => {
+    expect(
+      locacaoHardBlockPaths({
+        ...baseValid,
+        locadores: [
+          { tipo_pessoa: "fisica", nome: "A" },
+          { tipo_pessoa: "juridica", razao_social: "B LTDA" },
+        ],
+      })
+    ).toEqual([
+      "locadores.0.nome",
+      "locadores.1.razao_social",
+      "locatarios.0.nome",
+      "aluguel.valor",
+    ]);
+  });
+
+  it("cobre o nome mesmo nos presets que só declaram o path guarda-chuva", () => {
+    // Regressão: `essencial`/`completo` declaram `locadores` (guarda-chuva), que
+    // `effectiveRequiredPaths` satisfaz com qualquer array não-vazio — o gate de
+    // navegação passava com nome em branco enquanto o asterisco acendia. O piso
+    // duro não depende do preset, então fecha essa divergência dos dois lados.
+    const semNome = {
+      ...baseValid,
+      locadores: [{ tipo_pessoa: "fisica", nome: "" }],
+    };
+    expect(locacaoHardBlockPaths(semNome)).toContain("locadores.0.nome");
+    expect(collectLocacaoHardBlockIssues(semNome).map((i) => i.path)).toEqual([
+      "locadores.0.nome",
+    ]);
+  });
+
+  it("não quebra quando a lista de partes não é array (import/OCR torto)", () => {
+    const torto = { ...baseValid, locadores: { 0: { nome: "x" } } };
+    expect(() => locacaoHardBlockPaths(torto)).not.toThrow();
+    expect(locacaoHardBlockPaths(torto)).toContain("locadores");
   });
 
   it("assertLocacaoFinalizable lança com os issues e passa quando está completo", () => {

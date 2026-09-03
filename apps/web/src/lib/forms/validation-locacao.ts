@@ -627,49 +627,74 @@ const isBlankStr = (v: unknown): boolean =>
  * Fiador fica FORA: já tem guarda própria (`missingFiadorName`) com `reason`
  * dedicado na rota, e é condicional ao tipo de garantia.
  */
-export function collectLocacaoHardBlockIssues(
-  data: Record<string, unknown>
-): FinalizeIssue[] {
-  const issues: FinalizeIssue[] = [];
+const HARD_BLOCK_LISTS = [
+  ["locadores", "locador"],
+  ["locatarios", "locatário"],
+] as const;
 
-  for (const [list, label] of [
-    ["locadores", "locador"],
-    ["locatarios", "locatário"],
-  ] as const) {
+/**
+ * Os paths que o bloqueio duro exige, PREENCHIDOS OU NÃO.
+ *
+ * Existe separado de `collectLocacaoHardBlockIssues` porque o wizard precisa
+ * das duas leituras e elas não podem divergir: a lista abaixo acende o
+ * asterisco (o campo é exigido para CONCLUIR, sempre — nenhuma configuração
+ * desliga isso), e o `collect` filtra dela o que está vazio para barrar. Duas
+ * listas escritas à mão iam separar-se na primeira mudança.
+ */
+export function locacaoHardBlockPaths(data: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  for (const [list] of HARD_BLOCK_LISTS) {
     const parties = Array.isArray(data[list])
       ? (data[list] as Array<Record<string, unknown> | null | undefined>)
       : [];
+    // Lista vazia: o próprio path da lista é a pendência ("informe ao menos um").
     if (parties.length === 0) {
-      issues.push({ path: list, message: `Informe ao menos um ${label}.` });
+      out.push(list);
       continue;
     }
     parties.forEach((raw, i) => {
-      const parte = raw ?? {};
       // Mesmo par PF/PJ do piso do wizard: numa PJ o campo de identidade é a
       // razão social, e cobrar `nome` ali seria pendência num campo que a
       // ficha de empresa nem renderiza.
-      const isPJ = parte.tipo_pessoa === "juridica";
-      const field = isPJ ? "razao_social" : "nome";
-      if (isBlankStr(parte[field])) {
-        issues.push({
-          path: `${list}.${i}.${field}`,
-          message: isPJ
-            ? `Razão social do ${label} é obrigatória.`
-            : `Nome do ${label} é obrigatório.`,
-        });
+      out.push(
+        `${list}.${i}.${(raw ?? {}).tipo_pessoa === "juridica" ? "razao_social" : "nome"}`
+      );
+    });
+  }
+  out.push("aluguel.valor");
+  return out;
+}
+
+/** Mensagem por path, derivada da forma do path (sem segunda tabela). */
+function hardBlockMessage(path: string): string {
+  if (path === "aluguel.valor") {
+    return "Informe o valor do aluguel (maior que zero).";
+  }
+  const [list, , field] = path.split(".");
+  const label = HARD_BLOCK_LISTS.find(([l]) => l === list)?.[1] ?? "parte";
+  if (!field) return `Informe ao menos um ${label}.`;
+  return field === "razao_social"
+    ? `Razão social do ${label} é obrigatória.`
+    : `Nome do ${label} é obrigatório.`;
+}
+
+export function collectLocacaoHardBlockIssues(
+  data: Record<string, unknown>
+): FinalizeIssue[] {
+  return locacaoHardBlockPaths(data)
+    .filter((path) => {
+      if (path === "aluguel.valor") {
+        const aluguel = (data.aluguel as Record<string, unknown> | undefined) ?? {};
+        // Zero é ausência aqui, não resposta — o Zod dá `.default(0)` ao campo.
+        return !(Number(aluguel.valor) > 0);
       }
-    });
-  }
-
-  const aluguel = (data.aluguel as Record<string, unknown> | undefined) ?? {};
-  if (!(Number(aluguel.valor) > 0)) {
-    issues.push({
-      path: "aluguel.valor",
-      message: "Informe o valor do aluguel (maior que zero).",
-    });
-  }
-
-  return issues;
+      const [list, idx, field] = path.split(".");
+      // Path de lista (sem índice) só é gerado quando a lista está vazia.
+      if (!field) return true;
+      const parties = (data[list] as Array<Record<string, unknown>>) ?? [];
+      return isBlankStr(parties[Number(idx)]?.[field]);
+    })
+    .map((path) => ({ path, message: hardBlockMessage(path) }));
 }
 
 /** Erro de veto do finalize — lançado de dentro do lock, vira 422 na rota. */

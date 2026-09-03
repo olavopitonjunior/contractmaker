@@ -10,6 +10,8 @@ import { useDirtyTopLevelScope } from "@/hooks/use-dirty-scope";
 import {
   LOCACAO_COMERCIAL_SCHEMA_TYPE,
   stepLabelsForLocacaoType,
+  locacaoHardBlockPaths,
+  collectLocacaoHardBlockIssues,
 } from "@/lib/forms/validation-locacao";
 import { PrivacyConsent } from "@/components/legal/PrivacyConsent";
 import { RequiredFieldMarker } from "@/components/forms/RequiredFieldMarker";
@@ -262,25 +264,25 @@ export function LocacaoFormWizard({
     (path) => getByPath(watchedData, path),
   );
 
-  // Asterisco dos campos que o PISO barra — não vêm do preset, então não estão
-  // em `allRequiredPaths`. Antes ficavam `required` cravado no step, o que
-  // deixaria o asterisco aceso mesmo com o piso desligado. Sai daqui para que
-  // marcação e gate leiam a MESMA condição.
-  const floorRequiredPaths = useMemo(() => {
-    const out: string[] = [];
-    if (requiredFloorEnabled) {
-      for (const { list } of Object.values(PARTY_STEP)) {
-        const parties =
-          (watchedData?.[list] as Array<Record<string, unknown>> | undefined) ?? [];
-        parties.forEach((p, i) => {
-          out.push(`${list}.${i}.${p?.tipo_pessoa === "juridica" ? "razao_social" : "nome"}`);
-        });
-      }
-      for (const paths of Object.values(STEP_REQUIRED)) out.push(...paths);
-    }
-    // Fiador é independente do piso: a rota já bloqueia o finalize sem o nome
-    // dele (`missingFiadorName`, reason `fiador_incompleto`), condicional ao
-    // tipo de garantia. O asterisco acompanha esse bloqueio, não o preset.
+  // Asterisco dos campos que o SERVIDOR exige para CONCLUIR, independentemente
+  // do preset: identidade de cada parte e valor do aluguel
+  // (`assertLocacaoFinalizable`), mais o nome do fiador (`missingFiadorName`).
+  // Nenhuma configuração desliga isso, então o asterisco acende SEMPRE — também
+  // quando o piso de navegação cedeu à configuração da org.
+  //
+  // A divisão é essa: a imobiliária configura o que barra para AVANÇAR; o que
+  // barra para CONCLUIR é do servidor e não é configurável.
+  //
+  // Antes esses campos tinham `required` cravado no step, e a marcação não
+  // acompanhava nem o preset nem o piso. Pior: os presets `essencial` e
+  // `completo` declaram só o path guarda-chuva (`locadores`), que o
+  // `useRequiredField` trata como se cobrisse `nome` — asterisco aceso — mas
+  // que `effectiveRequiredPaths` satisfaz com qualquer array não-vazio — gate
+  // passando. Marcar daqui fecha essa divergência.
+  const hardBlockPaths = useMemo(() => {
+    const out = locacaoHardBlockPaths(
+      (watchedData ?? {}) as Record<string, unknown>,
+    );
     const garantia = watchedData?.garantia as
       | { tipo?: string; fiador?: { tipo_pessoa?: string } }
       | undefined;
@@ -292,7 +294,7 @@ export function LocacaoFormWizard({
       );
     }
     return out;
-  }, [requiredFloorEnabled, watchedData]);
+  }, [watchedData]);
 
   // "Pedir para esta pessoa preencher" — papel da etapa atual (índice REAL).
   // Só na visão do token principal (subtoken já É a visão da parte).
@@ -492,6 +494,40 @@ export function LocacaoFormWizard({
       setCurrentStep(TOTAL - 1);
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
+    }
+    // Piso DURO do servidor, exercido aqui antes do PATCH. O gate de navegação
+    // cede à configuração da imobiliária, mas `assertLocacaoFinalizable` não —
+    // sem esta checagem o cliente percorreria as 7 etapas e levaria um 422 seco
+    // no fim, num campo que nenhuma etapa acusou. Mesma função do servidor, para
+    // as duas respostas não poderem divergir.
+    //
+    // Só no token principal: o link por parte não finaliza o formulário (marca
+    // o `completedAt` da parte) e enxerga só um pedaço dos dados — cobrar dele
+    // o nome do locador seria pendência num campo que a tela nem renderiza.
+    if (finalizeMode === "main") {
+      const hardIssues = collectLocacaoHardBlockIssues(
+        form.getValues() as Record<string, unknown>,
+      );
+      if (hardIssues.length > 0) {
+        for (const issue of hardIssues) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          form.setError(issue.path as any, {
+            type: "required",
+            message: "Campo obrigatório",
+          });
+        }
+        // Leva à etapa do primeiro pendente, senão o erro fica numa aba que o
+        // usuário não está vendo e o scroll do marcador não acha nada.
+        const first = hardIssues[0].path.split(".")[0];
+        const stepAlvo = first === "locadores" ? 1 : first === "locatarios" ? 2 : 4;
+        const visivel = visibleStepIndexes.indexOf(stepAlvo);
+        if (visivel >= 0) setCurrentStep(visivel);
+        setFailedTriggerCount((n) => n + 1);
+        toast.error(
+          `Preencha: ${describeMissingPaths(hardIssues.map((i) => i.path))}`,
+        );
+        return;
+      }
     }
     setIsSubmitting(true);
     try {
@@ -745,7 +781,7 @@ export function LocacaoFormWizard({
 
       <RequiredFieldsProvider
         paths={allRequiredPaths}
-        floorPaths={floorRequiredPaths}
+        floorPaths={hardBlockPaths}
       >
         <fieldset disabled={readOnly} className="m-0 border-0 p-0 min-w-0 disabled:opacity-70">
           {steps[visibleStepIndexes[currentStep] ?? currentStep]}
