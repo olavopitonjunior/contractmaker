@@ -364,7 +364,7 @@ export async function applyDocEdits(input: {
     }
     for (const e of estruturaisOk) {
       results[e.index] = {
-        op: "restore-paragraph",
+        op: e.op,
         status: "failed",
         reason: "verify-unavailable",
         target: e.target,

@@ -54,7 +54,7 @@ const OpSchema = z.discriminatedUnion("op", [
   }),
   z.object({
     op: z.literal("replace-block"),
-    paragraphs: z.array(z.string().min(1)).min(1).max(20),
+    paragraphs: z.array(z.string().trim().min(1)).min(1).max(20),
     token: z.string().trim().min(1),
   }),
 ]);

@@ -66,18 +66,21 @@ export interface ParagraphRange {
 }
 
 /**
- * Intervalo do parágrafo cujo texto, aparado, é exatamente `text`.
+ * Parágrafos do corpo, com o intervalo de cada um E a posição no `body.content`
+ * ORIGINAL.
  *
- * Devolve `null` quando não existe ou quando aparece em MAIS de um parágrafo:
- * apagar um intervalo é destrutivo e ambiguidade aqui não pode virar escolha
- * arbitrária. A marca de parágrafo fica FORA do intervalo de propósito — quem
- * insere o texto novo no lugar herda a formatação do parágrafo, em vez de
- * fundir-se com o seguinte.
+ * A posição original importa: `body.content` também guarda tabela, quebra de
+ * seção e sumário, que não são parágrafo e são pulados aqui. Sem guardar de
+ * onde cada parágrafo veio, dois parágrafos com uma TABELA entre eles pareceriam
+ * vizinhos — e o intervalo "do primeiro ao último" apagaria a tabela junto.
  */
-/** Parágrafos do corpo, com o intervalo de cada um. */
-function paragraphsOf(doc: docs_v1.Schema$Document): Array<{ texto: string; range: ParagraphRange }> {
-  const out: Array<{ texto: string; range: ParagraphRange }> = [];
-  for (const block of doc.body?.content || []) {
+function paragraphsOf(
+  doc: docs_v1.Schema$Document
+): Array<{ texto: string; range: ParagraphRange; posicao: number }> {
+  const out: Array<{ texto: string; range: ParagraphRange; posicao: number }> = [];
+  const content = doc.body?.content || [];
+  for (let posicao = 0; posicao < content.length; posicao += 1) {
+    const block = content[posicao]!;
     const para = block.paragraph;
     if (!para) continue;
     const elements = (para.elements || []).filter(
@@ -90,6 +93,7 @@ function paragraphsOf(doc: docs_v1.Schema$Document): Array<{ texto: string; rang
     out.push({
       texto: conteudo.replace(/\n+$/, "").trim(),
       range: { startIndex: start, endIndex: start + semNewline },
+      posicao,
     });
   }
   return out;
@@ -104,6 +108,14 @@ function paragraphsOf(doc: docs_v1.Schema$Document): Array<{ texto: string; rang
  * entre eles — e o que está entre eles é contrato. Ambíguo (a mesma sequência
  * aparece duas vezes) devolve `null` pelo mesmo motivo de sempre: apagar
  * intervalo é destrutivo, e escolher um dos dois seria arbitrário.
+ *
+ * "Consecutivos" é medido no `body.content` ORIGINAL, não na lista já filtrada
+ * de parágrafos. A diferença é destrutiva: uma TABELA (ou quebra de seção, ou
+ * sumário) entre dois parágrafos não é parágrafo, sai da lista filtrada e os
+ * dois pareceriam vizinhos — mas ela ocupa índices no documento, e o intervalo
+ * "do primeiro ao último" a apagaria junto. Como a conferência posterior só
+ * verifica que os parágrafos PRETENDIDOS sumiram, e nunca que nada além deles
+ * sumiu, o estrago seria reportado como sucesso.
  */
 export function findBlockRange(
   doc: docs_v1.Schema$Document,
@@ -117,6 +129,11 @@ export function findBlockRange(
   for (let i = 0; i + alvos.length <= paras.length; i += 1) {
     const casa = alvos.every((t, k) => paras[i + k]!.texto === t);
     if (!casa) continue;
+    // Nada entre eles no `body.content` original — nem bloco que não é parágrafo.
+    const semIntruso = alvos.every(
+      (_t, k) => k === 0 || paras[i + k]!.posicao === paras[i + k - 1]!.posicao + 1
+    );
+    if (!semIntruso) continue;
     if (achado) return null; // a mesma sequência aparece mais de uma vez
     achado = {
       startIndex: paras[i]!.range.startIndex,
@@ -126,6 +143,15 @@ export function findBlockRange(
   return achado;
 }
 
+/**
+ * Intervalo do parágrafo cujo texto, aparado, é exatamente `text`.
+ *
+ * Devolve `null` quando não existe ou quando aparece em MAIS de um parágrafo:
+ * apagar um intervalo é destrutivo e ambiguidade aqui não pode virar escolha
+ * arbitrária. A marca de parágrafo fica FORA do intervalo de propósito — quem
+ * insere o texto novo no lugar herda a formatação do parágrafo, em vez de
+ * fundir-se com o seguinte.
+ */
 export function findParagraphRange(
   doc: docs_v1.Schema$Document,
   text: string
