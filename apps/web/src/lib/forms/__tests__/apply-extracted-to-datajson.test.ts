@@ -147,7 +147,7 @@ describe("applyExtractedToDataJson — doc no fiador vira a garantia para fiador
     );
     const garantia = merged.garantia as Record<string, unknown>;
     expect(garantia.tipo).toBe("fiador");
-    expect(garantia.caucao_meses).toBeUndefined();
+    expect(garantia.caucao_meses).toBe(0);
     expect((garantia.fiador as Record<string, unknown>).nome).toBe("Pedro Fiador");
   });
 
@@ -160,7 +160,7 @@ describe("applyExtractedToDataJson — doc no fiador vira a garantia para fiador
     );
     const garantia = merged.garantia as Record<string, unknown>;
     expect(garantia.tipo).toBe("fiador");
-    expect(garantia.cobertura_meses).toBeUndefined();
+    expect(garantia.cobertura_meses).toBe(0);
     expect((garantia.fiador as Record<string, unknown>).nome).toBe("Pedro");
   });
 

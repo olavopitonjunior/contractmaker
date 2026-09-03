@@ -353,7 +353,7 @@ describe("locacaoDocAdapter.onAssign — doc no fiador define a modalidade", () 
     const msg = locacaoDocAdapter.onAssign!("fiador", 0, form);
     expect(msg).toMatch(/Fiador/);
     expect((data.garantia as Record<string, unknown>).tipo).toBe("fiador");
-    expect((data.garantia as Record<string, unknown>).caucao_meses).toBeUndefined();
+    expect((data.garantia as Record<string, unknown>).caucao_meses).toBe(0);
     expect(setValue).toHaveBeenCalledWith("garantia.tipo", "fiador", {
       shouldDirty: true,
       shouldTouch: true,

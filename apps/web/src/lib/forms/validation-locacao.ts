@@ -265,8 +265,16 @@ const garantiaSchema = z.object({
   // tempo ela vale. Sem `.default()` de propósito — o padrão de mercado varia
   // por seguradora e por imobiliária, então quem preenche escolhe; ausente, o
   // enrich não deriva texto nenhum e a cláusula segue genérica.
-  seguro_tomador: z.enum(["inquilino", "proprietario"]).optional(),
-  seguro_vigencia: z.enum(["anual_renovavel", "prazo_contrato"]).optional(),
+  // "" é o "limpo" que a troca de modalidade grava (auto-save + deepMerge não
+  // sabem apagar chave — ver GARANTIA_MODALIDADE_RESET); vira undefined aqui.
+  seguro_tomador: z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z.enum(["inquilino", "proprietario"]).optional()
+  ),
+  seguro_vigencia: z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z.enum(["anual_renovavel", "prazo_contrato"]).optional()
+  ),
   // Caução: nº de aluguéis depositados (art. 38 §2º — máx 3).
   caucao_meses: z.number().optional().default(0),
   // Título de capitalização caucionado (art. 37, II): valor nominal + proposta.
