@@ -13,6 +13,7 @@ import {
   angariadorValorMensal,
   angariadorValorTotal,
   formaComissao,
+  rateioPrimeiroAluguel,
   somaPercentuaisAngariadores,
   taxaLocacaoEfetiva,
 } from "@/lib/locacao/commission";
@@ -49,6 +50,8 @@ export interface AngariadorValue {
   percentual?: number;
   valor_fixo?: number;
   meses_comissao?: number;
+  /** Parte deste corretor no PRIMEIRO aluguel (cláusula de rateio). */
+  valor_primeiro_aluguel?: number;
 }
 
 export interface ComissaoLocacaoValue {
@@ -111,6 +114,11 @@ export function ComissaoLocacaoSection({
     value.forma_taxa_locacao === "valor_fixo" ? "valor_fixo" : "percentual";
   const corretagem = taxaLocacaoEfetiva(valorAluguel, value);
   const somaPercentuais = somaPercentuaisAngariadores(angariadores);
+  // Rateio do 1º aluguel: os corretores recebem de DENTRO da taxa, então a
+  // parte da imobiliária é a taxa menos a soma deles. Sem este aviso, um erro
+  // de digitação no valor de um corretor zera a comissão da própria imobiliária
+  // e a cláusula sai do contrato sem ela — sem "R$ 0,00", sem linha, sem sinal.
+  const rateio = rateioPrimeiroAluguel(valorAluguel, value);
 
   const patchAngariador = (index: number, patch: Partial<AngariadorValue>) => {
     const next = angariadores.map((a, i) => (i === index ? { ...a, ...patch } : a));
@@ -451,6 +459,27 @@ export function ComissaoLocacaoSection({
                     placeholder="Vazio = todo o contrato"
                   />
                 </FormField>
+
+                {/* Parte do 1º aluguel: é o que a cláusula de rateio imprime no
+                    contrato, e sai de DENTRO da taxa da imobiliária. Vazio usa
+                    a comissão do mês 1, que é o caso comum — o campo existe
+                    para o negócio em que o combinado do primeiro aluguel é
+                    outro (metade, valor cheio, um adiantamento). */}
+                <FormField label="Parte do 1º aluguel (R$)">
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    disabled={disabled}
+                    value={a.valor_primeiro_aluguel ?? ""}
+                    onChange={(e) =>
+                      patchAngariador(index, {
+                        valor_primeiro_aluguel: toNumberOrUndefined(e.target.value),
+                      })
+                    }
+                    placeholder={mensal > 0 ? `Vazio = ${BRL(mensal)}` : "Vazio = comissão do mês 1"}
+                  />
+                </FormField>
               </div>
 
               {mensal > 0 && (
@@ -470,6 +499,14 @@ export function ComissaoLocacaoSection({
         <div className="rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">
           Soma dos percentuais dos angariadores: <strong>{somaPercentuais.toFixed(2)}%</strong> —
           excede 100% do aluguel.
+        </div>
+      )}
+
+      {rateio.excede && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">
+          As partes dos corretores no <strong>1º aluguel</strong> somam mais que a taxa de
+          intermediação. Do jeito que está, a comissão da imobiliária fica em{" "}
+          <strong>R$ 0,00</strong> e ela sai da cláusula de rateio do contrato.
         </div>
       )}
     </div>

@@ -95,7 +95,7 @@ export function corretoresDe(data: Record<string, unknown>): CorretorParaBloco[]
 }
 
 /** Nome de exibição conforme PF/PJ, com fallback pro campo que estiver preenchido. */
-function nomeDe(c: CorretorParaBloco): string {
+export function nomeDe(c: CorretorParaBloco): string {
   const pj = txt(c.tipo_pessoa) === "juridica";
   return (pj ? txt(c.razao_social) || txt(c.nome) : txt(c.nome) || txt(c.razao_social)).trim();
 }
@@ -105,21 +105,25 @@ function nomeDe(c: CorretorParaBloco): string {
  * — quem imprime repasse é `corretagemDadosPagamento`, e a imobiliária que não
  * quiser conta no contrato usa só esta chave.
  */
+/**
+ * Qualificação de UM corretor: nome, documento e CRECI. Exportada porque a
+ * cláusula de rateio do 1º aluguel nomeia cada corretor no SEU item da lista —
+ * ali a lista junta de `corretagemQualificacao` não serve.
+ */
+export function qualificacaoDeCorretor(c: CorretorParaBloco): string {
+  const nome = nomeDe(c);
+  if (!nome) return "";
+  const pj = txt(c.tipo_pessoa) === "juridica";
+  const doc = formatDoc(pj ? c.cnpj || c.cpf : c.cpf || c.cnpj);
+  const creci = txt(c.creci);
+  const partes = [nome];
+  if (doc) partes.push(`inscrit${pj ? "a" : "o(a)"} no ${pj ? "CNPJ" : "CPF"}/MF sob nº ${doc}`);
+  if (creci) partes.push(`CRECI nº ${creci}`);
+  return partes.join(", ");
+}
+
 export function corretagemQualificacao(data: Record<string, unknown>): string {
-  const linhas = corretoresDe(data)
-    .map((c) => {
-      const nome = nomeDe(c);
-      if (!nome) return "";
-      const pj = txt(c.tipo_pessoa) === "juridica";
-      const doc = formatDoc(pj ? c.cnpj || c.cpf : c.cpf || c.cnpj);
-      const creci = txt(c.creci);
-      const partes = [nome];
-      if (doc) partes.push(`inscrit${pj ? "a" : "o(a)"} no ${pj ? "CNPJ" : "CPF"}/MF sob nº ${doc}`);
-      if (creci) partes.push(`CRECI nº ${creci}`);
-      return partes.join(", ");
-    })
-    .filter(Boolean);
-  return linhas.join("; ");
+  return corretoresDe(data).map(qualificacaoDeCorretor).filter(Boolean).join("; ");
 }
 
 /**
@@ -160,7 +164,7 @@ export function viaDeRepasse(r: RecebimentoData | null | undefined): string {
  * id é escolha explícita de quem preencheu — documento é inferência, e dois
  * cadastros podem compartilhá-lo (PF e a PJ dela).
  */
-function repasseDe(c: CorretorParaBloco, registro: RegistroCorretor[]): string {
+export function repasseDe(c: CorretorParaBloco, registro: RegistroCorretor[]): string {
   const doForm = viaDeRepasse(c.recebimento);
   if (doForm) return doForm;
   if (registro.length === 0) return "";

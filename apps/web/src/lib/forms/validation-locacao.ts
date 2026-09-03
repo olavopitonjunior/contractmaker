@@ -351,6 +351,22 @@ export const angariadorLocacaoSchema = z.object({
   percentual: z.number().min(0).max(100).optional(),
   valor_fixo: z.number().min(0).optional(),
   meses_comissao: z.number().int().min(0).optional(),
+  /**
+   * Quanto DESTE corretor sai do PRIMEIRO aluguel, pago diretamente a ele.
+   *
+   * Aditivo (2026-09). Existe porque a cláusula de rateio do 1º aluguel —
+   * "a) R$ X à imobiliária; b) R$ Y ao corretor; c) R$ Z ao corretor" — não
+   * tinha onde guardar os itens b) e c): a comissão recorrente
+   * (`percentual`/`valor_fixo` × `meses_comissao`) responde "quanto por mês",
+   * não "quanto do primeiro aluguel vai direto para quem captou".
+   *
+   * Ausente = usa a comissão do mês 1 como valor (é o caso comum, e é o que o
+   * campo anuncia como padrão). A parte da imobiliária é a taxa de locação
+   * MENOS a soma destes valores: os corretores recebem de DENTRO da taxa —
+   * regra decidida pelo dono do produto em 03/09/2026, e é o que a cláusula
+   * real reflete, com a soma dos itens fechando um aluguel inteiro.
+   */
+  valor_primeiro_aluguel: z.number().min(0).optional(),
 });
 
 // Comissão da imobiliária — taxa de locação cobrada à vista (1º aluguel) +

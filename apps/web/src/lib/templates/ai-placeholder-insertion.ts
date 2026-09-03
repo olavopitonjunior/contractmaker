@@ -109,6 +109,8 @@ REGRAS:
 8. O documento pode já conter placeholders no formato {{alguma_coisa}} — eles já estão prontos. NUNCA inclua no trecho_literal um texto que contenha {{...}}, nem pra "corrigir" o nome do token. Trate essas linhas como intocáveis.
 9. Tokens de DADO — qualificações (*_qualificacao) e dados de pagamento (*_dados_pagamento) — cobrem APENAS o dado em si: da razão social/nome até o último dado da qualificação; ou só a chave PIX / banco, agência e conta. NUNCA inclua neles rótulos fixos ("a ser pago diretamente à imobiliária intermediadora"), valores em R$, nem o trecho que pertence a outro token. Dois tokens vizinhos no mesmo parágrafo NUNCA se sobrepõem: se a qualificação e a conta estão na mesma frase, são DOIS mapeamentos, um para cada token, cada um só com a sua parte. Um trecho que engole o de outro token é recusado.
 
+10. LISTA de rateio de valor entre beneficiários — um parágrafo por item, cada um com valor em R$ e o nome de quem recebe ("a) R$ … à imobiliária intermediadora …; b) R$ … ao(à) corretor(a) …") — é UM único mapeamento para \`rateio_primeiro_aluguel\`, cobrindo do PRIMEIRO item ao ÚLTIMO. NÃO mapeie item por item, e NÃO use \`corretagem_*\` nem \`imobiliaria_*\` dentro de um item: cada uma dessas chaves imprime a lista inteira de beneficiários, então com dois itens o bloco se repete nos dois. O cabeçalho que introduz a lista ("O pagamento correspondente ao primeiro aluguel será rateado da seguinte forma:") é texto fixo e fica FORA do trecho.
+
 DOCUMENTO:
 ${docText.slice(0, MAX_PROMPT_CHARS)}`;
 }

@@ -4,6 +4,13 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-03 - Chave do rateio do primeiro aluguel
+
+### Adicionado
+
+- **`{{rateio_primeiro_aluguel}}`** — a cláusula que divide o primeiro aluguel entre a imobiliária e os corretores que captaram passa a ter chave própria, cobrindo a LISTA inteira (um item por beneficiário, com valor em R$ e por extenso, qualificação e via de pagamento) e nunca o cabeçalho que a introduz. Antes não havia chave: cada item ficava com uma chave de corretagem, que imprime a lista inteira de beneficiários — com dois corretores, o mesmo bloco saía repetido em todos os itens, e era isso que impedia a ativação dos modelos.
+- **`comissao.angariadores[].valor_primeiro_aluguel`** (aditivo): quanto de cada corretor sai do primeiro aluguel. Ausente = usa a comissão do mês 1. A parte da imobiliária é a taxa de locação menos a soma dessas partes — os corretores recebem de dentro da taxa —, nunca negativa. O valor aparece no resumo do negócio ao lado da mensalidade do angariador.
+
 ## [Unreleased] - 2026-09-03 - Bateria de avaliação do passe de chaves
 
 ### Interno
