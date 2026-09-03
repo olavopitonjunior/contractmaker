@@ -33,6 +33,8 @@ Analise o documento anexo (contrato de locação ou proposta) e extraia os dados
       "profissao": "...",
       "nacionalidade": "Brasileiro(a) | ...",
       "data_nascimento": "YYYY-MM-DD",
+      "nome_mae": "...",                      // filiação (mãe), quando o contrato trouxer
+      "sexo": "M" | "F",                      // quando inferível (nome/qualificação)
       "endereco": "...", "numero": "...", "complemento": "...",
       "bairro": "...", "cidade": "...", "uf": "SP", "cep": "00000-000",
       "email": "...",

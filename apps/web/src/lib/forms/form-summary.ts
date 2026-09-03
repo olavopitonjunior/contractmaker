@@ -279,10 +279,14 @@ function partySection(
     pushIf(rows, "Estado civil", str(parte.estado_civil));
     pushIf(rows, "Profissão", str(parte.profissao));
     pushIf(rows, "Nascimento", dateBR(parte.data_nascimento));
-    if (isVenda) {
-      pushIf(rows, "Nome da mãe", str(parte.nome_mae));
-      pushIf(rows, "Naturalidade", str(parte.naturalidade));
-    }
+    // Locação PF ganhou os dois em 2026-09-03 (certidões); venda já os tinha.
+    pushIf(
+      rows,
+      "Sexo",
+      parte.sexo === "M" ? "Masculino" : parte.sexo === "F" ? "Feminino" : str(parte.sexo)
+    );
+    pushIf(rows, "Nome da mãe", str(parte.nome_mae));
+    if (isVenda) pushIf(rows, "Naturalidade", str(parte.naturalidade));
     pushIf(rows, "E-mail", str(parte.email));
     pushIf(rows, "Telefone", str(parte.mobile_phone));
     pushIf(rows, "Endereço", endereco(parte));

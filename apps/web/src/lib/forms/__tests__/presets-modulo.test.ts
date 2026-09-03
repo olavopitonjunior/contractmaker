@@ -187,7 +187,11 @@ describe("paths de locação", () => {
     // quando o tipo é "fiador". Essa obrigatoriedade já é aplicada, e de forma
     // condicional, por collectLocacaoFinalizeIssues.
     expect(isKnownLocacaoFormPath("garantia.fiador.cpf")).toBe(false);
-    expect(isKnownLocacaoFormPath("locadores.0.nome_mae")).toBe(false);
+    // `nome_mae`/`sexo` entraram no schema de locação em 2026-09-03 (certidões);
+    // `naturalidade` continua só na venda.
+    expect(isKnownLocacaoFormPath("locadores.0.nome_mae")).toBe(true);
+    expect(isKnownLocacaoFormPath("locatarios.0.sexo")).toBe(true);
+    expect(isKnownLocacaoFormPath("locadores.0.naturalidade")).toBe(false);
     expect(isKnownLocacaoFormPath("imoveis.0.rua")).toBe(false); // plural é de venda
     expect(isKnownLocacaoFormPath("foo.bar")).toBe(false);
   });
