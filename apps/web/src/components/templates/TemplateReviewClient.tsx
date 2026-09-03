@@ -35,7 +35,11 @@ import {
   Info,
   MousePointerClick,
 } from "lucide-react";
-import { matchCriteriaSummary, modalidadeLabel } from "@/lib/contracts/template-category";
+import {
+  matchCriteriaSummary,
+  modalidadeLabel,
+  templateFamilyForModalidade,
+} from "@/lib/contracts/template-category";
 
 interface CatalogEntry {
   token: string;
@@ -280,6 +284,41 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
   /** Achado cuja correção está sendo aplicada (um por vez: o Doc é um só). */
   const [fixingId, setFixingId] = useState<string | null>(null);
   const [iframeKey, setIframeKey] = useState(0);
+  const [aba, setAba] = useState<"documento" | "previa">("documento");
+  // Só há prévia preenchida onde existe construtor de mapa. Proposta não tem —
+  // e oferecer o botão para depois recusar seria pior que não oferecer.
+  const temPrevia = ["locacao", "venda"].includes(
+    templateFamilyForModalidade(template.modalidade)
+  );
+  const [previaHtml, setPreviaHtml] = useState<string | null>(null);
+  const [previaErro, setPreviaErro] = useState<string | null>(null);
+  const [previaCarregando, setPreviaCarregando] = useState(false);
+
+  /**
+   * Gera a prévia PREENCHIDA: o servidor copia o Doc, aplica a amostra pelo
+   * mesmo mapa da geração e descarta a cópia. Custa alguns segundos, por isso é
+   * sob demanda — e o HTML só é trocado quando chega, para a aba não piscar.
+   */
+  const gerarPrevia = useCallback(async () => {
+    setPreviaCarregando(true);
+    setPreviaErro(null);
+    try {
+      const res = await fetch(`/api/templates/${template.id}/preview`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sample: true }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.html) {
+        throw new Error(data.error ?? "Falha ao gerar a prévia.");
+      }
+      setPreviaHtml(data.html as string);
+    } catch (err) {
+      setPreviaErro(err instanceof Error ? err.message : "Falha ao gerar a prévia.");
+    } finally {
+      setPreviaCarregando(false);
+    }
+  }, [template.id]);
 
   const revalidate = useCallback(async () => {
     setValidating(true);
@@ -387,6 +426,10 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
       );
       await Promise.all([revalidate(), refreshDocText()]);
       setIframeKey((k) => k + 1);
+      // A prévia descreve o Doc ANTES desta edição: descartar é
+      // obrigatório. Prévia velha é pior que prévia nenhuma — ela
+      // parece confirmação de um estado que não existe mais.
+      setPreviaHtml(null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha na revisão por IA");
     } finally {
@@ -436,6 +479,10 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
       }
       await refreshDocText();
       setIframeKey((k) => k + 1);
+      // A prévia descreve o Doc ANTES desta edição: descartar é
+      // obrigatório. Prévia velha é pior que prévia nenhuma — ela
+      // parece confirmação de um estado que não existe mais.
+      setPreviaHtml(null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha ao aplicar a correção");
     } finally {
@@ -463,6 +510,10 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
       window.getSelection?.()?.removeAllRanges();
       await Promise.all([revalidate(), refreshDocText()]);
       setIframeKey((k) => k + 1);
+      // A prévia descreve o Doc ANTES desta edição: descartar é
+      // obrigatório. Prévia velha é pior que prévia nenhuma — ela
+      // parece confirmação de um estado que não existe mais.
+      setPreviaHtml(null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha ao mapear");
     } finally {
@@ -696,13 +747,95 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_360px]">
-        <div className="min-h-[64vh] overflow-hidden rounded-lg border">
-          <iframe
-            key={iframeKey}
-            src={template.embedLink}
-            className="h-full min-h-[64vh] w-full"
-            title="Modelo da imobiliária"
-          />
+        <div className="space-y-2">
+          {/* Duas visões do MESMO modelo: o documento com as chaves, e como o
+              contrato sai. A segunda é a que faltava — o operador via o
+              relatório e as chaves, e decidia sem nunca ver o resultado. */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Button
+              size="sm"
+              variant={aba === "documento" ? "default" : "outline"}
+              className="h-7 text-xs"
+              onClick={() => setAba("documento")}
+            >
+              Documento
+            </Button>
+            {temPrevia && (
+              <Button
+                size="sm"
+                variant={aba === "previa" ? "default" : "outline"}
+                className="h-7 text-xs"
+                onClick={() => {
+                  setAba("previa");
+                  if (!previaHtml) void gerarPrevia();
+                }}
+              >
+                Prévia com dados de exemplo
+              </Button>
+            )}
+            <a
+              href={`https://docs.google.com/document/d/${template.docId}/edit`}
+              target="_blank"
+              rel="noreferrer"
+              className="ml-auto text-xs font-medium underline text-muted-foreground hover:text-foreground"
+            >
+              Abrir no Google Docs
+            </a>
+          </div>
+
+          {aba === "documento" ? (
+            <div className="min-h-[64vh] overflow-hidden rounded-lg border">
+              <iframe
+                key={iframeKey}
+                src={template.embedLink}
+                className="h-full min-h-[64vh] w-full"
+                title="Modelo da imobiliária"
+              />
+            </div>
+          ) : (
+            <div className="min-h-[64vh] overflow-hidden rounded-lg border">
+              {previaErro ? (
+                <div className="space-y-2 p-4 text-sm">
+                  <p className="font-medium text-destructive">Não consegui gerar a prévia</p>
+                  <p className="text-muted-foreground">{previaErro}</p>
+                  <Button size="sm" variant="outline" onClick={() => void gerarPrevia()}>
+                    Tentar de novo
+                  </Button>
+                </div>
+              ) : previaHtml ? (
+                <iframe
+                  // `sandbox` vazio: o HTML vem do export do Google e é exibido
+                  // como documento, sem script nem navegação.
+                  sandbox=""
+                  srcDoc={previaHtml}
+                  className="h-full min-h-[64vh] w-full bg-white"
+                  title="Prévia do contrato com dados de exemplo"
+                />
+              ) : (
+                <div className="flex min-h-[64vh] flex-col items-center justify-center gap-3 p-6 text-center text-sm text-muted-foreground">
+                  {previaCarregando ? (
+                    <>
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                      <p>
+                        Preenchendo uma cópia do modelo com dados de exemplo… leva alguns
+                        segundos.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p>
+                        Mostra como o contrato sai, com um negócio fictício e os dados de
+                        recebimento da sua imobiliária.
+                      </p>
+                      <Button size="sm" variant="outline" onClick={() => void gerarPrevia()}>
+                        Gerar prévia
+                      </Button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="space-y-4">

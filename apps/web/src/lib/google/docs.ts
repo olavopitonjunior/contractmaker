@@ -345,3 +345,24 @@ export async function getDocStructure(docId: string) {
   const res = await docs.documents.get({ documentId: docId });
   return res.data;
 }
+
+/**
+ * `headRevisionId` do arquivo — muda a cada edição salva no Doc.
+ *
+ * Serve como identidade do CONTEÚDO para cache: uma prévia gerada a partir do
+ * modelo só continua válida enquanto o modelo não mudou. Sem isto, o operador
+ * corrigiria uma chave, pediria a prévia e receberia a versão anterior — que é
+ * pior que não ter prévia, porque parece confirmação.
+ *
+ * `null` quando o Drive não informa; quem chama trata como "não sei" e
+ * re-renderiza, em vez de servir cache de validade desconhecida.
+ */
+export async function getDocHeadRevision(docId: string): Promise<string | null> {
+  const drive = getDriveClient();
+  const res = await drive.files.get({
+    fileId: docId,
+    fields: "headRevisionId",
+    supportsAllDrives: true,
+  });
+  return res.data.headRevisionId ?? null;
+}

@@ -4,6 +4,17 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-03 - A prévia mostra o contrato pronto, não as chaves
+
+### Adicionado
+
+- **Prévia com dados de exemplo para modelos Google Docs.** Até aqui, "prévia" de um modelo desse tipo era o próprio Doc-modelo: o operador via o relatório de validação e um documento cheio de `{{chaves}}`, e nunca via **como o contrato sai**. Foi decidindo assim que os 16 modelos da RE/MAX Trio foram aprovados com 10 erros semânticos — nenhum deles passaria por quem tivesse visto a cláusula preenchida. A tela de revisão ganha as abas Documento / Prévia: a prévia copia o Doc, preenche com um negócio fictício, exporta e **descarta a cópia** (um documento com cara de contrato sobrando no Drive da imobiliária é pior que uma prévia que falhou). Cache por revisão do Doc, e invalidada a cada edição — prévia velha parece confirmação de um estado que não existe mais.
+- Link **"Abrir no Google Docs"** na revisão do modelo.
+
+### Interno
+
+- A montagem do mapa de substituição da locação — incluindo as três chaves de repasse (corretagem, via da imobiliária e rateio do 1º aluguel) que dependem de dados que o formulário não guarda — saiu de dentro da geração de contrato para um módulo compartilhado. Geração e prévia passam a usar **a mesma** montagem: uma prévia que diverge da geração é pior que prévia nenhuma, porque o operador aprova o modelo confiando nela.
+
 ## [Unreleased] - 2026-09-03 - Corrigir o modelo de dentro do app
 
 ### Adicionado
