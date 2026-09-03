@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { OBSERVACOES_MAX } from "@/lib/forms/validation";
 import { NativeSelect } from "@/components/forms/NativeSelect";
+import { resetGarantiaModalidade } from "@/lib/forms/garantia-fiador-flip";
 import { FormField } from "@/components/forms/fields/FormField";
 import {
   MoneyField,
@@ -107,9 +108,14 @@ export function GarantiaStep({
 
   const onTipoChange = (value: string) => {
     form.setValue("garantia.tipo", value, { shouldDirty: true });
-    // Trocar o tipo zera a prestadora — a Porto Seguro do seguro-fiança não
-    // pode ficar pendurada num título de capitalização.
-    form.setValue("garantia.provider", "", { shouldDirty: true });
+    // Trocar o tipo zera a modalidade anterior inteira — prestadora, meses de
+    // caução, cobertura, título — pelo mesmo helper do flip automático da etapa
+    // Documentos. Só a prestadora era zerada: "Fiador" convivia com "Caução: 3
+    // aluguéis" no resumo e no contrato (smoke 03/09). `garantia.fiador` fica.
+    resetGarantiaModalidade(
+      (path) => form.getValues(path as never) as unknown,
+      (path, v) => form.setValue(path as never, v as never, { shouldDirty: true })
+    );
     setOutraEscolhida(false);
   };
 

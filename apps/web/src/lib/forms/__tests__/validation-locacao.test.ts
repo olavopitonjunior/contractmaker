@@ -26,6 +26,32 @@ describe("dadosLocacaoSchema", () => {
     expect(parsed.config?.juros_mensais_atraso).toBe(1);
   });
 
+  it('aceita "" nos enums de seguro (limpeza da troca de modalidade) e devolve undefined', () => {
+    const res = dadosLocacaoSchema.safeParse({
+      ...baseValid,
+      garantia: {
+        tipo: "fiador",
+        seguro_tomador: "",
+        seguro_vigencia: "",
+        cobertura_meses: 0,
+        caucao_meses: 0,
+        titulo_valor: 0,
+        fiador: { tipo_pessoa: "fisica", nome: "Pedro Fiador" },
+      },
+    });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.garantia?.seguro_tomador).toBeUndefined();
+      expect(res.data.garantia?.seguro_vigencia).toBeUndefined();
+      expect(res.data.garantia?.titulo_valor).toBe(0);
+    }
+    const bad = dadosLocacaoSchema.safeParse({
+      ...baseValid,
+      garantia: { tipo: "seguro_fianca", seguro_tomador: "banco" },
+    });
+    expect(bad.success).toBe(false);
+  });
+
   it("aceita garantia por título de capitalização com valor e proposta", () => {
     const res = dadosLocacaoSchema.safeParse({
       ...baseValid,

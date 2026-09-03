@@ -29,15 +29,20 @@ export const FIADOR_DOC_KINDS: ReadonlySet<DocumentKind> = new Set<DocumentKind>
  * `caucao_meses` de uma caução anterior deixaria o contrato com duas garantias
  * (art. 37, § único, Lei 8.245/91) e o revisor de IA acusaria cumulação. Mesma
  * semântica de reset de `toGuaranteeData` em `api/locacao/guarantees`.
- * O valor é o "vazio" que o schema espera para o campo.
+ * O valor é o "vazio" que o schema espera para o campo — e tem que ser um
+ * valor REAL (0 / ""), nunca `undefined`: o auto-save serializa com
+ * `JSON.stringify` (descarta `undefined`) e `deepMergeAtPaths` preserva chave
+ * ausente, então `undefined` limparia só a sessão do browser e o dataJson
+ * persistido continuaria com "Caução: 3" ao lado de "Fiador" (review do #546).
+ * Os enums de seguro aceitam "" via preprocess em `garantiaSchema`.
  */
 export const GARANTIA_MODALIDADE_RESET: ReadonlyArray<readonly [string, unknown]> = [
   ["garantia.provider", ""],
-  ["garantia.caucao_meses", undefined],
-  ["garantia.cobertura_meses", undefined],
-  ["garantia.seguro_tomador", undefined],
-  ["garantia.seguro_vigencia", undefined],
-  ["garantia.titulo_valor", undefined],
+  ["garantia.caucao_meses", 0],
+  ["garantia.cobertura_meses", 0],
+  ["garantia.seguro_tomador", ""],
+  ["garantia.seguro_vigencia", ""],
+  ["garantia.titulo_valor", 0],
   ["garantia.titulo_proposta", ""],
 ];
 
@@ -106,12 +111,29 @@ export function applyFiadorFlip(
 ): boolean {
   if (!shouldFlipGarantiaToFiador(kind, get("garantia.tipo"))) return false;
   set("garantia.tipo", "fiador");
+  resetGarantiaModalidade(get, set);
+  return true;
+}
+
+/**
+ * Limpa os campos da modalidade ANTERIOR (caução, seguro, título, prestadora)
+ * sem tocar `garantia.fiador`. Usado pelo flip automático e pela troca manual
+ * de tipo na etapa Garantia — antes a troca manual só zerava a prestadora, e
+ * "Fiador" convivia com "Caução: 3 aluguéis" no resumo e no contrato (art. 37,
+ * § único). Só escreve o que precisa limpar. Retorna os paths limpos.
+ */
+export function resetGarantiaModalidade(
+  get: (path: string) => unknown,
+  set: (path: string, value: unknown) => void
+): string[] {
+  const cleared: string[] = [];
   for (const [path, empty] of GARANTIA_MODALIDADE_RESET) {
     const current = get(path);
-    if (current === undefined || current === null || current === "") continue;
+    if (current === undefined || current === null || current === "" || current === 0) continue;
     set(path, empty);
+    cleared.push(path);
   }
-  return true;
+  return cleared;
 }
 
 export const FIADOR_FLIP_TOAST = "Garantia alterada para Fiador (definida pelos documentos)";

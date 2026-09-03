@@ -255,7 +255,7 @@ describe("DocumentosStep (locação) — fiador define a garantia só no evento 
     await waitFor(() => {
       expect(capturedForm!.getValues("garantia.tipo")).toBe("fiador");
     });
-    expect(capturedForm!.getValues("garantia.caucao_meses")).toBeUndefined();
+    expect(capturedForm!.getValues("garantia.caucao_meses")).toBe(0);
     // A atribuição não aplica os campos: isso segue no "Aplicar aos campos".
     expect(capturedForm!.getValues("garantia.fiador.nome")).toBeFalsy();
   });

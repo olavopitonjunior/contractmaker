@@ -1,8 +1,11 @@
 import { describe, it, expect } from "vitest";
+import { deepMergeAtPaths } from "../dataJson-merge";
 import {
   applyFiadorFlip,
+  resetGarantiaModalidade,
   fiadorHasIdentity,
   fiadorHasName,
+  GARANTIA_MODALIDADE_RESET,
   garantiaTemFiador,
   missingFiadorName,
   shouldFlipGarantiaToFiador,
@@ -55,7 +58,7 @@ describe("applyFiadorFlip", () => {
     expect(applyFiadorFlip("fiador", f.get, f.set)).toBe(true);
     const g = f.data.garantia as Record<string, unknown>;
     expect(g.tipo).toBe("fiador");
-    expect(g.caucao_meses).toBeUndefined();
+    expect(g.caucao_meses).toBe(0);
     expect(g.provider).toBe("");
     expect(g.fiador).toEqual({ nome: "Pedro Fiador", cpf: "11144477735" });
   });
@@ -65,7 +68,7 @@ describe("applyFiadorFlip", () => {
     expect(applyFiadorFlip("conjuge_fiador", f.get, f.set)).toBe(true);
     const g = f.data.garantia as Record<string, unknown>;
     expect(g.tipo).toBe("fiador");
-    expect(g.cobertura_meses).toBeUndefined();
+    expect(g.cobertura_meses).toBe(0);
   });
 
   it("é idempotente: tipo já fiador não escreve nada (a caução limpa não volta, a manual fica)", () => {
@@ -133,5 +136,67 @@ describe("missingFiadorName (piso do finalize e da etapa 5)", () => {
     expect(missingFiadorName({ garantia: { tipo: "caucao" } })).toBeNull();
     expect(missingFiadorName({})).toBeNull();
     expect(missingFiadorName(null)).toBeNull();
+  });
+});
+
+describe("resetGarantiaModalidade (troca manual de tipo na etapa Garantia)", () => {
+  it("limpa caução/seguro/título/prestadora, preserva garantia.fiador e o tipo, e só escreve o que precisa", () => {
+    const f = plainForm({
+      garantia: {
+        tipo: "fiador",
+        caucao_meses: 3,
+        provider: "Porto Seguro",
+        seguro_tomador: "inquilino",
+        fiador: { nome: "Pedro Fiador" },
+      },
+    });
+    const cleared = resetGarantiaModalidade(f.get, f.set);
+    expect(cleared.sort()).toEqual(["garantia.caucao_meses", "garantia.provider", "garantia.seguro_tomador"]);
+    const g = f.data.garantia as Record<string, unknown>;
+    expect(g.tipo).toBe("fiador");
+    expect(g.caucao_meses).toBe(0);
+    expect(g.provider).toBe("");
+    expect(g.fiador).toEqual({ nome: "Pedro Fiador" });
+    expect(f.writes).toHaveLength(3);
+  });
+});
+
+describe("persistência: o reset sobrevive ao auto-save (JSON) e ao deepMergeAtPaths", () => {
+  it("nenhum valor de limpeza é undefined/null (JSON.stringify descartaria a chave e o merge preservaria o valor antigo)", () => {
+    for (const [, empty] of GARANTIA_MODALIDADE_RESET) {
+      expect(empty).not.toBeUndefined();
+      expect(empty).not.toBeNull();
+    }
+  });
+
+  it("depois de trocar Seguro-fiança → Fiador, o dataJson mergeado não guarda a modalidade antiga", () => {
+    const persisted = {
+      garantia: {
+        tipo: "seguro_fianca",
+        provider: "Porto Seguro",
+        cobertura_meses: 30,
+        seguro_tomador: "inquilino",
+        seguro_vigencia: "prazo_contrato",
+        titulo_valor: 15000,
+        caucao_meses: 3,
+        fiador: { nome: "Pedro Fiador" },
+      },
+    };
+    // Estado do RHF no browser = cópia do persistido; a troca manual escreve nele.
+    const f = plainForm(JSON.parse(JSON.stringify(persisted)));
+    f.set("garantia.tipo", "fiador");
+    resetGarantiaModalidade(f.get, f.set);
+    // Auto-save: serializa a raiz `garantia` inteira e o servidor faz o deep merge.
+    const incoming = JSON.parse(JSON.stringify({ garantia: f.data.garantia }));
+    const { merged } = deepMergeAtPaths(persisted, incoming);
+    const g = merged.garantia as Record<string, unknown>;
+    expect(g.tipo).toBe("fiador");
+    expect(g.provider).toBe("");
+    expect(g.cobertura_meses).toBe(0);
+    expect(g.caucao_meses).toBe(0);
+    expect(g.titulo_valor).toBe(0);
+    expect(g.seguro_tomador).toBe("");
+    expect(g.seguro_vigencia).toBe("");
+    expect(g.fiador).toEqual({ nome: "Pedro Fiador" });
   });
 });

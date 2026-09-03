@@ -4,6 +4,12 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-03 - Trocar o tipo de garantia limpa a modalidade anterior
+
+### Corrigido
+
+- **Na etapa Garantia do formulário de locação, trocar o tipo (ex.: de Caução para Fiador) limpa os campos da modalidade anterior** — meses de caução, cobertura, título, prestadora. Só a prestadora era limpa: o negócio ficava com "Fiador" e "Caução: 3 aluguéis" ao mesmo tempo no resumo e no contrato (achado no smoke de 03/09). Os dados do fiador nunca são apagados. A limpeza grava valores reais (0 / vazio) em vez de `undefined`, que o auto-save descartava e o merge do servidor ignorava — sem isso o dado antigo ficava persistido e reaparecia no resumo e no PDF.
+
 ## [Unreleased] - 2026-09-03 - Aba Certidões no negócio de locação
 
 ### Adicionado
