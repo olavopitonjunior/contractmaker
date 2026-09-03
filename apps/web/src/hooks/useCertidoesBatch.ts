@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import type { TargetKind } from "@/lib/certidoes/types";
 
 export interface CertidaoJobRow {
   id: string;
@@ -139,14 +140,8 @@ export function useCertidoesBatch(dealId: string) {
     async (
       jobs?: Array<{
         endpoint: string;
-        targetKind:
-          | "vendedor"
-          | "comprador"
-          | "imovel"
-          | "diligenciado"
-          | "conjuge_vendedor"
-          | "procurador_vendedor"
-          | "representante_vendedor";
+        // Fonte única: lib/certidoes/types.ts (antes: cópia literal, sem locação).
+        targetKind: TargetKind;
         targetIndex: number;
       }>
     ) => {

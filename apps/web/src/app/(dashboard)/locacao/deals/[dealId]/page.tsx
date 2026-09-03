@@ -193,6 +193,7 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
 
   const modulesView = await getOrgModules(org.id);
   const surveysEnabled = isFeatureEnabled(modulesView, FEATURE.LOCACAO_PESQUISAS);
+  const certidoesEnabled = isFeatureEnabled(modulesView, FEATURE.LOCACAO_CERTIDOES);
 
   // Padrão contratual de LOCAÇÃO da org — piso da aba Configurações do editor
   // (contrato de locação e de administração).
@@ -214,6 +215,7 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
     <LocacaoDealDetail
       formSummarySections={formSummarySections}
       surveysEnabled={surveysEnabled}
+      certidoesEnabled={certidoesEnabled}
       orgDefaults={orgDefaults}
       deal={{
         id: deal.id,

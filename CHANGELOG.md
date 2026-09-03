@@ -4,6 +4,17 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-03 - Aba Certidões no negócio de locação
+
+### Adicionado
+
+- **O negócio de locação ganha a aba "Certidões"**, a mesma da venda, com as partes da locação: seções Locatários e Fiador (fiador e cônjuge do fiador) vêm pré-marcadas; Locadores, Imóvel, Pessoas adicionais e Pesquisa de bens são opt-in. Cada pessoa mostra suas certidões por região (imóvel e endereço), com o mesmo seletor de extras, "Corrigir dados" e relatório. Sem menção a Serasa. A aba só aparece quando a sub-função **"Certidões — locação"** está ligada para a imobiliária (painel super-admin; nasce desligada).
+
+### Corrigido
+
+- "Corrigir dados" de uma certidão lia e gravava a parte errada quando o alvo não era vendedor (tudo caía em "compradores"); agora segue o alvo (locatário, locador, fiador, cônjuge do fiador).
+- Os grupos da aba de certidões e os rótulos das pessoas passam a vir de uma lista única de alvos, sem enum cru na tela para alvos novos.
+
 ## [Unreleased] - 2026-09-03 - Sexo e nome da mãe nas pessoas físicas da locação
 
 ### Adicionado
