@@ -4,6 +4,12 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-02 - Uma chave de dado não engole mais o trecho da chave vizinha
+
+### Corrigido
+
+- **A revisão por IA podia trocar um item inteiro da cláusula de rateio por uma única chave.** Ao mapear a qualificação da imobiliária, o modelo propôs o item a) completo — valor, "a ser pago diretamente à imobiliária intermediadora", razão social, sede e conta — e o sistema aplicou: o parágrafo virou só `{{imobiliaria_qualificacao}}`, a chave da conta ficou de fora e o gate de dado pessoal liberou, porque a conta tinha sumido junto. Medido em produção em 02/09 num rascunho da RE/MAX Trio (reparado à mão). Agora: (1) o pedido ao modelo diz que chaves de dado (qualificações e dados de pagamento) cobrem só o dado em si e nunca se sobrepõem; (2) as descrições dessas chaves no catálogo dizem o limite exato; (3) uma trava determinística recusa a proposta de chave de dado que contenha a proposta de outra chave, com o motivo "engoliria a chave vizinha" e o nome dela — o trecho menor entra normalmente e o operador vê o que foi recusado.
+
 ## [Unreleased] - 2026-09-02 - "Pedir revisão pela IA" para de perder a resposta em silêncio
 
 ### Corrigido
