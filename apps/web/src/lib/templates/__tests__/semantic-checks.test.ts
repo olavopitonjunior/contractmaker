@@ -224,6 +224,30 @@ describe("collapsed-paragraph — a cláusula virou uma chave só", () => {
     });
   });
 
+  it("não acusa bloco de cláusula, que substitui a cláusula inteira por desenho", () => {
+    // Medido em staging (03/09/2026): a regra valia para todo bloco composto e
+    // acusava `{{clausula_garantia}}`. `assinaturas`, `bloco_administradora` e
+    // `parcelas_pagamento` têm o mesmo papel — para eles, engolir a cláusula é
+    // o comportamento correto.
+    for (const token of [
+      "clausula_garantia",
+      "assinaturas",
+      "bloco_administradora",
+      "parcelas_pagamento",
+    ]) {
+      const doc = [anterior, `{{${token}}}`, posterior].join("\n");
+      const source = [anterior, itemOriginal, posterior].join("\n");
+      expect(
+        byCategory(run(doc, { sourceText: source }).findings, "collapsed-paragraph")
+      ).toHaveLength(0);
+    }
+    // A chave de DADO no mesmo lugar continua sendo acusada.
+    const comDado = [anterior, "{{imobiliaria_qualificacao}}", posterior].join("\n");
+    expect(
+      byCategory(run(comDado, { sourceText: [anterior, itemOriginal, posterior].join("\n") }).findings, "collapsed-paragraph")
+    ).toHaveLength(1);
+  });
+
   it("cala quando o parágrafo do fonte era mesmo só uma qualificação", () => {
     const abre = "Pelo presente instrumento, as partes abaixo qualificadas ajustam o seguinte:";
     const fecha = "Resolvem celebrar o presente contrato de locação, que se regerá pelas cláusulas.";
