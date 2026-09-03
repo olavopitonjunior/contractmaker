@@ -28,11 +28,7 @@
  * PII segue o único bloqueio duro). Falso positivo aqui custa um clique;
  * bloquear por heurística custaria o operador aprendendo a forçar tudo.
  */
-import {
-  DATA_KEYS,
-  catalogForModalidade,
-  isKnownToken,
-} from "@/lib/templates/placeholder-catalog";
+import { DATA_KEYS, isKnownToken } from "@/lib/templates/placeholder-catalog";
 import { maskForReport, splitDocParagraphs } from "@/lib/templates/insertion-report";
 import {
   DEFAULT_MIN_CONFIDENCE,
@@ -260,7 +256,7 @@ export function runSemanticChecks(input: SemanticCheckInput): SemanticReport {
     checkOrgLiterals(docParagraphs, org, input.modalidade, findings, seen);
   }
   checkLeftoverIdentifiers(docParagraphs, findings, seen);
-  checkCollapsedParagraphs(docParagraphs, srcParagraphs, input.modalidade, findings, seen);
+  checkCollapsedParagraphs(docParagraphs, srcParagraphs, findings, seen);
   checkDanglingReferences(docParagraphs, srcParagraphs, findings, seen);
 
   findings.sort((a, b) => a.paragraphIndex - b.paragraphIndex);
@@ -474,21 +470,21 @@ function checkLeftoverIdentifiers(
 function checkCollapsedParagraphs(
   docParagraphs: readonly string[],
   srcParagraphs: readonly string[],
-  modalidade: string,
   findings: SemanticFinding[],
   seen: Map<string, number>
 ): void {
-  const composed = new Set(
-    catalogForModalidade(modalidade)
-      .filter((d) => d.kind === "composed")
-      .map((d) => d.token)
-  );
-
   docParagraphs.forEach((paragraph, paragraphIndex) => {
     const m = ONLY_TOKEN_RE.exec(normalizeForMatch(paragraph));
     if (!m) return;
     const token = m[1];
-    if (!DATA_KEYS.has(token) && !composed.has(token)) return;
+    // SÓ chave de DADO. Medido em staging em 03/09/2026: a regra valia para
+    // todo bloco composto e acusava `{{clausula_garantia}}` — que substitui uma
+    // cláusula inteira POR DESENHO, assim como `assinaturas`,
+    // `bloco_administradora` e `parcelas_pagamento`. Para esses, "o parágrafo
+    // do fonte era uma cláusula" é a saída correta, não o defeito. O incidente
+    // que originou a regra foi uma chave de dado (`imobiliaria_qualificacao`)
+    // engolindo o item da cláusula de rateio — é esse o caso a pegar.
+    if (!DATA_KEYS.has(token)) return;
 
     const source = srcParagraphs.length
       ? findSourceBetweenAnchors(docParagraphs, srcParagraphs, paragraphIndex)
