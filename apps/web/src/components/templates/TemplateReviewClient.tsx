@@ -5,6 +5,12 @@ import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { describePiiKinds, type TemplatePiiReport } from "@/lib/templates/pii-gate";
 import { maskForReport, readNotMapped } from "@/lib/templates/insertion-report";
+import {
+  SEMANTIC_CATEGORY_LABEL,
+  countBySeverity,
+  type SemanticFinding,
+  type SemanticReport,
+} from "@/lib/templates/semantic-checks";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -46,6 +52,8 @@ interface ValidateResult {
   catalog: CatalogEntry[];
   /** Estado dos slots reconciliado com o Doc (ver validate-gdoc). */
   slots?: SlotReport[];
+  /** Achados semânticos do último `validate-gdoc` (ver semantic-checks.ts). */
+  semantic?: SemanticReport;
 }
 /** Espelha `ApplyClauseSlotReport` (lib/templates/apply-clause-slot.ts). */
 interface SlotReport {
@@ -73,6 +81,8 @@ interface DraftReport {
   ranAt?: string;
   /** Gate de PII do modelo — espelho do último texto lido (ver lib/templates/pii-gate.ts). */
   pii?: TemplatePiiReport;
+  /** Achados semânticos persistidos (sem as frases cruas do conserto). */
+  semantic?: SemanticReport;
 }
 interface TemplateInfo {
   id: string;
@@ -136,6 +146,35 @@ const SLOT_ISSUE_REASON: Record<string, string> = {
   "token-missing": "o campo não está mais no documento",
 };
 
+const SEVERITY_STYLE: Record<string, string> = {
+  error: "border-destructive/40 bg-destructive/5",
+  warning: "border-warning/40 bg-warning/5",
+  info: "border-border bg-muted/40",
+};
+
+/**
+ * Um achado semântico. Mostra o que está errado e ONDE — o excerto é o que
+ * permite ao operador achar o parágrafo no Doc ao lado sem procurar às cegas.
+ */
+function SemanticFindingRow({ finding }: { finding: SemanticFinding }) {
+  return (
+    <div className={`space-y-1 rounded-md border p-2 ${SEVERITY_STYLE[finding.severity] ?? ""}`}>
+      <p className="font-medium">
+        {SEMANTIC_CATEGORY_LABEL[finding.category] ?? finding.category}
+        <span className="ml-1 font-normal text-muted-foreground">
+          · parágrafo {finding.paragraphIndex + 1}
+        </span>
+      </p>
+      <p className="text-muted-foreground">{finding.message}</p>
+      {finding.excerpt && (
+        <p className="rounded bg-muted px-1.5 py-1 font-mono text-[11px] leading-snug">
+          {finding.excerpt}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function parseDraftReport(raw: unknown): DraftReport | null {
   return raw && typeof raw === "object" && !Array.isArray(raw)
     ? (raw as DraftReport)
@@ -184,6 +223,12 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
    * dos campos obrigatórios ausentes).
    */
   const failedSlots = (report?.slots ?? []).filter((s) => !s.applied);
+  // A validação da sessão manda (traz o conserto proposto com a frase crua); o
+  // relatório persistido é o fallback enquanto a primeira revalidação não volta.
+  const semantic = validation?.semantic ?? report?.semantic ?? null;
+  const semanticFindings = semantic?.findings ?? [];
+  const semanticCounts = countBySeverity(semanticFindings);
+  const semanticErrors = semanticFindings.filter((f) => f.severity === "error");
 
   // Mapeamento manual
   const [paragraphs, setParagraphs] = useState<string[]>([]);
@@ -200,11 +245,12 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
       setValidation(data);
       // A revalidação reconcilia a declaração de slot com o Doc — se o operador
       // consertou o modelo à mão, o aviso (e a trava da ativação) some aqui.
-      if (Array.isArray(data.slots) || data.pii) {
+      if (Array.isArray(data.slots) || data.pii || data.semantic) {
         setReport((prev) => ({
           ...(prev ?? {}),
           ...(Array.isArray(data.slots) ? { slots: data.slots as SlotReport[] } : {}),
           ...(data.pii ? { pii: data.pii as TemplatePiiReport } : {}),
+          ...(data.semantic ? { semantic: data.semantic as SemanticReport } : {}),
         }));
       }
     } catch (err) {
@@ -267,7 +313,11 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
     // Nova tentativa = nenhum flag aceito ainda. O ref só sobrevive DENTRO da
     // cadeia slot → PII de uma mesma tentativa (409 → diálogo → retry).
     acceptedFlags.current = {};
-    if ((validation?.missingRequired ?? []).length > 0 || failedSlots.length > 0) {
+    if (
+      (validation?.missingRequired ?? []).length > 0 ||
+      failedSlots.length > 0 ||
+      semanticErrors.length > 0
+    ) {
       setConfirmOpen(true);
       return;
     }
@@ -425,7 +475,9 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
             <AlertDialogTitle>
               {failedSlots.length > 0
                 ? "Ativar com a cláusula variável chumbada?"
-                : "Ativar com campos obrigatórios ausentes?"}
+                : semanticErrors.length > 0 && (validation?.missingRequired ?? []).length === 0
+                  ? "Ativar com problemas apontados na revisão?"
+                  : "Ativar com campos obrigatórios ausentes?"}
             </AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2">
@@ -451,6 +503,29 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                     não estão no modelo — não serão preenchidos nos contratos até
                     você inseri-los.
                   </p>
+                )}
+                {semanticErrors.length > 0 && (
+                  <div className="space-y-1">
+                    <p>
+                      A revisão apontou{" "}
+                      <b>
+                        {semanticErrors.length}{" "}
+                        {semanticErrors.length === 1 ? "problema" : "problemas"}
+                      </b>{" "}
+                      no conteúdo do modelo:
+                    </p>
+                    <ul className="list-disc space-y-0.5 pl-4 text-xs">
+                      {semanticErrors.slice(0, 5).map((f) => (
+                        <li key={f.id}>{f.message}</li>
+                      ))}
+                    </ul>
+                    {semanticErrors.length > 5 && (
+                      <p className="text-xs text-muted-foreground">
+                        …e mais {semanticErrors.length - 5}. A lista completa está no
+                        card &quot;Problemas&quot;.
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             </AlertDialogDescription>
@@ -635,6 +710,69 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
               )}
             </CardContent>
           </Card>
+
+          {/* Problemas de CONTEÚDO — o que a validação sintática não vê. */}
+          {semantic && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-1.5">
+                    <AlertTriangle
+                      className={
+                        semanticCounts.error > 0
+                          ? "h-4 w-4 text-destructive"
+                          : "h-4 w-4 text-muted-foreground"
+                      }
+                    />
+                    Problemas
+                  </span>
+                  {semanticFindings.length > 0 && (
+                    <span className="flex gap-1">
+                      {semanticCounts.error > 0 && (
+                        <Badge variant="destructive">{semanticCounts.error}</Badge>
+                      )}
+                      {semanticCounts.warning > 0 && (
+                        <Badge variant="outline">{semanticCounts.warning} aviso(s)</Badge>
+                      )}
+                    </span>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-xs">
+                {semanticFindings.length === 0 ? (
+                  <p className="text-muted-foreground">
+                    Nada a apontar no conteúdo: as chaves batem com as partes que o texto
+                    nomeia, não há dado de pessoa ao lado delas e nenhuma cláusula virou
+                    uma chave só.
+                  </p>
+                ) : (
+                  semanticFindings.map((f) => (
+                    <SemanticFindingRow key={f.id} finding={f} />
+                  ))
+                )}
+                {/* O que a checagem NÃO pôde afirmar é parte do resultado: sem
+                    o contrato original ela não distingue "cláusula engolida" de
+                    "qualificação corretamente chaveada". */}
+                {!semantic.sourceAvailable && (
+                  <p className="border-t pt-2 text-muted-foreground">
+                    Não encontrei o arquivo original deste modelo, então não dá para
+                    comparar parágrafo a parágrafo — cláusula engolida por uma chave pode
+                    passar despercebida.
+                  </p>
+                )}
+                {!semantic.orgFactsAvailable && (
+                  <p className="text-muted-foreground">
+                    O cadastro da imobiliária está vazio em{" "}
+                    <a href="/settings/perfil" className="underline" target="_blank" rel="noreferrer">
+                      Perfil
+                    </a>
+                    : sem CNPJ, CRECI e dados de recebimento não consigo apontar quando um
+                    dado da própria imobiliária ficou fixo no modelo.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Relato da IA */}
           {report && (report.ranAt || report.inserted) && (

@@ -6,6 +6,22 @@
 // mora aqui.
 import { sanitizePii } from "@/lib/ingestion/pii";
 
+/**
+ * Divisor ÚNICO de parágrafos de um Google Doc lido como texto puro.
+ *
+ * `paragraphIndex` só significa a mesma coisa na rota `doc-text`, nas
+ * checagens semânticas, no alinhamento com o contrato-fonte e na tela se as
+ * quatro pontas cortarem o texto pela MESMA regra. Antes cada ponta tinha a
+ * sua cópia do `split`, e um índice apontava para parágrafos diferentes
+ * dependendo de quem contou.
+ */
+export function splitDocParagraphs(text: string): string[] {
+  return text
+    .split(/\n+/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+}
+
 export interface InsertedToken {
   token: string;
   trecho: string;
