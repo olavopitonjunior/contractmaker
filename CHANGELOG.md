@@ -4,6 +4,17 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-03 - O conserto que devolvia o CPF ao modelo
+
+### Corrigido
+
+- **A regra "cláusula virou uma chave só" acusava o trabalho bem feito e propunha desfazê-lo.** Medido no smoke da staging: o único modelo com conserto automático disponível apontava `{{locadores_qualificacao}}` como erro e oferecia o botão "Restaurar o parágrafo" — e o texto a restaurar era a qualificação de uma pessoa real do contrato original, com **nome, RG e CPF**. Trocar a qualificação pela chave é exatamente o que a padronização deve fazer; a regra chamava isso de defeito e oferecia, como remédio, recolocar o dado de um terceiro dentro do modelo. A causa era o comprimento usado como segundo gatilho: a qualificação completa de dois locadores passa de 400 caracteres sem ter nada de cláusula. Agora quem distingue os dois casos é a **linguagem** (R$, %, deverá, pagamento) — que é o que o incidente original tinha —, nunca o tamanho.
+- **Segunda rede, independente da primeira:** nenhum conserto automático pode devolver ao modelo um texto que o gate de ativação bloquearia. Colapso real cujo parágrafo-fonte contém CPF, RG ou conta passa a pedir ajuste manual, com a explicação do porquê. Uma heurística pode errar de novo, por um caminho que ninguém previu; o conserto que ela propõe não pode desfazer o gate de PII.
+
+### Notas
+
+- O defeito já estava em produção (veio com a checagem semântica e a edição no app). A tela de revisão da biblioteca não o criou — ela o tornou visível, e é assim que ele foi encontrado.
+
 ## [Unreleased] - 2026-09-03 - A migração que não tinha ferramenta
 
 ### Adicionado

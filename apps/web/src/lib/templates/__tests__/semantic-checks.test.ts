@@ -260,6 +260,75 @@ describe("collapsed-paragraph — a cláusula virou uma chave só", () => {
     expect(byCategory(run(doc, { sourceText: source }).findings, "collapsed-paragraph")).toHaveLength(0);
   });
 
+  it("qualificação LONGA continua calando — o tamanho não faz de um parágrafo uma cláusula", () => {
+    // Medido na staging em 03/09/2026, e o defeito era grave: a regra tinha o
+    // comprimento como segundo gatilho (`|| source.length > 400`). A
+    // qualificação completa de dois locadores passa disso sem ter nada de
+    // cláusula, e a regra promovia o trabalho BEM FEITO a "erro" — propondo
+    // restaurar nome, RG e CPF das pessoas dentro do modelo.
+    const abre = "Pelo presente instrumento particular, as partes abaixo qualificadas:";
+    const fecha = "Resolvem celebrar o presente contrato de locação residencial.";
+    const qualificacaoLonga =
+      "HELENA CASTRO VILABOIM, brasileira, viúva, engenheira civil, portadora da cédula de " +
+      "identidade RG nº 12.345.678-9 SSP/SP, inscrita no CPF sob o nº 111.444.777-35, " +
+      "residente e domiciliada na Rua das Acácias, nº 1.200, apartamento 74, bairro Jardim " +
+      "Paulistano, São Paulo/SP, CEP 01455-000, e ROBERTO ALMEIDA VILABOIM, brasileiro, " +
+      "solteiro, arquiteto, portador da cédula de identidade RG nº 98.765.432-1 SSP/SP, " +
+      "residente e domiciliado no mesmo endereço acima descrito";
+    expect(qualificacaoLonga.length).toBeGreaterThan(400);
+    const doc = [abre, "{{locadores_qualificacao}}", fecha].join("\n");
+    const source = [abre, qualificacaoLonga, fecha].join("\n");
+    expect(
+      byCategory(run(doc, { sourceText: source }).findings, "collapsed-paragraph")
+    ).toHaveLength(0);
+  });
+
+  it("colapso REAL cujo fonte tem PII não oferece restaurar — pede ajuste manual", () => {
+    // Segunda rede, independente da primeira. Uma heurística pode errar; o
+    // conserto que ela propõe não pode desfazer o gate de PII devolvendo o dado
+    // de um terceiro ao modelo.
+    const itemComCpf =
+      "a) R$ 2.500,00 (dois mil e quinhentos reais), a ser pago a Marcos Antônio Ferreira, " +
+      "inscrito no CPF sob o nº 111.444.777-35, como honorários pela intermediação;";
+    const doc = [anterior, "{{imobiliaria_qualificacao}}", posterior].join("\n");
+    const source = [anterior, itemComCpf, posterior].join("\n");
+    const hits = byCategory(run(doc, { sourceText: source }).findings, "collapsed-paragraph");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].severity).toBe("error");
+    expect(hits[0].suggestedFix).toEqual({ op: "manual" });
+    expect(hits[0].message).toMatch(/dado pessoal/i);
+    // E o excerto que vai para a tela continua mascarado.
+    expect(hits[0].excerpt).not.toContain("111.444.777-35");
+  });
+
+  it("DÍVIDA CONHECIDA: colapso sem termo de valor passa em silêncio", () => {
+    // Este teste descreve um FALSO NEGATIVO deliberado, não um comportamento
+    // desejado. Ao trocar o gatilho de comprimento pela linguagem de cláusula,
+    // um colapso genuíno cuja redação não use R$, %, "deverá" ou "pagamento" —
+    // prazo, posse, foro — deixa de ser apontado.
+    //
+    // A troca foi escolhida porque os dois erros não custam o mesmo: o falso
+    // positivo vinha COM UM BOTÃO que devolvia nome, RG e CPF ao modelo, e o
+    // falso negativo custa um colapso que segue invisível, como era antes de a
+    // regra existir. Numa regra que proponhe reescrever contrato, silêncio é
+    // preferível a um remédio perigoso.
+    //
+    // Se alguém alargar `CLAUSE_LANGUAGE` para fechar este buraco, este caso
+    // vira o oposto (esperar 1 achado) — e aí a rede de PII é o que precisa
+    // segurar o falso positivo que voltar junto.
+    const abre = "5.1. Da posse do imóvel:";
+    const fecha = "5.2. As benfeitorias necessárias serão indenizadas na forma da lei.";
+    const clausulaSemValor =
+      "A posse será transmitida ao LOCATÁRIO na data da assinatura, mediante termo de " +
+      "vistoria assinado pelas partes, permanecendo o imóvel sob responsabilidade do " +
+      "LOCADOR até aquele momento.";
+    const doc = [abre, "{{locatarios_qualificacao}}", fecha].join("\n");
+    const source = [abre, clausulaSemValor, fecha].join("\n");
+    expect(
+      byCategory(run(doc, { sourceText: source }).findings, "collapsed-paragraph")
+    ).toHaveLength(0);
+  });
+
   it("sem fonte, só avisa quando o parágrafo anterior abre uma lista ou fala de comissão", () => {
     const doc = [anterior, "{{imobiliaria_qualificacao}}", posterior].join("\n");
     const hits = byCategory(run(doc).findings, "collapsed-paragraph");

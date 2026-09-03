@@ -30,6 +30,9 @@
  */
 import { DATA_KEYS, isKnownToken } from "@/lib/templates/placeholder-catalog";
 import { maskForReport, splitDocParagraphs } from "@/lib/templates/insertion-report";
+// Mesma régua do gate de ativação, de propósito: o conserto que esta regra
+// propõe nunca pode devolver ao modelo um texto que o gate barraria.
+import { auditTemplateText } from "@/lib/templates/pii-gate";
 import {
   DEFAULT_MIN_CONFIDENCE,
   detectPii,
@@ -491,17 +494,38 @@ function checkCollapsedParagraphs(
       : null;
 
     if (source) {
-      // Fonte curto e sem linguagem de cláusula era mesmo só uma qualificação:
-      // a chave está certa e não há o que apontar.
-      if (!CLAUSE_LANGUAGE.test(source) && source.length <= 400) return;
+      // Sem linguagem de cláusula, o parágrafo-fonte era uma qualificação — e
+      // trocá-la pela chave é EXATAMENTE o que a padronização deve fazer.
+      //
+      // O comprimento já entrou aqui como segundo gatilho (`|| length > 400`) e
+      // saiu, medido na staging em 03/09/2026: a qualificação completa de dois
+      // locadores (nome, nacionalidade, profissão, RG, CPF, endereço) passa de
+      // 400 caracteres sem ter nada de cláusula, e a regra promovia o trabalho
+      // BEM FEITO a "erro" — propondo, como conserto, restaurar o nome e o CPF
+      // das pessoas dentro do modelo. O incidente que originou a regra (#531)
+      // era um item de rateio com valor em R$: é a LINGUAGEM que distingue os
+      // dois casos, nunca o tamanho.
+      if (!CLAUSE_LANGUAGE.test(source)) return;
+
+      // Segunda rede, independente da primeira: nunca propor restaurar um texto
+      // que o gate de ativação bloquearia. Se a regra errar de novo — por outro
+      // caminho que ninguém previu —, o pior que ela faz é pedir ajuste manual,
+      // em vez de oferecer um botão que devolve dado pessoal de terceiro ao
+      // modelo. Uma heurística pode errar; o conserto que ela propõe não pode
+      // desfazer o gate de PII.
+      const devolveriaPii = auditTemplateText(source).blocked;
       pushFinding(findings, seen, {
         severity: "error",
         category: "collapsed-paragraph",
         paragraphIndex,
         token,
         excerpt: excerptOf(source),
-        message: `Este parágrafo virou só {{${token}}}, mas no contrato original ele era uma cláusula com texto próprio (valor, condição ou forma de pagamento). Tudo que não era o dado da chave se perdeu.`,
-        suggestedFix: { op: "restore-paragraph", current: paragraph, source },
+        message: devolveriaPii
+          ? `Este parágrafo virou só {{${token}}}, mas no contrato original ele era uma cláusula com texto próprio. Não dá para restaurá-lo automaticamente: o texto original contém dado pessoal (CPF, RG ou conta), e recolocá-lo no modelo imprimiria o dado de um terceiro em todo contrato gerado. Reescreva a cláusula no documento, sem os dados da pessoa.`
+          : `Este parágrafo virou só {{${token}}}, mas no contrato original ele era uma cláusula com texto próprio (valor, condição ou forma de pagamento). Tudo que não era o dado da chave se perdeu.`,
+        suggestedFix: devolveriaPii
+          ? { op: "manual" }
+          : { op: "restore-paragraph", current: paragraph, source },
       });
       return;
     }
