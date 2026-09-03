@@ -558,3 +558,21 @@ describe("comissaoLocacaoSchema", () => {
     expect(com.comissao?.taxa_locacao_percent).toBe(100);
   });
 });
+
+// 2026-09-03 — `nome_mae`/`sexo` nas partes PF de locação (certidões TJSP e
+// antecedentes exigem; RG/CNH trazem). Opcionais com default "".
+describe("pessoa física de locação: nome_mae e sexo", () => {
+  it("aceita, guarda e defaulta para vazio (locador, locatário e fiador)", () => {
+    const parsed = dadosLocacaoSchema.parse({
+      ...baseValid,
+      locadores: [{ tipo_pessoa: "fisica", nome: "João Locador", nome_mae: "Ana Locadora", sexo: "M" }],
+      garantia: {
+        tipo: "fiador",
+        fiador: { tipo_pessoa: "fisica", nome: "Fernando Fiador", sexo: "F" },
+      },
+    });
+    expect(parsed.locadores[0]).toMatchObject({ nome_mae: "Ana Locadora", sexo: "M" });
+    expect(parsed.locatarios[0]).toMatchObject({ nome_mae: "", sexo: "" });
+    expect(parsed.garantia?.fiador).toMatchObject({ sexo: "F", nome_mae: "" });
+  });
+});

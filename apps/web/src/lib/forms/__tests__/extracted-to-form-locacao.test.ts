@@ -301,9 +301,10 @@ describe("mapExtractedToLocacaoForm — categoria fora do catálogo", () => {
     expect(store.get("locadores.0.cpf")).toBe("11122233344");
     expect(store.get("locadores.0.rg")).toBe("MG-12.345.678");
     expect(store.get("locadores.0.data_nascimento")).toBe("1985-03-12");
-    // parteLocacaoSchema não tem naturalidade/nome_mae — não injeta chave órfã.
+    // parteLocacaoSchema não tem naturalidade — não injeta chave órfã.
+    // `nome_mae` entrou no schema em 2026-09-03 (certidões) e passa a ser aplicado.
     expect(store.get("locadores.0.naturalidade")).toBeUndefined();
-    expect(store.get("locadores.0.nome_mae")).toBeUndefined();
+    expect(store.get("locadores.0.nome_mae")).toBe("Maria Locadora");
   });
 
   it('"outro" com identidade também vale pro fiador', () => {
@@ -367,5 +368,59 @@ describe("labels do wizard de locação", () => {
     expect(LOCACAO_COMERCIAL_STEP_LABELS[5]).toBe("Garantia e Observações");
     expect(LOCACAO_STEP_LABELS).not.toContain("Confirmação e Assinatura");
     expect(LOCACAO_COMERCIAL_STEP_LABELS).not.toContain("Confirmação e Assinatura");
+  });
+});
+
+// 2026-09-03 — RG/CNH trazem filiação e sexo; o mapa de locação descartava
+// (o schema não tinha as chaves). Agora entram como na venda.
+describe("mapExtractedToLocacaoForm — nome da mãe e sexo", () => {
+  it("RG com filiacao_mae/sexo preenche nome_mae e sexo do locatário e do fiador", () => {
+    const rg = {
+      category: "rg",
+      fields: {
+        nome_completo: "Carlos Locatário",
+        cpf_numero: "52998224725",
+        filiacao_mae: "Helena Mãe",
+        sexo: "M",
+      },
+      confidence: 0.9,
+    };
+    const a = makeFormStub();
+    mapExtractedToLocacaoForm(rg, { kind: "locatario", index: 0 }, a.form);
+    expect(a.store.get("locatarios.0.nome_mae")).toBe("Helena Mãe");
+    expect(a.store.get("locatarios.0.sexo")).toBe("M");
+
+    const b = makeFormStub();
+    mapExtractedToLocacaoForm(rg, { kind: "fiador", index: 0 }, b.form);
+    expect(b.store.get("garantia.fiador.nome_mae")).toBe("Helena Mãe");
+    expect(b.store.get("garantia.fiador.sexo")).toBe("M");
+  });
+  it("no cônjuge (locador e fiador) NÃO grava sexo/nome_mae/estado_civil — o sub-schema não os tem", () => {
+    const rg = {
+      category: "rg",
+      fields: {
+        nome_completo: "Clara Cônjuge",
+        cpf_numero: "22233344405",
+        filiacao_mae: "Helena Mãe",
+        sexo: "F",
+        estado_civil: "Casado(a)",
+      },
+      confidence: 0.9,
+    };
+    const a = makeFormStub({ "locadores.0.nome": "João Locador" });
+    mapExtractedToLocacaoForm(rg, { kind: "conjuge_locador", index: 0 }, a.form);
+    expect(a.store.get("locadores.0.conjuge.nome")).toBe("Clara Cônjuge");
+    expect(a.store.get("locadores.0.conjuge.sexo")).toBeUndefined();
+    expect(a.store.get("locadores.0.conjuge.nome_mae")).toBeUndefined();
+    expect(a.store.get("locadores.0.conjuge.estado_civil")).toBeUndefined();
+    // O estado civil do TITULAR continua sendo derivado (D2).
+    expect(a.store.get("locadores.0.estado_civil")).toBe("Casado(a)");
+
+    const b = makeFormStub({ "garantia.fiador.nome": "Fernando Fiador" });
+    mapExtractedToLocacaoForm(rg, { kind: "conjuge_fiador", index: 0 }, b.form);
+    expect(b.store.get("garantia.fiador.conjuge.nome")).toBe("Clara Cônjuge");
+    expect(b.store.get("garantia.fiador.conjuge.sexo")).toBeUndefined();
+    expect(b.store.get("garantia.fiador.conjuge.nome_mae")).toBeUndefined();
+
   });
 });

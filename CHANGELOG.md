@@ -4,6 +4,12 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-03 - Sexo e nome da mãe nas pessoas físicas da locação
+
+### Adicionado
+
+- **Locador, locatário e fiador pessoa física ganham os campos Sexo e Nome da mãe** no formulário de locação, ao lado da data de nascimento. As certidões cíveis do TJSP (com execução fiscal) e os antecedentes exigem esses dados; sem eles a certidão mais útil para a análise de crédito nunca era emitida em São Paulo. Os campos são opcionais, podem ser configurados como obrigatórios em Configurações → Formulário, aparecem no resumo consolidado e o OCR de RG/CNH já os preenche.
+
 ## [Unreleased] - 2026-09-03 - Motor de certidões preparado para a locação (sem tela ainda)
 
 ### Adicionado

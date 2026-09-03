@@ -47,8 +47,9 @@ const ADDRESS_FIELDS = new Set([
   "cep",
 ]);
 
-// parteLocacaoSchema não tem naturalidade/sexo/nome_mae — mapeia só o que o
-// schema conhece pra não injetar chaves órfãs no dataJson.
+// parteLocacaoSchema não tem naturalidade — mapeia só o que o schema conhece
+// pra não injetar chaves órfãs no dataJson. `nome_mae`/`sexo` entraram em
+// 2026-09-03 (certidões TJSP/antecedentes exigem; RG/CNH trazem).
 //
 // A qualificação (nacionalidade, estado civil, profissão) e o contato
 // (e-mail, celular) ESTÃO no parteLocacaoSchema e estavam sendo descartados:
@@ -60,6 +61,12 @@ const FIELD_MAP_PERSON_LOCACAO: Record<string, string> = {
   rg_numero: "rg",
   cpf_numero: "cpf",
   data_nascimento: "data_nascimento",
+  // Mesmas chaves que o mapa de venda (extracted-to-form.ts): OCR de RG/CNH
+  // devolve `filiacao_mae`/`mae` e `sexo`.
+  sexo: "sexo",
+  filiacao_mae: "nome_mae",
+  mae: "nome_mae",
+  nome_mae: "nome_mae",
   nacionalidade: "nacionalidade",
   estado_civil: "estado_civil",
   profissao: "profissao",
@@ -163,6 +170,15 @@ export function resolveLocacaoBasePath(assignment: Assignment): string | null {
   }
 }
 
+/**
+ * O sub-objeto `conjuge` de locação (validation-locacao.ts) NÃO tem
+ * `sexo`/`nome_mae`/`estado_civil` — o mapa de pessoa é compartilhado com o
+ * titular, então sem este guard o OCR do RG do cônjuge gravaria chaves órfãs
+ * em `locadores.0.conjuge.*` (o finalize persiste o `mergedData` cru, não o
+ * `result.data` do Zod). Espelho do guard do representante, pelo negativo.
+ */
+const CONJUGE_DISALLOWED_FIELDS_LOCACAO = new Set(["sexo", "nome_mae", "estado_civil"]);
+
 export function mapExtractedToLocacaoForm(
   extraction: ExtractedDoc,
   assignment: Assignment,
@@ -208,6 +224,7 @@ export function mapExtractedToLocacaoForm(
     if (isRepresentante && !REPRESENTANTE_ALLOWED_FIELDS_LOCACAO.has(formField)) {
       return;
     }
+    if (isConjuge && CONJUGE_DISALLOWED_FIELDS_LOCACAO.has(formField)) return;
     let value = coerce(formField, raw);
     // `area` é number no schema de locação; OCR devolve string.
     if (formField === "area") {

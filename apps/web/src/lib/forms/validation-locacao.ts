@@ -26,6 +26,13 @@ const pessoaFisicaLocacaoSchema = z.object({
   rg: z.string().optional().default(""),
   cpf: z.string().optional().default(""),
   data_nascimento: z.string().optional().default(""),
+  // 2026-09-03 — mesmos nomes da venda (validation.ts), que o planner de
+  // certidões lê: sem `nome_mae`/`sexo` a certidão TJSP mais útil para crédito
+  // (pedido-certidao, cível + execução fiscal) nunca dispara em SP — cai no
+  // pedido-civel só-cível — e antecedentes PF nem entra. Opcionais: ausência
+  // vira skip "complete os dados", não erro.
+  nome_mae: z.string().optional().default(""),
+  sexo: z.string().optional().default(""),
   email: z.string().email("Email inválido").optional().or(z.literal("")),
   mobile_phone: z.string().optional().default(""),
   endereco: z.string().optional().default(""),
@@ -38,8 +45,10 @@ const pessoaFisicaLocacaoSchema = z.object({
   // Renda declarada (insumo da análise de crédito Fase 1: renda × aluguel).
   renda_mensal: z.number().optional().default(0),
   // Cônjuge (2026-07-24). Locação não tinha outorga uxória em camada nenhuma:
-  // um locador casado assinava sozinho. Espelha o sub-objeto de venda menos os
-  // campos que só as certidões PF de venda usam (nome_mae/sexo/naturalidade).
+  // um locador casado assinava sozinho. Espelha o sub-objeto de venda menos
+  // nome_mae/sexo/naturalidade. Desde 2026-09-02 o cônjuge do FIADOR é alvo de
+  // certidão (planner de locação) e sem sexo/nome_mae cai em skip "complete os
+  // dados" sem campo no form — dívida declarada, a tratar no PR da aba.
   // `incluir_como_signatario` default `true` como o resto de locação (venda
   // nasceu opt-in por motivos históricos).
   conjuge: z.object({

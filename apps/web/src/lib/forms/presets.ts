@@ -645,6 +645,7 @@ export function isKnownFormPath(path: string): boolean {
 // obrigatoriedade que nunca dispara.
 const LOCACAO_PARTY_FIELDS = [
   "nome", "razao_social", "cnpj", "cpf", "rg", "data_nascimento",
+  "nome_mae", "sexo",
   "nacionalidade", "estado_civil", "profissao", "email", "mobile_phone",
   "endereco", "numero", "complemento", "bairro", "cidade", "uf", "cep",
   "renda_mensal", "faturamento_mensal",

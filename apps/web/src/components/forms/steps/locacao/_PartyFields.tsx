@@ -208,6 +208,31 @@ export function PessoaFisicaLocacaoFields({
             type="date"
           />
         </FormField>
+        {/* Sexo e nome da mãe (2026-09-03): as certidões TJSP (cível + execução
+            fiscal) e antecedentes exigem; sem eles o motor pula a certidão
+            mais útil para crédito. Mesmos valores da venda (M/F). */}
+        <FormField form={form} name={`${prefix}.sexo`} label="Sexo">
+          <NativeSelect
+            value={form.watch(`${prefix}.sexo`) || ""}
+            onChange={(v) => form.setValue(`${prefix}.sexo`, v, { shouldDirty: true })}
+            options={[
+              { value: "", label: "Não informado" },
+              { value: "M", label: "Masculino" },
+              { value: "F", label: "Feminino" },
+            ]}
+          />
+        </FormField>
+        <FormField
+          form={form}
+          name={`${prefix}.nome_mae`}
+          label="Nome da Mãe"
+          className="md:col-span-2"
+        >
+          <Input
+            {...form.register(`${prefix}.nome_mae`)}
+            placeholder="Nome completo da mãe (usado nas certidões)"
+          />
+        </FormField>
         <FormField
           form={form}
           name={`${prefix}.renda_mensal`}
