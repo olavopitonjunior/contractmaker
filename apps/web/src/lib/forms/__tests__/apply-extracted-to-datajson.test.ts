@@ -133,3 +133,51 @@ describe("applyExtractedToDataJson", () => {
     expect(original.vendedores[0]).not.toHaveProperty("cpf");
   });
 });
+
+// 2026-09-02 — paridade com a etapa 0: aplicar um doc ao fiador pelo servidor
+// define a modalidade (e limpa a anterior), sem respeitar `skipIfDirty` para o
+// `garantia.tipo` (que tem default "caucao" e chegaria "preenchido").
+describe("applyExtractedToDataJson — doc no fiador vira a garantia para fiador (locação)", () => {
+  it("fiador: tipo vira fiador, caução some, garantia.fiador recebe o OCR", () => {
+    const { merged } = applyExtractedToDataJson(
+      { garantia: { tipo: "caucao", caucao_meses: 3, provider: "" } },
+      { category: "rg", fields: { nome_completo: "Pedro Fiador", cpf_numero: "11144477735" } },
+      { kind: "fiador", index: 0 },
+      { kind: "locacao" }
+    );
+    const garantia = merged.garantia as Record<string, unknown>;
+    expect(garantia.tipo).toBe("fiador");
+    expect(garantia.caucao_meses).toBeUndefined();
+    expect((garantia.fiador as Record<string, unknown>).nome).toBe("Pedro Fiador");
+  });
+
+  it("conjuge_fiador também define a modalidade", () => {
+    const { merged } = applyExtractedToDataJson(
+      { garantia: { tipo: "seguro_fianca", cobertura_meses: 30, fiador: { nome: "Pedro" } } },
+      { category: "cnh", fields: { nome_completo: "Clara Fiadora" } },
+      { kind: "conjuge_fiador", index: 0 },
+      { kind: "locacao" }
+    );
+    const garantia = merged.garantia as Record<string, unknown>;
+    expect(garantia.tipo).toBe("fiador");
+    expect(garantia.cobertura_meses).toBeUndefined();
+    expect((garantia.fiador as Record<string, unknown>).nome).toBe("Pedro");
+  });
+
+  it("locatário não mexe na garantia; venda nunca", () => {
+    const loc = applyExtractedToDataJson(
+      { garantia: { tipo: "caucao", caucao_meses: 3 } },
+      { category: "rg", fields: { nome_completo: "Lct" } },
+      { kind: "locatario", index: 0 },
+      { kind: "locacao" }
+    );
+    expect(loc.merged.garantia).toEqual({ tipo: "caucao", caucao_meses: 3 });
+
+    const venda = applyExtractedToDataJson(
+      { garantia: { tipo: "caucao" } },
+      { category: "rg", fields: { nome_completo: "V" } },
+      { kind: "vendedor", index: 0 }
+    );
+    expect(venda.merged.garantia).toEqual({ tipo: "caucao" });
+  });
+});

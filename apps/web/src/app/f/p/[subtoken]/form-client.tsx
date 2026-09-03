@@ -32,14 +32,18 @@ interface SubtokenFormClientProps {
 
 /**
  * Roles cujo link individual tem um slot de parte próprio pro auto-assign de
- * OCR (Fix 4 do DocumentosStep). Fiador fica fora — os dados moram no objeto
- * `garantia`, não num array de partes.
+ * OCR (Fix 4 do DocumentosStep). O fiador entrou em 2026-09-02: os dados moram
+ * no objeto `garantia.fiador` (sem índice — `index: 0` é convenção), o
+ * `ensureSlot` já é no-op para kind não-array e o mapper de locação resolve o
+ * basePath. O assignment persiste porque `DEFAULT_ROLE_STEPS.fiador` inclui a
+ * etapa 5 (`garantia` no escopo).
  */
 const SELF_ASSIGN_KIND: Partial<Record<ParticipantRole, Assignment["kind"]>> = {
   vendedor: "vendedor",
   comprador: "comprador",
   locador: "locador",
   locatario: "locatario",
+  fiador: "fiador",
 };
 
 const ROLE_LABELS: Record<ParticipantRole, string> = {

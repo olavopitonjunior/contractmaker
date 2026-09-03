@@ -3,6 +3,7 @@
  * These filter out the easy cases so the passive analyzer only escalates to Haiku when needed.
  */
 import { parseMoneyBR } from "@/lib/format/money";
+import { fiadorHasIdentity } from "@/lib/forms/garantia-fiador-flip";
 
 export type QuickFinding = {
   severity: "info" | "warning" | "error";
@@ -458,7 +459,9 @@ export function quickChecksLocacao(data: DadosLocacao): QuickFinding[] {
   const parties: Array<{ label: string; parte: ParteLocacao }> = [];
   locadores.forEach((p, i) => parties.push({ label: `Locador ${i + 1}`, parte: p }));
   locatarios.forEach((p, i) => parties.push({ label: `Locatário ${i + 1}`, parte: p }));
-  if (data.garantia?.tipo === "fiador" && data.garantia.fiador) {
+  // Fiador identificado entra mesmo antes de o tipo ser "fiador" — o documento
+  // dele já basta para valer a checagem de CPF/CNPJ.
+  if (data.garantia?.fiador && fiadorHasIdentity(data.garantia.fiador)) {
     parties.push({ label: "Fiador", parte: data.garantia.fiador });
   }
 

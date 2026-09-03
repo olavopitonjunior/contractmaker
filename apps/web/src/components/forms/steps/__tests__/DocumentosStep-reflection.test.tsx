@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor, cleanup } from "@testing-library/react";
 import { useForm, type UseFormReturn } from "react-hook-form";
 import { DocumentosStep } from "@/components/forms/steps/DocumentosStep";
+import { locacaoDocAdapter } from "@/components/forms/steps/locacao/locacao-doc-adapter";
+import { fireEvent } from "@testing-library/react";
 
 /**
  * Integração: valida que a OCR feita/categorizada nos links individuais reflete
@@ -180,5 +182,103 @@ describe("DocumentosStep — reflexão de OCR/categoria nos campos", () => {
     );
     expect(groups).toContain("Vendedores");
     expect(groups).toContain("Compradores");
+  });
+});
+
+/** RG do fiador (locação) já extraído e atribuído (persistido) ao fiador. */
+function fiadorRg(overrides: Partial<Attachment> = {}): Attachment {
+  return compradorRg({
+    id: "att-fiador",
+    filename: "rg-pedro.jpg",
+    extractedData: {
+      confidence: 0.95,
+      fields: { nome_completo: "Pedro Fiador", cpf_numero: "11144477735" },
+      assignment: { kind: "fiador", index: 0 },
+    },
+    ...overrides,
+  });
+}
+
+function LocacaoHarness({ defaultValues }: { defaultValues?: Record<string, unknown> }) {
+  const form = useForm<Record<string, unknown>>({
+    defaultValues: defaultValues ?? {
+      locadores: [{ tipo_pessoa: "fisica" }],
+      locatarios: [{ tipo_pessoa: "fisica" }],
+      garantia: { tipo: "caucao", caucao_meses: 3 },
+    },
+  });
+  capturedForm = form;
+  return <DocumentosStep form={form} token="tok" adapter={locacaoDocAdapter} />;
+}
+
+// 2026-09-02 — doc no fiador define a modalidade, mas SÓ no evento de
+// atribuição. O restore (Fix 3) não flipa: o usuário pode ter trocado para
+// caução na etapa 5 depois de atribuir, e a escolha manual vence.
+describe("DocumentosStep (locação) — fiador define a garantia só no evento de atribuição", () => {
+  it("restore com assignment persistido no fiador aplica o OCR mas NÃO muda o tipo", async () => {
+    mockAttachments([fiadorRg()]);
+    render(<LocacaoHarness />);
+
+    await waitFor(() => {
+      expect(capturedForm!.getValues("garantia.fiador.nome")).toBe("Pedro Fiador");
+    });
+    expect(capturedForm!.getValues("garantia.tipo")).toBe("caucao");
+    expect(capturedForm!.getValues("garantia.caucao_meses")).toBe(3);
+  });
+
+  it("trocar o seletor para Fiador vira o tipo e limpa a caução", async () => {
+    // Sem assignment persistido: o doc nasce em "outro" e o usuário escolhe.
+    mockAttachments([
+      fiadorRg({
+        extractedData: {
+          confidence: 0.95,
+          fields: { nome_completo: "Pedro Fiador", cpf_numero: "11144477735" },
+        },
+      }),
+    ]);
+    const { container } = render(<LocacaoHarness />);
+
+    const select = await waitFor(() => {
+      const el = container.querySelector("select");
+      if (!el) throw new Error("select ainda não renderizou");
+      return el as HTMLSelectElement;
+    });
+    const values = Array.from(select.querySelectorAll("option")).map(
+      (o) => o.getAttribute("value") ?? ""
+    );
+    // Garantia caução e o grupo Fiador está lá mesmo assim.
+    expect(values).toContain("fiador:0");
+    expect(values).toContain("conjuge_fiador:0");
+
+    fireEvent.change(select, { target: { value: "fiador:0" } });
+
+    await waitFor(() => {
+      expect(capturedForm!.getValues("garantia.tipo")).toBe("fiador");
+    });
+    expect(capturedForm!.getValues("garantia.caucao_meses")).toBeUndefined();
+    // A atribuição não aplica os campos: isso segue no "Aplicar aos campos".
+    expect(capturedForm!.getValues("garantia.fiador.nome")).toBeFalsy();
+  });
+
+  it("mover o doc do fiador para o locatário não reverte o tipo", async () => {
+    mockAttachments([fiadorRg()]);
+    const { container } = render(
+      <LocacaoHarness
+        defaultValues={{
+          locadores: [{ tipo_pessoa: "fisica" }],
+          locatarios: [{ tipo_pessoa: "fisica" }],
+          garantia: { tipo: "fiador" },
+        }}
+      />
+    );
+    const select = await waitFor(() => {
+      const el = container.querySelector("select");
+      if (!el) throw new Error("select ainda não renderizou");
+      return el as HTMLSelectElement;
+    });
+    await waitFor(() => expect(select.value).toBe("fiador:0"));
+    fireEvent.change(select, { target: { value: "locatario:0" } });
+    await waitFor(() => expect(select.value).toBe("locatario:0"));
+    expect(capturedForm!.getValues("garantia.tipo")).toBe("fiador");
   });
 });

@@ -1752,7 +1752,7 @@ async function handleSuggestImprovements(
     Array.isArray(data.locadores) || Array.isArray(data.locatarios);
   if (isLocacao) {
     const garantia = data.garantia as
-      | { tipo?: string; caucao_meses?: number }
+      | { tipo?: string; caucao_meses?: number; fiador?: { nome?: string; razao_social?: string } }
       | undefined;
     if (!garantia?.tipo || garantia.tipo === "sem_garantia") {
       suggestions.push({
@@ -1760,6 +1760,20 @@ async function handleSuggestImprovements(
         title: "Definir modalidade de garantia locatícia (art. 37)",
         reason:
           "Locação sem garantia definida. A Lei 8.245/91 (art. 37) admite caução, fiança, seguro-fiança ou cessão fiduciária — defina UMA (a cumulação é vedada pelo § único).",
+        importance: "high",
+      });
+    } else if (
+      garantia.tipo === "fiador" &&
+      !garantia.fiador?.nome?.trim() &&
+      !garantia.fiador?.razao_social?.trim()
+    ) {
+      // A modalidade pode ter sido definida por um documento atribuído ao
+      // fiador antes de alguém o qualificar — o contrato não sai sem o nome.
+      suggestions.push({
+        category: "garantia",
+        title: "Qualificar o fiador",
+        reason:
+          "A garantia é fiança, mas o fiador ainda não tem nome. Sem a qualificação (nome, CPF, endereço, estado civil) a cláusula de fiança e a assinatura do fiador ficam sem sustentação.",
         importance: "high",
       });
     }

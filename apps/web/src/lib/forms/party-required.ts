@@ -26,7 +26,8 @@ import { isMarried } from "@/lib/forms/estado-civil";
 // presets de obrigatoriedade próprios (lib/forms/presets.ts) e precisa do
 // mesmo remap PF/PJ. `garantia.fiador.*` fica de fora de propósito: não é
 // lista indexada e a obrigatoriedade do fiador é condicional ao tipo de
-// garantia (fica em collectLocacaoFinalizeIssues).
+// garantia (avisos em collectLocacaoFinalizeIssues; o nome é piso em
+// lib/forms/garantia-fiador-flip.ts → missingFiadorName).
 const PARTY_PATH_RE =
   /^(vendedores|compradores|locadores|locatarios)\.(\d+)\.(.+)$/;
 
