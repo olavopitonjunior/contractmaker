@@ -55,6 +55,15 @@ desktop.ini
 # protege é a regra estar no ponto de onde todas as branches nascem.
 apps/web/scripts/ai-bench/fixtures/vision/
 
+# Resultados da bateria do passe de chaves: carregam o texto do corpus e as
+# propostas CRUAS do modelo. Hoje o corpus é anonimizado e versionado, então o
+# risco é baixo — mas o README manda crescer o corpus com contratos da Trio, e
+# nesse dia o `results-*.json` passa a conter texto de contrato real antes de
+# qualquer revisão. A regra entra ANTES, e pela `staging`, que é de onde as
+# branches nascem (ver a nota do corpus de visão acima, que foi publicado duas
+# vezes por a regra viver só na branch de quem baixou).
+apps/web/scripts/ai-bench/placeholders/results-*.json
+
 # storage
 .storage/
 public/exports/

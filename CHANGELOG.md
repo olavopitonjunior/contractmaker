@@ -4,6 +4,13 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-03 - Bateria de avaliação do passe de chaves
+
+### Interno
+
+- **O passe de inserção de chaves foi separado em propor / planejar / aplicar**, sem mudança de comportamento no caminho de produção: as três funções compõem a mesma operação e devolvem o mesmo relatório. O planejador — onde mora a segurança do replace global — ficou puro e passa a ser testável sem modelo e sem Google Docs, o que antes exigia mocar as duas pontas ao mesmo tempo. `commitInsertion` passou a recusar plano montado contra outro documento.
+- **Nova bateria de avaliação** (`scripts/ai-bench/placeholders/`) mede precisão e recall do passe por índice de parágrafo contra gabaritos anotados à mão, com `--replay` para remedir a custo zero quando só o planejador muda. Referência contra Sonnet, em 2 contratos: precisão 90,9%, recall 81,1%, 0 colocações proibidas. Existe porque a ausência desse número deixou 10 dos 16 modelos da Trio passarem na validação sintática e chegarem errados na revisão.
+
 ## [Unreleased] - 2026-09-03 - Certidões: token da Infosimples inválido não vira "negativa"
 
 ### Corrigido

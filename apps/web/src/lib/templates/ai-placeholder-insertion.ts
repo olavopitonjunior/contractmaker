@@ -25,6 +25,7 @@ export {
 } from "./insertion-report";
 
 import { catalogForModalidade, requiredTokens, isKnownToken, DATA_KEYS } from "./placeholder-catalog";
+import { textFingerprint } from "@/lib/ingestion/pii";
 
 /**
  * Teto do texto enviado à IA. Era 24.000 chars — um contrato de locação de
@@ -189,56 +190,163 @@ export function extractMapeamentos(raw: string): { ok: boolean; mapeamentos: Map
 // Re-exportado aqui porque este é o módulo que o define em uso.
 export { DATA_KEYS };
 
-export async function insertPlaceholdersWithAI(input: {
-  docId: string;
-  modalidade: string;
-  orgId: string;
-}): Promise<InsertionReport> {
-  const docText = await getDocPlainText(input.docId);
+/**
+ * O que a IA propôs, antes de qualquer trava determinística.
+ *
+ * `raw` fica guardado de propósito: a bateria de avaliação reprocessa o
+ * planejador contra respostas já pagas (`--replay`), e sem o texto cru cada
+ * ajuste no planejador custaria uma rodada nova do modelo.
+ */
+export interface ProposalResult {
+  mapeamentos: Mapeamento[];
+  raw: string;
+  /** O documento passou de `MAX_PROMPT_CHARS`: a IA nunca viu a cauda. */
+  docTruncated: boolean;
+  /** A resposta estourou `max_tokens` (`stop_reason`). */
+  responseTruncated: boolean;
+  /** A resposta chegou inteira e não pôde ser lida como JSON. */
+  responseUnparsed: boolean;
+  /**
+   * Tokens da chamada. Devolvidos SEMPRE, inclusive quando o custo não foi
+   * gravado em `AIUsage` (ver `orgId: null`) — chamada de modelo sem conta em
+   * lugar nenhum é o que esta sessão está aqui para não repetir.
+   */
+  usage: { promptTokens: number; completionTokens: number; latencyMs: number };
+}
 
-  const docTruncated = docText.length > MAX_PROMPT_CHARS;
+/**
+ * Candidato a inserção: passou nas travas do texto plano e gerou requests.
+ * Vira `inserted` só depois que a reply e a releitura confirmarem.
+ */
+export interface Candidate {
+  token: string;
+  trecho: string;
+  /** O parágrafo que vira `{{token}}` (o trecho inteiro, quando é um só). */
+  first: string;
+  /** Índice do request que insere o token. */
+  requestIdx: number;
+  /** Requests que esvaziam os demais parágrafos de um bloco. */
+  rest: Array<{ idx: number; par: string }>;
+  /** Parágrafos do bloco que ficaram no Doc (ambíguos ou não casados). */
+  leftover: string[];
+}
+
+/**
+ * O que seria enviado ao Google — decidido inteiro no texto plano, sem tocar
+ * no Doc. É o artefato que a bateria de avaliação pontua: com ele dá para
+ * medir precisão e recall do passe sem gastar uma escrita no Drive.
+ */
+export interface InsertionPlan {
+  requests: docs_v1.Schema$Request[];
+  candidates: Candidate[];
+  skippedAmbiguous: SkippedToken[];
+  /** O texto como ficaria se o lote entrasse inteiro — a base da unicidade. */
+  simulatedText: string;
+  /**
+   * Impressão do texto contra o qual este plano foi montado. Existe para
+   * `commitInsertion` recusar um plano de OUTRO documento: as duas entradas
+   * chegam separadas, e a combinação errada escreveria no Doc trechos casados
+   * contra texto que não é o dele. Em produção quem monta as duas é a
+   * composição, então não há como divergirem — a trava é contra o chamador
+   * futuro, não contra o de hoje.
+   */
+  docTextFingerprint: string;
+}
+
+/** O plano recebido não foi montado contra o texto que se vai escrever. */
+export class PlanTextMismatchError extends Error {
+  constructor() {
+    super(
+      "O plano de inserção foi montado contra outro texto do documento. " +
+        "Refaça o planejamento sobre o texto atual antes de aplicar."
+    );
+    this.name = "PlanTextMismatchError";
+  }
+}
+
+/** Sinais da proposta que o relatório final precisa reportar. */
+export interface ProposalFlags {
+  docTruncated: boolean;
+  responseTruncated: boolean;
+  responseUnparsed: boolean;
+}
+
+/**
+ * ETAPA 1 — pergunta à IA. Único ponto que fala com a Anthropic e o único que
+ * custa dinheiro; não toca no Google Docs, para a avaliação poder rodar sobre
+ * um corpus de texto sem Doc nenhum.
+ */
+export async function proposeMapeamentos(input: {
+  docText: string;
+  modalidade: string;
+  /**
+   * Org que paga a chamada. `null` = fora de qualquer org (bateria de
+   * avaliação): a linha de `AIUsage` é PULADA em vez de escrita com um id
+   * inventado — o FK recusa, e um custo de bench dentro da métrica de um
+   * tenant seria pior que não gravar. Quem passa `null` recebe `usage` e presta
+   * a conta por fora (ver `scripts/ai-bench/placeholders/run.ts`).
+   */
+  orgId: string | null;
+}): Promise<ProposalResult> {
+  const docTruncated = input.docText.length > MAX_PROMPT_CHARS;
 
   const anthropic = getAnthropicClient();
   const t0 = Date.now();
   let raw = "";
   let responseTruncated = false;
+  let usage = { promptTokens: 0, completionTokens: 0, latencyMs: 0 };
   try {
     const response = await anthropic.messages.create({
       model: SONNET_MODEL,
       max_tokens: MAX_OUTPUT_TOKENS,
       temperature: 0,
-      messages: [{ role: "user", content: buildPrompt(input.modalidade, docText) }],
+      messages: [{ role: "user", content: buildPrompt(input.modalidade, input.docText) }],
     });
-    recordAIUsage({
-      orgId: input.orgId,
-      userId: null,
-      contractId: null,
-      provider: "anthropic",
-      model: SONNET_MODEL,
-      operation: "template_placeholder_insertion",
+    usage = {
       promptTokens: response.usage?.input_tokens ?? 0,
       completionTokens: response.usage?.output_tokens ?? 0,
       latencyMs: Date.now() - t0,
-      success: true,
-    });
+    };
+    // `!== null`, não truthiness: `orgId: ""` (um `algo ?? ""` num chamador
+    // futuro) pularia a linha de custo EM SILÊNCIO. Com a comparação estrita,
+    // string vazia entra no caminho de gravação e o FK falha alto.
+    if (input.orgId !== null) {
+      recordAIUsage({
+        orgId: input.orgId,
+        userId: null,
+        contractId: null,
+        provider: "anthropic",
+        model: SONNET_MODEL,
+        operation: "template_placeholder_insertion",
+        promptTokens: usage.promptTokens,
+        completionTokens: usage.completionTokens,
+        latencyMs: usage.latencyMs,
+        success: true,
+      });
+    }
     const block = response.content.find((b) => b.type === "text");
     raw = block && block.type === "text" ? block.text : "";
     // Resposta cortada no meio do JSON caía no catch mudo do parse e o passe
     // seguia com lista VAZIA — foi assim que um modelo saiu com zero chaves.
     responseTruncated = response.stop_reason === "max_tokens";
   } catch (err) {
-    recordAIUsage({
-      orgId: input.orgId,
-      userId: null,
-      contractId: null,
-      provider: "anthropic",
-      model: SONNET_MODEL,
-      operation: "template_placeholder_insertion",
-      promptTokens: 0,
-      latencyMs: Date.now() - t0,
-      success: false,
-      errorMessage: err instanceof Error ? err.message : String(err),
-    });
+    // `!== null`, não truthiness: `orgId: ""` (um `algo ?? ""` num chamador
+    // futuro) pularia a linha de custo EM SILÊNCIO. Com a comparação estrita,
+    // string vazia entra no caminho de gravação e o FK falha alto.
+    if (input.orgId !== null) {
+      recordAIUsage({
+        orgId: input.orgId,
+        userId: null,
+        contractId: null,
+        provider: "anthropic",
+        model: SONNET_MODEL,
+        operation: "template_placeholder_insertion",
+        promptTokens: 0,
+        latencyMs: Date.now() - t0,
+        success: false,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+    }
     throw err;
   }
 
@@ -249,28 +357,29 @@ export async function insertPlaceholdersWithAI(input: {
   // lista vazia (medido em produção em 02/09/2026, "Confirmou 0 trecho" nos
   // 16 rascunhos da Trio). Falha de parse agora é sinal, nunca silêncio.
   const extracted = extractMapeamentos(raw);
-  const mapeamentos = extracted.mapeamentos;
-  // Resposta cortada por `max_tokens` também não parseia — a causa mais
-  // específica vence, senão a tela mostraria dois banners para um problema.
-  const responseUnparsed = !extracted.ok && !responseTruncated;
+  return {
+    mapeamentos: extracted.mapeamentos,
+    raw,
+    usage,
+    docTruncated,
+    // Resposta cortada por `max_tokens` também não parseia — a causa mais
+    // específica vence, senão a tela mostraria dois banners para um problema.
+    responseTruncated,
+    responseUnparsed: !extracted.ok && !responseTruncated,
+  };
+}
 
-  /**
-   * Candidato a inserção: passou nas travas do texto plano e gerou requests.
-   * Vira `inserted` só depois que a reply e a releitura confirmarem.
-   */
-  interface Candidate {
-    token: string;
-    trecho: string;
-    /** O parágrafo que vira `{{token}}` (o trecho inteiro, quando é um só). */
-    first: string;
-    /** Índice do request que insere o token. */
-    requestIdx: number;
-    /** Requests que esvaziam os demais parágrafos de um bloco. */
-    rest: Array<{ idx: number; par: string }>;
-    /** Parágrafos do bloco que ficaram no Doc (ambíguos ou não casados). */
-    leftover: string[];
-  }
-
+/**
+ * ETAPA 2 — decide o que entra, contra o texto plano. PURA: mesma entrada,
+ * mesmo plano, sem rede. Toda a segurança do replace global mora aqui, e é por
+ * isso que ela pode ser testada e pontuada sem modelo e sem Drive.
+ */
+export function planInsertion(input: {
+  docText: string;
+  modalidade: string;
+  mapeamentos: Mapeamento[];
+}): InsertionPlan {
+  const { docText, modalidade, mapeamentos } = input;
   const skippedAmbiguous: SkippedToken[] = [];
   const requests: docs_v1.Schema$Request[] = [];
   const candidates: Candidate[] = [];
@@ -282,7 +391,7 @@ export async function insertPlaceholdersWithAI(input: {
   // Até 2026-09-02 `seenTokens` valia para todos e descartava em silêncio:
   // o modelo saía com o literal em todas as cláusulas menos uma.
   const composedTokens = new Set(
-    catalogForModalidade(input.modalidade)
+    catalogForModalidade(modalidade)
       .filter((d) => d.kind === "composed")
       .map((d) => d.token)
   );
@@ -314,7 +423,7 @@ export async function insertPlaceholdersWithAI(input: {
       skippedAmbiguous.push({ token, trecho, reason: "already-tokenized" });
       continue;
     }
-    if (!isKnownToken(token, input.modalidade)) {
+    if (!isKnownToken(token, modalidade)) {
       skippedAmbiguous.push({ token, trecho, reason: "unknown-token" });
       continue;
     }
@@ -403,6 +512,37 @@ export async function insertPlaceholdersWithAI(input: {
     candidates.push(candidate);
   }
 
+  return {
+    requests,
+    candidates,
+    skippedAmbiguous,
+    simulatedText: sim,
+    docTextFingerprint: textFingerprint(docText),
+  };
+}
+
+/**
+ * ETAPA 3 — escreve no Doc e CONFERE. É a única que muda o documento, e a
+ * única que pode transformar candidato em `inserted`: "a API aceitou" não é
+ * "está no texto", e "não sei" (Drive fora na releitura) nunca vira "deu certo".
+ */
+export async function commitInsertion(input: {
+  docId: string;
+  docText: string;
+  modalidade: string;
+  plan: InsertionPlan;
+  flags: ProposalFlags;
+}): Promise<InsertionReport> {
+  const { docId, docText, modalidade, plan, flags } = input;
+  // ANTES de qualquer escrita: plano e texto têm que ser do mesmo documento.
+  if (plan.docTextFingerprint !== textFingerprint(docText)) {
+    throw new PlanTextMismatchError();
+  }
+  const { requests, candidates } = plan;
+  // Cópia: o relatório acrescenta os skips pós-batch, e o plano recebido é do
+  // chamador (a avaliação pontua o mesmo plano depois de commitar).
+  const skippedAmbiguous: SkippedToken[] = [...plan.skippedAmbiguous];
+
   const inserted: InsertedToken[] = [];
   const skip = (c: Candidate, reason: SkipReason, paragraph?: string) =>
     skippedAmbiguous.push({
@@ -411,7 +551,7 @@ export async function insertPlaceholdersWithAI(input: {
       reason,
       ...(paragraph ? { paragraph } : {}),
     });
-  // As travas do texto plano (acima) empurram direto em skippedAmbiguous com
+  // As travas do texto plano (no plano) empurram direto em skippedAmbiguous com
   // o trecho cru; a máscara é aplicada UMA vez, na montagem do relatório.
   // Tokens que a API pôs no Doc mas em lugar/quantidade que ninguém revisou.
   // Estão no texto e NÃO contam como presentes: "não confirmado" é "faltando".
@@ -424,7 +564,7 @@ export async function insertPlaceholdersWithAI(input: {
   if (candidates.length > 0) {
     let replies: docs_v1.Schema$Response[] | null = null;
     try {
-      const res = await batchUpdateDoc(input.docId, requests);
+      const res = await batchUpdateDoc(docId, requests);
       replies = res?.data?.replies ?? [];
     } catch (err) {
       console.error("[ai-placeholder-insertion] batchUpdate falhou:", err);
@@ -470,7 +610,7 @@ export async function insertPlaceholdersWithAI(input: {
       // 2ª triagem: o que o documento mostra. Aqui se decide `inserted`.
       let reread: string | null = null;
       try {
-        reread = await getDocPlainText(input.docId);
+        reread = await getDocPlainText(docId);
       } catch (err) {
         console.error("[ai-placeholder-insertion] releitura falhou:", err);
       }
@@ -502,6 +642,32 @@ export async function insertPlaceholdersWithAI(input: {
     }
   }
 
+  return buildInsertionReport({
+    modalidade,
+    finalText,
+    inserted,
+    skippedAmbiguous,
+    unconfirmed,
+    flags,
+  });
+}
+
+/**
+ * Monta o relatório a partir do estado pós-passe. Separado de
+ * {@link commitInsertion} porque é PURO: a avaliação monta o mesmo relatório
+ * sobre um passe simulado, sem Doc.
+ */
+export function buildInsertionReport(input: {
+  modalidade: string;
+  /** Texto do Doc DEPOIS do passe (ou o de antes, se a releitura falhou). */
+  finalText: string;
+  inserted: InsertedToken[];
+  skippedAmbiguous: SkippedToken[];
+  unconfirmed: ReadonlySet<string>;
+  flags: ProposalFlags;
+}): InsertionReport {
+  const { modalidade, finalText, inserted, skippedAmbiguous, unconfirmed, flags } = input;
+
   // Estado pós-pass: o que ficou no doc vs catálogo. Quando a releitura
   // falhou, `finalText` é o pré-passe — o relatório fica pessimista, nunca
   // otimista. Token que a API pôs em lugar não revisado (over-*) está no
@@ -516,8 +682,8 @@ export async function insertPlaceholdersWithAI(input: {
       (t) => confirmed.has(t) || !unconfirmed.has(t)
     )
   );
-  const catalogTokens = catalogForModalidade(input.modalidade).map((d) => d.token);
-  const missingRequired = requiredTokens(input.modalidade).filter((t) => !present.has(t));
+  const catalogTokens = catalogForModalidade(modalidade).map((d) => d.token);
+  const missingRequired = requiredTokens(modalidade).filter((t) => !present.has(t));
 
   // Máscara antes de gravar. `trecho` e `paragraph` vêm do contrato-fonte —
   // e o `trecho` de `inserted` é o pior caso: depois do replace ele só existe
@@ -546,11 +712,11 @@ export async function insertPlaceholdersWithAI(input: {
   // a resposta: o que ficou além do teto NUNCA foi visto, e rodar de novo não
   // muda o corte — mandar "rode a IA de novo" para essas chaves seria mandar
   // o operador a uma ação inútil. Resposta cortada só quando o doc coube.
-  const semProposta: UnmappedReason = docTruncated
+  const semProposta: UnmappedReason = flags.docTruncated
     ? "doc-truncated"
-    : responseTruncated
+    : flags.responseTruncated
       ? "response-truncated"
-      : responseUnparsed
+      : flags.responseUnparsed
         ? "response-unparsed"
         : "no-mapping";
   const notMapped: UnmappedToken[] = catalogTokens
@@ -572,9 +738,43 @@ export async function insertPlaceholdersWithAI(input: {
     // antigo com o novo, então chave ausente não apaga a antiga — uma passada
     // que truncou deixaria `docTruncated: true` grudado para sempre, e o
     // banner "rode a IA de novo" sobreviveria à própria rodada limpa.
-    docTruncated,
-    responseTruncated,
-    responseUnparsed,
+    docTruncated: flags.docTruncated,
+    responseTruncated: flags.responseTruncated,
+    responseUnparsed: flags.responseUnparsed,
     unconfirmed: Array.from(unconfirmed).filter((t) => !confirmed.has(t)).sort(),
   };
+}
+
+/**
+ * O passe completo: propor → planejar → aplicar. Saída idêntica à de antes da
+ * separação — as três etapas existem para poderem ser exercidas isoladamente
+ * (bateria de avaliação, e o "propor sem aplicar" da revisão por IA).
+ */
+export async function insertPlaceholdersWithAI(input: {
+  docId: string;
+  modalidade: string;
+  orgId: string;
+}): Promise<InsertionReport> {
+  const docText = await getDocPlainText(input.docId);
+  const proposal = await proposeMapeamentos({
+    docText,
+    modalidade: input.modalidade,
+    orgId: input.orgId,
+  });
+  const plan = planInsertion({
+    docText,
+    modalidade: input.modalidade,
+    mapeamentos: proposal.mapeamentos,
+  });
+  return commitInsertion({
+    docId: input.docId,
+    docText,
+    modalidade: input.modalidade,
+    plan,
+    flags: {
+      docTruncated: proposal.docTruncated,
+      responseTruncated: proposal.responseTruncated,
+      responseUnparsed: proposal.responseUnparsed,
+    },
+  });
 }
