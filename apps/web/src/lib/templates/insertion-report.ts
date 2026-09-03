@@ -22,6 +22,11 @@ export type SkipReason =
   | "already-tokenized"
   /** Existia no original, mas outra substituição desta passada o consumiu. */
   | "overlapped"
+  /**
+   * Chave de DADO (qualificação/pagamento) cuja proposta CONTÉM a proposta de
+   * outra chave — aplicar engoliria o vizinho e o parágrafo. `neighbor` diz qual.
+   */
+  | "engulfs-neighbor"
   // Depois do batch — decididos pela resposta da API e pela releitura.
   /** O Google recusou o lote inteiro (nada mudou no Doc). */
   | "batch-failed"
@@ -45,6 +50,8 @@ export interface SkippedToken {
   reason: SkipReason;
   /** Em `over-removed`: o parágrafo do bloco que foi apagado além do esperado. */
   paragraph?: string;
+  /** Em `engulfs-neighbor`: o token vizinho cuja proposta este trecho continha. */
+  neighbor?: string;
 }
 
 /**
@@ -74,6 +81,8 @@ export interface UnmappedToken {
   sourceValue?: string;
   /** Quantas vezes o valor do gabarito aparece no texto (reverse-merge). */
   occurrences?: number;
+  /** Em `engulfs-neighbor`: o token vizinho que a proposta recusada continha. */
+  neighbor?: string;
 }
 
 /** Motivos que só o reverse-merge produz (os pós-batch já estão em SkipReason). */
@@ -141,13 +150,14 @@ export function readNotMapped(raw: unknown): UnmappedToken[] {
       out.push({ token: item, reason: "no-mapping" });
     } else if (item && typeof item === "object" && typeof (item as { token?: unknown }).token === "string") {
       const o = item as { token: string; reason?: unknown; trecho?: unknown };
-      const o2 = item as { sourceValue?: unknown; occurrences?: unknown };
+      const o2 = item as { sourceValue?: unknown; occurrences?: unknown; neighbor?: unknown };
       out.push({
         token: o.token,
         reason: typeof o.reason === "string" ? (o.reason as UnmappedReason) : "no-mapping",
         ...(typeof o.trecho === "string" ? { trecho: o.trecho } : {}),
         ...(typeof o2.sourceValue === "string" ? { sourceValue: o2.sourceValue } : {}),
         ...(typeof o2.occurrences === "number" ? { occurrences: o2.occurrences } : {}),
+        ...(typeof o2.neighbor === "string" ? { neighbor: o2.neighbor } : {}),
       });
     }
   }
