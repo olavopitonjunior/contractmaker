@@ -153,7 +153,11 @@ export function PessoaFisicaLocacaoFields({
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <FormField form={form} name={`${prefix}.nome`} label="Nome Completo" required>
+        {/* Sem `required` cravado: a obrigatoriedade do nome vem do
+            RequiredFieldsContext — preset da org ou piso do wizard
+            (`floorPaths`). Cravado aqui, o asterisco continuaria aceso depois
+            de o piso ceder à configuração da imobiliária. */}
+        <FormField form={form} name={`${prefix}.nome`} label="Nome Completo">
           <Input
             {...form.register(`${prefix}.nome`, { validate: nomeCompletoRule })}
             placeholder="Nome completo"
@@ -328,11 +332,11 @@ export function PessoaJuridicaLocacaoFields({
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Sem `required` cravado — ver a nota no `nome` da ficha PF. */}
         <FormField
           form={form}
           name={`${prefix}.razao_social`}
           label="Razão Social"
-          required
           className="md:col-span-2"
         >
           <Input {...form.register(`${prefix}.razao_social`)} placeholder="Razão Social da empresa" />

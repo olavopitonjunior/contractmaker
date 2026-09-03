@@ -29,18 +29,28 @@ const NAME_FIELD_RE = /^([a-z]+)\.\d+\.(nome|razao_social)$/;
 
 export function RequiredFieldsProvider({
   paths,
+  floorPaths = [],
   children,
 }: {
   /** Paths obrigatórios (crus, como vêm do preset/wizard). */
   paths: readonly string[];
+  /**
+   * Paths obrigatórios pelo PISO do wizard, não pelo preset da org (nome da
+   * parte, valor do aluguel, nome do fiador). Entram no mesmo Set porque o
+   * asterisco tem que refletir o que o gate barra — quando o piso cede à
+   * configuração, o wizard manda a lista vazia e o asterisco cai junto. Antes
+   * disso, esses campos tinham `required` cravado no step e o asterisco
+   * continuaria mesmo depois de o gate parar de exigi-los.
+   */
+  floorPaths?: readonly string[];
   children: React.ReactNode;
 }) {
   const value = useMemo(
-    () => new Set(paths.map(normalizeIndexes)),
+    () => new Set([...paths, ...floorPaths].map(normalizeIndexes)),
     // `paths` costuma ser recriado a cada render nos wizards; o join estabiliza
     // a memo sem obrigar o chamador a memoizar do lado dele.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [paths.join("|")]
+    [paths.join("|"), floorPaths.join("|")]
   );
   return (
     <RequiredFieldsContext.Provider value={value}>

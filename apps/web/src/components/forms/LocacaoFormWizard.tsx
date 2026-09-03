@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -55,6 +55,19 @@ interface LocacaoFormWizardProps {
    * (lib/forms/required-snapshot.ts). Ausente/vazio = só o piso histórico.
    */
   requiredFieldsByStep?: readonly (readonly string[])[];
+  /**
+   * O piso histórico de obrigatoriedade (nome da parte, valor do aluguel) ainda
+   * vale? `true` (default) = comportamento de sempre. O servidor manda `false`
+   * quando a imobiliária CONFIGUROU a obrigatoriedade de locação
+   * (`resolveFormRequiredConfig().moduleConfigured`): aí o preset dela manda
+   * sozinho, inclusive para afrouxar.
+   *
+   * Sem isto, a configuração só era respeitada para ENDURECER — os campos do
+   * piso continuavam obrigatórios mesmo desmarcados, e não havia tela nenhuma
+   * capaz de desligá-los. O piso nunca foi garantia real (é client-side): quem
+   * garante no servidor é `assertLocacaoFinalizable`, no finalize sob o lock.
+   */
+  requiredFloorEnabled?: boolean;
   /**
    * Catálogo de garantias da org (tipo × garantidor), resolvido no SERVIDOR
    * pela page do formulário — como o `requiredFieldsByStep`. O form é anônimo,
@@ -168,6 +181,7 @@ export function LocacaoFormWizard({
   initialData,
   schemaType,
   requiredFieldsByStep,
+  requiredFloorEnabled = true,
   garantiaOptions,
   stepIndexes,
   endpoint: endpointProp,
@@ -248,6 +262,38 @@ export function LocacaoFormWizard({
     (path) => getByPath(watchedData, path),
   );
 
+  // Asterisco dos campos que o PISO barra — não vêm do preset, então não estão
+  // em `allRequiredPaths`. Antes ficavam `required` cravado no step, o que
+  // deixaria o asterisco aceso mesmo com o piso desligado. Sai daqui para que
+  // marcação e gate leiam a MESMA condição.
+  const floorRequiredPaths = useMemo(() => {
+    const out: string[] = [];
+    if (requiredFloorEnabled) {
+      for (const { list } of Object.values(PARTY_STEP)) {
+        const parties =
+          (watchedData?.[list] as Array<Record<string, unknown>> | undefined) ?? [];
+        parties.forEach((p, i) => {
+          out.push(`${list}.${i}.${p?.tipo_pessoa === "juridica" ? "razao_social" : "nome"}`);
+        });
+      }
+      for (const paths of Object.values(STEP_REQUIRED)) out.push(...paths);
+    }
+    // Fiador é independente do piso: a rota já bloqueia o finalize sem o nome
+    // dele (`missingFiadorName`, reason `fiador_incompleto`), condicional ao
+    // tipo de garantia. O asterisco acompanha esse bloqueio, não o preset.
+    const garantia = watchedData?.garantia as
+      | { tipo?: string; fiador?: { tipo_pessoa?: string } }
+      | undefined;
+    if (garantia?.tipo === "fiador") {
+      out.push(
+        garantia.fiador?.tipo_pessoa === "juridica"
+          ? "garantia.fiador.razao_social"
+          : "garantia.fiador.nome",
+      );
+    }
+    return out;
+  }, [requiredFloorEnabled, watchedData]);
+
   // "Pedir para esta pessoa preencher" — papel da etapa atual (índice REAL).
   // Só na visão do token principal (subtoken já É a visão da parte).
   const currentTrueIdx = visibleStepIndexes[currentStep] ?? currentStep;
@@ -304,8 +350,11 @@ export function LocacaoFormWizard({
   // schema completo de 7 etapas).
   //
   // Duas camadas, nesta ordem:
-  //   1. PISO histórico (PARTY_STEP/STEP_REQUIRED) — vale sempre, mesmo em org
-  //      sem preset configurado. É o que locação já exigia antes.
+  //   1. PISO histórico (PARTY_STEP/STEP_REQUIRED) — vale para org que NÃO
+  //      configurou a obrigatoriedade de locação (`requiredFloorEnabled`). É o
+  //      que locação já exigia antes de existir configuração; org que
+  //      configurou manda sozinha, inclusive pra afrouxar. A garantia dura de
+  //      nome/valor no finalize é do servidor (`assertLocacaoFinalizable`).
   //   2. Preset da org (`requiredFieldsByStep`) — obrigatoriedade configurável,
   //      remapeada por tipo_pessoa como em venda (PJ não tem CPF/estado civil;
   //      e-mail/celular vão pro representante legal).
@@ -315,7 +364,7 @@ export function LocacaoFormWizard({
 
     // (1) Piso: steps de partes exigem nome (PF) ou razão social (PJ) de CADA
     // parte.
-    const partyStep = PARTY_STEP[step];
+    const partyStep = requiredFloorEnabled ? PARTY_STEP[step] : undefined;
     if (partyStep) {
       const parties =
         (form.getValues(partyStep.list as never) as unknown as Array<Record<string, unknown>>) ??
@@ -339,7 +388,9 @@ export function LocacaoFormWizard({
         }
       }
     } else {
-      const required = STEP_REQUIRED[step] ?? [];
+      // Mesma condição do ramo de partes: com o piso desligado, `aluguel.valor`
+      // deixa de ser exigido aqui e passa a valer só se a org o configurar.
+      const required = requiredFloorEnabled ? (STEP_REQUIRED[step] ?? []) : [];
       const missingPiso: string[] = [];
       for (const path of required) {
         // Regra de vazio ÚNICA (party-required): este piso tinha uma cópia
@@ -692,7 +743,10 @@ export function LocacaoFormWizard({
           </div>
         )}
 
-      <RequiredFieldsProvider paths={allRequiredPaths}>
+      <RequiredFieldsProvider
+        paths={allRequiredPaths}
+        floorPaths={floorRequiredPaths}
+      >
         <fieldset disabled={readOnly} className="m-0 border-0 p-0 min-w-0 disabled:opacity-70">
           {steps[visibleStepIndexes[currentStep] ?? currentStep]}
         </fieldset>

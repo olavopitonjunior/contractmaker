@@ -15,6 +15,8 @@ interface SubtokenFormClientProps {
   schemaType: string;
   initialData: Record<string, unknown>;
   requiredFieldsByStep: readonly (readonly string[])[];
+  /** Piso do wizard ainda vale? Ver LocacaoFormWizard.requiredFloorEnabled. */
+  requiredFloorEnabled: boolean;
   /** Catálogo de garantias da org — o link do fiador cai na etapa Garantia. */
   garantiaOptions?: readonly GarantiaOptionLike[];
   stepIndexes: readonly number[];
@@ -60,6 +62,7 @@ export function SubtokenFormClient({
   schemaType,
   initialData,
   requiredFieldsByStep,
+  requiredFloorEnabled,
   garantiaOptions,
   stepIndexes,
   pathScope,
@@ -130,6 +133,7 @@ export function SubtokenFormClient({
             initialData={initialData}
             schemaType={schemaType}
             requiredFieldsByStep={requiredFieldsByStep}
+            requiredFloorEnabled={requiredFloorEnabled}
             garantiaOptions={garantiaOptions}
             stepIndexes={stepIndexes}
             endpoint={participantEndpoint}

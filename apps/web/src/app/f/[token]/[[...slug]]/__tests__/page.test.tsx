@@ -15,6 +15,10 @@ vi.mock("@/lib/forms/form-gate", () => ({
 }));
 vi.mock("@/lib/forms/required-snapshot", () => ({
   resolveFormRequiredFields: vi.fn().mockResolvedValue([[], [], [], [], [], []]),
+  resolveFormRequiredConfig: vi.fn().mockResolvedValue({
+    byStep: [[], [], [], [], [], []],
+    moduleConfigured: false,
+  }),
 }));
 
 import PublicFormPage from "../page";
