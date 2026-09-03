@@ -19,8 +19,11 @@ const TOTAL_STEPS = 7;
 const TOTAL_STEPS_LOCACAO = 6;
 
 // Índices REAIS do wizard de locação (LOCACAO_STEP_LABELS).
-const STEP_LOCADOR = 1;
-const STEP_LOCATARIO = 2;
+// 2026-09-03: o locatário passou à frente do locador. Estas constantes existem
+// justamente para a renumeração ser um edit de uma linha e não uma caçada a
+// literais espalhados pelos casos.
+const STEP_LOCATARIO = 1;
+const STEP_LOCADOR = 2;
 const STEP_IMOVEL = 3;
 const STEP_ALUGUEL = 4;
 
@@ -309,14 +312,18 @@ describe("requiredPathsForRoleScope (link por parte)", () => {
   }).map((p) => Array.from(p));
 
   it("locatário só responde pelos próprios campos", () => {
-    const scoped = requiredPathsForRoleScope(byStep, [0, 2], ["locatarios"]);
+    const scoped = requiredPathsForRoleScope(byStep, [0, STEP_LOCATARIO], ["locatarios"]);
     expect(scoped).toContain("locatarios.0.cpf");
     expect(scoped.some((p) => p.startsWith("imovel"))).toBe(false);
     expect(scoped.some((p) => p.startsWith("locadores"))).toBe(false);
   });
 
   it("locador responde por si e pelo imóvel (ROLE_PATHS)", () => {
-    const scoped = requiredPathsForRoleScope(byStep, [0, 1, 3], ["locadores", "imovel"]);
+    const scoped = requiredPathsForRoleScope(
+      byStep,
+      [0, STEP_LOCADOR, STEP_IMOVEL],
+      ["locadores", "imovel"],
+    );
     expect(scoped).toContain("locadores.0.cpf");
     expect(scoped).toContain("imovel.rua");
     // Aluguel (etapa 4) não está nos steps do locador.

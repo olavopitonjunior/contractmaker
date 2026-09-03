@@ -133,8 +133,12 @@ const VENDA_STEP_SCHEMA: Record<number, StepSchemaSpec> = {
   },
 };
 
+// As CHAVES são o índice da etapa no wizard de locação, e o locatário passou à
+// frente do locador em 2026-09-03 (LOCACAO_STEP_LABELS). O ditado é escopado
+// pela etapa aberta: chave errada aqui faz o áudio do locatário ser extraído
+// contra o schema do locador e cair em `locadores.0.*`.
 const LOCACAO_STEP_SCHEMA: Record<number, StepSchemaSpec> = {
-  1: {
+  2: {
     description: "Dados do locador (proprietário que aluga o imóvel)",
     paths: [
       { path: "locadores.0.nome", hint: "nome completo" },
@@ -154,7 +158,7 @@ const LOCACAO_STEP_SCHEMA: Record<number, StepSchemaSpec> = {
       { path: "locadores.0.cep", hint: "CEP" },
     ],
   },
-  2: {
+  1: {
     description: "Dados do locatário (inquilino)",
     paths: [
       { path: "locatarios.0.nome", hint: "nome completo" },

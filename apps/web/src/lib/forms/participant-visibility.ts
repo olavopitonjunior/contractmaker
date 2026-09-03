@@ -60,10 +60,19 @@ export const STEP_PATHS: Record<FormEsteira, Record<number, readonly string[]>> 
     ],
     5: ["modalidade", "pagamento", "incluso_no_preco"],
   },
+  // ATENÇÃO: esta tabela e `DEFAULT_ROLE_STEPS` se referenciam por ÍNDICE e
+  // precisam ser trocadas JUNTAS. Como os data-paths de um subtoken derivam das
+  // etapas, trocar só uma das duas dá ao link público de um papel escopo de
+  // ESCRITA sobre os dados do outro — em toda org que nunca configurou
+  // visibilidade, que é a maioria (a coluna é nullable e só persiste o que
+  // diverge do default). O `pathScope` do auto-save aceitaria o path errado em
+  // silêncio. O teste correspondente afirma o par papel→data-path, nunca o
+  // número da etapa: asserção por índice passa com a tabela trocada.
   locacao: {
     0: [],
-    1: ["locadores"],
-    2: ["locatarios"],
+    // Locatário à frente do locador desde 2026-09-03 (LOCACAO_STEP_LABELS).
+    1: ["locatarios"],
+    2: ["locadores"],
     3: ["imovel"],
     4: ["aluguel"],
     // `observacoes` acompanha a etapa (o card "Observações Gerais" vive nela);
@@ -88,8 +97,11 @@ export function grantableSteps(esteira: FormEsteira): number[] {
 export const DEFAULT_ROLE_STEPS: Record<ParticipantRole, readonly number[]> = {
   vendedor: [0, 1, 3],
   comprador: [0, 2, 5],
-  locador: [0, 1, 3, 4],
-  locatario: [0, 2, 5],
+  // Locação: locatário é a etapa 1 e locador a 2 desde 2026-09-03. Trocado
+  // JUNTO com `STEP_PATHS.locacao` — ver o aviso lá. O locador continua vendo
+  // imóvel (3) e aluguel (4); o locatário, a garantia (5).
+  locador: [0, 2, 3, 4],
+  locatario: [0, 1, 5],
   fiador: [0, 5],
 };
 

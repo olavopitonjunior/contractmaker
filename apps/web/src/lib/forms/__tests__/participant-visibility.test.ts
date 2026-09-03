@@ -92,17 +92,19 @@ describe("resolveParticipantScope — config por org", () => {
 
   it("sem row usa os defaults", async () => {
     const scope = await resolveParticipantScope("locatario", "org-1");
-    expect(scope.stepIndexes).toEqual([0, 2, 5]);
+    // 2026-09-03: locatário é a etapa 1 (era 2). O que importa é o par
+    // papel→dado — ver o bloco "escopo de escrita por papel" abaixo.
+    expect(scope.stepIndexes).toEqual([0, 1, 5]);
     expect(scope.topKeys).toContain("garantia");
     expect(scope.nested).toBe(false);
   });
 
   it("row com config aplica o subset da org", async () => {
     p.orgFormSettings.findUnique.mockResolvedValueOnce({
-      participantVisibilityJson: { locacao: { locatario: [0, 2] } },
+      participantVisibilityJson: { locacao: { locatario: [0, 1] } },
     });
     const scope = await resolveParticipantScope("locatario", "org-1");
-    expect(scope.stepIndexes).toEqual([0, 2]);
+    expect(scope.stepIndexes).toEqual([0, 1]);
     expect(scope.topKeys).toEqual(["locatarios"]);
   });
 
@@ -149,5 +151,83 @@ describe("STEP_PATHS — canário de deriva do catálogo", () => {
     expect(STEP_PATHS.locacao[5]).toContain("garantia");
     expect(STEP_PATHS.locacao[5]).toContain("observacoes");
     expect(STEP_PATHS.locacao[5]).not.toContain("config");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Escopo de ESCRITA por papel — a asserção que sobrevive a uma renumeração.
+//
+// `STEP_PATHS` e `DEFAULT_ROLE_STEPS` se referenciam por ÍNDICE. Trocar uma sem
+// a outra dá ao link público de um papel escopo de escrita sobre os dados do
+// outro, em toda org que nunca configurou visibilidade (a coluna é nullable e
+// só persiste o que diverge do default) — sem erro e sem log, porque o
+// `pathScope` do auto-save apenas aceita o path errado.
+//
+// Por isso estes testes afirmam o par papel→DATA-PATH e nunca o número da
+// etapa: `expect(DEFAULT_ROLE_STEPS.locador).toEqual([0, 2, 3, 4])` passaria
+// com as duas tabelas trocadas, que é exatamente o bug que não pode passar.
+// ---------------------------------------------------------------------------
+describe("escopo de escrita por papel (invariante da renumeração)", () => {
+  it("locador escreve os PRÓPRIOS dados, nunca os do locatário", () => {
+    const paths = resolveRoleVisibility("locador", {}).paths;
+    expect(paths).toContain("locadores");
+    expect(paths).not.toContain("locatarios");
+  });
+
+  it("locatário escreve os PRÓPRIOS dados, nunca os do locador", () => {
+    const paths = resolveRoleVisibility("locatario", {}).paths;
+    expect(paths).toContain("locatarios");
+    expect(paths).not.toContain("locadores");
+  });
+
+  it("fiador não escreve dados de nenhuma das duas partes", () => {
+    const paths = resolveRoleVisibility("fiador", {}).paths;
+    expect(paths).not.toContain("locadores");
+    expect(paths).not.toContain("locatarios");
+  });
+
+  it("vendedor e comprador seguem separados (venda não foi renumerada)", () => {
+    const v = resolveRoleVisibility("vendedor", {}).paths;
+    const c = resolveRoleVisibility("comprador", {}).paths;
+    expect(v).toContain("vendedores");
+    expect(v).not.toContain("compradores");
+    expect(c).toContain("compradores");
+    expect(c).not.toContain("vendedores");
+  });
+
+  it("nenhum papel de locação recebe a etapa da Comissão", () => {
+    for (const papel of ["locador", "locatario", "fiador"] as const) {
+      expect(resolveRoleVisibility(papel, {}).paths).not.toContain("comissao");
+    }
+  });
+
+  // Controle anti-vacuidade: se `resolveRoleVisibility` passasse a devolver
+  // sempre [], todo `not.toContain` acima ficaria verde sem provar nada.
+  it("CONTROLE: os papéis de locação devolvem escopo não-vazio", () => {
+    for (const papel of ["locador", "locatario", "fiador"] as const) {
+      expect(resolveRoleVisibility(papel, {}).paths.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("ordem das etapas de locação (2026-09-03)", () => {
+  it("a etapa 1 é a do locatário e a 2 a do locador", () => {
+    expect(STEP_PATHS.locacao[1]).toEqual(["locatarios"]);
+    expect(STEP_PATHS.locacao[2]).toEqual(["locadores"]);
+  });
+
+  it("as duas tabelas concordam: o papel vê a etapa que carrega o dado dele", () => {
+    // Deriva o índice a partir de STEP_PATHS em vez de escrevê-lo à mão — é o
+    // que impede este teste de virar cópia da tabela que ele deveria checar.
+    const etapaDe = (topKey: string): number =>
+      Number(
+        Object.entries(STEP_PATHS.locacao).find(([, keys]) =>
+          keys.includes(topKey),
+        )?.[0],
+      );
+    expect(DEFAULT_ROLE_STEPS.locador).toContain(etapaDe("locadores"));
+    expect(DEFAULT_ROLE_STEPS.locador).not.toContain(etapaDe("locatarios"));
+    expect(DEFAULT_ROLE_STEPS.locatario).toContain(etapaDe("locatarios"));
+    expect(DEFAULT_ROLE_STEPS.locatario).not.toContain(etapaDe("locadores"));
   });
 });
