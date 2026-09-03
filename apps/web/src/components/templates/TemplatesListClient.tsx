@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   Pencil,
+  ClipboardCheck,
   Star,
   FileText,
   Archive,
@@ -634,6 +635,20 @@ function TemplateCard({
             <Eye className="mr-1 h-3.5 w-3.5" />
             Preview
           </Button>
+          {/* A tela de revisão só era alcançável de dentro do fluxo de
+              ingestão (o diálogo de upload e a tela do lote), que é
+              transitório: fechado aquilo, um rascunho só era revisável por quem
+              soubesse a URL. É onde moram a validação, os problemas apontados,
+              a prévia preenchida e o botão de ativar — sem este link, "revisar
+              sozinho" dependia de alguém passar o endereço. */}
+          {isGdocs && (
+            <Button size="sm" variant={t.status === "draft" ? "default" : "outline"} asChild>
+              <Link href={`/templates/${t.id}/review`}>
+                <ClipboardCheck className="mr-1 h-3.5 w-3.5" />
+                Revisar
+              </Link>
+            </Button>
+          )}
           <Button size="sm" variant="outline" asChild>
             <Link href={`/templates/${t.id}`}>
               <Pencil className="mr-1 h-3.5 w-3.5" />
