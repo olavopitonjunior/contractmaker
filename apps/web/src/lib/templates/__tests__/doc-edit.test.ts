@@ -17,12 +17,24 @@ vi.mock("@/lib/google/docs", () => ({
 
 import { applyDocEdits, type DocEditOp } from "../doc-edit";
 
-/** Doc simulado: um `textRun` por parágrafo, com índices como a API devolve. */
+/**
+ * Doc simulado. Um `textRun` por parágrafo, com índices como a API devolve.
+ *
+ * `"[[TABELA]]"` na lista vira um bloco que NÃO é parágrafo (uma tabela) — o
+ * `body.content` real também guarda tabela, quebra de seção e sumário, e é
+ * justamente esse tipo de bloco que o localizador precisa enxergar para não
+ * apagá-lo junto ao atravessá-lo.
+ */
 function fakeDoc(paragrafos: string[]) {
   let index = 1;
   return {
     body: {
       content: paragrafos.map((p) => {
+        if (p === "[[TABELA]]") {
+          const bloco = { startIndex: index, endIndex: index + 10, table: { rows: 1, columns: 1 } };
+          index += 10;
+          return bloco;
+        }
         const texto = `${p}\n`;
         const el = { startIndex: index, endIndex: index + texto.length, textRun: { content: texto } };
         index += texto.length;
@@ -213,6 +225,126 @@ describe("restore-paragraph — devolver a cláusula que a chave engoliu", () =>
     getDocPlainTextMock.mockResolvedValue(colapsado);
     const out = await run([{ op: "restore-paragraph", current: colapsado, source: "   " }]);
     expect(out.results[0]).toMatchObject({ status: "skipped", reason: "empty-source" });
+  });
+});
+
+describe("replace-block — a migração que não tinha caminho", () => {
+  // O caso real dos 16 modelos da Trio: a lista de rateio chaveada item a item.
+  // Cada chave de corretagem imprime a lista INTEIRA de beneficiários, então um
+  // item sai com nome sem conta e o outro com conta sem nome. A chave certa
+  // existe desde o #554 e NADA conseguia aplicá-la — `map-field` e o passe de IA
+  // recusam trecho que já tem chave, e a trava dos dois está certa.
+  const cabecalho = "4.1.1. O pagamento correspondente ao primeiro aluguel será rateado assim:";
+  const itens = [
+    "a) R$0000 (três mil...), a ser pago à imobiliária intermediadora {{imobiliaria_qualificacao}};",
+    "b) R$ 1.315,15, a ser pago à corretora intermediadora {{corretagem_dados_pagamento}}",
+    "c) R$ 1.315,15, a ser pago ao corretor intermediador {{corretagem_qualificacao}}.",
+  ];
+  const depois = "4.1.2. A comprovação do pagamento servirá como quitação.";
+  const doc = [cabecalho, ...itens, depois];
+
+  it("troca o bloco inteiro por UMA chave, preservando o cabeçalho", async () => {
+    getDocPlainTextMock
+      .mockResolvedValueOnce(doc.join("\n"))
+      .mockResolvedValueOnce([cabecalho, "{{rateio_primeiro_aluguel}}", depois].join("\n"));
+    getDocStructureMock.mockResolvedValue(fakeDoc(doc));
+
+    const out = await run([
+      { op: "replace-block", paragraphs: itens, token: "rateio_primeiro_aluguel" },
+    ]);
+
+    expect(out.results[0]).toMatchObject({ op: "replace-block", status: "applied" });
+    const reqs = batchUpdateDocMock.mock.calls[0][1];
+    // O intervalo vai do início do item a) ao fim do item c) — nem antes nem depois.
+    const inicioA = 1 + cabecalho.length + 1;
+    expect(reqs[0].deleteContentRange.range.startIndex).toBe(inicioA);
+    expect(reqs[1].insertText.text).toBe("{{rateio_primeiro_aluguel}}");
+  });
+
+  it("bloco NÃO consecutivo é recusado antes de qualquer escrita", async () => {
+    // Apagar do primeiro ao último engoliria o que está no meio — e o que está
+    // no meio é contrato.
+    getDocPlainTextMock.mockResolvedValue(doc.join("\n"));
+    const out = await run([
+      {
+        op: "replace-block",
+        paragraphs: [itens[0]!, itens[2]!], // pula o b)
+        token: "rateio_primeiro_aluguel",
+      },
+    ]);
+    expect(out.results[0]).toMatchObject({ status: "skipped", reason: "block-not-consecutive" });
+    expect(batchUpdateDocMock).not.toHaveBeenCalled();
+  });
+
+  it("parágrafo repetido no documento é recusado", async () => {
+    getDocPlainTextMock.mockResolvedValue([...doc, itens[0]!].join("\n"));
+    const out = await run([
+      { op: "replace-block", paragraphs: [itens[0]!], token: "rateio_primeiro_aluguel" },
+    ]);
+    expect(out.results[0]).toMatchObject({ status: "skipped", reason: "ambiguous" });
+  });
+
+  it("chave fora do catálogo da modalidade é recusada", async () => {
+    getDocPlainTextMock.mockResolvedValue(doc.join("\n"));
+    const out = await run(
+      [{ op: "replace-block", paragraphs: itens, token: "rateio_primeiro_aluguel" }],
+      "a_vista"
+    );
+    expect(out.results[0]).toMatchObject({ status: "skipped", reason: "unknown-token" });
+  });
+
+  it("TABELA entre os parágrafos: recusa em vez de apagá-la junto", async () => {
+    // O caso mais perigoso desta operação. Uma tabela entre dois itens não é
+    // parágrafo: sai da lista filtrada e os dois PARECEM vizinhos — mas ela
+    // ocupa índices, e o intervalo "do primeiro ao último" a levaria embora.
+    // Como a conferência só verifica que os parágrafos PRETENDIDOS sumiram, e
+    // nunca que nada além deles sumiu, o estrago sairia como sucesso.
+    const comTabela = [cabecalho, itens[0]!, "[[TABELA]]", itens[1]!, depois];
+    // No texto plano a tabela não aparece, então os dois itens parecem coladas —
+    // é exatamente por isso que a prova no texto não basta.
+    getDocPlainTextMock.mockResolvedValue(
+      [cabecalho, itens[0]!, itens[1]!, depois].join("\n")
+    );
+    getDocStructureMock.mockResolvedValue(fakeDoc(comTabela));
+
+    const out = await run([
+      { op: "replace-block", paragraphs: [itens[0]!, itens[1]!], token: "rateio_primeiro_aluguel" },
+    ]);
+
+    expect(out.results[0]).toMatchObject({ status: "failed", reason: "structure-not-found" });
+    // Nada foi enviado: a recusa acontece antes do batch.
+    expect(batchUpdateDocMock).not.toHaveBeenCalled();
+  });
+
+  it("releitura indisponível reporta a operação CERTA, não restore-paragraph", async () => {
+    // O rótulo errado não corrompe o Doc, mas corrompe o log de auditoria — que
+    // é o único lugar onde fica registrado o que foi feito no texto contratual.
+    getDocPlainTextMock
+      .mockResolvedValueOnce(doc.join("\n"))
+      .mockRejectedValueOnce(new Error("Drive fora"));
+    getDocStructureMock.mockResolvedValue(fakeDoc(doc));
+
+    const out = await run([
+      { op: "replace-block", paragraphs: itens, token: "rateio_primeiro_aluguel" },
+    ]);
+
+    expect(out.results[0]).toMatchObject({
+      op: "replace-block",
+      status: "failed",
+      reason: "verify-unavailable",
+    });
+  });
+
+  it("sobrevivente do bloco na releitura é falha, não sucesso", async () => {
+    // Se um parágrafo continua lá, o intervalo apagado não era o que se pensava.
+    getDocPlainTextMock
+      .mockResolvedValueOnce(doc.join("\n"))
+      .mockResolvedValueOnce([cabecalho, "{{rateio_primeiro_aluguel}}", itens[2]!, depois].join("\n"));
+    getDocStructureMock.mockResolvedValue(fakeDoc(doc));
+    const out = await run([
+      { op: "replace-block", paragraphs: itens, token: "rateio_primeiro_aluguel" },
+    ]);
+    expect(out.results[0]).toMatchObject({ status: "failed", reason: "verify-failed" });
   });
 });
 

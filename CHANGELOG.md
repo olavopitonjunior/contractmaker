@@ -4,6 +4,16 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-03 - A migração que não tinha ferramenta
+
+### Adicionado
+
+- **`replace-block`: um bloco de parágrafos que já contém chaves vira uma chave composta.** Diagnóstico medido nos 16 modelos da RE/MAX Trio: **16 de 16** têm a lista de rateio do 1º aluguel chaveada item a item — e cada chave de corretagem imprime a lista INTEIRA de beneficiários, então um item sai com nome sem conta e o outro com conta sem nome. A chave certa (`rateio_primeiro_aluguel`) existe desde a entrega anterior, e **nada conseguia aplicá-la**: tanto o mapeamento manual quanto o passe de IA recusam trecho que já tem chave — travas corretas, para não apagar campo por acidente —, e a migração ficava sem caminho. As proteções vêm do que pode dar errado: bloco não consecutivo é recusado antes de escrever (apagar do primeiro ao último engoliria o contrato que está no meio), a estrutura do documento é relida antes de apagar, e na conferência **todos** os parágrafos têm de ter sumido — um sobrevivente vira falha, porque significa que o intervalo apagado não era o esperado.
+
+### Notas
+
+- A aplicação nos 16 modelos ainda não foi feita: escrita em documento de produção passa pela rota do app, então acontece depois da promoção.
+
 ## [Unreleased] - 2026-09-03 - Revisar um rascunho sem saber a URL
 
 ### Corrigido

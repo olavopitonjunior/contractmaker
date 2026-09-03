@@ -241,8 +241,10 @@ export function resolveAllRequiredFields(
 
 // ===================================================================
 // LOCAÇÃO — presets por step do wizard de locação (7 etapas,
-// LOCACAO_STEP_LABELS): 0 Documentos, 1 Locador(es), 2 Locatário(s),
-// 3 Imóvel, 4 Aluguel e Reajuste, 5 Garantia, 6 Comissão (2026-08).
+// LOCACAO_STEP_LABELS): 0 Documentos, 1 Locatário(s), 2 Locador(es),
+// 3 Imóvel, 4 Aluguel e Reajuste, 5 Garantia, 6 Comissão. O locatário passou à
+// frente do locador em 2026-09-03; a POSIÇÃO das duas listas aqui é o que
+// define em qual etapa o preset as cobra.
 // A antiga etapa de Confirmação saiu em 2026-07-30. As tabelas abaixo têm 6
 // entradas — o índice 6 (Comissão) cai no `?? []` de resolveRequiredFields,
 // de propósito: comissão nunca é obrigatória pro cliente.
@@ -274,15 +276,6 @@ const LOCACAO_PRESET_LEGADO: readonly (readonly string[])[] = [
 const LOCACAO_PRESET_ESSENCIAL: readonly (readonly string[])[] = [
   [],
   [
-    "locadores",
-    "locadores.0.cpf",
-    "locadores.0.email",
-    "locadores.0.mobile_phone",
-    "locadores.0.endereco",
-    "locadores.0.cidade",
-    "locadores.0.uf",
-  ],
-  [
     "locatarios",
     "locatarios.0.cpf",
     "locatarios.0.email",
@@ -290,6 +283,15 @@ const LOCACAO_PRESET_ESSENCIAL: readonly (readonly string[])[] = [
     "locatarios.0.endereco",
     "locatarios.0.cidade",
     "locatarios.0.uf",
+  ],
+  [
+    "locadores",
+    "locadores.0.cpf",
+    "locadores.0.email",
+    "locadores.0.mobile_phone",
+    "locadores.0.endereco",
+    "locadores.0.cidade",
+    "locadores.0.uf",
   ],
   ["imovel.rua", "imovel.numero", "imovel.cidade", "imovel.uf"],
   ["aluguel.valor", "aluguel.vigencia_inicio"],
@@ -301,23 +303,6 @@ const LOCACAO_PRESET_ESSENCIAL: readonly (readonly string[])[] = [
 // completo das partes + matrícula do imóvel.
 const LOCACAO_PRESET_COMPLETO: readonly (readonly string[])[] = [
   [],
-  [
-    "locadores",
-    "locadores.0.cpf",
-    "locadores.0.rg",
-    "locadores.0.data_nascimento",
-    "locadores.0.nacionalidade",
-    "locadores.0.estado_civil",
-    "locadores.0.profissao",
-    "locadores.0.email",
-    "locadores.0.mobile_phone",
-    "locadores.0.endereco",
-    "locadores.0.numero",
-    "locadores.0.bairro",
-    "locadores.0.cidade",
-    "locadores.0.uf",
-    "locadores.0.cep",
-  ],
   [
     "locatarios",
     "locatarios.0.cpf",
@@ -334,6 +319,23 @@ const LOCACAO_PRESET_COMPLETO: readonly (readonly string[])[] = [
     "locatarios.0.cidade",
     "locatarios.0.uf",
     "locatarios.0.cep",
+  ],
+  [
+    "locadores",
+    "locadores.0.cpf",
+    "locadores.0.rg",
+    "locadores.0.data_nascimento",
+    "locadores.0.nacionalidade",
+    "locadores.0.estado_civil",
+    "locadores.0.profissao",
+    "locadores.0.email",
+    "locadores.0.mobile_phone",
+    "locadores.0.endereco",
+    "locadores.0.numero",
+    "locadores.0.bairro",
+    "locadores.0.cidade",
+    "locadores.0.uf",
+    "locadores.0.cep",
   ],
   [
     "imovel.rua",

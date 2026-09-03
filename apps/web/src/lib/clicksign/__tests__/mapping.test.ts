@@ -54,9 +54,26 @@ describe("dealDataToSigners", () => {
     });
   });
 
-  it("ignora partes sem nome", () => {
+  // 2026-09-03: "ignora partes sem nome" era cedo demais. Uma parte SEM nome
+  // mas COM dado de identificação (e-mail, aqui) é uma parte real a que falta o
+  // nome — e sumia de `signers` E de `missing`, deixando o envelope sair sem
+  // aquele signatário sem nada acusar. Passa a ir para `missing`, como o ramo
+  // PJ sempre fez. O que continua sendo ignorado é a LINHA EM BRANCO.
+  it("parte sem nome mas com identificação vira pendência, não some", () => {
     const result = dealDataToSigners({
       vendedores: [{ email: "x@y.com" }],
+    });
+    expect(result.signers).toHaveLength(0);
+    expect(result.missing).toHaveLength(1);
+    expect(result.missing[0]).toMatchObject({ sourceKind: "vendedor", sourceIndex: 0 });
+  });
+
+  it("linha EM BRANCO segue ignorada — é o estado inicial de todo formulário", () => {
+    // Exatamente o que `defaultValues` do wizard cria.
+    const result = dealDataToSigners({
+      vendedores: [
+        { tipo_pessoa: "fisica", nome: "", nacionalidade: "Brasileiro(a)" },
+      ],
     });
     expect(result.signers).toHaveLength(0);
     expect(result.missing).toHaveLength(0);
@@ -438,5 +455,43 @@ describe("isValidEmail", () => {
     ["", false],
   ])("%s → %s", (input, expected) => {
     expect(isValidEmail(input)).toBe(expected);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Parte PF sem nome: até 2026-09-03 o `if (name)` sem `else` fazia ela sumir de
+// `signers` E de `missing` — o envelope saía sem aquele signatário e nada
+// acusava. O ramo era inalcançável enquanto o formulário de venda cravava
+// `required` no nome; ao devolver essa decisão à imobiliária ele virou
+// alcançável em produção. O ramo PJ logo acima já fazia certo.
+// ---------------------------------------------------------------------------
+describe("parte sem nome não some silenciosa", () => {
+  const semNome = {
+    vendedores: [
+      { tipo_pessoa: "fisica", cpf: "111.444.777-35", email: "sem.nome@example.com" },
+    ],
+    compradores: [
+      { tipo_pessoa: "fisica", nome: "Ana Souza", email: "ana@example.com" },
+    ],
+  };
+
+  it("PF sem nome entra em `missing`, não no vazio", () => {
+    const { signers, missing } = dealDataToSigners(semNome);
+    expect(missing).toHaveLength(1);
+    expect(missing[0]).toMatchObject({ sourceKind: "vendedor", sourceIndex: 0 });
+    expect(signers.some((s) => s.sourceKind === "vendedor")).toBe(false);
+  });
+
+  it("PF sem nome NÃO vira signatário mesmo tendo e-mail válido", () => {
+    const { signers } = dealDataToSigners(semNome);
+    expect(signers.every((s) => (s.name ?? "").trim().length > 0)).toBe(true);
+  });
+
+  // Controle anti-vacuidade: a parte NOMEADA do mesmo payload continua virando
+  // signatário. Sem isto, os testes acima passariam se a função devolvesse
+  // sempre `signers: []`.
+  it("CONTROLE: a parte nomeada do mesmo payload vira signatário", () => {
+    const { signers } = dealDataToSigners(semNome);
+    expect(signers.some((s) => s.sourceKind === "comprador" && s.name === "Ana Souza")).toBe(true);
   });
 });

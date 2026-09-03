@@ -412,3 +412,44 @@ export function findSignatureRecommendations(
   }
   return out;
 }
+
+/**
+ * Expande o path GUARDA-CHUVA de uma lista de partes ("vendedores",
+ * "compradores") no nome de CADA parte existente — `nome` para PF,
+ * `razao_social` para PJ.
+ *
+ * Por que existe: `useRequiredField` já trata o guarda-chuva como se cobrisse o
+ * nome (é ele que acende o asterisco em `vendedores.0.nome` quando o preset
+ * pede só `vendedores`), mas `effectiveRequiredPaths` o dá por satisfeito com
+ * qualquer array NÃO-VAZIO. Sem esta expansão, asterisco e gate contam
+ * verdades diferentes: o campo aparece marcado e o "Próximo" deixa passar em
+ * branco.
+ *
+ * Até 2026-09-03 esse buraco era tapado por um `required` cravado no
+ * `register` de VendedorStep/CompradorStep — que barrava, mas não era
+ * desligável por configuração nenhuma e produzia "Revise os campos da etapa 1"
+ * sem dizer qual campo (o `trigger` reprovava enquanto o check manual passava).
+ *
+ * Só expande listas que ESTÃO na lista recebida: org que tirou `vendedores` do
+ * preset não passa a exigir nome nenhum. O guarda-chuva é preservado — ele
+ * continua sendo o "existe ao menos uma parte" para a lista vazia.
+ */
+export function expandPartyUmbrellaPaths(
+  paths: readonly string[],
+  getValue: (path: string) => unknown,
+  listas: readonly string[] = ["vendedores", "compradores"],
+): string[] {
+  const out = [...paths];
+  for (const lista of listas) {
+    if (!paths.includes(lista)) continue;
+    const parties = getValue(lista);
+    if (!Array.isArray(parties)) continue;
+    parties.forEach((raw, i) => {
+      const p = (raw ?? {}) as Record<string, unknown>;
+      const campo = p.tipo_pessoa === "juridica" ? "razao_social" : "nome";
+      const path = `${lista}.${i}.${campo}`;
+      if (!out.includes(path)) out.push(path);
+    });
+  }
+  return out;
+}

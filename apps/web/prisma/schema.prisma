@@ -3071,6 +3071,22 @@ model OrgFormSettings {
   // comportou antes desta config existir.
   locacaoPreset              String @default("legado") // legado | essencial | completo | custom
   locacaoCustomRequiredPaths Json   @default("[]")
+  // Versão do ESQUEMA DE ÍNDICES das etapas de locação gravadas nesta linha.
+  // v1: 1 Locador, 2 Locatário. v2 (2026-09-03): 1 Locatário, 2 Locador.
+  //
+  // Por que uma coluna e não só um UPDATE: a troca 1↔2 é uma INVOLUÇÃO — rodar
+  // duas vezes desfaz, e não existe WHERE que distinga "já trocado" de "ainda
+  // não" (os dois estados têm o mesmo domínio de valores). O `_prisma_migrations`
+  // garante uma execução por banco, mas não basta: `scripts/sync-prod-to-staging.ts`
+  // copia linhas de prod para uma staging já migrada, reinjetando formato antigo
+  // numa base que a migration nunca revisita. O marcador viaja junto com a linha.
+  //
+  // `locacaoCustomRequiredPaths` ainda assim é RECALCULADO a partir do próprio
+  // path (locatarios.* → 1, locadores.* → 2, …) em vez de trocado — recomputar
+  // é idempotente por construção, então aquela coluna fica correta mesmo que o
+  // marcador erre. `participantVisibilityJson` guarda só índices e não tem de
+  // onde recomputar: ali o marcador é a única defesa.
+  locacaoStepSchemaVersion   Int    @default(2)
   // Segurança do link do formulário: quando true, o SalesForm trava sozinho
   // (SalesForm.lockedAt) no momento em que o cliente finaliza — congela os
   // dados contra edição posterior por quem ainda tiver o link. Default false

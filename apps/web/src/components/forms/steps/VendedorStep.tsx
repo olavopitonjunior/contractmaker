@@ -150,18 +150,25 @@ function PessoaFisicaFields({
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* `required` explícito: a obrigatoriedade vem do próprio register
-            abaixo, não do preset da org. */}
-        <FormField
-          form={form}
-          name={`${prefix}.nome`}
-          label="Nome Completo"
-          required
-        >
+        {/* A OBRIGATORIEDADE é da imobiliária: `vendedores.0.nome` está na
+            allowlist da API e tem checkbox em Configurações → Formulário. Até
+            2026-09-03 havia aqui um `required` de marcação MAIS um
+            `required` no register, nenhum dos dois desligável por
+            configuração — e como o preset traz o path guarda-chuva
+            `vendedores` ("existe ao menos uma parte"), o `form.trigger` dessa
+            etapa alcançava a regra aninhada: o check manual passava (array
+            não-vazio) e o trigger reprovava, produzindo "Revise os campos da
+            etapa 1" sem dizer qual campo. O asterisco sai do
+            RequiredFieldsProvider, que lê a configuração.
+
+            O que fica é regra de FORMATO, e só para campo PREENCHIDO — mesmo
+            princípio de `collectPartyFormatIssues`: campo vazio é assunto da
+            obrigatoriedade, não do formato. */}
+        <FormField form={form} name={`${prefix}.nome`} label="Nome Completo">
           <Input
             {...form.register(`${prefix}.nome`, {
-              required: "Nome é obrigatório",
-              minLength: { value: 2, message: "Nome muito curto" },
+              validate: (v) =>
+                !v || String(v).trim().length >= 2 || "Nome muito curto",
             })}
             placeholder="Nome completo"
           />

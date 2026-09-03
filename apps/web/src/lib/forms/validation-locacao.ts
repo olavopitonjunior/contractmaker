@@ -475,10 +475,22 @@ export const LOCACAO_SCHEMA_TYPE = "locacao_residencial_v1" as const;
 // abandonava o formulário na última tela. Cidade/UF viraram configuração da
 // imobiliária (aba Locação do padrão contratual); a data continua por negócio;
 // o consentimento LGPD continua no wizard (`isLastStep`).
+// 2026-09-03: Locatário passou à frente do Locador (etapa 1). Quem preenche o
+// formulário costuma ser a imobiliária COM o candidato à locação na frente — o
+// locador já é conhecido do cadastro. A ordem anterior obrigava a começar pela
+// parte que raramente está na mesa.
+//
+// O índice da etapa é IDENTIDADE PERSISTIDA, não só posição: ele vive em
+// `OrgFormSettings.locacaoCustomRequiredPaths[].step` e em
+// `participantVisibilityJson.locacao.<papel>[]`. Trocar as posições aqui sem
+// remapear o que está gravado faria uma org configurada exigir campos na etapa
+// errada. A migration `20260903200000_locacao_locatario_antes_do_locador` cuida disso, e
+// ela RECALCULA o step a partir do próprio path (em vez de trocar 1↔2), para
+// ser idempotente — um swap literal se desfaz se rodar duas vezes.
 export const LOCACAO_STEP_LABELS = [
   "Documentos",
-  "Locador(es)",
   "Locatário(s)",
+  "Locador(es)",
   "Imóvel",
   "Aluguel e Reajuste",
   "Garantia e Observações",
@@ -567,10 +579,13 @@ export type DadosLocacaoComercialForm = z.infer<typeof dadosLocacaoComercialSche
 
 export const LOCACAO_COMERCIAL_SCHEMA_TYPE = "locacao_comercial_v1" as const;
 
+// Espelha a ORDEM de LOCACAO_STEP_LABELS — o wizard é o mesmo componente e
+// renumerar só o array residencial faria a locação comercial exibir a aba
+// "Locador(es)" enquanto renderiza os campos do locatário.
 export const LOCACAO_COMERCIAL_STEP_LABELS = [
   "Documentos",
-  "Locador(es)",
   "Locatário(s)",
+  "Locador(es)",
   "Imóvel e Destinação",
   "Aluguel e Reajuste",
   "Garantia e Observações",

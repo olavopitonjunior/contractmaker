@@ -24,6 +24,7 @@ import {
   isValueEmpty,
   getByPath,
   matriculaConditionalPaths,
+  expandPartyUmbrellaPaths,
 } from "@/lib/forms/party-required";
 import { toast } from "sonner";
 import { useAutoSave } from "@/hooks/use-auto-save";
@@ -526,7 +527,10 @@ export function SalesFormWizard({
   // Required fields da etapa atual remapeados pelo tipo_pessoa vivo (PJ não
   // tem cpf/estado_civil/rg — vira cnpj/razão social ou é dispensado).
   const currentEffectiveRequired = effectiveRequiredPaths(
-    isStep3 ? [...currentRequiredFields, ...conditionalRequired] : currentRequiredFields,
+    expandPartyUmbrellaPaths(
+      isStep3 ? [...currentRequiredFields, ...conditionalRequired] : currentRequiredFields,
+      readValue,
+    ),
     readValue,
   );
   const currentMissingCount = currentEffectiveRequired.filter((p) =>
@@ -538,8 +542,14 @@ export function SalesFormWizard({
   // Passa pelo MESMO remap PF/PJ do gate: senão o CNPJ de uma parte jurídica
   // ficava sem asterisco enquanto o "Próximo" barrava nele, e RG/estado civil
   // apareciam marcados numa ficha de empresa que não os renderiza.
+  // Mesma expansão do gate (`rawStepFields`): asterisco, contagem de
+  // pendências e bloqueio do "Próximo" precisam ler a MESMA lista, senão
+  // voltam a contar verdades diferentes sobre o nome da parte.
   const allRequiredPaths = effectiveRequiredPaths(
-    [...effectiveRequiredFields.flat(), ...conditionalRequired],
+    expandPartyUmbrellaPaths(
+      [...effectiveRequiredFields.flat(), ...conditionalRequired],
+      readValue,
+    ),
     readValue,
   );
 
@@ -630,10 +640,13 @@ export function SalesFormWizard({
         // clique, não sobre o render.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const readNow = (path: string): unknown => form.getValues(path as any);
-        const rawStepFields = [
-          ...(effectiveRequiredFields[trueIndex] ?? []),
-          ...(trueIndex === 3 ? matriculaConditionalPaths(readNow) : []),
-        ];
+        const rawStepFields = expandPartyUmbrellaPaths(
+          [
+            ...(effectiveRequiredFields[trueIndex] ?? []),
+            ...(trueIndex === 3 ? matriculaConditionalPaths(readNow) : []),
+          ],
+          readNow,
+        );
         // Remapeia pelo tipo_pessoa vivo: PJ não tem cpf/estado_civil/rg, então
         // exigi-los geraria pendência fantasma (campo nem renderiza). Vira
         // cnpj/razão social ou é dispensado. eslint: getValues tipado solto.
@@ -779,10 +792,20 @@ export function SalesFormWizard({
    */
   const stepHasPending = (stepIndex: number): boolean => {
     const trueIndex = visibleStepIndexes[stepIndex] ?? stepIndex;
-    const paths = [
-      ...(effectiveRequiredFields[trueIndex] ?? []),
-      ...(trueIndex === 3 ? conditionalRequired : []),
-    ];
+    // QUARTO leitor da lista de obrigatórios, junto de gate, asterisco e
+    // contagem — e por isso passa pela MESMA expansão. Sem ela o ponto de
+    // pendência do stepper não acendia para "parte sem nome" nos presets que
+    // declaram só o guarda-chuva (`legado`/`minimo`/`essencial`): o gate
+    // barrava, mas o indicador dizia que estava tudo certo. Pior em
+    // `?prefilled=1`, onde o corretor revisa uma proposta extraída confiando
+    // justamente nesse ponto.
+    const paths = expandPartyUmbrellaPaths(
+      [
+        ...(effectiveRequiredFields[trueIndex] ?? []),
+        ...(trueIndex === 3 ? conditionalRequired : []),
+      ],
+      readValue,
+    );
     if (paths.length === 0) return false;
     return findMissingRequired(paths, readValue).length > 0;
   };

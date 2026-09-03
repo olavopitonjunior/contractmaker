@@ -83,20 +83,21 @@ export function ImovelStep({ form, attachmentsEndpoint }: ImovelStepProps) {
             </CardHeader>
             <CardContent className="pt-0 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* `required` explícito nos três campos que o próprio step
-                    registra como obrigatórios (rua/cidade/descricao) — o preset
-                    da org pode não marcá-los, mas o register marca. */}
+                {/* Até 2026-09-03 este bloco carregava, em rua/cidade/descrição,
+                    marcação e regra de obrigatoriedade cravadas — e o comentário
+                    que estava aqui descrevia o defeito sem o nomear como tal:
+                    "o preset da org pode não marcá-los, mas o register marca".
+                    Os três estão em PRESET_LEGADO e têm checkbox em
+                    Configurações → Formulário, então quem decide é a
+                    imobiliária; a marcação sai do RequiredFieldsProvider. */}
                 <FormField
                   form={form}
                   name={`${prefix}.rua`}
                   label="Logradouro (Rua/Avenida)"
-                  required
                   className="md:col-span-2"
                 >
                   <Input
-                    {...form.register(`${prefix}.rua`, {
-                      required: "Logradouro é obrigatório",
-                    })}
+                    {...form.register(`${prefix}.rua`)}
                     placeholder="Ex: Rua das Flores"
                   />
                 </FormField>
@@ -120,16 +121,9 @@ export function ImovelStep({ form, attachmentsEndpoint }: ImovelStepProps) {
                   <Input {...form.register(`${prefix}.bairro`)} placeholder="Bairro" />
                 </FormField>
 
-                <FormField
-                  form={form}
-                  name={`${prefix}.cidade`}
-                  label="Cidade"
-                  required
-                >
+                <FormField form={form} name={`${prefix}.cidade`} label="Cidade">
                   <Input
-                    {...form.register(`${prefix}.cidade`, {
-                      required: "Cidade é obrigatória",
-                    })}
+                    {...form.register(`${prefix}.cidade`)}
                     placeholder="Cidade"
                   />
                 </FormField>
@@ -257,15 +251,17 @@ export function ImovelStep({ form, attachmentsEndpoint }: ImovelStepProps) {
                 form={form}
                 name={`${prefix}.descricao`}
                 label="Descrição do Imóvel"
-                required
               >
                 <textarea
                   {...form.register(`${prefix}.descricao`, {
-                    required: "Descrição do imóvel é obrigatória",
-                    minLength: {
-                      value: 10,
-                      message: "Descreva com pelo menos 10 caracteres",
-                    },
+                    // Formato, e só para campo PREENCHIDO: `minLength` do RHF
+                    // reprova a string vazia junto, e era por ela que a
+                    // descrição continuava barrando mesmo desmarcada na
+                    // configuração.
+                    validate: (v) =>
+                      !v ||
+                      String(v).trim().length >= 10 ||
+                      "Descreva com pelo menos 10 caracteres",
                   })}
                   placeholder="Ex: Apartamento com 3 quartos (sendo 1 suíte), 2 banheiros, sala, cozinha, área de serviço, 1 vaga de garagem coberta, área privativa de 85m²."
                   rows={4}

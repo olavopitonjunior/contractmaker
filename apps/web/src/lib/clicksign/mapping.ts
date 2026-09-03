@@ -114,6 +114,24 @@ const partyDoc = (p: Parte): string | undefined => {
   return onlyDigits(p.cpf);
 };
 
+/**
+ * A parte tem algum dado que a IDENTIFIQUE — documento, contato — ou é só a
+ * linha em branco que todo formulário nasce tendo?
+ *
+ * A distinção existe porque `defaultValues` do wizard já cria
+ * `vendedores: [{ tipo_pessoa: "fisica", nome: "", nacionalidade: "..." }]`.
+ * Tratar essa linha como pendência encheria a revisão do envelope de
+ * pendência fantasma — é o mesmo princípio de `pendenciasDeRecebimento`
+ * ("linha ainda em branco não é pendência, é linha vazia").
+ *
+ * `tipo_pessoa` e `nacionalidade` NÃO contam: os dois vêm com default e
+ * estariam presentes na linha vazia.
+ */
+const partyHasIdentifyingData = (p: Parte): boolean => {
+  const campos = [p.cpf, p.cnpj, p.email, p.mobile_phone, p.telefone];
+  return campos.some((v) => typeof v === "string" && v.trim().length > 0);
+};
+
 export function dealDataToSigners(
   dataJson: unknown,
   authMethod: AuthMethod = "email"
@@ -157,7 +175,22 @@ export function dealDataToSigners(
 
       // PF titular.
       const name = partyName(p);
-      if (name) {
+      if (!name) {
+        // Simetria com o ramo PJ acima: parte REAL sem nome não some
+        // silenciosa. Antes o `if (name)` sem `else` fazia a PF sem nome
+        // desaparecer de `signers` E de `missing` — o envelope saía sem aquele
+        // signatário e nada acusava, até o contrato assinado voltar faltando a
+        // assinatura. O ramo era inalcançável enquanto `nome` tinha `required`
+        // cravado no formulário de venda; ao devolver essa decisão à
+        // imobiliária, ele passa a ser alcançável em produção.
+        //
+        // A linha em BRANCO continua sendo ignorada, como sempre foi: ela é o
+        // estado inicial de todo formulário, e acusá-la viraria pendência
+        // fantasma na revisão do envelope.
+        if (partyHasIdentifyingData(p)) {
+          missing.push({ sourceKind, sourceIndex: idx, name: `Parte ${idx + 1}` });
+        }
+      } else {
         const email = (p.email ?? "").trim();
         if (!email) {
           missing.push({ sourceKind, sourceIndex: idx, name });

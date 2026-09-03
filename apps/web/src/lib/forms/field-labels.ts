@@ -193,9 +193,13 @@ const VENDA_STEP_BY_PREFIX: ReadonlyArray<[RegExp, number]> = [
   [/^(comissao.|testemunhas.|observacoes$)/, 6],
 ];
 
+// Locatário é a etapa 1 e locador a 2 desde 2026-09-03 — ver
+// LOCACAO_STEP_LABELS. Este mapa é o que decide em qual grupo cada checkbox
+// aparece na tela de configuração; se ele divergir dos rótulos, o admin marca
+// um campo num grupo e o wizard o cobra em outro.
 const LOCACAO_STEP_BY_PREFIX: ReadonlyArray<[RegExp, number]> = [
-  [/^locadores/, 1],
-  [/^locatarios/, 2],
+  [/^locatarios/, 1],
+  [/^locadores/, 2],
   [/^imovel./, 3],
   [/^aluguel./, 4],
   [/^(garantia.|observacoes$)/, 5],
@@ -211,8 +215,8 @@ const VENDA_STEP_LABELS: Record<number, string> = {
 };
 
 const LOCACAO_STEP_LABELS_CATALOG: Record<number, string> = {
-  1: "Locador",
-  2: "Locatário",
+  1: "Locatário",
+  2: "Locador",
   3: "Imóvel",
   4: "Aluguel e reajuste",
   5: "Garantia e observações",

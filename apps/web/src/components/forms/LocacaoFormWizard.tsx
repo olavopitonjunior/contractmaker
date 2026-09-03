@@ -112,16 +112,19 @@ interface LocacaoFormWizardProps {
 // validação, igual venda), partes começam em 1. A etapa final de confirmação
 // saiu em 2026-07-30: a Garantia (5) é a última, e o consentimento LGPD
 // continua sendo renderizado pelo wizard no `isLastStep`.
+//
+// Desde 2026-09-03 o LOCATÁRIO é a etapa 1 e o LOCADOR a 2. A lista continua
+// sendo a identidade do que se valida — o índice é só onde ela aparece.
 const PARTY_STEP: Record<number, { list: "locadores" | "locatarios"; label: string }> = {
-  1: { list: "locadores", label: "locador" },
-  2: { list: "locatarios", label: "locatário" },
+  1: { list: "locatarios", label: "locatário" },
+  2: { list: "locadores", label: "locador" },
 };
 
 // Required mínimo dos demais steps (non-empty check manual, já que não usamos
 // zodResolver). A validação completa roda no servidor no finalize
 // (schemaForLocacaoType) e retorna validationIssues.
 // Steps com ditado por voz — os mesmos que têm schema em voice-extract.ts
-// (LOCACAO_STEP_SCHEMA): 1 Locador, 2 Locatário, 3 Imóvel, 4 Aluguel,
+// (LOCACAO_STEP_SCHEMA): 1 Locatário, 2 Locador, 3 Imóvel, 4 Aluguel,
 // 5 Garantia. Fora: 0 Documentos e 6 Comissão.
 const STEPS_WITH_VOICE = new Set([1, 2, 3, 4, 5]);
 
@@ -519,7 +522,7 @@ export function LocacaoFormWizard({
         // Leva à etapa do primeiro pendente, senão o erro fica numa aba que o
         // usuário não está vendo e o scroll do marcador não acha nada.
         const first = hardIssues[0].path.split(".")[0];
-        const stepAlvo = first === "locadores" ? 1 : first === "locatarios" ? 2 : 4;
+        const stepAlvo = first === "locatarios" ? 1 : first === "locadores" ? 2 : 4;
         const visivel = visibleStepIndexes.indexOf(stepAlvo);
         if (visivel >= 0) setCurrentStep(visivel);
         setFailedTriggerCount((n) => n + 1);
@@ -624,8 +627,8 @@ export function LocacaoFormWizard({
   const steps = comercial
     ? [
         <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} allowedTopKeys={pathScope} selfAssignment={selfAssignment} viewerIsMember={viewerIsMember} />,
-        <LocacaoParteStep key="s1" form={form} listKey="locadores" singular="Locador" />,
-        <LocacaoParteStep key="s2" form={form} listKey="locatarios" singular="Locatário" />,
+        <LocacaoParteStep key="s1" form={form} listKey="locatarios" singular="Locatário" />,
+        <LocacaoParteStep key="s2" form={form} listKey="locadores" singular="Locador" />,
         <ImovelLocacaoStep key="s3" form={form} comercial attachmentsEndpoint={attachmentsEndpoint} />,
         <AluguelStep key="s4" form={form} />,
         <GarantiaStep key="s5" form={form} garantiaOptions={garantiaOptions} pathScope={pathScope} />,
@@ -633,8 +636,8 @@ export function LocacaoFormWizard({
       ]
     : [
         <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} allowedTopKeys={pathScope} selfAssignment={selfAssignment} viewerIsMember={viewerIsMember} />,
-        <LocacaoParteStep key="s1" form={form} listKey="locadores" singular="Locador" />,
-        <LocacaoParteStep key="s2" form={form} listKey="locatarios" singular="Locatário" />,
+        <LocacaoParteStep key="s1" form={form} listKey="locatarios" singular="Locatário" />,
+        <LocacaoParteStep key="s2" form={form} listKey="locadores" singular="Locador" />,
         <ImovelLocacaoStep key="s3" form={form} attachmentsEndpoint={attachmentsEndpoint} />,
         <AluguelStep key="s4" form={form} />,
         <GarantiaStep key="s5" form={form} garantiaOptions={garantiaOptions} pathScope={pathScope} />,
