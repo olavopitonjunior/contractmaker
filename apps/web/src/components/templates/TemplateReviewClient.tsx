@@ -35,7 +35,11 @@ import {
   Info,
   MousePointerClick,
 } from "lucide-react";
-import { matchCriteriaSummary, modalidadeLabel } from "@/lib/contracts/template-category";
+import {
+  matchCriteriaSummary,
+  modalidadeLabel,
+  templateFamilyForModalidade,
+} from "@/lib/contracts/template-category";
 
 interface CatalogEntry {
   token: string;
@@ -123,6 +127,15 @@ const SKIP_REASON: Record<string, string> = {
   "doc-truncated": "o documento é maior que o limite lido pela IA — esta parte ficou fora da leitura",
   "response-truncated": "a resposta da IA veio cortada antes de chegar aqui — rode a IA de novo",
   "response-unparsed": "a resposta da IA não pôde ser lida (veio com texto fora do JSON) — rode a IA de novo",
+  // Motivos que só as edições do app produzem (`doc-edit.ts`).
+  "phrase-has-token":
+    "o trecho a remover carrega uma chave de preenchimento — removê-lo apagaria o campo",
+  "same-token": "a chave de destino é a mesma da origem: não há o que trocar",
+  "token-missing-in-phrase":
+    "o parágrafo não tem mais a chave que seria trocada (ou tem mais de uma) — revalide",
+  "empty-source": "não há texto de origem para restaurar",
+  "structure-not-found":
+    "não localizei esse parágrafo na estrutura do documento — ele foi editado no Google Docs desde a última verificação",
 };
 
 const SLOT_LABEL: Record<string, string> = {
@@ -152,11 +165,33 @@ const SEVERITY_STYLE: Record<string, string> = {
   info: "border-border bg-muted/40",
 };
 
+/** Verbo do conserto → o que o botão diz que vai fazer. */
+const FIX_LABEL: Record<string, string> = {
+  rekey: "Corrigir a chave",
+  "remove-leftover": "Remover o trecho",
+  "restore-paragraph": "Restaurar o parágrafo",
+};
+
 /**
  * Um achado semântico. Mostra o que está errado e ONDE — o excerto é o que
- * permite ao operador achar o parágrafo no Doc ao lado sem procurar às cegas.
+ * permite ao operador achar o parágrafo no Doc ao lado sem procurar às cegas —
+ * e o botão do conserto, quando existe conserto automático.
  */
-function SemanticFindingRow({ finding }: { finding: SemanticFinding }) {
+function SemanticFindingRow({
+  finding,
+  onFix,
+  fixing,
+  disabled,
+}: {
+  finding: SemanticFinding;
+  onFix: (findingId: string) => void;
+  fixing: boolean;
+  disabled: boolean;
+}) {
+  // `manual` e ausência não ganham botão: dado da própria imobiliária fixo no
+  // modelo e citação de item inexistente não têm conserto automático, e um
+  // botão que não resolve é pior que nenhum.
+  const label = finding.suggestedFix ? FIX_LABEL[finding.suggestedFix.op] : undefined;
   return (
     <div className={`space-y-1 rounded-md border p-2 ${SEVERITY_STYLE[finding.severity] ?? ""}`}>
       <p className="font-medium">
@@ -170,6 +205,18 @@ function SemanticFindingRow({ finding }: { finding: SemanticFinding }) {
         <p className="rounded bg-muted px-1.5 py-1 font-mono text-[11px] leading-snug">
           {finding.excerpt}
         </p>
+      )}
+      {label && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs"
+          disabled={disabled}
+          onClick={() => onFix(finding.id)}
+        >
+          {fixing ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+          {label}
+        </Button>
       )}
     </div>
   );
@@ -234,7 +281,44 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
   const [paragraphs, setParagraphs] = useState<string[]>([]);
   const [selText, setSelText] = useState("");
   const [mapping, setMapping] = useState(false);
+  /** Achado cuja correção está sendo aplicada (um por vez: o Doc é um só). */
+  const [fixingId, setFixingId] = useState<string | null>(null);
   const [iframeKey, setIframeKey] = useState(0);
+  const [aba, setAba] = useState<"documento" | "previa">("documento");
+  // Só há prévia preenchida onde existe construtor de mapa. Proposta não tem —
+  // e oferecer o botão para depois recusar seria pior que não oferecer.
+  const temPrevia = ["locacao", "venda"].includes(
+    templateFamilyForModalidade(template.modalidade)
+  );
+  const [previaHtml, setPreviaHtml] = useState<string | null>(null);
+  const [previaErro, setPreviaErro] = useState<string | null>(null);
+  const [previaCarregando, setPreviaCarregando] = useState(false);
+
+  /**
+   * Gera a prévia PREENCHIDA: o servidor copia o Doc, aplica a amostra pelo
+   * mesmo mapa da geração e descarta a cópia. Custa alguns segundos, por isso é
+   * sob demanda — e o HTML só é trocado quando chega, para a aba não piscar.
+   */
+  const gerarPrevia = useCallback(async () => {
+    setPreviaCarregando(true);
+    setPreviaErro(null);
+    try {
+      const res = await fetch(`/api/templates/${template.id}/preview`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sample: true }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.html) {
+        throw new Error(data.error ?? "Falha ao gerar a prévia.");
+      }
+      setPreviaHtml(data.html as string);
+    } catch (err) {
+      setPreviaErro(err instanceof Error ? err.message : "Falha ao gerar a prévia.");
+    } finally {
+      setPreviaCarregando(false);
+    }
+  }, [template.id]);
 
   const revalidate = useCallback(async () => {
     setValidating(true);
@@ -342,10 +426,67 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
       );
       await Promise.all([revalidate(), refreshDocText()]);
       setIframeKey((k) => k + 1);
+      // A prévia descreve o Doc ANTES desta edição: descartar é
+      // obrigatório. Prévia velha é pior que prévia nenhuma — ela
+      // parece confirmação de um estado que não existe mais.
+      setPreviaHtml(null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha na revisão por IA");
     } finally {
       setAiRunning(false);
+    }
+  }
+
+  /**
+   * Aplica o conserto que a checagem propôs para este achado.
+   *
+   * Manda só o ID: o servidor recalcula as checagens e usa a frase que ele
+   * mesmo produziu contra o estado ATUAL do Doc. A tela nunca recebeu as frases
+   * (o relatório traz só o verbo do conserto), e por este caminho ela também
+   * não pode pedir a edição de um trecho arbitrário.
+   */
+  async function fixFinding(findingId: string) {
+    setFixingId(findingId);
+    try {
+      const res = await fetch(`/api/templates/${template.id}/doc-edit`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ findingId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Não consegui aplicar a correção.");
+
+      const result = data.results?.[0];
+      if (result?.status !== "applied") {
+        // Recusa não é erro de sistema: é o documento dizendo que o trecho
+        // ficou ambíguo ou não está mais lá.
+        toast.warning(SKIP_REASON[result?.reason] ?? "A correção não pôde ser aplicada.");
+      } else {
+        toast.success("Correção aplicada no documento.");
+      }
+
+      // A rota já revalidou; usa o resultado dela em vez de pedir de novo.
+      if (data.validation) {
+        setValidation(data.validation);
+        setReport((prev) => ({
+          ...(prev ?? {}),
+          ...(Array.isArray(data.validation.slots) ? { slots: data.validation.slots } : {}),
+          ...(data.validation.pii ? { pii: data.validation.pii } : {}),
+          ...(data.validation.semantic ? { semantic: data.validation.semantic } : {}),
+        }));
+      } else {
+        await revalidate();
+      }
+      await refreshDocText();
+      setIframeKey((k) => k + 1);
+      // A prévia descreve o Doc ANTES desta edição: descartar é
+      // obrigatório. Prévia velha é pior que prévia nenhuma — ela
+      // parece confirmação de um estado que não existe mais.
+      setPreviaHtml(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Falha ao aplicar a correção");
+    } finally {
+      setFixingId(null);
     }
   }
 
@@ -369,6 +510,10 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
       window.getSelection?.()?.removeAllRanges();
       await Promise.all([revalidate(), refreshDocText()]);
       setIframeKey((k) => k + 1);
+      // A prévia descreve o Doc ANTES desta edição: descartar é
+      // obrigatório. Prévia velha é pior que prévia nenhuma — ela
+      // parece confirmação de um estado que não existe mais.
+      setPreviaHtml(null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha ao mapear");
     } finally {
@@ -602,13 +747,95 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_360px]">
-        <div className="min-h-[64vh] overflow-hidden rounded-lg border">
-          <iframe
-            key={iframeKey}
-            src={template.embedLink}
-            className="h-full min-h-[64vh] w-full"
-            title="Modelo da imobiliária"
-          />
+        <div className="space-y-2">
+          {/* Duas visões do MESMO modelo: o documento com as chaves, e como o
+              contrato sai. A segunda é a que faltava — o operador via o
+              relatório e as chaves, e decidia sem nunca ver o resultado. */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Button
+              size="sm"
+              variant={aba === "documento" ? "default" : "outline"}
+              className="h-7 text-xs"
+              onClick={() => setAba("documento")}
+            >
+              Documento
+            </Button>
+            {temPrevia && (
+              <Button
+                size="sm"
+                variant={aba === "previa" ? "default" : "outline"}
+                className="h-7 text-xs"
+                onClick={() => {
+                  setAba("previa");
+                  if (!previaHtml) void gerarPrevia();
+                }}
+              >
+                Prévia com dados de exemplo
+              </Button>
+            )}
+            <a
+              href={`https://docs.google.com/document/d/${template.docId}/edit`}
+              target="_blank"
+              rel="noreferrer"
+              className="ml-auto text-xs font-medium underline text-muted-foreground hover:text-foreground"
+            >
+              Abrir no Google Docs
+            </a>
+          </div>
+
+          {aba === "documento" ? (
+            <div className="min-h-[64vh] overflow-hidden rounded-lg border">
+              <iframe
+                key={iframeKey}
+                src={template.embedLink}
+                className="h-full min-h-[64vh] w-full"
+                title="Modelo da imobiliária"
+              />
+            </div>
+          ) : (
+            <div className="min-h-[64vh] overflow-hidden rounded-lg border">
+              {previaErro ? (
+                <div className="space-y-2 p-4 text-sm">
+                  <p className="font-medium text-destructive">Não consegui gerar a prévia</p>
+                  <p className="text-muted-foreground">{previaErro}</p>
+                  <Button size="sm" variant="outline" onClick={() => void gerarPrevia()}>
+                    Tentar de novo
+                  </Button>
+                </div>
+              ) : previaHtml ? (
+                <iframe
+                  // `sandbox` vazio: o HTML vem do export do Google e é exibido
+                  // como documento, sem script nem navegação.
+                  sandbox=""
+                  srcDoc={previaHtml}
+                  className="h-full min-h-[64vh] w-full bg-white"
+                  title="Prévia do contrato com dados de exemplo"
+                />
+              ) : (
+                <div className="flex min-h-[64vh] flex-col items-center justify-center gap-3 p-6 text-center text-sm text-muted-foreground">
+                  {previaCarregando ? (
+                    <>
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                      <p>
+                        Preenchendo uma cópia do modelo com dados de exemplo… leva alguns
+                        segundos.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p>
+                        Mostra como o contrato sai, com um negócio fictício e os dados de
+                        recebimento da sua imobiliária.
+                      </p>
+                      <Button size="sm" variant="outline" onClick={() => void gerarPrevia()}>
+                        Gerar prévia
+                      </Button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="space-y-4">
@@ -747,7 +974,13 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                   </p>
                 ) : (
                   semanticFindings.map((f) => (
-                    <SemanticFindingRow key={f.id} finding={f} />
+                    <SemanticFindingRow
+                      key={f.id}
+                      finding={f}
+                      onFix={fixFinding}
+                      fixing={fixingId === f.id}
+                      disabled={fixingId !== null || validating}
+                    />
                   ))
                 )}
                 {/* O que a checagem NÃO pôde afirmar é parte do resultado: sem
@@ -945,8 +1178,10 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
         </div>
       </div>
 
-      {/* Mapeamento manual */}
-      {missing.length > 0 && (
+      {/* Mapeamento manual — só em rascunho: modelo ativo não muda de texto
+          debaixo de contrato já gerado (a rota devolve 409, e um painel que
+          convida a uma ação recusada é pior que painel ausente). */}
+      {missing.length > 0 && status !== "active" && (
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-1.5 text-sm">
@@ -993,7 +1228,7 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                   draggable
                   onDragStart={(e) => e.dataTransfer.setData("text/plain", c.token)}
                   onClick={() => mapField(c.token, selText)}
-                  disabled={mapping}
+                  disabled={mapping || fixingId !== null}
                   title={c.description || c.label}
                   className="inline-flex cursor-grab items-center gap-1 rounded-full border border-brand-accent/40 bg-brand-accent/5 px-2.5 py-1 text-[11px] font-medium text-brand-accent hover:bg-brand-accent/10 active:cursor-grabbing disabled:opacity-50"
                 >

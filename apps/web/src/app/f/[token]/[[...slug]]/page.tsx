@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db/prisma";
-import { resolveFormRequiredFields } from "@/lib/forms/required-snapshot";
+import { resolveFormRequiredConfig } from "@/lib/forms/required-snapshot";
 import { canAccessForm, viewerIsOrgMember } from "@/lib/forms/form-gate";
 import { listGarantiaOptions } from "@/lib/forms/garantia-option-repo";
 import { isLocacaoSchemaType } from "@/lib/forms/validation-locacao";
@@ -35,7 +35,11 @@ export default async function PublicFormPage({
   // Campos obrigatórios por step, resolvidos server-side pelo MÓDULO do form:
   // venda lê o preset da org ao vivo; locação lê o snapshot gravado no próprio
   // formulário (retrocompat — ver lib/forms/required-snapshot.ts).
-  const requiredFieldsByStep = await resolveFormRequiredFields(form);
+  // `moduleConfigured` vem da MESMA leitura: é o que decide se o piso do
+  // wizard (nome da parte, valor do aluguel) ainda vale ou se a configuração da
+  // imobiliária manda sozinha — inclusive para afrouxar.
+  const { byStep: requiredFieldsByStep, moduleConfigured } =
+    await resolveFormRequiredConfig(form);
 
   // Catálogo de garantias da imobiliária — desce daqui porque o formulário é
   // ANÔNIMO (não pode chamar uma API autenticada). Mesmo caminho do
@@ -92,6 +96,7 @@ export default async function PublicFormPage({
         { viewerIsMember }
       )}
       requiredFieldsByStep={requiredFieldsByStep}
+      requiredFloorEnabled={!moduleConfigured}
       garantiaOptions={garantiaOptions}
       prefilled={isPrefilled}
       proposalAttachmentUrl={proposalAttachmentUrl}

@@ -1,0 +1,29 @@
+{
+  "file": "02-RES-SEM-FIANCA.txt",
+  "modalidade": "locacao",
+  "_nota": "Anotado à mão em 03/09/2026. Sem fiador: o contrato não tem cláusula de garantia por fiança.",
+  "expected": [
+    { "token": "locadores_qualificacao", "paragraphIndex": 1 },
+    { "token": "locatarios_qualificacao", "paragraphIndex": 2 },
+    { "token": "imovel_endereco_completo", "paragraphIndex": 3 },
+    { "token": "imovel_matricula", "paragraphIndex": 3 },
+    { "token": "imovel_inscricao_iptu", "paragraphIndex": 3 },
+    { "token": "vigencia_meses", "paragraphIndex": 6 },
+    { "token": "vigencia_inicio", "paragraphIndex": 6 },
+    { "token": "vigencia_fim", "paragraphIndex": 6 },
+    { "token": "aluguel_valor", "paragraphIndex": 7 },
+    { "token": "aluguel_valor_extenso", "paragraphIndex": 7 },
+    { "token": "indice_reajuste_texto", "paragraphIndex": 7 },
+    { "token": "aluguel_dia_vencimento", "paragraphIndex": 8 },
+    { "token": "bloco_administradora", "paragraphIndex": 8 },
+    { "token": "multa_atraso_percent", "paragraphIndex": 9 },
+    { "token": "juros_mensais_atraso", "paragraphIndex": 9 },
+    { "token": "multa_rescisoria_meses", "paragraphIndex": 31 },
+    { "token": "foro_texto", "paragraphIndex": 32 },
+    { "token": "assinaturas", "paragraphIndex": 35 }
+  ],
+  "forbidden": [
+    { "token": "fiador_qualificacao", "paragraphIndex": 1 },
+    { "token": "locadores_qualificacao", "paragraphIndex": 35 }
+  ]
+}

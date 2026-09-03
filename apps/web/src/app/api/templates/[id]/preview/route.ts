@@ -67,6 +67,44 @@ export async function POST(
         { status: 400 }
       );
     }
+
+    // `sample: true` — a prévia PREENCHIDA. Sem ela, o único "preview" de um
+    // modelo google_docs era o próprio Doc com `{{chaves}}` cruas: o operador
+    // via o relatório e o documento com chaves, e nunca via como o contrato
+    // SAI. Foi decidindo no escuro que 16 modelos da Trio foram aprovados com
+    // 10 erros semânticos.
+    if (body?.sample === true) {
+      try {
+        const [{ renderGoogleDocsPreview }, { loadOrgRecebimento }] = await Promise.all([
+          import("@/lib/templates/gdoc-preview"),
+          import("@/lib/contracts/org-recebimento"),
+        ]);
+        const previa = await renderGoogleDocsPreview({
+          templateId: template.id,
+          orgId: org.id,
+          docId: template.googleTemplateDocId,
+          modalidade: template.modalidade ?? "locacao",
+          // Perfil REAL da org: é o que o operador confere na cláusula de
+          // corretagem — se a conta da imobiliária sai certa.
+          orgRecebimento: await loadOrgRecebimento(org.id),
+        });
+        return NextResponse.json({ mode: "google_docs_sample", ...previa });
+      } catch (err) {
+        // Família sem construtor de mapa não é falha de integração: é uma
+        // capacidade que não existe. 422 com a razão, em vez de 502 genérico —
+        // e nunca uma prévia inventada.
+        if (err instanceof Error && err.name === "PreviewFamiliaNaoSuportadaError") {
+          return NextResponse.json(
+            { error: err.message, code: "PREVIEW_FAMILIA_NAO_SUPORTADA" },
+            { status: 422 }
+          );
+        }
+        console.error("[templates/preview] prévia com amostra falhou:", err);
+        const { googleErrorMessage } = await import("@/lib/google/auth-error");
+        return NextResponse.json({ error: googleErrorMessage(err) }, { status: 502 });
+      }
+    }
+
     return NextResponse.json({
       mode: "google_docs",
       docId: template.googleTemplateDocId,

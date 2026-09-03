@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db/prisma";
-import { resolveFormRequiredFields } from "@/lib/forms/required-snapshot";
+import { resolveFormRequiredConfig } from "@/lib/forms/required-snapshot";
 import {
   resolveParticipantToken,
   type ParticipantRole,
@@ -71,7 +71,10 @@ export default async function PublicParticipantFormPage({
   // Required fields vêm do server (preset da org por MÓDULO — locação pelo
   // snapshot do próprio form), mas só os steps visíveis pro role são
   // renderizados: paths fora desses steps são ignorados pelo wizard.
-  const requiredFieldsByStep = await resolveFormRequiredFields(participant.form);
+  // Mesmo par do token principal: o link por parte tem de aplicar a MESMA
+  // configuração, senão o locatário veria uma exigência e a imobiliária outra.
+  const { byStep: requiredFieldsByStep, moduleConfigured } =
+    await resolveFormRequiredConfig(participant.form);
 
   // Catálogo de garantias (link do fiador enxerga a etapa Garantia). Server-side
   // pelo mesmo motivo do form principal: o link é anônimo.
@@ -90,6 +93,7 @@ export default async function PublicParticipantFormPage({
       schemaType={participant.form.schemaType}
       initialData={filtered}
       requiredFieldsByStep={requiredFieldsByStep}
+      requiredFloorEnabled={!moduleConfigured}
       garantiaOptions={garantiaOptions}
       stepIndexes={Array.from(scope.stepIndexes)}
       pathScope={Array.from(scope.paths)}

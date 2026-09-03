@@ -4,6 +4,49 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-03 - Revisar um rascunho sem saber a URL
+
+### Corrigido
+
+- **A lista de modelos passa a linkar a tela de revisão.** Ela só era alcançável de dentro do fluxo de ingestão — o diálogo de upload e a tela do lote —, e os dois são transitórios: fechado o lote, um rascunho só era revisável por quem soubesse o endereço. O card oferecia "Preview" e "Editar", e "Editar" leva ao editor de Handlebars, não à revisão. Como é na revisão que moram a validação, os problemas apontados, a prévia preenchida e o botão de ativar, o autoatendimento inteiro ficava atrás de uma porta sem maçaneta — medido: o dono tentou revisar os 16 rascunhos da RE/MAX Trio em produção e não chegou à tela, e os 16 seguem sem nenhuma revalidação no banco.
+
+## [Unreleased] - 2026-09-03 - A prévia mostra o contrato pronto, não as chaves
+
+### Adicionado
+
+- **Prévia com dados de exemplo para modelos Google Docs.** Até aqui, "prévia" de um modelo desse tipo era o próprio Doc-modelo: o operador via o relatório de validação e um documento cheio de `{{chaves}}`, e nunca via **como o contrato sai**. Foi decidindo assim que os 16 modelos da RE/MAX Trio foram aprovados com 10 erros semânticos — nenhum deles passaria por quem tivesse visto a cláusula preenchida. A tela de revisão ganha as abas Documento / Prévia: a prévia copia o Doc, preenche com um negócio fictício, exporta e **descarta a cópia** (um documento com cara de contrato sobrando no Drive da imobiliária é pior que uma prévia que falhou). Cache por revisão do Doc, e invalidada a cada edição — prévia velha parece confirmação de um estado que não existe mais.
+- Link **"Abrir no Google Docs"** na revisão do modelo.
+
+### Interno
+
+- A montagem do mapa de substituição da locação — incluindo as três chaves de repasse (corretagem, via da imobiliária e rateio do 1º aluguel) que dependem de dados que o formulário não guarda — saiu de dentro da geração de contrato para um módulo compartilhado. Geração e prévia passam a usar **a mesma** montagem: uma prévia que diverge da geração é pior que prévia nenhuma, porque o operador aprova o modelo confiando nela.
+
+## [Unreleased] - 2026-09-03 - Corrigir o modelo de dentro do app
+
+### Adicionado
+
+- **Botão de correção em cada problema apontado na revisão do modelo.** As checagens semânticas já diziam o que estava errado; agora consertam: trocar a chave da parte errada, remover o dado do titular que ficou ao lado da chave e restaurar a cláusula que uma chave engoliu. Antes, a única edição possível pelo app era "trecho literal → chave" — os outros três consertos exigiam abrir o Google Docs e editar à mão, que é como os 16 modelos da RE/MAX Trio foram corrigidos.
+- A tela manda só o identificador do problema; o servidor recalcula as checagens e usa a frase que ele mesmo produziu contra o estado atual do documento. Trecho de contrato não trafega para o navegador, e por esse caminho o cliente não pode pedir a edição de uma frase arbitrária.
+
+### Corrigido
+
+- **O mapeamento manual de chave declarava sucesso sem conferir.** A rota enviava a substituição ao Google e respondia "ok" sem ler a resposta da API nem reler o documento — o mesmo defeito que o passe de IA teve até 02/09, quando 11 de 12 modelos declaravam chave "inserida" que não estava no Doc. Agora confere a resposta, relê o documento, gera linha de auditoria e revalida.
+- Modelo **ativo** passa a recusar edição (409): contrato já gerado não pode ter o texto do modelo mudando debaixo. Voltar a rascunho é decisão consciente, não efeito colateral de um conserto.
+
+## [Unreleased] - 2026-09-03 - Chave do rateio do primeiro aluguel
+
+### Adicionado
+
+- **`{{rateio_primeiro_aluguel}}`** — a cláusula que divide o primeiro aluguel entre a imobiliária e os corretores que captaram passa a ter chave própria, cobrindo a LISTA inteira (um item por beneficiário, com valor em R$ e por extenso, qualificação e via de pagamento) e nunca o cabeçalho que a introduz. Antes não havia chave: cada item ficava com uma chave de corretagem, que imprime a lista inteira de beneficiários — com dois corretores, o mesmo bloco saía repetido em todos os itens, e era isso que impedia a ativação dos modelos.
+- **`comissao.angariadores[].valor_primeiro_aluguel`** (aditivo): quanto de cada corretor sai do primeiro aluguel. Ausente = usa a comissão do mês 1. A parte da imobiliária é a taxa de locação menos a soma dessas partes — os corretores recebem de dentro da taxa —, nunca negativa. O valor aparece no resumo do negócio ao lado da mensalidade do angariador.
+
+## [Unreleased] - 2026-09-03 - Bateria de avaliação do passe de chaves
+
+### Interno
+
+- **O passe de inserção de chaves foi separado em propor / planejar / aplicar**, sem mudança de comportamento no caminho de produção: as três funções compõem a mesma operação e devolvem o mesmo relatório. O planejador — onde mora a segurança do replace global — ficou puro e passa a ser testável sem modelo e sem Google Docs, o que antes exigia mocar as duas pontas ao mesmo tempo. `commitInsertion` passou a recusar plano montado contra outro documento.
+- **Nova bateria de avaliação** (`scripts/ai-bench/placeholders/`) mede precisão e recall do passe por índice de parágrafo contra gabaritos anotados à mão, com `--replay` para remedir a custo zero quando só o planejador muda. Referência contra Sonnet, em 2 contratos: precisão 90,9%, recall 81,1%, 0 colocações proibidas. Existe porque a ausência desse número deixou 10 dos 16 modelos da Trio passarem na validação sintática e chegarem errados na revisão.
+
 ## [Unreleased] - 2026-09-03 - Certidões: token da Infosimples inválido não vira "negativa"
 
 ### Corrigido

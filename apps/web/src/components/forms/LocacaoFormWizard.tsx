@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -10,6 +10,8 @@ import { useDirtyTopLevelScope } from "@/hooks/use-dirty-scope";
 import {
   LOCACAO_COMERCIAL_SCHEMA_TYPE,
   stepLabelsForLocacaoType,
+  locacaoHardBlockPaths,
+  collectLocacaoHardBlockIssues,
 } from "@/lib/forms/validation-locacao";
 import { PrivacyConsent } from "@/components/legal/PrivacyConsent";
 import { RequiredFieldMarker } from "@/components/forms/RequiredFieldMarker";
@@ -55,6 +57,19 @@ interface LocacaoFormWizardProps {
    * (lib/forms/required-snapshot.ts). Ausente/vazio = só o piso histórico.
    */
   requiredFieldsByStep?: readonly (readonly string[])[];
+  /**
+   * O piso histórico de obrigatoriedade (nome da parte, valor do aluguel) ainda
+   * vale? `true` (default) = comportamento de sempre. O servidor manda `false`
+   * quando a imobiliária CONFIGUROU a obrigatoriedade de locação
+   * (`resolveFormRequiredConfig().moduleConfigured`): aí o preset dela manda
+   * sozinho, inclusive para afrouxar.
+   *
+   * Sem isto, a configuração só era respeitada para ENDURECER — os campos do
+   * piso continuavam obrigatórios mesmo desmarcados, e não havia tela nenhuma
+   * capaz de desligá-los. O piso nunca foi garantia real (é client-side): quem
+   * garante no servidor é `assertLocacaoFinalizable`, no finalize sob o lock.
+   */
+  requiredFloorEnabled?: boolean;
   /**
    * Catálogo de garantias da org (tipo × garantidor), resolvido no SERVIDOR
    * pela page do formulário — como o `requiredFieldsByStep`. O form é anônimo,
@@ -168,6 +183,7 @@ export function LocacaoFormWizard({
   initialData,
   schemaType,
   requiredFieldsByStep,
+  requiredFloorEnabled = true,
   garantiaOptions,
   stepIndexes,
   endpoint: endpointProp,
@@ -248,6 +264,38 @@ export function LocacaoFormWizard({
     (path) => getByPath(watchedData, path),
   );
 
+  // Asterisco dos campos que o SERVIDOR exige para CONCLUIR, independentemente
+  // do preset: identidade de cada parte e valor do aluguel
+  // (`assertLocacaoFinalizable`), mais o nome do fiador (`missingFiadorName`).
+  // Nenhuma configuração desliga isso, então o asterisco acende SEMPRE — também
+  // quando o piso de navegação cedeu à configuração da org.
+  //
+  // A divisão é essa: a imobiliária configura o que barra para AVANÇAR; o que
+  // barra para CONCLUIR é do servidor e não é configurável.
+  //
+  // Antes esses campos tinham `required` cravado no step, e a marcação não
+  // acompanhava nem o preset nem o piso. Pior: os presets `essencial` e
+  // `completo` declaram só o path guarda-chuva (`locadores`), que o
+  // `useRequiredField` trata como se cobrisse `nome` — asterisco aceso — mas
+  // que `effectiveRequiredPaths` satisfaz com qualquer array não-vazio — gate
+  // passando. Marcar daqui fecha essa divergência.
+  const hardBlockPaths = useMemo(() => {
+    const out = locacaoHardBlockPaths(
+      (watchedData ?? {}) as Record<string, unknown>,
+    );
+    const garantia = watchedData?.garantia as
+      | { tipo?: string; fiador?: { tipo_pessoa?: string } }
+      | undefined;
+    if (garantia?.tipo === "fiador") {
+      out.push(
+        garantia.fiador?.tipo_pessoa === "juridica"
+          ? "garantia.fiador.razao_social"
+          : "garantia.fiador.nome",
+      );
+    }
+    return out;
+  }, [watchedData]);
+
   // "Pedir para esta pessoa preencher" — papel da etapa atual (índice REAL).
   // Só na visão do token principal (subtoken já É a visão da parte).
   const currentTrueIdx = visibleStepIndexes[currentStep] ?? currentStep;
@@ -304,8 +352,11 @@ export function LocacaoFormWizard({
   // schema completo de 7 etapas).
   //
   // Duas camadas, nesta ordem:
-  //   1. PISO histórico (PARTY_STEP/STEP_REQUIRED) — vale sempre, mesmo em org
-  //      sem preset configurado. É o que locação já exigia antes.
+  //   1. PISO histórico (PARTY_STEP/STEP_REQUIRED) — vale para org que NÃO
+  //      configurou a obrigatoriedade de locação (`requiredFloorEnabled`). É o
+  //      que locação já exigia antes de existir configuração; org que
+  //      configurou manda sozinha, inclusive pra afrouxar. A garantia dura de
+  //      nome/valor no finalize é do servidor (`assertLocacaoFinalizable`).
   //   2. Preset da org (`requiredFieldsByStep`) — obrigatoriedade configurável,
   //      remapeada por tipo_pessoa como em venda (PJ não tem CPF/estado civil;
   //      e-mail/celular vão pro representante legal).
@@ -315,7 +366,7 @@ export function LocacaoFormWizard({
 
     // (1) Piso: steps de partes exigem nome (PF) ou razão social (PJ) de CADA
     // parte.
-    const partyStep = PARTY_STEP[step];
+    const partyStep = requiredFloorEnabled ? PARTY_STEP[step] : undefined;
     if (partyStep) {
       const parties =
         (form.getValues(partyStep.list as never) as unknown as Array<Record<string, unknown>>) ??
@@ -339,7 +390,9 @@ export function LocacaoFormWizard({
         }
       }
     } else {
-      const required = STEP_REQUIRED[step] ?? [];
+      // Mesma condição do ramo de partes: com o piso desligado, `aluguel.valor`
+      // deixa de ser exigido aqui e passa a valer só se a org o configurar.
+      const required = requiredFloorEnabled ? (STEP_REQUIRED[step] ?? []) : [];
       const missingPiso: string[] = [];
       for (const path of required) {
         // Regra de vazio ÚNICA (party-required): este piso tinha uma cópia
@@ -441,6 +494,40 @@ export function LocacaoFormWizard({
       setCurrentStep(TOTAL - 1);
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
+    }
+    // Piso DURO do servidor, exercido aqui antes do PATCH. O gate de navegação
+    // cede à configuração da imobiliária, mas `assertLocacaoFinalizable` não —
+    // sem esta checagem o cliente percorreria as 7 etapas e levaria um 422 seco
+    // no fim, num campo que nenhuma etapa acusou. Mesma função do servidor, para
+    // as duas respostas não poderem divergir.
+    //
+    // Só no token principal: o link por parte não finaliza o formulário (marca
+    // o `completedAt` da parte) e enxerga só um pedaço dos dados — cobrar dele
+    // o nome do locador seria pendência num campo que a tela nem renderiza.
+    if (finalizeMode === "main") {
+      const hardIssues = collectLocacaoHardBlockIssues(
+        form.getValues() as Record<string, unknown>,
+      );
+      if (hardIssues.length > 0) {
+        for (const issue of hardIssues) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          form.setError(issue.path as any, {
+            type: "required",
+            message: "Campo obrigatório",
+          });
+        }
+        // Leva à etapa do primeiro pendente, senão o erro fica numa aba que o
+        // usuário não está vendo e o scroll do marcador não acha nada.
+        const first = hardIssues[0].path.split(".")[0];
+        const stepAlvo = first === "locadores" ? 1 : first === "locatarios" ? 2 : 4;
+        const visivel = visibleStepIndexes.indexOf(stepAlvo);
+        if (visivel >= 0) setCurrentStep(visivel);
+        setFailedTriggerCount((n) => n + 1);
+        toast.error(
+          `Preencha: ${describeMissingPaths(hardIssues.map((i) => i.path))}`,
+        );
+        return;
+      }
     }
     setIsSubmitting(true);
     try {
@@ -692,7 +779,10 @@ export function LocacaoFormWizard({
           </div>
         )}
 
-      <RequiredFieldsProvider paths={allRequiredPaths}>
+      <RequiredFieldsProvider
+        paths={allRequiredPaths}
+        floorPaths={hardBlockPaths}
+      >
         <fieldset disabled={readOnly} className="m-0 border-0 p-0 min-w-0 disabled:opacity-70">
           {steps[visibleStepIndexes[currentStep] ?? currentStep]}
         </fieldset>

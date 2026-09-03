@@ -54,12 +54,10 @@ import {
   RECEBIMENTO_SELECT,
   recebimentoFromRecipient,
 } from "@/lib/forms/commissioner-receiving";
-import {
-  corretagemDadosPagamento,
-  corretoresDe,
-  type RegistroCorretor,
-} from "@/lib/templates/corretagem";
-import { imobiliariaDadosPagamento } from "@/lib/templates/imobiliaria";
+// A montagem do mapa (com as três chaves de repasse) saiu daqui para
+// `gdoc-replacement-map.ts`; este arquivo só carrega os DADOS e passa.
+import type { RegistroCorretor } from "@/lib/templates/corretagem";
+import { buildLocacaoGoogleDocsMap } from "@/lib/templates/gdoc-replacement-map";
 import {
   GoogleDocsGenerationError,
   googleDocsFailureMessage,
@@ -1529,29 +1527,28 @@ export async function generateLocacaoContractForDeal(
         });
         created = { docId: copy.docId, webViewLink: copy.webViewLink };
 
-        const map = buildLocacaoPlaceholderMap(enrichedData);
-        // Slots resolvidos acima — `{{slot_garantia}}` no Doc do modelo vira a
-        // cláusula do acervo (ou o fallback canônico). Doc sem o token não casa
-        // nada no replaceAllText, então isto é inócuo pros modelos antigos.
-        Object.assign(map, slotValues);
-        // Repasse da corretagem: a única chave que o mapa não produz sozinho,
-        // porque o dado bancário foi retirado do dataJson antes do enrich, de
-        // propósito. Resolve aqui (formulário primeiro, cadastro depois),
-        // escreve no Doc do CONTRATO e não volta para o dataJson — o modelo
-        // guarda o token; a conta de alguém, nunca.
-        map["corretagem_dados_pagamento"] =
-          corretoresDe(rawDataJson).length > 0
-            ? corretagemDadosPagamento(rawDataJson, await carregarRegistroCorretores(orgId))
-            : "";
-        // Idem para a PRÓPRIA imobiliária: a via de recebimento da comissão vem
-        // do cadastro da org (Perfil da imobiliária), vai para o Doc e não
-        // para o dataJson. Nunca lança — sem cadastro, a chave sai vazia.
-        map["imobiliaria_dados_pagamento"] = imobiliariaDadosPagamento(
-          await loadOrgRecebimento(orgId)
-        );
-        map["contrato_numero"] = numeroContrato;
-        map["contrato_id"] = contract.id;
-        map["contrato_versao"] = String(contract.version);
+        // O mapa mora em `gdoc-replacement-map.ts` — a MESMA montagem que a
+        // prévia com dados de exemplo usa. As três chaves de repasse dependem
+        // de dados que o dataJson enriquecido não tem de propósito (o bancário
+        // do corretor sai antes do enrich; a via da imobiliária vem do Perfil),
+        // e enquanto a montagem vivia aqui inline qualquer outro consumidor
+        // reproduzia uma parte e divergia na outra.
+        const [registroCorretores, orgRecebimento] = await Promise.all([
+          carregarRegistroCorretores(orgId),
+          loadOrgRecebimento(orgId),
+        ]);
+        const map = buildLocacaoGoogleDocsMap({
+          enriched: enrichedData,
+          rawDataJson,
+          slotValues,
+          registro: registroCorretores,
+          orgRecebimento,
+          contrato: {
+            numero: numeroContrato,
+            id: contract.id,
+            versao: String(contract.version),
+          },
+        });
         // Sem replace, o contrato sai com `{{tokens}}` crus — deixa propagar.
         const replaced = await replacePlaceholdersInDoc({ docId: copy.docId, replacements: map });
         const orphansRemoved = await cleanupOrphanPlaceholders(copy.docId);

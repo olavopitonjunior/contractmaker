@@ -916,9 +916,15 @@ function buildLocacaoConsolidatedSummary(
       .filter(Boolean)
       .join(" · ");
     const fatia = quanto ? `${quanto}${duracao}` : "";
+    // Parte do 1º aluguel: é o que a cláusula de rateio imprime no contrato
+    // (`{{rateio_primeiro_aluguel}}`), e sai do valor que cabe à imobiliária —
+    // quem confere o resumo precisa ver esse recorte, não só a mensalidade.
+    const primeiro = Number(a.valor_primeiro_aluguel);
+    const doPrimeiro =
+      Number.isFinite(primeiro) && primeiro > 0 ? `${brl(primeiro)} do 1º aluguel` : "";
     comissaoRows.push({
       label: `Angariador — ${nome}`,
-      value: [fatia, qualificacao].filter(Boolean).join(" — ") || "—",
+      value: [fatia, doPrimeiro, qualificacao].filter(Boolean).join(" — ") || "—",
     });
   }
   if (comissaoRows.length > 0) sections.push({ title: "Comissão", rows: comissaoRows });

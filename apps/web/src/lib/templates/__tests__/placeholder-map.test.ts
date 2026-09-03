@@ -452,6 +452,28 @@ describe("buildLocacaoPlaceholderMap — corretagem", () => {
     );
   });
 
+  it("o rateio do 1º aluguel sai do mapa com valores e nomes, mas sem via de pagamento", async () => {
+    const { stripCommissionerReceiving } = await import("@/lib/forms/redact-datajson");
+    const dados = comCorretor() as Record<string, unknown>;
+    const comissao = dados.comissao as Record<string, unknown>;
+    comissao.forma_taxa_locacao = "valor_fixo";
+    comissao.taxa_locacao_valor = 3000;
+    (comissao.angariadores as Record<string, unknown>[])[0].valor_primeiro_aluguel = 1000;
+
+    const map = buildLocacaoPlaceholderMap(
+      enrichLocacaoData(stripCommissionerReceiving(dados))
+    );
+    // `moeda` emite NBSP depois de "R$" (padrão pt-BR do Intl).
+    const rateio = map.rateio_primeiro_aluguel.replace(/\u00a0/g, " ");
+    // Diferente de `corretagem_dados_pagamento`, a lista NÃO sai vazia: valor e
+    // beneficiário já são afirmações verdadeiras sem o dado bancário. A via é o
+    // único pedaço que o call site acrescenta.
+    expect(rateio).toContain("R$ 2.000,00");
+    expect(rateio).toContain("R$ 1.000,00");
+    expect(rateio).toContain("Ana Ribeiro");
+    expect(rateio).not.toContain("por meio");
+  });
+
   it("o caminho do mapa NUNCA produz repasse: o bancário sai antes do enrich", async () => {
     const { stripCommissionerReceiving } = await import("@/lib/forms/redact-datajson");
     // Controle que sabe falhar: com o dado bruto, a chave sairia preenchida.
