@@ -1,5 +1,4 @@
 import { auth, getUserOrg } from "@/lib/auth/auth";
-import { isOrgOwnerAdmin } from "@/lib/auth/org-role";
 import { prisma } from "@/lib/db/prisma";
 import { knowledgeScopeWhere } from "@/lib/ai/knowledge-scope";
 import { findPlatformSlotUpdates } from "@/lib/knowledge/platform-slot-updates";
@@ -88,9 +87,6 @@ export default async function ClausesPage() {
       clauses={clauses}
       platformUpdates={platformUpdates}
       locacaoEnabled={locacaoEnabled}
-      // A revisão da biblioteca é owner/admin; sem isto, o membro comum veria
-      // um botão que só sabe levar a 404.
-      podeRevisar={await isOrgOwnerAdmin(session.user.id, org.id)}
     />
   );
 }
