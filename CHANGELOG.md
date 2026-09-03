@@ -4,6 +4,18 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-03 - Corrigir o modelo de dentro do app
+
+### Adicionado
+
+- **Botão de correção em cada problema apontado na revisão do modelo.** As checagens semânticas já diziam o que estava errado; agora consertam: trocar a chave da parte errada, remover o dado do titular que ficou ao lado da chave e restaurar a cláusula que uma chave engoliu. Antes, a única edição possível pelo app era "trecho literal → chave" — os outros três consertos exigiam abrir o Google Docs e editar à mão, que é como os 16 modelos da RE/MAX Trio foram corrigidos.
+- A tela manda só o identificador do problema; o servidor recalcula as checagens e usa a frase que ele mesmo produziu contra o estado atual do documento. Trecho de contrato não trafega para o navegador, e por esse caminho o cliente não pode pedir a edição de uma frase arbitrária.
+
+### Corrigido
+
+- **O mapeamento manual de chave declarava sucesso sem conferir.** A rota enviava a substituição ao Google e respondia "ok" sem ler a resposta da API nem reler o documento — o mesmo defeito que o passe de IA teve até 02/09, quando 11 de 12 modelos declaravam chave "inserida" que não estava no Doc. Agora confere a resposta, relê o documento, gera linha de auditoria e revalida.
+- Modelo **ativo** passa a recusar edição (409): contrato já gerado não pode ter o texto do modelo mudando debaixo. Voltar a rascunho é decisão consciente, não efeito colateral de um conserto.
+
 ## [Unreleased] - 2026-09-03 - Chave do rateio do primeiro aluguel
 
 ### Adicionado

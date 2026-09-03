@@ -1,5 +1,8 @@
 import { batchUpdateDoc, getDocStructure } from "./docs";
 import type { docs_v1 } from "googleapis";
+// Os utilitários de índice moram em `doc-index.ts` desde que ganharam um
+// segundo caso (restaurar parágrafo engolido por uma chave).
+import { charToDocsIndex, collectTextSegments } from "./doc-index";
 
 /**
  * Expande blocos `[[REPEAT:fieldName]]...[[/REPEAT]]` no doc para N iterações
@@ -127,41 +130,6 @@ function findFirstRepeatBlock(doc: docs_v1.Schema$Document): RepeatBlock | null 
   }
 
   return { fieldName, startIndex, endIndex, innerText };
-}
-
-interface TextSegment {
-  text: string;
-  docsStartIndex: number; // índice absoluto da Docs API onde esse segmento começa
-}
-
-function collectTextSegments(doc: docs_v1.Schema$Document): TextSegment[] {
-  const out: TextSegment[] = [];
-  for (const block of doc.body?.content || []) {
-    const para = block.paragraph;
-    if (!para) continue;
-    for (const el of para.elements || []) {
-      const tr = el.textRun;
-      if (!tr || !tr.content) continue;
-      if (el.startIndex === undefined || el.startIndex === null) continue;
-      out.push({ text: tr.content, docsStartIndex: el.startIndex });
-    }
-  }
-  return out;
-}
-
-function charToDocsIndex(segments: TextSegment[], charIdx: number): number {
-  let acc = 0;
-  for (const seg of segments) {
-    const len = seg.text.length;
-    if (charIdx <= acc + len) {
-      const offset = charIdx - acc;
-      return seg.docsStartIndex + offset;
-    }
-    acc += len;
-  }
-  // Se char idx ultrapassa o texto coletado, retorna o final do último segmento
-  const last = segments[segments.length - 1];
-  return last ? last.docsStartIndex + last.text.length : 1;
 }
 
 /**

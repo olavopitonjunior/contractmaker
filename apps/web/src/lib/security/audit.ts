@@ -98,6 +98,13 @@ export type AuditAction =
   | "ORG_BRANDING_UPDATED"
   // Operador ativou modelo com dado pessoal literal no texto (`allowPii`).
   | "TEMPLATE_ACTIVATE_WITH_PII"
+  // Edição cirúrgica no Doc-modelo feita pelo app (trocar chave, remover sobra
+  // do titular, restaurar parágrafo engolido). O Doc é a fonte do texto
+  // contratual e o histórico de versões do Drive não diz QUEM pediu a edição
+  // nem por quê — sem esta linha, uma cláusula alterada não tem autor.
+  | "TEMPLATE_DOC_EDIT"
+  // Trecho literal trocado por chave de preenchimento (painel de mapeamento).
+  | "TEMPLATE_FIELD_MAPPED"
   | "ORG_FEES_UPDATED"
   // iList/RexAPI (integração RE/MAX) — provisioning super-admin + sync + import
   | "ILIST_CONNECTION_UPDATED"

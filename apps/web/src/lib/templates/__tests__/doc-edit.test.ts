@@ -1,0 +1,304 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+/**
+ * O aplicador de edições é o único caminho pelo qual o app escreve num
+ * Doc-modelo fora do passe de IA. Como `replaceAllText` troca TODAS as
+ * ocorrências, cada caso aqui existe para provar uma recusa: o que NÃO é
+ * enviado importa mais do que o que é.
+ */
+const getDocPlainTextMock = vi.fn();
+const getDocStructureMock = vi.fn();
+const batchUpdateDocMock = vi.fn();
+vi.mock("@/lib/google/docs", () => ({
+  getDocPlainText: (...a: unknown[]) => getDocPlainTextMock(...a),
+  getDocStructure: (...a: unknown[]) => getDocStructureMock(...a),
+  batchUpdateDoc: (...a: unknown[]) => batchUpdateDocMock(...a),
+}));
+
+import { applyDocEdits, type DocEditOp } from "../doc-edit";
+
+/** Doc simulado: um `textRun` por parágrafo, com índices como a API devolve. */
+function fakeDoc(paragrafos: string[]) {
+  let index = 1;
+  return {
+    body: {
+      content: paragrafos.map((p) => {
+        const texto = `${p}\n`;
+        const el = { startIndex: index, endIndex: index + texto.length, textRun: { content: texto } };
+        index += texto.length;
+        return { paragraph: { elements: [el] } };
+      }),
+    },
+  };
+}
+
+/** Resposta do batch com N replies de 1 ocorrência trocada. */
+const replies = (n: number, changed = 1) => ({
+  data: { replies: Array.from({ length: n }, () => ({ replaceAllText: { occurrencesChanged: changed } })) },
+});
+
+const run = (ops: DocEditOp[], modalidade = "locacao") =>
+  applyDocEdits({ docId: "doc1", modalidade, ops });
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  batchUpdateDocMock.mockResolvedValue(replies(1));
+});
+
+describe("rekey — trocar a chave da parte errada", () => {
+  const frase =
+    "a) pago à imobiliária intermediadora {{corretagem_qualificacao}}, como honorários;";
+
+  it("troca a chave preservando o resto da frase", async () => {
+    getDocPlainTextMock
+      .mockResolvedValueOnce(frase)
+      .mockResolvedValueOnce(frase.replace("corretagem_qualificacao", "imobiliaria_qualificacao"));
+
+    const out = await run([
+      {
+        op: "rekey",
+        phrase: frase,
+        fromToken: "corretagem_qualificacao",
+        toToken: "imobiliaria_qualificacao",
+      },
+    ]);
+
+    expect(out.results[0]).toMatchObject({ op: "rekey", status: "applied" });
+    const req = batchUpdateDocMock.mock.calls[0][1][0].replaceAllText;
+    expect(req.containsText.text).toBe(frase);
+    expect(req.replaceText).toContain("{{imobiliaria_qualificacao}}");
+    expect(req.replaceText).toContain("como honorários");
+  });
+
+  it("frase sem a chave de origem é recusada ANTES de escrever", async () => {
+    getDocPlainTextMock.mockResolvedValue("a) pago à imobiliária intermediadora Trio Ltda;");
+    const out = await run([
+      {
+        op: "rekey",
+        phrase: "a) pago à imobiliária intermediadora Trio Ltda;",
+        fromToken: "corretagem_qualificacao",
+        toToken: "imobiliaria_qualificacao",
+      },
+    ]);
+    expect(out.results[0]).toMatchObject({ status: "skipped", reason: "token-missing-in-phrase" });
+    expect(batchUpdateDocMock).not.toHaveBeenCalled();
+  });
+
+  it("chave de destino fora do catálogo da modalidade é recusada", async () => {
+    getDocPlainTextMock.mockResolvedValue(frase);
+    const out = await run(
+      [
+        {
+          op: "rekey",
+          phrase: frase,
+          fromToken: "corretagem_qualificacao",
+          toToken: "imobiliaria_qualificacao",
+        },
+      ],
+      "a_vista" // venda não tem `imobiliaria_*`
+    );
+    expect(out.results[0]).toMatchObject({ status: "skipped", reason: "unknown-token" });
+    expect(batchUpdateDocMock).not.toHaveBeenCalled();
+  });
+
+  it("mesma chave de origem e destino não vira edição", async () => {
+    getDocPlainTextMock.mockResolvedValue(frase);
+    const out = await run([
+      {
+        op: "rekey",
+        phrase: frase,
+        fromToken: "corretagem_qualificacao",
+        toToken: "corretagem_qualificacao",
+      },
+    ]);
+    expect(out.results[0]).toMatchObject({ status: "skipped", reason: "same-token" });
+  });
+});
+
+describe("remove-leftover — apagar o dado do titular ao lado da chave", () => {
+  const doc = "b) pago a {{corretagem_qualificacao}}, CRECI 12345-F, conforme ajustado.";
+
+  it("remove a frase e confere a ausência dela", async () => {
+    getDocPlainTextMock
+      .mockResolvedValueOnce(doc)
+      .mockResolvedValueOnce(doc.replace(", CRECI 12345-F", ""));
+    const out = await run([{ op: "remove-leftover", phrase: ", CRECI 12345-F" }]);
+    expect(out.results[0]).toMatchObject({ status: "applied" });
+    expect(batchUpdateDocMock.mock.calls[0][1][0].replaceAllText.replaceText).toBe("");
+  });
+
+  it("frase que carrega chave é recusada — removê-la apagaria o campo", async () => {
+    getDocPlainTextMock.mockResolvedValue(doc);
+    const out = await run([
+      { op: "remove-leftover", phrase: "{{corretagem_qualificacao}}, CRECI 12345-F" },
+    ]);
+    expect(out.results[0]).toMatchObject({ status: "skipped", reason: "phrase-has-token" });
+    expect(batchUpdateDocMock).not.toHaveBeenCalled();
+  });
+
+  it("trecho ambíguo não é enviado", async () => {
+    getDocPlainTextMock.mockResolvedValue("CRECI 12345-F\noutra linha\nCRECI 12345-F");
+    const out = await run([{ op: "remove-leftover", phrase: "CRECI 12345-F" }]);
+    expect(out.results[0]).toMatchObject({ status: "skipped", reason: "ambiguous" });
+    expect(batchUpdateDocMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("map-field — trecho literal vira chave", () => {
+  it("aplica e confere", async () => {
+    getDocPlainTextMock
+      .mockResolvedValueOnce("LOCADOR: João da Silva, brasileiro.")
+      .mockResolvedValueOnce("LOCADOR: {{locadores_qualificacao}}.");
+    const out = await run([
+      { op: "map-field", phrase: "João da Silva, brasileiro", token: "locadores_qualificacao" },
+    ]);
+    expect(out.results[0]).toMatchObject({ status: "applied" });
+  });
+
+  it("trecho que já tem chave é recusado", async () => {
+    getDocPlainTextMock.mockResolvedValue("já tem {{aluguel_valor}} aqui");
+    const out = await run([
+      { op: "map-field", phrase: "já tem {{aluguel_valor}} aqui", token: "aluguel_valor" },
+    ]);
+    expect(out.results[0]).toMatchObject({ status: "skipped", reason: "phrase-has-token" });
+  });
+});
+
+describe("restore-paragraph — devolver a cláusula que a chave engoliu", () => {
+  const colapsado = "{{imobiliaria_qualificacao}}";
+  const original = [
+    "a) R$ 2.500,00, a ser pago diretamente à imobiliária intermediadora Trio Ltda;",
+    "b) R$ 1.500,00, a ser pago diretamente ao(à) corretor(a) Ana Ribeiro.",
+  ].join("\n");
+
+  it("apaga o intervalo e insere o texto, em batch SEPARADO e com a estrutura relida", async () => {
+    const antes = ["4.1.1. O pagamento será rateado assim:", colapsado, "4.1.2. Retido no repasse."];
+    getDocPlainTextMock
+      .mockResolvedValueOnce(antes.join("\n"))
+      .mockResolvedValueOnce([antes[0], original, antes[2]].join("\n"));
+    getDocStructureMock.mockResolvedValue(fakeDoc(antes));
+
+    const out = await run([{ op: "restore-paragraph", current: colapsado, source: original }]);
+
+    expect(out.results[0]).toMatchObject({ op: "restore-paragraph", status: "applied" });
+    // Nenhum request de texto: a restauração é estrutural.
+    expect(batchUpdateDocMock).toHaveBeenCalledTimes(1);
+    const reqs = batchUpdateDocMock.mock.calls[0][1];
+    expect(reqs[0].deleteContentRange.range).toEqual({
+      startIndex: 1 + antes[0].length + 1,
+      endIndex: 1 + antes[0].length + 1 + colapsado.length,
+    });
+    expect(reqs[1].insertText.text).toBe(original);
+    // A estrutura é lida DEPOIS do texto, não reaproveitada de antes.
+    expect(getDocStructureMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("parágrafo repetido no documento não é restaurado", async () => {
+    const antes = ["abre:", colapsado, "meio", colapsado];
+    getDocPlainTextMock.mockResolvedValue(antes.join("\n"));
+    const out = await run([{ op: "restore-paragraph", current: colapsado, source: original }]);
+    expect(out.results[0]).toMatchObject({ status: "skipped", reason: "ambiguous" });
+    expect(getDocStructureMock).not.toHaveBeenCalled();
+  });
+
+  it("estrutura sem o parágrafo falha em vez de apagar o intervalo errado", async () => {
+    getDocPlainTextMock.mockResolvedValue(["abre:", colapsado].join("\n"));
+    getDocStructureMock.mockResolvedValue(fakeDoc(["abre:", "outra coisa"]));
+    const out = await run([{ op: "restore-paragraph", current: colapsado, source: original }]);
+    expect(out.results[0]).toMatchObject({ status: "failed", reason: "structure-not-found" });
+    expect(batchUpdateDocMock).not.toHaveBeenCalled();
+  });
+
+  it("fonte vazia não vira edição", async () => {
+    getDocPlainTextMock.mockResolvedValue(colapsado);
+    const out = await run([{ op: "restore-paragraph", current: colapsado, source: "   " }]);
+    expect(out.results[0]).toMatchObject({ status: "skipped", reason: "empty-source" });
+  });
+});
+
+describe("o documento é quem decide", () => {
+  it("lote recusado pelo Google: nada é declarado aplicado", async () => {
+    getDocPlainTextMock.mockResolvedValue("b) pago a X, CRECI 12345-F.");
+    batchUpdateDocMock.mockRejectedValue(new Error("500"));
+    const out = await run([{ op: "remove-leftover", phrase: ", CRECI 12345-F" }]);
+    expect(out.results[0]).toMatchObject({ status: "failed", reason: "batch-failed" });
+  });
+
+  it("API diz que trocou 0 vezes: falha, não sucesso", async () => {
+    getDocPlainTextMock.mockResolvedValue("b) pago a X, CRECI 12345-F.");
+    batchUpdateDocMock.mockResolvedValue(replies(1, 0));
+    const out = await run([{ op: "remove-leftover", phrase: ", CRECI 12345-F" }]);
+    expect(out.results[0]).toMatchObject({ status: "failed", reason: "replace-noop" });
+  });
+
+  it("API diz que trocou em mais de um lugar: falha (cabeçalho/rodapé)", async () => {
+    getDocPlainTextMock.mockResolvedValue("b) pago a X, CRECI 12345-F.");
+    batchUpdateDocMock.mockResolvedValue(replies(1, 2));
+    const out = await run([{ op: "remove-leftover", phrase: ", CRECI 12345-F" }]);
+    expect(out.results[0]).toMatchObject({ status: "failed", reason: "over-matched" });
+  });
+
+  it("releitura indisponível NUNCA vira 'deu certo'", async () => {
+    getDocPlainTextMock
+      .mockResolvedValueOnce("b) pago a X, CRECI 12345-F.")
+      .mockRejectedValueOnce(new Error("Drive fora"));
+    const out = await run([{ op: "remove-leftover", phrase: ", CRECI 12345-F" }]);
+    expect(out.results[0]).toMatchObject({ status: "failed", reason: "verify-unavailable" });
+    expect(out.finalText).toBeNull();
+  });
+
+  it("releitura mostra o trecho ainda lá: verify-failed", async () => {
+    const doc = "b) pago a X, CRECI 12345-F.";
+    getDocPlainTextMock.mockResolvedValueOnce(doc).mockResolvedValueOnce(doc);
+    const out = await run([{ op: "remove-leftover", phrase: ", CRECI 12345-F" }]);
+    expect(out.results[0]).toMatchObject({ status: "failed", reason: "verify-failed" });
+  });
+
+  it("documento ilegível: nada é tentado", async () => {
+    getDocPlainTextMock.mockRejectedValue(new Error("invalid_grant"));
+    const out = await run([{ op: "remove-leftover", phrase: "x" }]);
+    expect(out.results[0]).toMatchObject({ status: "failed", reason: "verify-unavailable" });
+    expect(batchUpdateDocMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("várias edições numa chamada", () => {
+  it("a unicidade da segunda é contada no texto SIMULADO, não no original", async () => {
+    // Depois de trocar a chave do 1º item, o texto muda — a 2ª edição tem que
+    // ser avaliada contra o resultado, senão duas trocas sobrepostas passam e a
+    // segunda casa zero no Docs.
+    const doc = "a) {{corretagem_qualificacao}} aqui;\nb) outra coisa, CRECI 12345-F.";
+    getDocPlainTextMock
+      .mockResolvedValueOnce(doc)
+      .mockResolvedValueOnce(
+        "a) {{imobiliaria_qualificacao}} aqui;\nb) outra coisa."
+      );
+    batchUpdateDocMock.mockResolvedValue(replies(2));
+
+    const out = await run([
+      {
+        op: "rekey",
+        phrase: "a) {{corretagem_qualificacao}} aqui;",
+        fromToken: "corretagem_qualificacao",
+        toToken: "imobiliaria_qualificacao",
+      },
+      { op: "remove-leftover", phrase: ", CRECI 12345-F" },
+    ]);
+
+    expect(out.results.map((r) => r.status)).toEqual(["applied", "applied"]);
+    expect(batchUpdateDocMock.mock.calls[0][1]).toHaveLength(2);
+  });
+
+  it("uma edição recusada não impede as outras", async () => {
+    const doc = "a) {{corretagem_qualificacao}} aqui;\nb) X, CRECI 12345-F.";
+    getDocPlainTextMock
+      .mockResolvedValueOnce(doc)
+      .mockResolvedValueOnce("a) {{corretagem_qualificacao}} aqui;\nb) X.");
+    const out = await run([
+      { op: "map-field", phrase: "trecho que não existe", token: "aluguel_valor" },
+      { op: "remove-leftover", phrase: ", CRECI 12345-F" },
+    ]);
+    expect(out.results[0]).toMatchObject({ status: "skipped", reason: "not-found" });
+    expect(out.results[1]).toMatchObject({ status: "applied" });
+  });
+});
