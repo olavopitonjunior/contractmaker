@@ -44,6 +44,12 @@ function TabLoading() {
 
 // Code splitting: abas não-iniciais saem do chunk da página (o custo é
 // bundle/parse — o Radix Tabs já desmonta o conteúdo inativo). Sem `ssr: false`.
+// Certidões (Infosimples) — mesma aba da venda, com as partes da locação.
+// Só entra quando a feature `locacao.certidoes` está ligada na org.
+const CertidoesTab = dynamic(
+  () => import("@/components/pipeline/CertidoesTab").then((m) => m.CertidoesTab),
+  { loading: () => <TabLoading /> }
+);
 const ContractEditorPage = dynamic(
   () =>
     import("@/components/contracts/ContractEditorPage").then(
@@ -162,6 +168,8 @@ interface LocacaoDealDetailProps {
   simplified?: boolean;
   /** Pesquisas de satisfação habilitadas (feature locacao.pesquisas, default OFF). */
   surveysEnabled?: boolean;
+  /** Feature `locacao.certidoes` (default OFF): mostra a aba Certidões. */
+  certidoesEnabled?: boolean;
   /** Padrão contratual de LOCAÇÃO da org — piso da aba Configurações do editor
    *  (vale pro contrato de locação E pro de administração). */
   orgDefaults?: LocacaoSettings;
@@ -211,6 +219,7 @@ export function LocacaoDealDetail({
   lease,
   simplified = false,
   surveysEnabled = false,
+  certidoesEnabled = false,
   orgDefaults,
 }: LocacaoDealDetailProps) {
   const router = useRouter();
@@ -231,6 +240,7 @@ export function LocacaoDealDetail({
     // Deep-link ?tab=pesquisas (paridade com vendas) — só quando a feature
     // está ligada, senão cai no default.
     ...(surveysEnabled ? ["pesquisas"] : []),
+    ...(certidoesEnabled ? ["certidoes"] : []),
   ];
   const [tab, setTab] = useState(
     tabParam && VALID_TABS.includes(tabParam) ? tabParam : "dados"
@@ -418,6 +428,7 @@ export function LocacaoDealDetail({
           <TabsTrigger value="contrato">Contrato</TabsTrigger>
           <TabsTrigger value="administracao">Administração</TabsTrigger>
           <TabsTrigger value="documentos">Documentos</TabsTrigger>
+          {certidoesEnabled && <TabsTrigger value="certidoes">Certidões</TabsTrigger>}
           <TabsTrigger value="assinaturas">Assinaturas</TabsTrigger>
           {/* Garantias/Vistoria/Seguros fazem parte da jornada comercial do deal
               (a superfície ADM está suprimida nesta fase) — sempre visíveis. */}
@@ -495,6 +506,36 @@ export function LocacaoDealDetail({
             garantia={garantia}
           />
         </TabsContent>
+
+        {/* CERTIDÕES — motor Infosimples com as partes da locação (2026-09-03).
+            `imovel` é singular no dataJson e entra como imoveis[0]. */}
+        {certidoesEnabled && (
+          <TabsContent value="certidoes" className="mt-4">
+            <CertidoesTab
+              dealId={deal.id}
+              esteira="locacao"
+              vendedores={[]}
+              compradores={[]}
+              locadores={locadores}
+              locatarios={locatarios}
+              fiador={
+                garantia?.tipo === "fiador" && garantia.fiador
+                  ? (garantia.fiador as {
+                      nome?: string;
+                      razao_social?: string;
+                      tipo_pessoa?: string;
+                      conjuge?: { nome?: string; cpf?: string };
+                    })
+                  : null
+              }
+              imoveis={
+                deal.dataJson.imovel
+                  ? [deal.dataJson.imovel as { rua?: string; numero?: string; cidade?: string }]
+                  : []
+              }
+            />
+          </TabsContent>
+        )}
 
         {/* ASSINATURAS — envia o contrato aprovado pra ClickSign (igual venda) */}
         <TabsContent value="assinaturas" className="mt-4">
