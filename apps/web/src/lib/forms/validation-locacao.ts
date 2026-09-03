@@ -360,10 +360,11 @@ export const angariadorLocacaoSchema = z.object({
    * (`percentual`/`valor_fixo` × `meses_comissao`) responde "quanto por mês",
    * não "quanto do primeiro aluguel vai direto para quem captou".
    *
-   * Ausente = usa a comissão do mês 1 como valor (é o caso comum, e é o que a
-   * UI pré-preenche). A parte da imobiliária é a taxa de locação MENOS a soma
-   * destes valores — os corretores recebem de DENTRO da taxa, como na cláusula
-   * real em que a soma dos itens fecha um aluguel inteiro.
+   * Ausente = usa a comissão do mês 1 como valor (é o caso comum, e é o que o
+   * campo anuncia como padrão). A parte da imobiliária é a taxa de locação
+   * MENOS a soma destes valores: os corretores recebem de DENTRO da taxa —
+   * regra decidida pelo dono do produto em 03/09/2026, e é o que a cláusula
+   * real reflete, com a soma dos itens fechando um aluguel inteiro.
    */
   valor_primeiro_aluguel: z.number().min(0).optional(),
 });

@@ -195,9 +195,16 @@ export function aplicarPadraoComissao<T extends ComissaoSeedInput>(
  *
  * É a conta da cláusula que a Trio escreve como uma lista — "a) R$ X à
  * imobiliária intermediadora; b) R$ Y ao corretor; c) R$ Z ao corretor" — e
- * cuja soma, nos contratos reais, fecha um aluguel inteiro. Por isso os
- * corretores recebem de DENTRO da taxa de locação, não além dela: a parte da
- * imobiliária é a taxa MENOS a soma das partes dos corretores.
+ * cuja soma, nos contratos reais, fecha um aluguel inteiro.
+ *
+ * REGRA DECIDIDA pelo dono do produto em 03/09/2026: os corretores recebem de
+ * DENTRO da taxa de locação, não além dela — a parte da imobiliária é a taxa
+ * MENOS a soma das partes dos corretores. Com aluguel de R$ 5.000, taxa de um
+ * aluguel e corretores levando R$ 1.500 + R$ 1.000, a lista soma R$ 5.000 (um
+ * aluguel) e a imobiliária fica com R$ 2.500 — não R$ 5.000 com a lista somando
+ * R$ 7.500. Se algum dia existir imobiliária que cobre "além da taxa", isso é
+ * um booleano novo no schema da comissão; o texto da cláusula não muda, só a
+ * conta.
  *
  * A parte de cada corretor é `valor_primeiro_aluguel` quando informada; sem
  * ela, a comissão do mês 1 (que é o que o campo mostra como padrão). Nunca
