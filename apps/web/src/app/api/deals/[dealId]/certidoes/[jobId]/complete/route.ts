@@ -10,6 +10,7 @@ import { endpointInfo } from "@/lib/certidoes/endpoints";
 import { sanitizePayload } from "@/lib/certidoes/infosimples";
 import { z } from "zod";
 import { guardDealScope } from "@/lib/deals/route-helpers";
+import { esteiraForDealKind } from "@/lib/certidoes/target-paths";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
@@ -139,7 +140,12 @@ export async function POST(
     merged as any,
     session.user.email ?? undefined,
     diligenciados,
-    { expandAll: true, govBrActive: govbr.active, onrActive: onr.active }
+    {
+      expandAll: true,
+      govBrActive: govbr.active,
+      onrActive: onr.active,
+      esteira: esteiraForDealKind(jobDeal.kind),
+    }
   );
   const newPlanned = plan.jobs.find(
     (p) =>

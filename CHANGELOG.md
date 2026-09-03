@@ -4,6 +4,25 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-03 - Motor de certidões preparado para a locação (sem tela ainda)
+
+### Adicionado
+
+- **O planejador de certidões entende o negócio de locação**: locatários, fiador (quando a garantia é fiança), cônjuge do fiador e locadores viram alvos, e o imóvel único da locação entra como o imóvel do plano. Locatário, fiador e cônjuge ficam na camada padrão e herdam a região do imóvel; locador fica como opcional; a pesquisa de bens passa a valer para fiador e cônjuge. Nada aparece na tela ainda: a aba Certidões do negócio de locação chega no próximo passo, atrás da sub-função **"Certidões — locação"** (desligada por padrão no painel super-admin).
+- As rotas de certidões de um negócio passam a exigir a sub-função do módulo certo (Vendas para venda, Locação para locação); a rota que monta o plano não tinha gate nenhum.
+
+### Corrigido
+
+- **"Corrigir dados" de uma certidão de locação apontava para o campo errado** (`fiadores.0`, `locatarioes.0`): os caminhos agora seguem o formulário (`garantia.fiador`, `locatarios.0`, `imovel`).
+- **O PDF de certidão de locatário ou fiador caía na pasta "Outros"** dos documentos do negócio; agora vai para a pasta da pessoa.
+- **Teto mensal de certidões mostrado de forma diferente em cada tela.** O executor bloqueava em R$ 200, a API do dashboard dizia R$ 50.000 e a documentação R$ 50; e cada tela contava o gasto do mês de um jeito (só negócios, ou só consultas avulsas). Agora há um único valor e uma única contagem (negócios da imobiliária + consultas de cliente/avulsas), e dois disparos simultâneos não passam mais os dois pelo teto.
+- As certidões da ficha do cliente de locação (CNDT/PGFN) não olhavam o teto mensal antes de disparar; agora recusam com o mesmo aviso do negócio.
+- As categorias "Cadastro" (CPF/CNPJ) e "FGTS" apareciam no catálogo mas nunca viravam filtro no seletor de certidões extras.
+
+### Notas
+
+- Documentação de certidões corrigida: 16 estados (não 12), cron a cada 5 minutos (não diário) e teto padrão de R$ 200.
+
 ## [Unreleased] - 2026-09-02 - Locador, locatário, fiador e cônjuge do fiador assinam com a qualificação certa
 
 ### Alterado

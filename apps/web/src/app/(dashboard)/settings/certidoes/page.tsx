@@ -42,11 +42,13 @@ export default async function CertidoesSettingsPage() {
   const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const last30 = new Date(now.getTime() - 30 * 24 * 60 * 60_000);
 
-  // All jobs from deals that belong to this org (via the deal's form.orgId).
+  // Jobs da org: de deal (via form.orgId) E sem deal (ad-hoc/LeaseClient,
+  // orgId direto) — a mesma contagem que bloqueia o disparo
+  // (lib/certidoes/budget.ts); antes só os de deal entravam aqui.
   const recent = await prisma.certidaoJob.findMany({
     where: {
       createdAt: { gte: last30 },
-      deal: { form: { orgId: org.id } },
+      OR: [{ deal: { form: { orgId: org.id } } }, { orgId: org.id }],
     },
     orderBy: { createdAt: "desc" },
     take: 500,
@@ -486,12 +488,18 @@ export default async function CertidoesSettingsPage() {
               {recentErrors.map((err) => (
                 <li key={err.id} className="text-xs border rounded p-2">
                   <div className="flex justify-between gap-2 mb-1">
-                    <Link
-                      href={`/deals/${err.dealId}`}
-                      className="font-medium truncate hover:underline"
-                    >
-                      {err.label}
-                    </Link>
+                    {/* Job sem deal (ad-hoc / cliente de locação) entra na lista
+                        desde que a contagem passou a incluir jobs por orgId. */}
+                    {err.dealId ? (
+                      <Link
+                        href={`/deals/${err.dealId}`}
+                        className="font-medium truncate hover:underline"
+                      >
+                        {err.label}
+                      </Link>
+                    ) : (
+                      <span className="font-medium truncate">{err.label}</span>
+                    )}
                     <span className="text-muted-foreground shrink-0">
                       {new Date(err.createdAt).toLocaleString("pt-BR")}
                     </span>

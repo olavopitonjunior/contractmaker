@@ -56,6 +56,7 @@ export const FEATURE = {
   LOCACAO_INGESTAO_ACERVO: "locacao.ingestao_acervo",
   LOCACAO_REVISAO_CONTRATO: "locacao.revisao_contrato",
   LOCACAO_REVISAO_PROPOSTA: "locacao.revisao_proposta",
+  LOCACAO_CERTIDOES: "locacao.certidoes",
 } as const;
 
 export type FeatureKey = (typeof FEATURE)[keyof typeof FEATURE];
@@ -158,6 +159,11 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
         label: "Revisão pós-envio de proposta — locação",
         default: true,
       },
+      // Certidões Infosimples no negócio de locação (locatário, fiador,
+      // cônjuge do fiador; locador e imóvel opt-in). Default OFF (2026-09-02):
+      // cada pessoa gera ~6-10 consultas pagas; entra tenant a tenant pelo
+      // painel super-admin, como a Pagadoria.
+      { key: FEATURE.LOCACAO_CERTIDOES, label: "Certidões — locação", default: false },
     ],
   },
 ] as const;
@@ -226,6 +232,16 @@ export function newtonFeatureForDealKind(kind: string): FeatureKey {
  */
 export function maxFeatureForDealKind(kind: string): FeatureKey {
   return kind === "locacao" ? FEATURE.LOCACAO_MAX : FEATURE.VENDAS_MAX;
+}
+
+/**
+ * Feature de Certidões por kind. Vendas: ON por padrão desde sempre. Locação:
+ * OFF por padrão (2026-09-02) — as rotas de certidão de um deal escolhem a
+ * chave pelo `Deal.kind`, para um tenant só-locação poder ter certidões sem
+ * ganhar o módulo Vendas.
+ */
+export function certidoesFeatureForKind(kind: string): FeatureKey {
+  return kind === "locacao" ? FEATURE.LOCACAO_CERTIDOES : FEATURE.VENDAS_CERTIDOES;
 }
 
 /** Feature de Propostas por kind. Default ON nos dois desde 2026-07-24 (graduou do

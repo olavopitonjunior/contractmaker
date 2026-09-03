@@ -7,6 +7,9 @@ import type { ExtractionPlan } from "@/lib/certidoes/types";
 import { checkGovBrAuth } from "@/lib/certidoes/govbr-auth";
 import { checkOnrAuth } from "@/lib/certidoes/onr-auth";
 import { guardDealScope } from "@/lib/deals/route-helpers";
+import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
+import { certidoesFeatureForKind } from "@/lib/modules/catalog";
+import { esteiraForDealKind } from "@/lib/certidoes/target-paths";
 import {
   listAllForPicker,
   listCoveredUfs,
@@ -53,6 +56,13 @@ export async function GET(
   if (deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  // Mesmo gate do POST /certidoes (esta rota não tinha nenhum): a feature do
+  // módulo do negócio — `vendas.certidoes` ou `locacao.certidoes`.
+  const modulesView = await getOrgModules(org.id);
+  if (!isFeatureEnabled(modulesView, certidoesFeatureForKind(deal.kind))) {
+    return NextResponse.json({ error: "MODULE_DISABLED" }, { status: 403 });
+  }
+  const esteira = esteiraForDealKind(deal.kind);
 
   // Escopo do gerente (GET — plano de extração; sem permission).
   const denied = await guardDealScope({
@@ -110,6 +120,7 @@ export async function GET(
       govBrActive: govbr.active,
       onrActive: onr.active,
       extraRegions,
+      esteira,
     })
   );
   const spend = await getMonthlySpend(org.id);
@@ -126,6 +137,7 @@ export async function GET(
       govBrActive: govbr.active,
       onrActive: onr.active,
       extraRegions,
+      esteira,
     })
   );
   const catalog = listAllForPicker();

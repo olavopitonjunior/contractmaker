@@ -65,20 +65,55 @@ export async function POST(
     (deal.dataJson as Record<string, unknown> | null) ||
     {};
 
+  const isLocacao = deal.kind === "locacao";
   const vendedores = ((dealData as any).vendedores as any[]) ?? [];
   const compradores = ((dealData as any).compradores as any[]) ?? [];
-  const imoveis = ((dealData as any).imoveis as any[]) ?? [];
+  const locatarios = ((dealData as any).locatarios as any[]) ?? [];
+  const locadores = ((dealData as any).locadores as any[]) ?? [];
+  // Mesma regra do planner (collectTargets): fiador só quando a garantia É fiança.
+  const fiador =
+    (dealData as any).garantia?.tipo === "fiador"
+      ? ((dealData as any).garantia?.fiador as any | undefined)
+      : undefined;
+  // Locação tem UM imóvel (objeto); a chave de agrupamento continua `imovel-0`.
+  const imoveis: any[] = isLocacao
+    ? (dealData as any).imovel
+      ? [(dealData as any).imovel]
+      : []
+    : (((dealData as any).imoveis as any[]) ?? []);
 
-  const partes = [
-    ...vendedores.map((v: any, i: number) => ({
-      key: `vendedor-${i}`,
-      label: `Vendedor: ${v.nome || v.razao_social || `Parte ${i + 1}`}`,
-    })),
-    ...compradores.map((c: any, i: number) => ({
-      key: `comprador-${i}`,
-      label: `Comprador: ${c.nome || c.razao_social || `Parte ${i + 1}`}`,
-    })),
-  ];
+  const nomeDe = (p: any, i: number) => p?.nome || p?.razao_social || `Parte ${i + 1}`;
+  // Chave de agrupamento = `${targetKind}-${targetIndex}` (ver buildReportData).
+  const keyOf = (kind: string, i: number) => `${kind}-${i}`;
+  const partes = isLocacao
+    ? [
+        ...locatarios.map((p: any, i: number) => ({
+          key: keyOf("locatario", i),
+          label: `Locatário: ${nomeDe(p, i)}`,
+        })),
+        ...(fiador
+          ? [
+              { key: keyOf("fiador", 0), label: `Fiador: ${nomeDe(fiador, 0)}` },
+              ...(fiador.conjuge?.nome
+                ? [{ key: keyOf("conjuge_fiador", 0), label: `Cônjuge do fiador: ${fiador.conjuge.nome}` }]
+                : []),
+            ]
+          : []),
+        ...locadores.map((p: any, i: number) => ({
+          key: keyOf("locador", i),
+          label: `Locador: ${nomeDe(p, i)}`,
+        })),
+      ]
+    : [
+        ...vendedores.map((v: any, i: number) => ({
+          key: `vendedor-${i}`,
+          label: `Vendedor: ${nomeDe(v, i)}`,
+        })),
+        ...compradores.map((c: any, i: number) => ({
+          key: `comprador-${i}`,
+          label: `Comprador: ${nomeDe(c, i)}`,
+        })),
+      ];
   const imoveisList = imoveis.map((im: any, i: number) => {
     const parts: string[] = [];
     if (im.rua) parts.push(im.rua);
