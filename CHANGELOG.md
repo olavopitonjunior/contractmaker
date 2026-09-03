@@ -4,6 +4,12 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-03 - Revisar um rascunho sem saber a URL
+
+### Corrigido
+
+- **A lista de modelos passa a linkar a tela de revisão.** Ela só era alcançável de dentro do fluxo de ingestão — o diálogo de upload e a tela do lote —, e os dois são transitórios: fechado o lote, um rascunho só era revisável por quem soubesse o endereço. O card oferecia "Preview" e "Editar", e "Editar" leva ao editor de Handlebars, não à revisão. Como é na revisão que moram a validação, os problemas apontados, a prévia preenchida e o botão de ativar, o autoatendimento inteiro ficava atrás de uma porta sem maçaneta — medido: o dono tentou revisar os 16 rascunhos da RE/MAX Trio em produção e não chegou à tela, e os 16 seguem sem nenhuma revalidação no banco.
+
 ## [Unreleased] - 2026-09-03 - A prévia mostra o contrato pronto, não as chaves
 
 ### Adicionado
