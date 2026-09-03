@@ -1,6 +1,6 @@
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
-import { PenLine, KeyRound, Library } from "lucide-react";
+import { PenLine, KeyRound, Library, ClipboardCheck } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
@@ -144,7 +144,20 @@ export default async function TemplatesPage({
       <PageHeader
         title="Templates de Contrato"
         description="Cada tipo de contrato tem um modelo padrão — é ele que gera o documento."
-      />
+      >
+        {/*
+          No cabeçalho, e não na barra de ações da aba "Modelos": a conferência
+          da biblioteca é a pergunta que se faz ANTES de escolher uma aba, e
+          enterrá-la numa delas foi exatamente como o botão "Revisar" de cada
+          modelo passou despercebido.
+        */}
+        <Button size="sm" variant="outline" asChild>
+          <Link href="/templates/revisao">
+            <ClipboardCheck className="mr-1.5 h-4 w-4" />
+            Revisar biblioteca
+          </Link>
+        </Button>
+      </PageHeader>
 
       {openRun && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-violet-300 bg-violet-50/50 p-3 text-sm dark:border-violet-900 dark:bg-violet-950/20">
