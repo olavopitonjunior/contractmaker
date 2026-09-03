@@ -121,6 +121,26 @@ const MESSAGE_HEURISTICS: Array<{
  * discriminar, cairia em `account_issue` → tripava o circuit-breaker de crédito
  * (isOrgInfosimplesBlocked) e bloqueava toda a org por 30min. Gate por mensagem.
  */
+/**
+ * 2026-09-03 — Token da Infosimples inválido/ausente chega como code 601
+ * "Não foi possível se autenticar com o token informado." — o MESMO 601 que
+ * o e-proc usa para "não encontrado" (genuine_no_data no CODE_MAP). Sem
+ * discriminar pela mensagem, o normalizer marcava situacao "negativa" e o
+ * classifier agendava retry como "portal fora do ar" (staging 03/09: 4/4 jobs
+ * assim, token_name null). É problema de CONTA (account_issue): falha
+ * terminal, sem retry, sem custo, ação do admin. Gate ANTES do CODE_MAP.
+ */
+export function isTokenAuthFailure(message: string | null | undefined): boolean {
+  if (!message) return false;
+  // Exige contexto de AUTENTICAÇÃO da conta ("se autenticar", "com o token",
+  // "token informado"). "token inválido/expirado" solto NÃO casa de propósito:
+  // os `obter_detalhes` do ieptb/protestos também são "tokens" (sub-chamadas
+  // do executor) e um vencido apontaria o operador para INFOSIMPLES_TOKEN.
+  return /autenticar\s+com\s+o\s+token|token\s+informado\s+(é\s+|est[áa]\s+)?(inv[aá]lido|expirad|n[ãa]o\s+(autorizado|encontrado|configurado))/i.test(
+    message
+  );
+}
+
 export function isEmailThrottle(message: string | null | undefined): boolean {
   if (!message) return false;
   return /mesmo\s+email\s+m[uú]ltiplas\s+vezes|tente\s+novamente\s+com\s+outro\s+email/i.test(
@@ -278,6 +298,9 @@ export function mapInfosimplesCodeToCategory(
   if (code === 200) return "unknown"; // shouldn't be called for success
   // 604 do throttle de e-mail (e-SAJ pedido-certidao) é transitório, não conta.
   if (code === 604 && isEmailThrottle(codeMessage)) return "rate_limited";
+  // Token inválido pela MENSAGEM, antes do CODE_MAP: o 601 é ambíguo (auth
+  // aqui, "não encontrado" no e-proc). Ver isTokenAuthFailure.
+  if (isTokenAuthFailure(codeMessage)) return "account_issue";
   // Indisponibilidade de portal pela MENSAGEM, antes do CODE_MAP: pega o 609
   // "tentativas excedidas" (e similares) que o catálogo mapeia como dado, mas
   // que é transitório e deve dar retry. Ver isPortalUnavailableMessage.

@@ -30,6 +30,7 @@ import {
   isEmailThrottle,
   isReceitaCertidaoNaoEmitida,
   isPortalUnavailableMessage,
+  isTokenAuthFailure,
   friendlySourceUnavailableMessage,
   terminalizeRetryMessage,
 } from "./error-codes";
@@ -368,7 +369,9 @@ export function classifyOutcome(
       // Saldo / token — failed_permanent mas sem portalUrl (admin action)
       return {
         status: "failed_permanent",
-        errorMessage: effectiveErrorMessage || "Problema na conta do provedor",
+        errorMessage: isTokenAuthFailure(effectiveErrorMessage)
+          ? "Token da Infosimples inválido ou não configurado (INFOSIMPLES_TOKEN) — a consulta não rodou e nada foi cobrado. Ação do administrador."
+          : effectiveErrorMessage || "Problema na conta do provedor",
         failureCategory: category,
         costCents: 0,
         nextRetryAt: null,

@@ -1421,7 +1421,11 @@ export async function pollPortalJob(jobId: string): Promise<void> {
     //  - demais 6xx → "ainda processando": reagenda até o prazo do portal
     //    (maxPortalWaitMs), depois falha + problema.
     if (resp.code !== 200) {
-      const category = mapInfosimplesCodeToCategory(resp.code, resp.code_message);
+      // Paridade com normalize(): a razão específica pode vir só em errors[]
+      // (I.10) — inclusive o 601 de token (isTokenAuthFailure). Texto combinado.
+      const obterMessage =
+        [resp.code_message, ...(resp.errors ?? [])].filter(Boolean).join(" ") || null;
+      const category = mapInfosimplesCodeToCategory(resp.code, obterMessage);
       const obterCost = resp.header?.billable === false ? 0 : obterInfo.costCents;
       const costAcc = (job.costCents ?? 0) + obterCost;
       const ageMs = startedAt.getTime() - job.createdAt.getTime();

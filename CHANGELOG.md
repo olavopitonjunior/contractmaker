@@ -4,6 +4,12 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-03 - Certidões: token da Infosimples inválido não vira "negativa"
+
+### Corrigido
+
+- **Código 601 "Não foi possível se autenticar com o token informado" passa a ser tratado como problema de conta** (falha terminal, sem retry, sem custo, mensagem apontando `INFOSIMPLES_TOKEN`). Antes o 601 caía no mapa fixo como "nenhum registro": o normalizer gravava situação **negativa** e o classificador agendava retries como "portal fora do ar" — um falso "nada consta" para uma consulta que nunca rodou (visto na staging em 03/09, 4/4 jobs). O 601 "não encontrado" do e-proc continua fechando como negativa legítima: a distinção é pela mensagem.
+
 ## [Unreleased] - 2026-09-03 - Trocar o tipo de garantia limpa a modalidade anterior
 
 ### Corrigido
