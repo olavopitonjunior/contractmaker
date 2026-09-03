@@ -310,6 +310,13 @@ interface DealDataLike {
   // Phase K — modalidade da transação influencia quais certidões extras
   // disparam (ex: antecedentes criminais obrigatórios em financiamento).
   modalidade?: "a_vista" | "financiamento" | string;
+  // Locação (2026-09-02) — shape do formulário de locação, lido só quando
+  // `PlannerOptions.esteira === "locacao"`: partes em `locatarios`/`locadores`,
+  // fiador em `garantia.fiador` (objeto, sem índice) e UM `imovel` singular.
+  locadores?: Parte[];
+  locatarios?: Parte[];
+  imovel?: Imovel;
+  garantia?: { tipo?: string; fiador?: Parte };
 }
 
 // -------------------------------------------------------------------
@@ -510,8 +517,18 @@ function diligenciadoToParte(d: DiligentedPersonInput): Parte {
 }
 
 /** Dependente tem documento útil (CPF) ou ao menos um nome p/ diligenciar. */
-function hasIdentity(d: Dependente | undefined): d is Dependente {
-  return !!d && !!((d.cpf && d.cpf.trim()) || (d.nome && d.nome.trim()));
+function hasIdentity<T extends { cpf?: string; nome?: string; cnpj?: string; razao_social?: string }>(
+  d: T | undefined
+): d is T {
+  return (
+    !!d &&
+    !!(
+      (d.cpf && d.cpf.trim()) ||
+      (d.nome && d.nome.trim()) ||
+      (d.cnpj && d.cnpj.trim()) ||
+      (d.razao_social && d.razao_social.trim())
+    )
+  );
 }
 
 /**
@@ -566,6 +583,58 @@ function dependentesDoVendedor(
 }
 
 /**
+ * Alvos (pessoas + imóveis) de um negócio, conforme a esteira.
+ *
+ * Venda (histórico): vendedores + dependentes do vendedor, compradores,
+ * diligenciados; `imoveis[]`.
+ * Locação (2026-09-02): locatários, fiador (só quando a garantia É fiança e
+ * ele tem identidade — `garantia.fiador` é objeto, índice 0 por convenção),
+ * cônjuge do fiador (fiador PF, com identidade; herda UF/cidade do fiador),
+ * locadores (opt-in, tier "opcional"), diligenciados; `imovel` singular vira
+ * lista de 1 para o loop de imóvel não mudar.
+ */
+function collectTargets(
+  data: DealDataLike,
+  diligenciados: DiligentedPersonInput[] | null | undefined,
+  esteira: CertidoesEsteira
+): { pessoas: Array<{ kind: TargetKind; index: number; parte: Parte }>; imoveis: Imovel[] } {
+  const pessoas: Array<{ kind: TargetKind; index: number; parte: Parte }> = [];
+  let imoveis: Imovel[];
+  if (esteira === "locacao") {
+    (data.locatarios ?? []).forEach((p, i) => pessoas.push({ kind: "locatario", index: i, parte: p }));
+    const fiador = data.garantia?.fiador;
+    if (data.garantia?.tipo === "fiador" && fiador && hasIdentity(fiador)) {
+      pessoas.push({ kind: "fiador", index: 0, parte: fiador });
+      if (fiador.tipo_pessoa !== "juridica" && hasIdentity(fiador.conjuge)) {
+        pessoas.push({
+          kind: "conjuge_fiador",
+          index: 0,
+          parte: dependenteToParte(fiador.conjuge, fiador),
+        });
+      }
+    }
+    (data.locadores ?? []).forEach((p, i) => pessoas.push({ kind: "locador", index: i, parte: p }));
+    imoveis = data.imovel ? [data.imovel] : [];
+  } else {
+    (data.vendedores ?? []).forEach((p, i) => {
+      pessoas.push({ kind: "vendedor", index: i, parte: p });
+      // Dependentes do VENDEDOR são sempre diligenciados junto (decisão do
+      // usuário 2026-05-22): cônjuge, procurador e — para vendedor PJ — o
+      // representante PF que assina. Compradores e seus dependentes NÃO entram
+      // por padrão (gerar à toa queima crédito Infosimples).
+      for (const dep of dependentesDoVendedor(p, i)) pessoas.push(dep);
+    });
+    (data.compradores ?? []).forEach((p, i) => pessoas.push({ kind: "comprador", index: i, parte: p }));
+    imoveis = (data.imoveis ?? []) as Imovel[];
+  }
+  // F3: diligenciados are treated like partes for personal certidões
+  (diligenciados ?? []).forEach((d, i) =>
+    pessoas.push({ kind: "diligenciado", index: i, parte: diligenciadoToParte(d) })
+  );
+  return { pessoas, imoveis };
+}
+
+/**
  * F1/F2: options for the planner.
  *   - `expandAll`: when true, generate jobs for endpoints in ALL UFs (not just
  *     the party/imovel's own UF). Used by the POST /certidoes route so the
@@ -594,11 +663,18 @@ export interface PlannerOptions {
    * lado vendedor (certidões regionais disparam também nessas praças).
    */
   extraRegions?: Array<{ uf?: string; cidade?: string }>;
+  /**
+   * Locação (2026-09-02) — escolhe o shape lido do `dataJson` e as camadas por
+   * alvo. Explícito (o caller sabe o `Deal.kind`), nunca inferido do JSON: um
+   * form de venda com `locatarios` vazio não pode virar plano de locação.
+   */
+  esteira?: CertidoesEsteira;
 }
 
 // ---- Redesign 2026-05-26: regiões + camadas (tier) -------------------------
 
 import type { JobTier, JobRegion } from "./types";
+import { basePathForTarget, type CertidoesEsteira } from "./target-paths";
 
 const VENDEDOR_SIDE_KINDS = new Set<TargetKind>([
   "vendedor",
@@ -606,6 +682,23 @@ const VENDEDOR_SIDE_KINDS = new Set<TargetKind>([
   "procurador_vendedor",
   "representante_vendedor",
 ]);
+
+/**
+ * Locação: o "lado analisado" é quem paga e quem garante — locatário, fiador
+ * e cônjuge do fiador (execução da fiança atinge o patrimônio do casal). São
+ * o tier padrão da locação e herdam a região do imóvel como o lado vendedor.
+ */
+const LOCACAO_CREDIT_KINDS = new Set<TargetKind>(["locatario", "fiador", "conjuge_fiador"]);
+
+/** Quem recebe região do imóvel + endereço (não só o próprio endereço). */
+const FULL_REGION_KINDS = new Set<TargetKind>([
+  ...VENDEDOR_SIDE_KINDS,
+  ...LOCACAO_CREDIT_KINDS,
+  "locador",
+]);
+
+/** Quem entra na pesquisa de bens ONR: patrimônio de quem responde pela dívida. */
+const PESQUISA_BENS_KINDS = new Set<TargetKind>([...VENDEDOR_SIDE_KINDS, "fiador", "conjuge_fiador"]);
 
 /** Endpoints FEDERAIS (cobertura nacional) — region = "nacional", não regional. */
 const FEDERAL_ENDPOINTS = new Set<string>([
@@ -632,8 +725,10 @@ const PESQUISA_ENDPOINTS = new Set<string>(["onr/mapa-registro-imoveis"]);
 function tierForJob(kind: TargetKind, endpoint: string): JobTier {
   if (PESQUISA_ENDPOINTS.has(endpoint) || endpoint.startsWith("serasa/")) return "pesquisa";
   if (kind === "imovel") return "imovel"; // IPTU/municipal, matrícula ONR (visualização), CCIR
-  if (VENDEDOR_SIDE_KINDS.has(kind) || kind === "diligenciado") return "padrao";
-  // comprador (opt-in via seção Opcional)
+  if (VENDEDOR_SIDE_KINDS.has(kind) || LOCACAO_CREDIT_KINDS.has(kind) || kind === "diligenciado") {
+    return "padrao";
+  }
+  // comprador e locador (opt-in via seção Opcional)
   return "opcional";
 }
 
@@ -671,7 +766,7 @@ function computeRegionsForPerson(
     seen.add(key);
     out.push(r);
   };
-  if (VENDEDOR_SIDE_KINDS.has(kind)) {
+  if (FULL_REGION_KINDS.has(kind)) {
     for (const im of imoveis) add("imovel", im.uf, im.cidade);
     for (const ex of extraRegions) add("outro", ex.uf, ex.cidade);
     add("endereco", parte.uf, parte.cidade);
@@ -695,26 +790,8 @@ export function planCertidoesForDeal(
   const govBrActive = options?.govBrActive === true;
   const onrActive = options?.onrActive === true;
   const extraRegions = options?.extraRegions ?? [];
-  const imoveis = (data.imoveis ?? []) as Imovel[];
-
-  const pessoas: Array<{ kind: TargetKind; index: number; parte: Parte }> = [];
-  (data.vendedores ?? []).forEach((p, i) => {
-    pessoas.push({ kind: "vendedor", index: i, parte: p });
-    // Dependentes do VENDEDOR são sempre diligenciados junto (decisão do
-    // usuário 2026-05-22): cônjuge, procurador e — para vendedor PJ — o
-    // representante PF que assina. Compradores e seus dependentes NÃO entram
-    // por padrão (gerar à toa queima crédito Infosimples).
-    for (const dep of dependentesDoVendedor(p, i)) {
-      pessoas.push(dep);
-    }
-  });
-  (data.compradores ?? []).forEach((p, i) =>
-    pessoas.push({ kind: "comprador", index: i, parte: p })
-  );
-  // F3: diligenciados are treated like partes for personal certidões
-  (diligenciados ?? []).forEach((d, i) =>
-    pessoas.push({ kind: "diligenciado", index: i, parte: diligenciadoToParte(d) })
-  );
+  const esteira: CertidoesEsteira = options?.esteira ?? "venda";
+  const { pessoas, imoveis } = collectTargets(data, diligenciados, esteira);
 
   // Phase K (2026-04-18) — flag para ativar certidões extras quando a
   // transação é financiamento bancário (Mapeamento 2.1.4: antecedentes PF
@@ -1158,7 +1235,7 @@ export function planCertidoesForDeal(
     // como opção opt-in na seção "Pesquisa adicional", sem inflar o custo padrão.
     // Restrito ao lado vendedor (diligência patrimonial dos vendedores). Quando
     // não há credencial ONR, vira skip explicando como habilitar.
-    if ((cpf || cnpj) && VENDEDOR_SIDE_KINDS.has(kind)) {
+    if ((cpf || cnpj) && PESQUISA_BENS_KINDS.has(kind)) {
       const ep = "onr/mapa-registro-imoveis";
       if (onrActive) {
         jobs.push(
@@ -1183,7 +1260,7 @@ export function planCertidoesForDeal(
   // IPTU/CND municipal (por município coberto), matrícula ONR (two-step) e CCIR
   // (rural). Auto-dispara quando o imóvel tem os identificadores; sem eles emite
   // SkippedJob com missingFields para o fluxo "Completar campos".
-  (data.imoveis ?? []).forEach((imovel, index) => {
+  imoveis.forEach((imovel, index) => {
     const kind: TargetKind = "imovel";
     const imUf = uf(imovel);
     const cidadeNorm = normalizeCidade(imovel.cidade);
@@ -1663,6 +1740,16 @@ export function planCertidoesForDeal(
   jobs.forEach(stampPersonId);
   skipped.forEach(stampPersonId);
 
+  // Locação: o imóvel é singular no dataJson (`imovel`, não `imoveis[N]`).
+  // `buildSkip` não recebe a esteira, então o rebase dos paths de "Corrigir
+  // dados" acontece aqui, uma vez, sobre os skips já montados.
+  if (esteira === "locacao") {
+    for (const s of skipped) {
+      for (const f of s.missingFields) {
+        f.path = f.path.replace(/^imoveis\.\d+(?=\.|$)/, "imovel");
+      }
+    }
+  }
   const totalCostCents = jobs.reduce((acc, j) => acc + j.costCents, 0);
   return { jobs, skipped, totalCostCents };
 }
@@ -1696,18 +1783,9 @@ function buildSkip(
   reason: string
 ): SkippedJob {
   const info = endpointInfo(endpoint);
-  const basePath =
-    kind === "imovel"
-      ? `imoveis.${index}`
-      : kind === "diligenciado"
-      ? `diligenciados.${index}`
-      : kind === "conjuge_vendedor"
-      ? `vendedores.${index}.conjuge`
-      : kind === "procurador_vendedor"
-      ? `vendedores.${index}.procurador`
-      : kind === "representante_vendedor"
-      ? `vendedores.${index}.representante`
-      : `${kind}es.${index}`;
+  // `imovel` de locação é singular; o rebase `imoveis.N` → `imovel` acontece
+  // num pós-passo em `planCertidoesForDeal` (buildSkip não recebe a esteira).
+  const basePath = basePathForTarget(kind, index, "venda");
   const missingFields: MissingField[] = buildMissingFieldsForSkip(
     missingField,
     basePath,

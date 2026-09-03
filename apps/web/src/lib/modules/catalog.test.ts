@@ -10,6 +10,7 @@ import {
   featureDefault,
   moduleDef,
   proposalFeatureForKind,
+  certidoesFeatureForKind,
 } from "./catalog";
 
 describe("catalog — integridade", () => {
@@ -94,5 +95,15 @@ describe("proposalFeatureForKind", () => {
   it("propostas nasce ON nos dois módulos (graduou do rollout gradual em 2026-07-24)", () => {
     expect(featureDefault(FEATURE.VENDAS_PROPOSTAS)).toBe(true);
     expect(featureDefault(FEATURE.LOCACAO_PROPOSTAS)).toBe(true);
+  });
+});
+
+describe("certidoesFeatureForKind", () => {
+  it("venda → vendas.certidoes (ON); locação → locacao.certidoes (OFF por padrão)", () => {
+    expect(certidoesFeatureForKind("venda")).toBe(FEATURE.VENDAS_CERTIDOES);
+    expect(certidoesFeatureForKind("locacao")).toBe(FEATURE.LOCACAO_CERTIDOES);
+    expect(featureDefault(FEATURE.VENDAS_CERTIDOES)).toBe(true);
+    expect(featureDefault(FEATURE.LOCACAO_CERTIDOES)).toBe(false);
+    expect(featureModule(FEATURE.LOCACAO_CERTIDOES)).toBe(MODULE.LOCACAO);
   });
 });

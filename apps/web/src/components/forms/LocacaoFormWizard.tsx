@@ -15,6 +15,7 @@ import { PrivacyConsent } from "@/components/legal/PrivacyConsent";
 import { RequiredFieldMarker } from "@/components/forms/RequiredFieldMarker";
 import { RequiredFieldsProvider } from "@/components/forms/RequiredFieldsContext";
 import { describeMissingPaths } from "@/lib/forms/field-labels";
+import { garantiaTemFiador, missingFiadorName } from "@/lib/forms/garantia-fiador-flip";
 import {
   pendenciasDeRecebimento,
   mensagemDePendencia,
@@ -257,8 +258,7 @@ export function LocacaoFormWizard({
         ? "locador"
         : currentTrueIdx === 2
           ? "locatario"
-          : currentTrueIdx === 5 &&
-              (form.getValues("garantia.tipo" as never) as unknown) === "fiador"
+          : currentTrueIdx === 5 && garantiaTemFiador(watchedData)
             ? "fiador"
             : null;
 
@@ -270,9 +270,7 @@ export function LocacaoFormWizard({
   // A etapa de garantia entra junto: o fiador casado é justamente o caso em que
   // a outorga é indispensável (art. 1.647, III CC). Ele não é array, então vira
   // uma lista sintética de 1 elemento com prefixo próprio.
-  const isGarantiaStep =
-    currentTrueIdx === 5 &&
-    (getByPath(watchedData, "garantia.tipo") as unknown) === "fiador";
+  const isGarantiaStep = currentTrueIdx === 5 && garantiaTemFiador(watchedData);
   const sigRecoList = isGarantiaStep
     ? "garantia"
     : (PARTY_STEP[currentTrueIdx]?.list ?? null);
@@ -357,6 +355,20 @@ export function LocacaoFormWizard({
         setFailedTriggerCount((n) => n + 1);
         toast.error(`Preencha: ${describeMissingPaths(missingPiso)}`);
         return false;
+      }
+      // Piso da Garantia: fiança exige o fiador nomeado (mesma regra do 422
+      // `fiador_incompleto` no servidor). Entrou junto com o flip automático da
+      // modalidade pela etapa Documentos — sem isto o usuário avançava com
+      // "Fiador" selecionado e ninguém qualificado.
+      if (step === 5) {
+        const fiadorPath = missingFiadorName(form.getValues() as Record<string, unknown>);
+        if (fiadorPath) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          form.setError(fiadorPath as any, { type: "required", message: "Campo obrigatório" });
+          setFailedTriggerCount((n) => n + 1);
+          toast.error(`Preencha: ${describeMissingPaths([fiadorPath])}`);
+          return false;
+        }
       }
     }
 
@@ -597,15 +609,17 @@ export function LocacaoFormWizard({
         <Separator />
 
         {/* Links por parte visíveis de dentro do próprio form (token
-            principal). Fiador só entra quando a garantia é fiador — mesma
-            regra do LocacaoDadosTab. `watch` (não getValues) pra re-renderizar
-            quando a garantia muda durante a sessão; a `key` remonta o painel
-            quando o conjunto de roles muda — ele cacheia os links gerados e
-            ignoraria o fiador novo (from-main é idempotente, regenerar é
-            barato). */}
+            principal). Fiador entra quando a garantia é fiador OU quando já
+            há um fiador identificado (um doc atribuído a ele já define a
+            modalidade) — mesma regra do LocacaoDadosTab. `watch` (não
+            getValues) pra re-renderizar quando a garantia muda durante a
+            sessão; a `key` remonta o painel quando o conjunto de roles muda —
+            ele cacheia os links gerados e ignoraria o fiador novo (from-main é
+            idempotente, regenerar é barato). */}
         {finalizeMode === "main" && !readOnly && (() => {
-          const isFiador =
-            (form.watch("garantia.tipo" as never) as unknown) === "fiador";
+          const isFiador = garantiaTemFiador({
+            garantia: form.watch("garantia" as never) as unknown,
+          });
           const roles = [
             "locador" as const,
             "locatario" as const,

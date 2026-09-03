@@ -16,6 +16,14 @@ export const CLICKSIGN_ROLES = [
   "consenting",
   "attorney",
   "party",
+  // Locação (2026-09-02) — qualificações nativas da ClickSign v3, confirmadas
+  // na tabela de qualificações da doc oficial: locador, locatário, fiador e
+  // cônjuge do fiador. Antes locador/locatário iam como "party" e fiador +
+  // cônjuge como "consenting", indistinguíveis no certificado.
+  "lessor",
+  "lessee",
+  "surety",
+  "guarantor_spouse",
 ] as const;
 
 export type ClicksignRole = (typeof CLICKSIGN_ROLES)[number];
@@ -24,6 +32,10 @@ export type ClicksignRole = (typeof CLICKSIGN_ROLES)[number];
 export const CLICKSIGN_ROLE_OPTIONS: Array<{ value: ClicksignRole; label: string }> = [
   { value: "buyer", label: "Comprador" },
   { value: "seller", label: "Vendedor" },
+  { value: "lessor", label: "Locador" },
+  { value: "lessee", label: "Locatário" },
+  { value: "surety", label: "Fiador" },
+  { value: "guarantor_spouse", label: "Cônjuge do fiador" },
   { value: "consenting", label: "Anuente" },
   { value: "party", label: "Interessado" },
   { value: "attorney", label: "Procurador" },
@@ -54,8 +66,12 @@ export function defaultRoleForSourceKind(
   sourceKind: string,
   subKind?: "titular" | "conjuge" | "procurador" | "representante" | "avulso"
 ): ClicksignRole {
-  if (subKind === "conjuge") return "consenting";
+  // A ordem importa: o cônjuge decide ANTES do switch por parte. O cônjuge do
+  // fiador é o único com qualificação própria na ClickSign (guarantor_spouse —
+  // art. 1.647, III CC); os demais cônjuges seguem como anuentes.
+  if (subKind === "conjuge") return sourceKind === "fiador" ? "guarantor_spouse" : "consenting";
   if (subKind === "procurador") return "attorney";
+  // O representante (PJ) assina NO LUGAR da parte e herda o papel dela.
   switch (sourceKind) {
     case "vendedor":
       return "seller";
@@ -67,14 +83,14 @@ export function defaultRoleForSourceKind(
       return "intervening";
     case "imobiliaria":
       return "realestate";
-    // Locação — usar só qualificações já existentes no enum ClicksignRole
-    // (role desconhecido → 422 na ClickSign).
+    // Locação — qualificações nativas (ver CLICKSIGN_ROLES). Role fora do
+    // enum da ClickSign → 422; estes quatro estão na tabela oficial.
     case "locador":
-      return "party";
+      return "lessor";
     case "locatario":
-      return "party";
+      return "lessee";
     case "fiador":
-      return "consenting";
+      return "surety";
     default:
       return "sign";
   }

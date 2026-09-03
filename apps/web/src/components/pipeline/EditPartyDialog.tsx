@@ -15,6 +15,28 @@ import { Label } from "@/components/ui/label";
 import { Loader2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import type { CertidaoJobRow } from "@/hooks/useCertidoesBatch";
+import { basePathForTarget, type CertidoesEsteira } from "@/lib/certidoes/target-paths";
+import { isTargetKind } from "./certidoes-groups";
+
+/**
+ * Caminho da parte no dataJson pelo alvo do job. Venda: `vendedores.N` /
+ * `compradores.N`; locação: `locatarios.N`, `locadores.N`, `garantia.fiador`
+ * (objeto, sem índice) e `garantia.fiador.conjuge`. Antes era um binário
+ * vendedor/comprador — qualquer outro kind lia e gravava em `compradores.N`.
+ */
+function partyBasePath(job: CertidaoJobRow, esteira: CertidoesEsteira): string {
+  return isTargetKind(job.targetKind)
+    ? basePathForTarget(job.targetKind, job.targetIndex, esteira)
+    : `compradores.${job.targetIndex}`;
+}
+
+function getByPath(root: Record<string, unknown>, path: string): unknown {
+  return path.split(".").reduce<unknown>(
+    (cur, seg) =>
+      cur && typeof cur === "object" ? (cur as Record<string, unknown>)[seg] : undefined,
+    root
+  );
+}
 
 interface Props {
   job: CertidaoJobRow;
@@ -23,6 +45,8 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   /** Called after the party data is saved so the parent can retry the job. */
   onSaved: () => void | Promise<void>;
+  /** Esteira do negócio — só muda o caminho do imóvel (`imovel` × `imoveis.N`). */
+  esteira?: CertidoesEsteira;
 }
 
 interface PartySnapshot {
@@ -55,6 +79,7 @@ export function EditPartyDialog({
   open,
   onOpenChange,
   onSaved,
+  esteira = "venda",
 }: Props) {
   const [snapshot, setSnapshot] = useState<PartySnapshot | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -84,10 +109,8 @@ export function EditPartyDialog({
           deal?.dataJson ??
           deal?.data ??
           {}) as Record<string, unknown>;
-        const arrKey =
-          job.targetKind === "vendedor" ? "vendedores" : "compradores";
-        const arr = (dealData[arrKey] as PartySnapshot[] | undefined) ?? [];
-        const party = arr[job.targetIndex] ?? {};
+        const party =
+          (getByPath(dealData, partyBasePath(job, esteira)) as PartySnapshot | undefined) ?? {};
         setSnapshot(party);
         setValues({
           nome: party.nome ?? party.razao_social ?? "",
@@ -104,15 +127,12 @@ export function EditPartyDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, dealId, job.targetKind, job.targetIndex, onOpenChange]);
+  }, [open, dealId, job, esteira, onOpenChange]);
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      const basePath =
-        job.targetKind === "vendedor"
-          ? `vendedores.${job.targetIndex}`
-          : `compradores.${job.targetIndex}`;
+      const basePath = partyBasePath(job, esteira);
       const isPJ = snapshot?.tipo_pessoa === "juridica";
       const fields: Record<string, string> = {};
       const pushIfChanged = (key: string, current: string | undefined) => {

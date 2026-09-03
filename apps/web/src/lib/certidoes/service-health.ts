@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db/prisma";
 import { classifyJobBucket, type HealthBucket, type HealthJobLike } from "./health-monitor";
 import { isEmailThrottle, isEndpointNotEnabled } from "./error-codes";
+import { monthlyBudgetCents, monthlySpendWhere } from "./budget";
 
 /**
  * Saúde do serviço de certidões por org, em LEITURA — resgate 5c.
@@ -10,10 +11,6 @@ import { isEmailThrottle, isEndpointNotEnabled } from "./error-codes";
  * problem-digest (o aviso só sai quando já há problema; ver o cron
  * cron/certidoes/problem-digest). Não envia e-mail nem escreve nada.
  */
-
-// Defaults iguais aos do desenho original (overridáveis por env).
-const INFOSIMPLES_BUDGET_DEFAULT = "20000"; // R$ 200
-const SERASA_BUDGET_DEFAULT = "500000"; // R$ 5.000
 
 // Buckets que contam como "problema" (falha acionável) na taxa de sucesso.
 // `ok` é sucesso; `em_voo`/`outro` ficam de fora (transitório/indefinido).
@@ -46,15 +43,11 @@ async function monthSpend(
   const now = new Date();
   const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const agg = await prisma.certidaoJob.aggregate({
-    where: { orgId, provider, createdAt: { gte: firstOfMonth } },
+    where: monthlySpendWhere(orgId, provider, firstOfMonth),
     _sum: { costCents: true },
   });
   const spentCents = agg._sum.costCents ?? 0;
-  const budgetCents = Number(
-    provider === "serasa"
-      ? process.env.SERASA_MONTHLY_BUDGET_CENTS ?? SERASA_BUDGET_DEFAULT
-      : process.env.INFOSIMPLES_MONTHLY_BUDGET_CENTS ?? INFOSIMPLES_BUDGET_DEFAULT
-  );
+  const budgetCents = monthlyBudgetCents(provider);
   return {
     spentCents,
     budgetCents,

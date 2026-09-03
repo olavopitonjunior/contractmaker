@@ -62,8 +62,10 @@ describe("GET /api/org/infosimples-budget", () => {
     expect(body.spentCents).toBe(3500);
     expect(body.spentByEndpoint.iptu).toBe(2700);
     expect(body.spentByEndpoint.matricula).toBe(800);
-    expect(body.budgetCents).toBe(5000000); // default
-    expect(body.remainingCents).toBe(5000000 - 3500);
+    // Default ÚNICO de lib/certidoes/budget.ts (R$ 200 — o que o executor sempre
+    // bloqueou). Esta rota dizia R$ 50.000 enquanto o disparo parava em R$ 200.
+    expect(body.budgetCents).toBe(20000);
+    expect(body.remainingCents).toBe(20000 - 3500);
     expect(body.ok).toBe(true);
     expect(body.warningPct).toBe(0.8);
     expect(body.month).toMatch(/^\d{4}-\d{2}$/);

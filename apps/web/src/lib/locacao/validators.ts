@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CLICKSIGN_ROLES } from "@/lib/clicksign/roles";
 
 // Zod schemas para CRUD das entidades operacionais de locação (docs/locacao/spec.md §6.6+).
 // Distintos dos schemas do form de contrato (lib/forms/validation-locacao.ts) — estes
@@ -707,18 +708,9 @@ export const inspectionUpdateSchema = z.object({
   executorId: z.string().nullable().optional(),
 });
 
-// Roles ClickSign v3 (espelha lib/clicksign/roles.ts — client-safe lá, Zod aqui).
-const clicksignRoleSchema = z.enum([
-  "sign",
-  "buyer",
-  "seller",
-  "intervening",
-  "realestate",
-  "witness",
-  "consenting",
-  "attorney",
-  "party",
-]);
+// Roles ClickSign v3 — derivado de lib/clicksign/roles.ts (client-safe), que é
+// a fonte única; a cópia literal que vivia aqui divergia a cada papel novo.
+const clicksignRoleSchema = z.enum(CLICKSIGN_ROLES);
 
 export const inspectionSendSignatureSchema = z.object({
   signers: z

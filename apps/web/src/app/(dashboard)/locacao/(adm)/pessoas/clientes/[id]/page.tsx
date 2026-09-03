@@ -6,12 +6,10 @@ import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ClienteFichaCard } from "@/components/locacao/ClienteFichaCard";
-import { ClientCreditAnalysisCard } from "@/components/locacao/ClientCreditAnalysisCard";
 import { ClientInsurerAnalysisCard } from "@/components/locacao/ClientInsurerAnalysisCard";
 import { ClientDocumentsCard } from "@/components/locacao/ClientDocumentsCard";
 import { ConverterClienteButton } from "@/components/locacao/ConverterClienteButton";
 import { ClientCertidoesCard } from "@/components/locacao/ClientCertidoesCard";
-import { isSerasaConfigured } from "@/lib/serasa/client";
 
 export const dynamic = "force-dynamic";
 
@@ -45,26 +43,14 @@ export default async function ClienteDetailPage({ params }: { params: { id: stri
 
   const createdByName = client.createdBy?.name ?? client.createdBy?.email ?? "—";
 
-  // Mapa certidaoJobId → attachmentId (PDF Serasa vive no LeaseClientAttachment).
+  // Mapa certidaoJobId → attachmentId (PDF da certidão vive no LeaseClientAttachment).
   const attByJob = new Map<string, string>();
   for (const a of client.attachments) {
     if (a.certidaoJobId) attByJob.set(a.certidaoJobId, a.id);
   }
 
-  const serasaJobs = client.certidaoJobs
-    .filter((j) => j.provider === "serasa")
-    .map((j) => {
-      const r = j.resultData as { situacao?: string; detalhes?: string } | null;
-      return {
-        id: j.id,
-        label: j.label,
-        status: j.status,
-        situacao: r?.situacao ?? null,
-        detalhes: r?.detalhes ?? null,
-        attachmentId: attByJob.get(j.id) ?? null,
-      };
-    });
-
+  // Serasa não está integrado (2026-09-02): consultas antigas desse provider
+  // ficam fora da tela até a integração existir de verdade.
   const certidaoJobs = client.certidaoJobs
     .filter((j) => j.provider !== "serasa")
     .map((j) => {
@@ -80,9 +66,6 @@ export default async function ClienteDetailPage({ params }: { params: { id: stri
     });
 
   const hasDoc = !!client.cpfCnpj && client.cpfCnpj.replace(/\D/g, "").length >= 11;
-
-  const compliance = (client.complianceJson as Record<string, unknown> | null) ?? null;
-  const hasConsent = !!(compliance?.serasaConsent as { at?: string } | undefined)?.at;
 
   return (
     <div className="space-y-4">
@@ -114,12 +97,6 @@ export default async function ClienteDetailPage({ params }: { params: { id: stri
             createdByName,
             createdAt: client.createdAt.toISOString(),
           }}
-        />
-        <ClientCreditAnalysisCard
-          clientId={client.id}
-          hasConsent={hasConsent}
-          jobs={serasaJobs}
-          serasaAvailable={isSerasaConfigured()}
         />
         <ClientInsurerAnalysisCard
           clientId={client.id}

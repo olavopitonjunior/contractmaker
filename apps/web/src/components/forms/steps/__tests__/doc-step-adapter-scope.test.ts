@@ -271,3 +271,110 @@ describe("readPersistedAssignment", () => {
     ).toBeNull();
   });
 });
+
+// 2026-09-02 — Fiador e cônjuge do fiador aparecem SEMPRE na etapa 0 (ela vem
+// antes da etapa Garantia, então o gate por `garantia.tipo` escondia o grupo
+// justo no form novo), e atribuir um doc a eles define a modalidade.
+describe("buildLocacaoOptions — fiador sempre disponível", () => {
+  const labelsOf = (groups: SelectGroup[]) => groups.map((g) => g.label);
+  const valuesOf = (groups: SelectGroup[]) =>
+    groups.flatMap((g) => g.options.map((o) => o.value));
+
+  it("garantia caução (default do form novo) ainda oferece Fiador e Cônjuge do fiador", () => {
+    const groups = locacaoDocAdapter.buildOptions({ garantia: { tipo: "caucao" } }, []);
+    expect(labelsOf(groups)).toContain("Fiador");
+    expect(valuesOf(groups)).toContain("fiador:0");
+    expect(valuesOf(groups)).toContain("conjuge_fiador:0");
+  });
+
+  it("fiador PJ não tem cônjuge", () => {
+    const groups = locacaoDocAdapter.buildOptions(
+      { garantia: { tipo: "caucao", fiador: { tipo_pessoa: "juridica", razao_social: "Fiança Ltda" } } },
+      []
+    );
+    expect(valuesOf(groups)).toContain("fiador:0");
+    expect(valuesOf(groups)).not.toContain("conjuge_fiador:0");
+    const fiador = groups.find((g) => g.label === "Fiador")!;
+    expect(fiador.options[0].label).toBe("Fiador — Fiança Ltda");
+  });
+
+  it("o escopo do papel continua na frente: locador não vê Fiador; locatário e fiador veem", () => {
+    const groups = locacaoDocAdapter.buildOptions({ garantia: { tipo: "caucao" } }, []);
+    const locador = filterAssignmentOptionsByScope(
+      groups,
+      ["locadores", "imovel", "aluguel"],
+      locacaoDocAdapter.topKeyForKind
+    );
+    expect(labelsOf(locador)).not.toContain("Fiador");
+    expect(valuesOf(locador)).not.toContain("conjuge_fiador:0");
+
+    const locatario = filterAssignmentOptionsByScope(
+      groups,
+      ["locatarios", "garantia", "observacoes"],
+      locacaoDocAdapter.topKeyForKind
+    );
+    expect(valuesOf(locatario)).toContain("fiador:0");
+    expect(valuesOf(locatario)).toContain("conjuge_fiador:0");
+
+    const fiador = filterAssignmentOptionsByScope(
+      groups,
+      ["garantia", "observacoes"],
+      locacaoDocAdapter.topKeyForKind
+    );
+    expect(labelsOf(fiador)).toEqual(["Fiador", "Cônjuges", "Outros"]);
+  });
+});
+
+describe("locacaoDocAdapter.onAssign — doc no fiador define a modalidade", () => {
+  function fakeForm(initial: Record<string, unknown>) {
+    const data: Record<string, unknown> = JSON.parse(JSON.stringify(initial));
+    const setValue = vi.fn((path: string, value: unknown) => {
+      const segs = path.split(".");
+      let cur = data;
+      for (const seg of segs.slice(0, -1)) {
+        if (!cur[seg] || typeof cur[seg] !== "object") cur[seg] = {};
+        cur = cur[seg] as Record<string, unknown>;
+      }
+      cur[segs[segs.length - 1]] = value;
+    });
+    const getValues = (path?: string) =>
+      path === undefined
+        ? data
+        : path.split(".").reduce<unknown>(
+            (cur, seg) =>
+              cur && typeof cur === "object" ? (cur as Record<string, unknown>)[seg] : undefined,
+            data
+          );
+    return { form: { getValues, setValue } as unknown as UseFormReturn<Record<string, unknown>>, data, setValue };
+  }
+
+  it("fiador: vira o tipo com shouldDirty/shouldTouch, limpa a caução e devolve a mensagem do toast", () => {
+    const { form, data, setValue } = fakeForm({ garantia: { tipo: "caucao", caucao_meses: 3 } });
+    const msg = locacaoDocAdapter.onAssign!("fiador", 0, form);
+    expect(msg).toMatch(/Fiador/);
+    expect((data.garantia as Record<string, unknown>).tipo).toBe("fiador");
+    expect((data.garantia as Record<string, unknown>).caucao_meses).toBe(0);
+    expect(setValue).toHaveBeenCalledWith("garantia.tipo", "fiador", {
+      shouldDirty: true,
+      shouldTouch: true,
+    });
+  });
+
+  it("cônjuge do fiador também; kinds de outras partes não; já fiador é no-op", () => {
+    const a = fakeForm({ garantia: { tipo: "seguro_fianca" } });
+    expect(locacaoDocAdapter.onAssign!("conjuge_fiador", 0, a.form)).toMatch(/Fiador/);
+    expect((a.data.garantia as Record<string, unknown>).tipo).toBe("fiador");
+
+    const b = fakeForm({ garantia: { tipo: "caucao" } });
+    expect(locacaoDocAdapter.onAssign!("locatario", 0, b.form)).toBeNull();
+    expect(b.setValue).not.toHaveBeenCalled();
+
+    const c = fakeForm({ garantia: { tipo: "fiador", fiador: { nome: "Ana" } } });
+    expect(locacaoDocAdapter.onAssign!("fiador", 0, c.form)).toBeNull();
+    expect(c.setValue).not.toHaveBeenCalled();
+  });
+
+  it("venda não tem o hook", () => {
+    expect(createVendaAdapter(buildAssignmentOptions).onAssign).toBeUndefined();
+  });
+});

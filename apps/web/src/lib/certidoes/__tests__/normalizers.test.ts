@@ -383,6 +383,22 @@ describe("Phase A — failureCategory via normalize()", () => {
     expect(r.failureCategory).toBe("account_issue");
   });
 
+  it("code 601 'não foi possível se autenticar com o token' → account_issue + nao_emitida (nunca negativa)", () => {
+    const tokenInvalido = {
+      code: 601,
+      code_message: "Não foi possível se autenticar com o token informado.",
+      data: [],
+      errors: [],
+      header: { billable: false, token_name: null },
+    };
+    const r = normalize(
+      "receita-federal/cpf",
+      tokenInvalido as unknown as InfosimplesResponse
+    );
+    expect(r.failureCategory).toBe("account_issue");
+    expect(r.situacao).toBe("nao_emitida");
+  });
+
   it("code 600 (nenhum registro) → genuine_no_data + situacao=negativa", () => {
     const r = normalize(
       "receita-federal/pgfn",

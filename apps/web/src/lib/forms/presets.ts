@@ -252,10 +252,11 @@ export function resolveAllRequiredFields(
 // arrays). Renomear campo lá exige atualizar aqui, igual em venda.
 //
 // A etapa 5 (Garantia) fica VAZIA de propósito nos dois presets: o fiador só
-// existe quando `garantia.tipo === "fiador"`, então exigir `garantia.fiador.*`
+// faz sentido quando a garantia é fiança, então exigir `garantia.fiador.*`
 // incondicionalmente viraria pendência fantasma. A obrigatoriedade do fiador
-// continua onde sempre esteve — `collectLocacaoFinalizeIssues`, condicional
-// ao tipo de garantia.
+// é condicional ao tipo e mora em `collectLocacaoFinalizeIssues` (avisos) e no
+// piso `missingFiadorName` (nome bloqueia, desde 2026-09-02 — o tipo pode ser
+// definido por um documento atribuído ao fiador na etapa 0).
 // ===================================================================
 
 const LOCACAO_PRESET_LEGADO: readonly (readonly string[])[] = [
@@ -644,6 +645,7 @@ export function isKnownFormPath(path: string): boolean {
 // obrigatoriedade que nunca dispara.
 const LOCACAO_PARTY_FIELDS = [
   "nome", "razao_social", "cnpj", "cpf", "rg", "data_nascimento",
+  "nome_mae", "sexo",
   "nacionalidade", "estado_civil", "profissao", "email", "mobile_phone",
   "endereco", "numero", "complemento", "bairro", "cidade", "uf", "cep",
   "renda_mensal", "faturamento_mensal",
@@ -691,7 +693,8 @@ function buildKnownLocacaoPaths(): Set<string> {
   // `garantia.fiador.*` SAIU: `PARTY_PATH_RE` (party-required) não casa esse
   // prefixo, então o path passava sem o remap PF/PJ e sem checar se a garantia
   // é fiança — exigência incondicional de um campo que só existe às vezes. A
-  // obrigatoriedade do fiador já é condicional em collectLocacaoFinalizeIssues.
+  // obrigatoriedade do fiador é condicional ao tipo: avisos em
+  // collectLocacaoFinalizeIssues, nome como piso em missingFiadorName.
   for (const f of LOCACAO_IMOVEL_FIELDS) s.add(`imovel.${f}`);
   for (const f of LOCACAO_ALUGUEL_FIELDS) s.add(`aluguel.${f}`);
   for (const f of LOCACAO_GARANTIA_FIELDS) s.add(`garantia.${f}`);

@@ -24,7 +24,7 @@ export {
   type UnmappedToken,
 } from "./insertion-report";
 
-import { catalogForModalidade, requiredTokens, isKnownToken } from "./placeholder-catalog";
+import { catalogForModalidade, requiredTokens, isKnownToken, DATA_KEYS } from "./placeholder-catalog";
 
 /**
  * Teto do texto enviado à IA. Era 24.000 chars — um contrato de locação de
@@ -184,27 +184,10 @@ export function extractMapeamentos(raw: string): { ok: boolean; mapeamentos: Map
   return { ok: false, mapeamentos: [] };
 }
 
-/**
- * Chaves de DADO: cobrem só o dado em si (uma qualificação, uma via de
- * pagamento) e convivem com vizinhas no mesmo parágrafo. Uma proposta para
- * uma delas que CONTÉM a proposta de outra chave é recusada
- * (`engulfs-neighbor`) em vez de aplicada — medido em produção em 02/09/2026:
- * o item a) inteiro da cláusula de rateio entrou como `imobiliaria_qualificacao`
- * e o parágrafo colapsou, com o gate de PII liberando por cima. Conjunto
- * EXPLÍCITO de propósito (não derivado por sufixo): o teste do catálogo quebra
- * quando entrar uma chave nova, para a decisão ser tomada e não herdada.
- */
-export const DATA_KEYS: ReadonlySet<string> = new Set([
-  "locadores_qualificacao",
-  "locatarios_qualificacao",
-  "fiador_qualificacao",
-  "vendedores_qualificacao",
-  "compradores_qualificacao",
-  "corretagem_qualificacao",
-  "corretagem_dados_pagamento",
-  "imobiliaria_qualificacao",
-  "imobiliaria_dados_pagamento",
-]);
+// `DATA_KEYS` mora no catálogo (módulo puro): as checagens semânticas e a
+// tela precisam do conjunto sem puxar o cliente da Anthropic para o bundle.
+// Re-exportado aqui porque este é o módulo que o define em uso.
+export { DATA_KEYS };
 
 export async function insertPlaceholdersWithAI(input: {
   docId: string;

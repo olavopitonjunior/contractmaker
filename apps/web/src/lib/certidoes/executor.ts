@@ -17,6 +17,7 @@ import {
   isEndpointNotEnabled,
 } from "./error-codes";
 import type { InfosimplesResponse, JobStatus, Situacao, TargetKind } from "./types";
+import { monthlyBudgetCents, monthlySpendWhere } from "./budget";
 import { emitNotification } from "@/lib/notifications/emit";
 import { classifyJobBucket, missingFieldHint } from "./health-monitor";
 import { persistLeaseClientDocument } from "@/lib/locacao/client-attachments";
@@ -1062,16 +1063,23 @@ async function resolveSerasaConsultado(
 
   const data = (deal.form?.dataJson ?? deal.dataJson) as Record<string, unknown> | null;
 
-  // Locação: fiador vive em garantia.fiador (objeto, sem índice).
-  if (targetKind === "fiador") {
+  // Locação: fiador vive em garantia.fiador (objeto, sem índice); o cônjuge
+  // dele em garantia.fiador.conjuge.
+  if (targetKind === "fiador" || targetKind === "conjuge_fiador") {
     const fiador = (data?.garantia as { fiador?: Record<string, unknown> } | undefined)
       ?.fiador;
-    if (!fiador) return fallback;
+    const pessoa =
+      targetKind === "conjuge_fiador"
+        ? (fiador?.conjuge as Record<string, unknown> | undefined)
+        : fiador;
+    if (!pessoa) return fallback;
     return {
-      tipo: fiador.tipo_pessoa === "juridica" ? "Pessoa juridica" : "Pessoa fisica",
-      label: ((fiador.nome ?? fiador.razao_social) as string | undefined) ?? "Fiador",
-      documento: ((fiador.cnpj ?? fiador.cpf) as string | undefined) ?? "—",
-      uf: (fiador.uf as string | undefined) ?? undefined,
+      tipo: pessoa.tipo_pessoa === "juridica" ? "Pessoa juridica" : "Pessoa fisica",
+      label:
+        ((pessoa.nome ?? pessoa.razao_social) as string | undefined) ??
+        (targetKind === "conjuge_fiador" ? "Cônjuge do fiador" : "Fiador"),
+      documento: ((pessoa.cnpj ?? pessoa.cpf) as string | undefined) ?? "—",
+      uf: ((pessoa.uf ?? fiador?.uf) as string | undefined) ?? undefined,
       kind: targetKind,
       index: targetIndex,
     };
@@ -1084,6 +1092,8 @@ async function resolveSerasaConsultado(
       ? "compradores"
       : targetKind === "locatario"
       ? "locatarios"
+      : targetKind === "locador"
+      ? "locadores"
       : null;
   if (!listKey || !data) return fallback;
   const list = (data[listKey] as Array<Record<string, unknown>> | undefined) ?? [];
@@ -1411,7 +1421,11 @@ export async function pollPortalJob(jobId: string): Promise<void> {
     //  - demais 6xx → "ainda processando": reagenda até o prazo do portal
     //    (maxPortalWaitMs), depois falha + problema.
     if (resp.code !== 200) {
-      const category = mapInfosimplesCodeToCategory(resp.code, resp.code_message);
+      // Paridade com normalize(): a razão específica pode vir só em errors[]
+      // (I.10) — inclusive o 601 de token (isTokenAuthFailure). Texto combinado.
+      const obterMessage =
+        [resp.code_message, ...(resp.errors ?? [])].filter(Boolean).join(" ") || null;
+      const category = mapInfosimplesCodeToCategory(resp.code, obterMessage);
       const obterCost = resp.header?.billable === false ? 0 : obterInfo.costCents;
       const costAcc = (job.costCents ?? 0) + obterCost;
       const ageMs = startedAt.getTime() - job.createdAt.getTime();
@@ -1762,6 +1776,8 @@ async function downloadAndAttach(
     // para os kinds que o DocumentsTab/DealDetail já reconhecem (conjuge_vendedor,
     // representante_vendedor) — assim o PDF da certidão do cônjuge agrupa sob o
     // vendedor titular. procurador_vendedor segue o mesmo padrão.
+    // Locação (2026-09-02): os quatro alvos são DocumentKinds reconhecidos pelo
+    // LocacaoDocumentsTab — sem eles o PDF do locatário/fiador caía em "Outros".
     const ASSIGNABLE_KINDS = new Set([
       "vendedor",
       "comprador",
@@ -1769,6 +1785,10 @@ async function downloadAndAttach(
       "conjuge_vendedor",
       "procurador_vendedor",
       "representante_vendedor",
+      "locatario",
+      "locador",
+      "fiador",
+      "conjuge_fiador",
     ]);
     const assignmentKind = ASSIGNABLE_KINDS.has(targetKind) ? targetKind : "outro";
     // Aqui dealId é garantidamente não-nulo (caso cliente já retornou acima, e
@@ -2014,21 +2034,11 @@ export async function getMonthlySpendByProvider(
   orgId: string,
   provider: "infosimples" | "serasa"
 ): Promise<{ spentCents: number; budgetCents: number; exceeded: boolean }> {
-  const budgetCents =
-    provider === "serasa"
-      ? Number(process.env.SERASA_MONTHLY_BUDGET_CENTS ?? "500000")
-      : Number(process.env.INFOSIMPLES_MONTHLY_BUDGET_CENTS ?? "20000");
-  const now = new Date();
-  const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  // Teto e contagem vêm de lib/certidoes/budget.ts — a mesma cláusula que o
+  // monitor e a API do dashboard usam (antes cada um contava de um jeito).
+  const budgetCents = monthlyBudgetCents(provider);
   const agg = await prisma.certidaoJob.aggregate({
-    where: {
-      createdAt: { gte: firstOfMonth },
-      provider,
-      // Conta tanto jobs de deal (org via form) quanto ad-hoc/cliente (orgId
-      // direto no job). Sem o OR, jobs de LeaseClient (dealId null) escapavam do
-      // orçamento mensal. Cada row é contada uma vez (OR não duplica linhas).
-      OR: [{ deal: { form: { orgId } } }, { orgId }],
-    },
+    where: monthlySpendWhere(orgId, provider),
     _sum: { costCents: true },
   });
   const spentCents = agg._sum.costCents ?? 0;

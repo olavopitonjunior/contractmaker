@@ -416,8 +416,11 @@ function buildGarantia(g: GarantiaInput): Record<string, unknown> {
     const meses = Number(g.caucaoMeses);
     if (Number.isFinite(meses) && meses > 0) out.caucao_meses = meses;
   }
-  // `fiador` só entra quando a garantia É fiador — senão `deriveTemplateFacts`
-  // leria `fiadorPessoa` de um bloco morto e escolheria a variante errada.
+  // `fiador` só entra quando a garantia É fiador e ele tem nome. (No form
+  // público a relação é a inversa desde 2026-09-02 — um doc atribuído ao fiador
+  // define a modalidade — mas o `deriveTemplateFacts` já exige fiador nomeado
+  // para desempatar a variante, então as duas esteiras convergem no mesmo
+  // estado: fiador nomeado ⇔ tipo fiador.)
   if (g.tipo === "fiador" && trim(g.fiador.nome)) {
     out.fiador = partyToData(g.fiador);
   }

@@ -4,6 +4,93 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-03 - Certidões: token da Infosimples inválido não vira "negativa"
+
+### Corrigido
+
+- **Código 601 "Não foi possível se autenticar com o token informado" passa a ser tratado como problema de conta** (falha terminal, sem retry, sem custo, mensagem apontando `INFOSIMPLES_TOKEN`). Antes o 601 caía no mapa fixo como "nenhum registro": o normalizer gravava situação **negativa** e o classificador agendava retries como "portal fora do ar" — um falso "nada consta" para uma consulta que nunca rodou (visto na staging em 03/09, 4/4 jobs). O 601 "não encontrado" do e-proc continua fechando como negativa legítima: a distinção é pela mensagem.
+
+## [Unreleased] - 2026-09-03 - Trocar o tipo de garantia limpa a modalidade anterior
+
+### Corrigido
+
+- **Na etapa Garantia do formulário de locação, trocar o tipo (ex.: de Caução para Fiador) limpa os campos da modalidade anterior** — meses de caução, cobertura, título, prestadora. Só a prestadora era limpa: o negócio ficava com "Fiador" e "Caução: 3 aluguéis" ao mesmo tempo no resumo e no contrato (achado no smoke de 03/09). Os dados do fiador nunca são apagados. A limpeza grava valores reais (0 / vazio) em vez de `undefined`, que o auto-save descartava e o merge do servidor ignorava — sem isso o dado antigo ficava persistido e reaparecia no resumo e no PDF.
+
+## [Unreleased] - 2026-09-03 - Aba Certidões no negócio de locação
+
+### Adicionado
+
+- **O negócio de locação ganha a aba "Certidões"**, a mesma da venda, com as partes da locação: seções Locatários e Fiador (fiador e cônjuge do fiador) vêm pré-marcadas; Locadores, Imóvel, Pessoas adicionais e Pesquisa de bens são opt-in. Cada pessoa mostra suas certidões por região (imóvel e endereço), com o mesmo seletor de extras, "Corrigir dados" e relatório. Sem menção a Serasa. A aba só aparece quando a sub-função **"Certidões — locação"** está ligada para a imobiliária (painel super-admin; nasce desligada).
+
+### Corrigido
+
+- "Corrigir dados" de uma certidão lia e gravava a parte errada quando o alvo não era vendedor (tudo caía em "compradores"); agora segue o alvo (locatário, locador, fiador, cônjuge do fiador).
+- Os grupos da aba de certidões e os rótulos das pessoas passam a vir de uma lista única de alvos, sem enum cru na tela para alvos novos.
+
+## [Unreleased] - 2026-09-03 - Sexo e nome da mãe nas pessoas físicas da locação
+
+### Adicionado
+
+- **Locador, locatário e fiador pessoa física ganham os campos Sexo e Nome da mãe** no formulário de locação, ao lado da data de nascimento. As certidões cíveis do TJSP (com execução fiscal) e os antecedentes exigem esses dados; sem eles a certidão mais útil para a análise de crédito nunca era emitida em São Paulo. Os campos são opcionais, podem ser configurados como obrigatórios em Configurações → Formulário, aparecem no resumo consolidado e o OCR de RG/CNH já os preenche.
+
+## [Unreleased] - 2026-09-03 - Motor de certidões preparado para a locação (sem tela ainda)
+
+### Adicionado
+
+- **O planejador de certidões entende o negócio de locação**: locatários, fiador (quando a garantia é fiança), cônjuge do fiador e locadores viram alvos, e o imóvel único da locação entra como o imóvel do plano. Locatário, fiador e cônjuge ficam na camada padrão e herdam a região do imóvel; locador fica como opcional; a pesquisa de bens passa a valer para fiador e cônjuge. Nada aparece na tela ainda: a aba Certidões do negócio de locação chega no próximo passo, atrás da sub-função **"Certidões — locação"** (desligada por padrão no painel super-admin).
+- As rotas de certidões de um negócio passam a exigir a sub-função do módulo certo (Vendas para venda, Locação para locação); a rota que monta o plano não tinha gate nenhum.
+
+### Corrigido
+
+- **"Corrigir dados" de uma certidão de locação apontava para o campo errado** (`fiadores.0`, `locatarioes.0`): os caminhos agora seguem o formulário (`garantia.fiador`, `locatarios.0`, `imovel`).
+- **O PDF de certidão de locatário ou fiador caía na pasta "Outros"** dos documentos do negócio; agora vai para a pasta da pessoa.
+- **Teto mensal de certidões mostrado de forma diferente em cada tela.** O executor bloqueava em R$ 200, a API do dashboard dizia R$ 50.000 e a documentação R$ 50; e cada tela contava o gasto do mês de um jeito (só negócios, ou só consultas avulsas). Agora há um único valor e uma única contagem (negócios da imobiliária + consultas de cliente/avulsas), e dois disparos simultâneos não passam mais os dois pelo teto.
+- As certidões da ficha do cliente de locação (CNDT/PGFN) não olhavam o teto mensal antes de disparar; agora recusam com o mesmo aviso do negócio.
+- As categorias "Cadastro" (CPF/CNPJ) e "FGTS" apareciam no catálogo mas nunca viravam filtro no seletor de certidões extras.
+
+### Notas
+
+- Documentação de certidões corrigida: 16 estados (não 12), cron a cada 5 minutos (não diário) e teto padrão de R$ 200.
+
+## [Unreleased] - 2026-09-02 - Locador, locatário, fiador e cônjuge do fiador assinam com a qualificação certa
+
+### Alterado
+
+- **No envio do contrato de locação para assinatura, cada parte vai à ClickSign com a qualificação própria**: Locador, Locatário, Fiador e Cônjuge do fiador. Antes locador e locatário assinavam como "Interessado" e fiador e cônjuge como "Anuente", indistinguíveis no certificado. As quatro opções entram no menu "Assina como" e valem como padrão ao montar a lista de signatários; o operador continua podendo trocar. Cônjuge de locador ou locatário segue como Anuente (não há qualificação própria na ClickSign).
+- Envelopes já enviados não mudam; os que exibiam "Anuente"/"Interessado" continuam assim.
+
+### Notas
+
+- A lista de qualificações passa a ter uma fonte única no código; as três cópias que existiam em rotas e validadores foram substituídas por ela.
+
+## [Unreleased] - 2026-09-02 - Fiador e cônjuge do fiador sempre no seletor de documentos da locação
+
+### Adicionado
+
+- **"Fiador" e "Cônjuge do fiador" aparecem sempre em "Atribuir a:" na etapa Documentos do formulário de locação.** Antes só apareciam depois de escolher a garantia por fiador na etapa 5, que vem depois — num formulário novo o grupo nunca existia. Cônjuge do fiador continua fora quando o fiador é pessoa jurídica.
+- **Atribuir um documento ao fiador (ou ao cônjuge dele) já define a garantia como fiador**, com aviso na tela. Caução, seguro ou título que estivessem marcados são limpos, para o contrato não sair com duas garantias. Os dados do fiador continuam entrando pelo "Aplicar aos campos", como para as outras partes. Vale também ao mover um documento para o fiador na aba Documentos do negócio e ao aplicar um documento pelo servidor.
+- **O link individual do fiador passa a atribuir e aplicar sozinho o documento de identidade que ele envia**, como já acontecia para locador e locatário.
+
+### Alterado
+
+- **Garantia por fiador exige o fiador nomeado para avançar da etapa Garantia e para concluir o formulário.** Era só um aviso; virou bloqueio porque agora a modalidade pode ser definida por um documento antes de alguém qualificar o fiador. CPF, endereço e cônjuge continuam como avisos.
+- **O contrato não mostra mais fragmentos de fiador quando ele não tem nome**: preâmbulo, cláusula de fiança (cai no texto genérico do art. 37) e linha de assinatura. Vale para os modelos canônicos residencial e comercial (v2 e v3) e para os blocos compostos dos modelos do Google Docs.
+- O link do fiador, o painel de links e a recomendação de e-mail do cônjuge do fiador aparecem também quando já há um fiador identificado, não só quando a garantia está marcada como fiador.
+
+### Corrigido
+
+- **Os campos do cônjuge aparecem para "casado", "casada" e "União estável"** (o que o OCR devolve), não só para "Casado(a)" e "União Estável" escritos exatamente assim. Antes o formulário cobrava nome e CPF do cônjuge no final sem mostrar o campo. Vale para locador, locatário e fiador.
+
+### Notas
+
+- Os modelos canônicos `.hbs` mudaram: depois do deploy, rodar `sync-templates --apply` em staging e em produção.
+
+## [Unreleased] - 2026-09-02 - Serasa sai das telas de locação até a integração existir
+
+### Removido
+
+- **O card "Análise de crédito (Serasa)" no negócio de locação, o card equivalente na ficha do cliente e o selo "Serasa" na lista de clientes deixam de aparecer.** A consulta ao Serasa não está integrada: o botão prometia uma análise que não acontece e o custo por consulta era um valor provisório. As telas voltam a mostrar só o que funciona (certidões, seguradoras, documentos). O que já existia por baixo (rotas, consultas antigas gravadas) fica como está, sem ser exibido; quando a integração for concluída, os cards voltam.
+
 ## [Unreleased] - 2026-09-02 - Uma chave de dado não engole mais o trecho da chave vizinha
 
 ### Corrigido
@@ -77,7 +164,6 @@ Medido em produção antes de fechar: das aprovações já feitas, todas foram d
 - **Qualquer membro da organização podia abrir um negócio de venda, inclusive quem só deveria olhar.** As seis portas que criam negócio de venda — a criação do formulário público, o botão do funil, a importação do iList, o cadastro por proposta, a importação de contrato e a conversão de lead — não conferiam permissão nenhuma. Bastava estar dentro da organização. O lado de locação sempre exigiu permissão para o mesmo ato, e a diferença não era uma decisão: era uma checagem que nunca foi escrita. Agora as seis pedem "Criar negócio de venda". O preenchimento do formulário pelo proponente, que acontece por link público, não é afetado.
 - **Ninguém que já criava perde o acesso.** Antes de fechar a porta, medimos quem realmente a usava: dos 85 negócios de venda existentes, 84 foram criados por administradores, proprietários da conta, gerentes ou pelo agente Max — e a permissão nova nasce ligada para todos eles. Quem passa a ser barrado é quem nunca criou nada e não deveria poder: o perfil de leitura e os perfis financeiros e de portal. O perfil de leitura continua enxergando o funil inteiro, como antes; o que ele perde é só a criação.
 - **Para o gerente, a permissão fica na tela.** "Criar negócio de venda" entra em Configurações → Gerentes ligada, e o administrador pode desligá-la — mesma tela onde, nesta mesma versão, passou a existir "Criar negócio e contrato de locação".
-
 
 ## [Unreleased] - 2026-09-02 - Dois consertos medidos no smoke de staging da troca pelo gabarito
 

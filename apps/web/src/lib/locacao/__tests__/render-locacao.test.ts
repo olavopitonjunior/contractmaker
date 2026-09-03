@@ -567,3 +567,58 @@ describe("template v3 — administração e despesas decididas no form (2026-08)
     expect(html).not.toContain("transferência para seu nome das contas de consumo de energia");
   });
 });
+
+// 2026-09-02 — `temFiador`: desde que um documento atribuído ao fiador define a
+// modalidade, "tipo fiador com fiador vazio" é alcançável. O contrato não pode
+// sair com ", e, na qualidade de FIADOR(A), , têm entre si", cláusula de fiança
+// sem fiador nem linha de assinatura em branco.
+describe("temFiador: fiador sem nome não entra no contrato", () => {
+  const parsed = dadosLocacaoSchema.parse({
+    locadores: [{ tipo_pessoa: "fisica", nome: "Loc", cpf: "12345678901" }],
+    locatarios: [{ tipo_pessoa: "fisica", nome: "Lct", cpf: "98765432100" }],
+    imovel: { rua: "Rua A", numero: "1", cidade: "São Paulo", uf: "SP", cep: "01304001" },
+    aluguel: {
+      valor: 2000,
+      dia_vencimento: 5,
+      indice_reajuste: "IPCA",
+      vigencia_inicio: "2026-08-01",
+      vigencia_meses: 30,
+      meio_pagamento: "boleto",
+    },
+    assinatura: { cidade: "São Paulo", uf: "SP", data: "2026-08-01" },
+    garantia: { tipo: "caucao", caucao_meses: 1 },
+  });
+  // O schema recusa "fiador sem nome" no parse — o estado que chega ao
+  // renderizador é justamente o que passou por fora dele (rascunho, PATCH
+  // parcial, geração pelo admin). Montado por cima do parse válido.
+  const base = { ...parsed, garantia: { tipo: "fiador" } };
+
+  it.each(["locacao_residencial_v3.hbs", "locacao_comercial_v3.hbs"])(
+    "%s: tipo fiador sem nome — sem preâmbulo, sem cláusula de fiança, sem assinatura do fiador",
+    (file) => {
+      const html = renderContratoHTML(
+        loadTemplate(file),
+        enrichLocacaoData(base as Record<string, unknown>)
+      );
+      expect(html).not.toMatch(/\{\{/);
+      expect(html).not.toContain("na qualidade de FIADOR");
+      expect(html).not.toContain("FIADOR(A)");
+      expect(html).not.toContain("benefício de ordem");
+      // Cai no ramo genérico da 8.1, não em vazio.
+      expect(html).toContain("art. 37 da Lei");
+    }
+  );
+
+  it("com nome, o fiador volta a aparecer nos três lugares (regressão)", () => {
+    const html = renderContratoHTML(
+      loadTemplate(),
+      enrichLocacaoData({
+        ...base,
+        garantia: { tipo: "fiador", fiador: { tipo_pessoa: "fisica", nome: "Fulano Fiador" } },
+      } as Record<string, unknown>)
+    );
+    expect(html).toContain("na qualidade de FIADOR(A), Fulano Fiador");
+    expect(html).toContain("benefício de ordem");
+    expect(html).toContain("<br>FIADOR(A)");
+  });
+});

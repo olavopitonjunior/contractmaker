@@ -104,7 +104,7 @@ export function LeaseSignaturesTab({
             .filter(Boolean)
             .join(", ");
           throw new Error(
-            `Partes sem e-mail: ${names || "verifique locador/locatário/fiador"}.`
+            `Partes sem e-mail: ${names || "verifique locador, locatário, fiador e cônjuge do fiador"}.`
           );
         }
         // Limite do PLANO da conta ClickSign (recusa da própria ClickSign).
@@ -137,7 +137,7 @@ export function LeaseSignaturesTab({
           <p className="text-xs text-muted-foreground mt-1">
             {variant === "administracao"
               ? "Revise os signatários (proprietário, imobiliária e testemunhas) na popup antes de enviar."
-              : "Revise os signatários (locador, locatário, fiador e testemunhas) na popup antes de enviar."}
+              : "Revise os signatários (locador, locatário, fiador, cônjuge do fiador e testemunhas) na popup antes de enviar — cada um assina com a qualificação própria na ClickSign."}
           </p>
         </div>
         <div className="flex items-center gap-2">

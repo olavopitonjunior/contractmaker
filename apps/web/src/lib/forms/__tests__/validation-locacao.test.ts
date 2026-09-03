@@ -26,6 +26,32 @@ describe("dadosLocacaoSchema", () => {
     expect(parsed.config?.juros_mensais_atraso).toBe(1);
   });
 
+  it('aceita "" nos enums de seguro (limpeza da troca de modalidade) e devolve undefined', () => {
+    const res = dadosLocacaoSchema.safeParse({
+      ...baseValid,
+      garantia: {
+        tipo: "fiador",
+        seguro_tomador: "",
+        seguro_vigencia: "",
+        cobertura_meses: 0,
+        caucao_meses: 0,
+        titulo_valor: 0,
+        fiador: { tipo_pessoa: "fisica", nome: "Pedro Fiador" },
+      },
+    });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.garantia?.seguro_tomador).toBeUndefined();
+      expect(res.data.garantia?.seguro_vigencia).toBeUndefined();
+      expect(res.data.garantia?.titulo_valor).toBe(0);
+    }
+    const bad = dadosLocacaoSchema.safeParse({
+      ...baseValid,
+      garantia: { tipo: "seguro_fianca", seguro_tomador: "banco" },
+    });
+    expect(bad.success).toBe(false);
+  });
+
   it("aceita garantia por título de capitalização com valor e proposta", () => {
     const res = dadosLocacaoSchema.safeParse({
       ...baseValid,
@@ -556,5 +582,23 @@ describe("comissaoLocacaoSchema", () => {
       comissao,
     });
     expect(com.comissao?.taxa_locacao_percent).toBe(100);
+  });
+});
+
+// 2026-09-03 — `nome_mae`/`sexo` nas partes PF de locação (certidões TJSP e
+// antecedentes exigem; RG/CNH trazem). Opcionais com default "".
+describe("pessoa física de locação: nome_mae e sexo", () => {
+  it("aceita, guarda e defaulta para vazio (locador, locatário e fiador)", () => {
+    const parsed = dadosLocacaoSchema.parse({
+      ...baseValid,
+      locadores: [{ tipo_pessoa: "fisica", nome: "João Locador", nome_mae: "Ana Locadora", sexo: "M" }],
+      garantia: {
+        tipo: "fiador",
+        fiador: { tipo_pessoa: "fisica", nome: "Fernando Fiador", sexo: "F" },
+      },
+    });
+    expect(parsed.locadores[0]).toMatchObject({ nome_mae: "Ana Locadora", sexo: "M" });
+    expect(parsed.locatarios[0]).toMatchObject({ nome_mae: "", sexo: "" });
+    expect(parsed.garantia?.fiador).toMatchObject({ sexo: "F", nome_mae: "" });
   });
 });

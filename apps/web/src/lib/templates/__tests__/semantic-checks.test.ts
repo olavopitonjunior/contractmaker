@@ -1,0 +1,355 @@
+import { describe, it, expect } from "vitest";
+import {
+  countBySeverity,
+  persistableSemanticReport,
+  readSemanticReport,
+  runSemanticChecks,
+  type OrgFacts,
+  type SemanticFinding,
+} from "../semantic-checks";
+
+/**
+ * Os casos abaixo saíram do rebuild da RE/MAX Trio (03/09/2026): a cláusula de
+ * rateio do 1º aluguel — item a) da imobiliária, b) e c) dos corretores — é
+ * onde as quatro classes de erro apareceram juntas.
+ */
+const ORG: OrgFacts = {
+  legalName: "Trio Negócios Imobiliários Ltda",
+  cnpj: "12.345.678/0001-90",
+  creci: "79.434-J",
+  pixAddressKey: "financeiro@trio.exemplo.br",
+  bankBranch: "1234-5",
+  bankAccount: "98765-4",
+};
+
+function run(
+  docText: string,
+  opts: { org?: OrgFacts | null; sourceText?: string | null; modalidade?: string } = {}
+) {
+  return runSemanticChecks({
+    docText,
+    modalidade: opts.modalidade ?? "locacao",
+    org: opts.org === undefined ? null : opts.org,
+    sourceText: opts.sourceText ?? null,
+  });
+}
+
+const byCategory = (findings: SemanticFinding[], category: string) =>
+  findings.filter((f) => f.category === category);
+
+describe("wrong-entity — chave da parte errada", () => {
+  const itemDaImobiliaria = (token: string) =>
+    `a) R$ 2.500,00 (dois mil e quinhentos reais), a ser pago diretamente à imobiliária intermediadora ${token}, como honorários pela intermediação imobiliária;`;
+
+  it("aponta a chave do corretor num item que fala da imobiliária, com o rekey pronto", () => {
+    const { findings } = run(itemDaImobiliaria("{{corretagem_qualificacao}}"));
+    const hits = byCategory(findings, "wrong-entity");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].severity).toBe("error");
+    expect(hits[0].token).toBe("corretagem_qualificacao");
+    expect(hits[0].suggestedFix).toEqual({
+      op: "rekey",
+      phrase: itemDaImobiliaria("{{corretagem_qualificacao}}"),
+      fromToken: "corretagem_qualificacao",
+      toToken: "imobiliaria_qualificacao",
+    });
+  });
+
+  it("não aponta nada quando a chave já é a da imobiliária", () => {
+    const { findings } = run(itemDaImobiliaria("{{imobiliaria_qualificacao}}"));
+    expect(byCategory(findings, "wrong-entity")).toHaveLength(0);
+  });
+
+  it("aponta a chave da imobiliária num item que fala do corretor", () => {
+    const doc =
+      "b) R$ 1.200,00, a ser pago diretamente ao(à) corretor(a) intermediador(a) {{imobiliaria_dados_pagamento}};";
+    const hits = byCategory(run(doc).findings, "wrong-entity");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].suggestedFix).toMatchObject({
+      op: "rekey",
+      toToken: "corretagem_dados_pagamento",
+    });
+  });
+
+  it("tolera aposto entre o substantivo e o qualificador", () => {
+    const doc =
+      "a) valor pago à imobiliária, doravante denominada intermediadora, {{corretagem_qualificacao}};";
+    const hits = byCategory(run(doc).findings, "wrong-entity");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].suggestedFix).toMatchObject({ toToken: "imobiliaria_qualificacao" });
+  });
+
+  it("a pista não atravessa o fim da frase", () => {
+    // "intermediadora" pertence à oração seguinte: não é pista deste trecho.
+    const doc =
+      "A imobiliária cadastrou o imóvel. A corretora intermediadora recebe {{corretagem_qualificacao}}.";
+    expect(byCategory(run(doc).findings, "wrong-entity")).toHaveLength(0);
+  });
+
+  it("cala quando a frase tem as DUAS pistas — não é decidível por palavra", () => {
+    const doc =
+      "a) valor pago à imobiliária intermediadora, representada por seu corretor intermediador {{corretagem_qualificacao}};";
+    expect(byCategory(run(doc).findings, "wrong-entity")).toHaveLength(0);
+  });
+
+  it("não propõe rekey para chave que não existe na modalidade", () => {
+    // Em venda não há `imobiliaria_*`: sem destino no catálogo, não há conserto.
+    const doc = "a) pago à imobiliária intermediadora {{corretagem_qualificacao}};";
+    expect(byCategory(run(doc, { modalidade: "a_vista" }).findings, "wrong-entity")).toHaveLength(0);
+  });
+});
+
+describe("org-literal — dado da própria imobiliária escrito no modelo", () => {
+  it("pega o CNPJ da org mesmo com formatação diferente da cadastrada", () => {
+    const doc = "A ADMINISTRADORA, inscrita no CNPJ sob o nº 12345678000190, com sede nesta cidade.";
+    const hits = byCategory(run(doc, { org: ORG }).findings, "org-literal");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].severity).toBe("warning");
+    expect(hits[0].message).toContain("imobiliaria_qualificacao");
+  });
+
+  it("não casa um dado curto DENTRO de um número maior (agência dentro do CNPJ)", () => {
+    // `bankBranch: "1234-5"` é prefixo de `12345678000190`: comparar cadeias de
+    // dígitos sem fronteira dava dois achados no mesmo parágrafo.
+    const doc = "A ADMINISTRADORA, inscrita no CNPJ sob o nº 12345678000190, com sede nesta cidade.";
+    const hits = byCategory(run(doc, { org: ORG }).findings, "org-literal");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].message).toContain("CNPJ");
+  });
+
+  it("pega a agência quando ela aparece como número inteiro", () => {
+    const doc = "Depósito na agência 1234-5, conta 98765-4 do Banco do Brasil.";
+    const hits = byCategory(run(doc, { org: ORG }).findings, "org-literal");
+    expect(hits).toHaveLength(2);
+    expect(hits.every((h) => h.message.includes("imobiliaria_dados_pagamento"))).toBe(true);
+  });
+
+  it("ignora CNPJ de terceiro", () => {
+    const doc = "A construtora, inscrita no CNPJ sob o nº 99.888.777/0001-66, declara.";
+    expect(byCategory(run(doc, { org: ORG }).findings, "org-literal")).toHaveLength(0);
+  });
+
+  it("pega a chave PIX da org", () => {
+    const doc = "Pagamento via PIX para financeiro@trio.exemplo.br, em até 5 dias.";
+    const hits = byCategory(run(doc, { org: ORG }).findings, "org-literal");
+    expect(hits.some((h) => h.message.includes("chave PIX"))).toBe(true);
+  });
+
+  it("não roda sem cadastro da org e diz que não rodou", () => {
+    const doc = "CNPJ 12.345.678/0001-90.";
+    const report = run(doc, { org: null });
+    expect(report.orgFactsAvailable).toBe(false);
+    expect(byCategory(report.findings, "org-literal")).toHaveLength(0);
+  });
+});
+
+describe("leftover-identifier — dado do titular ao lado da chave", () => {
+  it("pega o CRECI literal e propõe remover a frase COM o separador", () => {
+    const doc = "b) pago a {{corretagem_qualificacao}}, CRECI 12345-F, conforme ajustado.";
+    const hits = byCategory(run(doc).findings, "leftover-identifier");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].severity).toBe("warning");
+    expect(hits[0].suggestedFix).toEqual({
+      op: "remove-leftover",
+      phrase: ", CRECI 12345-F",
+    });
+  });
+
+  it("trata CPF ao lado da chave como erro", () => {
+    const doc = "b) pago a {{corretagem_qualificacao}}, CPF 529.982.247-25, na conta indicada.";
+    const hits = byCategory(run(doc).findings, "leftover-identifier");
+    expect(hits[0].severity).toBe("error");
+    expect(hits[0].suggestedFix).toMatchObject({ op: "remove-leftover" });
+  });
+
+  it("a frase proposta para remoção nunca carrega uma chave (removê-la apagaria o campo)", () => {
+    const doc = "b) {{corretagem_qualificacao}} CRECI 12345-F {{corretagem_dados_pagamento}}.";
+    const hits = byCategory(run(doc).findings, "leftover-identifier");
+    expect(hits.length).toBeGreaterThan(0);
+    for (const hit of hits) {
+      if (hit.suggestedFix?.op !== "remove-leftover") continue;
+      expect(hit.suggestedFix.phrase).not.toContain("{{");
+      expect(doc).toContain(hit.suggestedFix.phrase);
+    }
+  });
+
+  it("ignora parágrafo sem chave de dado", () => {
+    const doc = "O corretor CRECI 12345-F assina este instrumento.";
+    expect(byCategory(run(doc).findings, "leftover-identifier")).toHaveLength(0);
+  });
+
+  it("mascara o dado no excerto do relatório", () => {
+    const doc = "b) pago a {{corretagem_qualificacao}}, CPF 529.982.247-25.";
+    const hits = byCategory(run(doc).findings, "leftover-identifier");
+    expect(hits[0].excerpt).not.toContain("529.982.247-25");
+  });
+
+  it("redige CRECI e chave PIX, que nenhum detector de PII reconhece", () => {
+    // O excerto é PERSISTIDO e RENDERIZADO: sem esta redação o relatório
+    // exibiria justamente o número que ele existe para denunciar.
+    const creci = byCategory(
+      run("b) pago a {{corretagem_qualificacao}}, CRECI 12345-F, conforme ajustado.").findings,
+      "leftover-identifier"
+    );
+    expect(creci[0].excerpt).not.toContain("12345-F");
+    expect(creci[0].excerpt).toContain("[CRECI]");
+
+    const pix = byCategory(
+      run("b) {{corretagem_dados_pagamento}} chave PIX 7a1f9c22-bd41-4a55-9e02-11ce3d77aa10.")
+        .findings,
+      "leftover-identifier"
+    );
+    expect(pix[0].excerpt).not.toContain("7a1f9c22-bd41-4a55-9e02-11ce3d77aa10");
+  });
+});
+
+describe("collapsed-paragraph — a cláusula virou uma chave só", () => {
+  const anterior =
+    "4.1.1. O pagamento correspondente ao primeiro aluguel será rateado da seguinte forma:";
+  const posterior =
+    "4.1.2. Os valores acima serão retidos pela ADMINISTRADORA no primeiro repasse ao LOCADOR.";
+  const itemOriginal =
+    "a) R$ 2.500,00 (dois mil e quinhentos reais), a ser pago diretamente à imobiliária intermediadora Trio, como honorários pela intermediação;";
+
+  it("com o contrato-fonte, aponta o colapso e propõe restaurar o parágrafo", () => {
+    const doc = [anterior, "{{imobiliaria_qualificacao}}", posterior].join("\n");
+    const source = [anterior, itemOriginal, posterior].join("\n");
+    const hits = byCategory(run(doc, { sourceText: source }).findings, "collapsed-paragraph");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].severity).toBe("error");
+    expect(hits[0].suggestedFix).toEqual({
+      op: "restore-paragraph",
+      current: "{{imobiliaria_qualificacao}}",
+      source: itemOriginal,
+    });
+  });
+
+  it("não acusa bloco de cláusula, que substitui a cláusula inteira por desenho", () => {
+    // Medido em staging (03/09/2026): a regra valia para todo bloco composto e
+    // acusava `{{clausula_garantia}}`. `assinaturas`, `bloco_administradora` e
+    // `parcelas_pagamento` têm o mesmo papel — para eles, engolir a cláusula é
+    // o comportamento correto.
+    for (const token of [
+      "clausula_garantia",
+      "assinaturas",
+      "bloco_administradora",
+      "parcelas_pagamento",
+    ]) {
+      const doc = [anterior, `{{${token}}}`, posterior].join("\n");
+      const source = [anterior, itemOriginal, posterior].join("\n");
+      expect(
+        byCategory(run(doc, { sourceText: source }).findings, "collapsed-paragraph")
+      ).toHaveLength(0);
+    }
+    // A chave de DADO no mesmo lugar continua sendo acusada.
+    const comDado = [anterior, "{{imobiliaria_qualificacao}}", posterior].join("\n");
+    expect(
+      byCategory(run(comDado, { sourceText: [anterior, itemOriginal, posterior].join("\n") }).findings, "collapsed-paragraph")
+    ).toHaveLength(1);
+  });
+
+  it("cala quando o parágrafo do fonte era mesmo só uma qualificação", () => {
+    const abre = "Pelo presente instrumento, as partes abaixo qualificadas ajustam o seguinte:";
+    const fecha = "Resolvem celebrar o presente contrato de locação, que se regerá pelas cláusulas.";
+    const doc = [abre, "{{locadores_qualificacao}}", fecha].join("\n");
+    const source = [
+      abre,
+      "Helena Castro Vilaboim, brasileira, viúva, engenheira, residente nesta capital",
+      fecha,
+    ].join("\n");
+    expect(byCategory(run(doc, { sourceText: source }).findings, "collapsed-paragraph")).toHaveLength(0);
+  });
+
+  it("sem fonte, só avisa quando o parágrafo anterior abre uma lista ou fala de comissão", () => {
+    const doc = [anterior, "{{imobiliaria_qualificacao}}", posterior].join("\n");
+    const hits = byCategory(run(doc).findings, "collapsed-paragraph");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].severity).toBe("warning");
+    expect(hits[0].suggestedFix).toEqual({ op: "manual" });
+  });
+
+  it("sem fonte e sem contexto de lista, não inventa achado", () => {
+    const doc = ["Das partes:", "{{locadores_qualificacao}}"].join("\n");
+    const hits = byCategory(run(doc).findings, "collapsed-paragraph");
+    // "Das partes:" abre lista — o aviso é legítimo, mas some se o anterior é prosa comum.
+    expect(hits).toHaveLength(1);
+    const outro = ["O imóvel é residencial e está desocupado.", "{{locadores_qualificacao}}"].join("\n");
+    expect(byCategory(run(outro).findings, "collapsed-paragraph")).toHaveLength(0);
+  });
+
+  it("âncora ambígua no fonte não propõe restauração", () => {
+    const repetido = "As partes ajustam o pagamento na forma abaixo descrita neste contrato.";
+    const doc = [repetido, "{{imobiliaria_qualificacao}}", posterior].join("\n");
+    const source = [repetido, itemOriginal, posterior, repetido].join("\n");
+    const hits = byCategory(run(doc, { sourceText: source }).findings, "collapsed-paragraph");
+    expect(hits.every((h) => h.suggestedFix?.op !== "restore-paragraph")).toBe(true);
+  });
+});
+
+describe("dangling-reference — citação de item que não existe", () => {
+  const cita = "4.1.2. Os valores do item 4.1.1 serão retidos no primeiro repasse.";
+
+  it("erro quando o fonte definia o item e o documento não define mais", () => {
+    const source = "4.1.1. O pagamento do primeiro aluguel será rateado assim:\n" + cita;
+    const hits = byCategory(run(cita, { sourceText: source }).findings, "dangling-reference");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].severity).toBe("error");
+  });
+
+  it("info quando nem o fonte definia — a citação já vinha quebrada", () => {
+    const hits = byCategory(run(cita, { sourceText: "Contrato sem esse item." }).findings, "dangling-reference");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].severity).toBe("info");
+  });
+
+  it("cala quando o item existe no documento", () => {
+    const doc = "4.1.1. O pagamento será rateado assim:\n" + cita;
+    expect(byCategory(run(doc).findings, "dangling-reference")).toHaveLength(0);
+  });
+});
+
+describe("contrato do relatório", () => {
+  it("não lança com documento vazio nem com fonte ausente", () => {
+    expect(() => run("")).not.toThrow();
+    const report = run("");
+    expect(report.findings).toEqual([]);
+    expect(report.sourceAvailable).toBe(false);
+  });
+
+  it("a forma persistida perde as frases cruas do conserto", () => {
+    const doc = "a) pago à imobiliária intermediadora {{corretagem_qualificacao}};";
+    const report = run(doc);
+    const persisted = persistableSemanticReport(report);
+    expect(report.findings[0].suggestedFix).toMatchObject({ phrase: expect.any(String) });
+    expect(persisted.findings[0].suggestedFix).toEqual({ op: "rekey" });
+    // Nenhum campo de frase crua do conserto sobrevive à persistência.
+    for (const key of ["phrase", "current", "source"]) {
+      expect(JSON.stringify(persisted.findings.map((f) => f.suggestedFix))).not.toContain(key);
+    }
+  });
+
+  it("ids são estáveis e únicos dentro do mesmo parágrafo", () => {
+    const doc = "b) {{corretagem_qualificacao}}, CRECI 12345-F, CPF 529.982.247-25.";
+    const first = run(doc).findings.map((f) => f.id);
+    const second = run(doc).findings.map((f) => f.id);
+    expect(first).toEqual(second);
+    expect(new Set(first).size).toBe(first.length);
+  });
+
+  it("lê relatório gravado e tolera formato ausente ou malformado", () => {
+    const report = run("a) pago à imobiliária intermediadora {{corretagem_qualificacao}};");
+    const saved = JSON.parse(JSON.stringify({ semantic: persistableSemanticReport(report) }));
+    expect(readSemanticReport(saved)?.findings).toHaveLength(1);
+    expect(readSemanticReport({})).toBeNull();
+    expect(readSemanticReport({ semantic: "nada" })).toBeNull();
+    expect(readSemanticReport(null)).toBeNull();
+  });
+
+  it("conta por severidade", () => {
+    expect(countBySeverity([{ severity: "error" }, { severity: "info" }] as SemanticFinding[])).toEqual({
+      error: 1,
+      warning: 0,
+      info: 1,
+    });
+  });
+});

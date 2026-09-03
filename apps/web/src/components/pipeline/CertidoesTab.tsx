@@ -46,6 +46,8 @@ import { DiligentedPersonsSection } from "./DiligentedPersonsSection";
 import { DiligentedPersonDialog } from "./DiligentedPersonDialog";
 import { CertidoesAnalysisPanel } from "./CertidoesAnalysisPanel";
 import { EditPartyDialog } from "./EditPartyDialog";
+import { KIND_LABEL } from "./certidoes-groups";
+import type { CertidoesEsteira } from "@/lib/certidoes/target-paths";
 import {
   CATEGORY_LABEL,
   isUserFixable,
@@ -77,6 +79,15 @@ interface CertidoesTabProps {
     numero?: string;
     cidade?: string;
   }>;
+  /**
+   * Locação (2026-09-03): a aba é a mesma; muda o shape das partes. O imóvel
+   * singular do form entra como `imoveis[0]` (chave de grupo `imovel-0`).
+   */
+  esteira?: CertidoesEsteira;
+  locadores?: Array<{ nome?: string; razao_social?: string }>;
+  locatarios?: Array<{ nome?: string; razao_social?: string }>;
+  /** Fiador só quando a garantia É fiança (mesma regra do planner). */
+  fiador?: { nome?: string; razao_social?: string; tipo_pessoa?: string; conjuge?: Dependente } | null;
 }
 
 /** Identidade útil de dependente: tem CPF ou ao menos nome. */
@@ -420,6 +431,10 @@ export function CertidoesTab({
   vendedores,
   compradores,
   imoveis,
+  esteira = "venda",
+  locadores = [],
+  locatarios = [],
+  fiador = null,
 }: CertidoesTabProps) {
   const {
     jobs,
@@ -595,6 +610,29 @@ export function CertidoesTab({
         rows: [],
       })
     );
+    // Locação: locatário, fiador (+ cônjuge, índice 0 — objeto) e locador.
+    locatarios.forEach((p, i) =>
+      map.set(`locatario-${i}`, {
+        label: `Locatário: ${p.nome || p.razao_social || `Parte ${i + 1}`}`,
+        rows: [],
+      })
+    );
+    if (fiador) {
+      const fLabel = fiador.nome || fiador.razao_social || "Fiador";
+      map.set("fiador-0", { label: `Fiador: ${fLabel}`, rows: [] });
+      if (fiador.tipo_pessoa !== "juridica" && hasDependente(fiador.conjuge)) {
+        map.set("conjuge_fiador-0", {
+          label: `Cônjuge do fiador ${fLabel}: ${fiador.conjuge.nome || "—"}`,
+          rows: [],
+        });
+      }
+    }
+    locadores.forEach((p, i) =>
+      map.set(`locador-${i}`, {
+        label: `Locador: ${p.nome || p.razao_social || `Parte ${i + 1}`}`,
+        rows: [],
+      })
+    );
     for (const job of displayJobs) {
       const key = groupKey(job);
       if (!map.has(key)) {
@@ -602,22 +640,18 @@ export function CertidoesTab({
         // Dependentes do vendedor sem pré-seed (dado removido do form depois
         // do job criado) recebem rótulo legível em vez do enum cru.
         const n = job.targetIndex + 1;
+        // Rótulo pelo catálogo de alvos (lib/certidoes/target-paths.ts) — cobre
+        // os kinds de venda e de locação sem enum cru na tela.
         const label =
           job.targetKind === "diligenciado"
             ? `Diligência avulsa #${n}`
-            : job.targetKind === "conjuge_vendedor"
-            ? `Cônjuge do Vendedor ${n}`
-            : job.targetKind === "procurador_vendedor"
-            ? `Procurador do Vendedor ${n}`
-            : job.targetKind === "representante_vendedor"
-            ? `Representante do Vendedor ${n}`
-            : `${job.targetKind} ${n}`;
+            : `${KIND_LABEL[job.targetKind] ?? job.targetKind} ${n}`;
         map.set(key, { label, rows: [] });
       }
       map.get(key)!.rows.push(job);
     }
     return Array.from(map.entries()).filter(([, g]) => g.rows.length > 0);
-  }, [displayJobs, vendedores, compradores, imoveis]);
+  }, [displayJobs, vendedores, compradores, imoveis, locatarios, locadores, fiador]);
 
   const stats = useMemo(() => {
     const total = visibleJobs.length;
@@ -925,6 +959,23 @@ export function CertidoesTab({
           ...compradores.map((c) => ({
             kind: "comprador",
             label: c.nome || c.razao_social || "Comprador",
+          })),
+          // Locação: quem está sendo diligenciado (mesma lista do seeding).
+          ...locatarios.map((p) => ({
+            kind: "locatario",
+            label: p.nome || p.razao_social || "Locatário",
+          })),
+          ...(fiador
+            ? [
+                { kind: "fiador", label: fiador.nome || fiador.razao_social || "Fiador" },
+                ...(fiador.tipo_pessoa !== "juridica" && hasDependente(fiador.conjuge)
+                  ? [{ kind: "conjuge_fiador", label: fiador.conjuge.nome || "Cônjuge do fiador" }]
+                  : []),
+              ]
+            : []),
+          ...locadores.map((p) => ({
+            kind: "locador",
+            label: p.nome || p.razao_social || "Locador",
           })),
           ...imoveis.map((im, i) => ({
             kind: "imovel",
@@ -1622,6 +1673,7 @@ export function CertidoesTab({
         inProgressKeys={inProgressKeys}
         onConfirm={handleExtract}
         onAddPerson={() => setAddPersonOpen(true)}
+        esteira={esteira}
       />
 
       <DiligentedPersonDialog
@@ -1662,6 +1714,7 @@ export function CertidoesTab({
         <EditPartyDialog
           job={editingPartyJob}
           dealId={dealId}
+          esteira={esteira}
           open={!!editingPartyJob}
           onOpenChange={(open) => !open && setEditingPartyJob(null)}
           onSaved={async () => {

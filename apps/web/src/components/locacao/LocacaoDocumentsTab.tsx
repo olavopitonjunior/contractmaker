@@ -19,6 +19,7 @@ import { AddDocumentsCard } from "@/components/pipeline/AddDocumentsCard";
 import type { SelectGroup } from "@/components/forms/NativeSelect";
 import type { Assignment, DocumentKind } from "@/lib/forms/extracted-to-form";
 import { buildLocacaoOptions } from "@/components/forms/steps/locacao/locacao-doc-adapter";
+import { FIADOR_FLIP_TOAST } from "@/lib/forms/garantia-fiador-flip";
 import { FileText } from "lucide-react";
 
 export interface LocacaoAttachment {
@@ -43,10 +44,11 @@ interface LocacaoDocumentsTabProps {
   locadores: ParteOption[];
   locatarios: ParteOption[];
   /**
-   * Recorte lite do `dataJson` só com o que o seletor precisa. Substituiu a
-   * prop booleana `hasFiador`: o builder compartilhado com a etapa 0 decide
-   * sozinho quando mostrar Fiador/Cônjuge do fiador e usa o nome da parte no
-   * rótulo.
+   * Recorte lite do `dataJson` só com o que o seletor precisa: o builder
+   * compartilhado com a etapa 0 mostra Fiador/Cônjuge do fiador sempre (o
+   * cônjuge só para fiador PF) e usa o nome da parte no rótulo. "Mover para
+   * Fiador" aqui também vira a garantia para fiador — o PATCH faz isso no
+   * servidor, com a mesma regra da etapa 0.
    */
   garantia?: { tipo?: string; fiador?: Record<string, unknown> };
 }
@@ -158,6 +160,9 @@ export function LocacaoDocumentsTab({
     });
     if (res.ok) {
       toast.success("Documento movido");
+      // Mesmo aviso da etapa 0: mover para o fiador definiu a modalidade.
+      const d = (await res.json().catch(() => null)) as { garantiaFlipped?: boolean } | null;
+      if (d?.garantiaFlipped) toast.info(FIADOR_FLIP_TOAST);
       router.refresh();
     } else {
       const d = await res.json().catch(() => null);

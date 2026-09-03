@@ -33,6 +33,8 @@ Analise o documento anexo (contrato de locação ou proposta) e extraia os dados
       "profissao": "...",
       "nacionalidade": "Brasileiro(a) | ...",
       "data_nascimento": "YYYY-MM-DD",
+      "nome_mae": "...",                      // filiação (mãe), quando o contrato trouxer
+      "sexo": "M" | "F",                      // quando inferível (nome/qualificação)
       "endereco": "...", "numero": "...", "complemento": "...",
       "bairro": "...", "cidade": "...", "uf": "SP", "cep": "00000-000",
       "email": "...",
@@ -90,7 +92,7 @@ Regras:
 - Campos não encontrados: OMITA da resposta (não preencha com null nem string vazia).
 - Parte PJ: use "razao_social" + "cnpj" (não "nome"+"cpf") e preencha "representante" quando o contrato nomear quem assina pela empresa.
 - Se houver múltiplos locadores/locatários, retorne array com TODOS. "imovel" é UM objeto (o imóvel locado), não array.
-- "garantia.fiador": preencher apenas quando tipo = "fiador" e o contrato qualificar o fiador.
+- "garantia.fiador": preencher sempre que o contrato qualificar um fiador (e, nesse caso, tipo = "fiador" — a presença do fiador define a modalidade).
 - "garantia_onerosa": modalidade PAGA prestada por um fornecedor de garantia locatícia (garantia onerosa, fiança digital, carta de fiança). O nome do fornecedor vai em "provider" — ele nunca define a modalidade.
 - "vigencia_meses": calcular pela vigência declarada (ex: "30 meses", ou início/fim explícitos).
 - "dia_vencimento": dia do mês do pagamento do aluguel (1-28).

@@ -84,6 +84,19 @@ export interface DocumentosStepAdapter {
    */
   partyListKeys: readonly string[];
   /**
+   * Efeito colateral de um EVENTO de atribuição (troca manual no seletor ou
+   * self-assign do link individual) — nunca de um effect de restore nem do
+   * `apply`: o `computeDocWrites` sonda o `apply` e o D7 apagaria a escrita na
+   * reatribuição. Locação: doc no fiador/cônjuge do fiador ⇒ `garantia.tipo`
+   * vira "fiador" (lib/forms/garantia-fiador-flip.ts). Retorna a mensagem a
+   * exibir em toast, ou null quando não houve efeito.
+   */
+  onAssign?(
+    kind: DocumentKind,
+    index: number,
+    form: UseFormReturn<Record<string, unknown>>
+  ): string | null;
+  /**
    * Aplica uma ficha-resumo no form (mestra de classificação, Fase E).
    * Ausente = esteira sem suporte a ficha (locação) — docs ficam em "outro".
    */

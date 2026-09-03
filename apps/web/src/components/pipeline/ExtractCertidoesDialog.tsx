@@ -27,35 +27,22 @@ import {
 } from "lucide-react";
 import { ExtraCertidaoPicker, type CatalogMeta } from "./ExtraCertidaoPicker";
 import type { EndpointInfo } from "@/lib/certidoes/endpoints";
+import type { TargetKind } from "@/lib/certidoes/types";
+import type { CertidoesEsteira } from "@/lib/certidoes/target-paths";
 import { formPublicPath } from "@/lib/forms/form-url";
-
-type Tier = "padrao" | "imovel" | "opcional" | "pesquisa";
-
-// Redesign 2026-06-10 — a pop-up agrupa por PARTE (não por camada abstrata):
-// Vendedores · Pessoas adicionais · Compradores · Imóvel · Pesquisa de bens.
-// O grupo deriva de targetKind (+ tier pra separar imóvel/pesquisa), então o
-// diligenciado ("Pessoas adicionais") aparece numa seção própria e visível —
-// antes caía no tier "opcional" colapsado e sumia da vista.
-type Group = "vendedores" | "adicionais" | "compradores" | "imovel" | "pesquisa";
-
-const VENDEDOR_KINDS = new Set([
-  "vendedor",
-  "conjuge_vendedor",
-  "procurador_vendedor",
-  "representante_vendedor",
-]);
-
-// Default: Vendedores + Pessoas adicionais (quem o usuário adicionou de propósito)
-// nascem pré-marcados; Compradores/Imóvel/Pesquisa entram via opt-in.
-const DEFAULT_GROUPS: Set<Group> = new Set<Group>(["vendedores", "adicionais"]);
-
-function groupForJob(j: { targetKind: string; tier?: Tier }): Group {
-  if (j.tier === "pesquisa") return "pesquisa";
-  if (j.tier === "imovel" || j.targetKind === "imovel") return "imovel";
-  if (j.targetKind === "diligenciado") return "adicionais";
-  if (VENDEDOR_KINDS.has(j.targetKind)) return "vendedores";
-  return "compradores"; // comprador (e fallback defensivo)
-}
+// Redesign 2026-06-10 — a pop-up agrupa por PARTE (não por camada abstrata).
+// Grupos, defaults e seções por esteira (venda/locação) vivem em
+// ./certidoes-groups (2026-09-03), testáveis sem RTL.
+import {
+  defaultGroupsFor,
+  emptyByGroup,
+  groupForJob,
+  initialOpenSections,
+  KIND_LABEL,
+  sectionsFor,
+  type Group,
+  type Tier,
+} from "./certidoes-groups";
 
 interface JobRegion {
   kind: "nacional" | "imovel" | "endereco" | "outro";
@@ -99,14 +86,7 @@ interface Spend {
 
 export interface JobSelection {
   endpoint: string;
-  targetKind:
-    | "vendedor"
-    | "comprador"
-    | "imovel"
-    | "diligenciado"
-    | "conjuge_vendedor"
-    | "procurador_vendedor"
-    | "representante_vendedor";
+  targetKind: TargetKind;
   targetIndex: number;
 }
 
@@ -128,6 +108,8 @@ interface ExtractCertidoesDialogProps {
   onConfirm: (jobs?: JobSelection[]) => Promise<void> | void;
   /** Abre o cadastro de "outras pessoas" (DiligentedPersonDialog) no parent. */
   onAddPerson?: () => void;
+  /** Esteira do negócio: define seções, defaults e rótulos. Default venda. */
+  esteira?: CertidoesEsteira;
 }
 
 interface DiligentedRow {
@@ -139,16 +121,6 @@ interface DiligentedRow {
 function jobKey(j: { endpoint: string; targetKind: string; targetIndex: number }) {
   return `${j.endpoint}|${j.targetKind}|${j.targetIndex}`;
 }
-
-const KIND_LABEL: Record<string, string> = {
-  vendedor: "Vendedor",
-  comprador: "Comprador",
-  imovel: "Imóvel",
-  diligenciado: "Pessoa adicional",
-  conjuge_vendedor: "Cônjuge do vendedor",
-  procurador_vendedor: "Procurador do vendedor",
-  representante_vendedor: "Representante do vendedor",
-};
 
 function groupLabel(kind: string, index: number, labelMap: Record<string, string>): string {
   const key = `${kind}-${index}`;
@@ -179,6 +151,7 @@ export function ExtractCertidoesDialog({
   inProgressKeys,
   onConfirm,
   onAddPerson,
+  esteira = "venda",
 }: ExtractCertidoesDialogProps) {
   const [plan, setPlan] = useState<ExtractionPlan | null>(null);
   const [expandedPlan, setExpandedPlan] = useState<ExtractionPlan | null>(null);
@@ -198,13 +171,18 @@ export function ExtractCertidoesDialog({
   // Seções colapsáveis por parte. Vendedores + Pessoas adicionais abertas (o que
   // já vem marcado); Compradores/Imóvel/Pesquisa colapsadas pra reduzir o scroll —
   // abrem em 1 clique.
-  const [openSections, setOpenSections] = useState<Record<Group, boolean>>({
-    vendedores: true,
-    adicionais: true,
-    compradores: false,
-    imovel: false,
-    pesquisa: false,
-  });
+  const [openSections, setOpenSections] = useState<Record<Group, boolean>>(() =>
+    initialOpenSections(esteira)
+  );
+  const defaultGroups = useMemo(() => defaultGroupsFor(esteira), [esteira]);
+  const sections = useMemo(() => sectionsFor(esteira), [esteira]);
+  // Locação sem Serasa (decisão 2026-09-02, não está integrado): o catálogo do
+  // seletor "Adicionar outras" vem inteiro da API; sem este filtro um locador
+  // podia receber score/restritivos Serasa a R$ 5 a consulta.
+  const visibleCatalog = useMemo(
+    () => (esteira === "locacao" ? catalog.filter((e) => e.provider !== "serasa") : catalog),
+    [catalog, esteira]
+  );
 
   const fetchPlan = (regions: string[]) => {
     setLoading(true);
@@ -228,7 +206,7 @@ export function ExtractCertidoesDialog({
             // checkbox fica travado e fora da contagem/custo.
             .filter(
               (j: PlannedJob) =>
-                DEFAULT_GROUPS.has(groupForJob(j)) && !inProgressKeys?.has(jobKey(j))
+                defaultGroups.has(groupForJob(j)) && !inProgressKeys?.has(jobKey(j))
             )
             .map((j: PlannedJob) => jobKey(j))
         );
@@ -312,7 +290,7 @@ export function ExtractCertidoesDialog({
     // despacho), espelhando a trava por alvo do backend.
     const next = new Set<string>();
     for (const j of allJobs) {
-      if (!DEFAULT_GROUPS.has(groupForJob(j))) continue; // só Vendedores + Adicionais
+      if (!defaultGroups.has(groupForJob(j))) continue; // só os grupos pré-marcados da esteira
       const key = jobKey(j);
       if (inProgressKeys?.has(key)) continue; // em andamento → não re-pedir
       const t = extractedStatus[key];
@@ -402,9 +380,7 @@ export function ExtractCertidoesDialog({
 
   // Agrupa jobs por PARTE (kind-index) e, dentro de cada parte, por região.
   const byGroup = useMemo(() => {
-    const out: Record<Group, PlannedJob[]> = {
-      vendedores: [], adicionais: [], compradores: [], imovel: [], pesquisa: [],
-    };
+    const out = emptyByGroup<PlannedJob>();
     for (const j of allJobs) out[groupForJob(j)].push(j);
     return out;
   }, [allJobs]);
@@ -412,9 +388,7 @@ export function ExtractCertidoesDialog({
   // Skips (não selecionáveis) por parte — pra mostrar Matrícula/IPTU/Bens e dados
   // faltantes como opções "falta X / indisponível" dentro da própria seção.
   const skipsByGroup = useMemo(() => {
-    const out: Record<Group, SkippedJob[]> = {
-      vendedores: [], adicionais: [], compradores: [], imovel: [], pesquisa: [],
-    };
+    const out = emptyByGroup<SkippedJob>();
     for (const s of plan?.skipped ?? []) out[groupForJob(s)].push(s);
     return out;
   }, [plan]);
@@ -598,14 +572,11 @@ export function ExtractCertidoesDialog({
     );
   };
 
-  // Vendedores: pessoas por região + "Adicionar outro local" (re-planeja com UF extra).
-  const renderVendedores = () => (
+  // Grupo principal (vendedores em venda; locatários/fiador em locação): pessoas
+  // por região + "Adicionar outro local" (re-planeja com UF extra).
+  const renderPrimary = (group: Group, emptyMsg: string) => (
     <div className="space-y-2">
-      {renderPersonRegionGroups(
-        byGroup.vendedores,
-        skipsByGroup.vendedores,
-        "Nenhum vendedor para diligenciar neste negócio."
-      )}
+      {renderPersonRegionGroups(byGroup[group], skipsByGroup[group], emptyMsg)}
       <div className="flex flex-wrap items-center gap-2 px-1">
         {addingLocal ? (
           <span className="flex items-center gap-1">
@@ -768,8 +739,17 @@ export function ExtractCertidoesDialog({
           <DialogHeader>
             <DialogTitle>Emitir certidões</DialogTitle>
             <DialogDescription>
-              <strong>Vendedores</strong> e <strong>pessoas adicionais</strong> já vêm marcados. Compradores,
-              imóvel e pesquisa de bens são opções — abra cada seção para incluir.
+              {esteira === "locacao" ? (
+                <>
+                  <strong>Locatários</strong> e <strong>fiador</strong> já vêm marcados. Locadores,
+                  imóvel e pesquisa de bens são opções — abra cada seção para incluir.
+                </>
+              ) : (
+                <>
+                  <strong>Vendedores</strong> e <strong>pessoas adicionais</strong> já vêm marcados. Compradores,
+                  imóvel e pesquisa de bens são opções — abra cada seção para incluir.
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
 
@@ -806,47 +786,19 @@ export function ExtractCertidoesDialog({
               </div>
 
               <div className="flex-1 overflow-y-auto min-h-0 space-y-3 pr-1">
-                <Section
-                  group="vendedores"
-                  title="Vendedores"
-                  desc="Certidões dos vendedores (e dependentes) na região do imóvel e na do endereço deles."
-                >
-                  {renderVendedores()}
-                </Section>
+                {sections.map((sec) => (
+                  <Section key={sec.group} group={sec.group} title={sec.title} desc={sec.desc}>
+                    {sec.kind === "primary"
+                      ? renderPrimary(sec.group, sec.emptyMsg ?? "Nada aqui.")
+                      : sec.kind === "adicionais"
+                        ? renderAdicionais()
+                        : renderByTarget(byGroup[sec.group], skipsByGroup[sec.group], { picker: true })}
+                  </Section>
+                ))}
 
-                <Section
-                  group="adicionais"
-                  title="Pessoas adicionais"
-                  desc="Pessoas externas ao contrato que você incluiu (sócios, avalistas, procuradores)."
-                >
-                  {renderAdicionais()}
-                </Section>
-
-                <Section
-                  group="compradores"
-                  title="Compradores"
-                  desc="Certidões dos compradores — inclua se quiser diligenciá-los."
-                >
-                  {renderByTarget(byGroup.compradores, skipsByGroup.compradores, { picker: true })}
-                </Section>
-
-                <Section
-                  group="imovel"
-                  title="Imóvel"
-                  desc="Matrícula (visualização ONR), IPTU e tributos municipais do imóvel, CCIR."
-                >
-                  {renderByTarget(byGroup.imovel, skipsByGroup.imovel, { picker: true })}
-                </Section>
-
-                <Section
-                  group="pesquisa"
-                  title="Pesquisa de bens"
-                  desc="Pesquisa de Bens (ONR) e certidões menos comuns."
-                >
-                  {renderByTarget(byGroup.pesquisa, skipsByGroup.pesquisa, { picker: true })}
-                </Section>
-
-                {/* Em breve — Serasa */}
+                {/* Em breve — Serasa (venda). Locação: sem menção até a integração
+                    existir (decisão 2026-09-02). */}
+                {esteira === "venda" && (
                 <div className="rounded-lg border border-dashed bg-muted/10 px-3 py-2.5 opacity-80">
                   <div className="flex flex-wrap items-center gap-2">
                     <Sparkles className="h-4 w-4 text-violet-500" />
@@ -859,6 +811,7 @@ export function ExtractCertidoesDialog({
                     Localizar empresas relacionadas aos vendedores e automatizar a busca de certidões.
                   </p>
                 </div>
+                )}
 
               </div>
 
@@ -910,7 +863,7 @@ export function ExtractCertidoesDialog({
         <ExtraCertidaoPicker
           open={!!pickerFor}
           onOpenChange={(o) => !o && setPickerFor(null)}
-          catalog={catalog}
+          catalog={visibleCatalog}
           catalogMeta={catalogMeta}
           alreadySelected={alreadySelectedByGroup.get(`${pickerFor.kind}-${pickerFor.index}`) ?? new Set()}
           targetKind={pickerFor.kind === "imovel" ? "imovel" : "pessoa"}

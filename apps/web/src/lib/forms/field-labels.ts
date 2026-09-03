@@ -123,6 +123,8 @@ const FIELD_LABELS: Record<string, string> = {
   "aluguel.valor": "Valor do aluguel",
   "comissao.valor": "Valor da comissão",
   "garantia.tipo": "Tipo de garantia",
+  "garantia.fiador.nome": "Nome do fiador",
+  "garantia.fiador.razao_social": "Razão social do fiador",
   "imovel.kind": "Tipo do imóvel",
 };
 

@@ -21,24 +21,8 @@ export interface ClienteRow {
   tipoPessoa: string;
   phone: string;
   createdByName: string;
-  /** Rótulo agregado da análise Serasa (null = ainda não analisado). */
-  serasaLabel: string | null;
-  serasaTone: "pending" | "ok" | "bad" | "info" | null;
   insurers: InsurerBadge[];
   href: string;
-}
-
-function SerasaBadge({ label, tone }: { label: string | null; tone: ClienteRow["serasaTone"] }) {
-  if (!label) return <span className="text-xs text-muted-foreground">—</span>;
-  if (tone === "pending") return <Badge variant="outline">{label}</Badge>;
-  if (tone === "bad") return <Badge variant="destructive">{label}</Badge>;
-  if (tone === "ok")
-    return (
-      <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-400">
-        {label}
-      </Badge>
-    );
-  return <Badge variant="secondary">{label}</Badge>;
 }
 
 function InsurerBadgeView({ ins }: { ins: InsurerBadge }) {
@@ -63,13 +47,6 @@ function AnalysisCell({ row }: { row: ClienteRow }) {
       {row.insurers.map((i) => (
         <InsurerBadgeView key={i.key} ins={i} />
       ))}
-      {row.serasaLabel && (
-        <>
-          <span className="mx-0.5 text-muted-foreground">·</span>
-          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Serasa</span>
-          <SerasaBadge label={row.serasaLabel} tone={row.serasaTone} />
-        </>
-      )}
     </div>
   );
 }
@@ -130,7 +107,6 @@ export function ClientesTable({ data, emptyState }: Props) {
               <div className="text-sm font-medium">{row.nome}</div>
               <div className="text-xs text-muted-foreground">{row.cpfCnpj || row.phone}</div>
             </div>
-            <SerasaBadge label={row.serasaLabel} tone={row.serasaTone} />
           </div>
           <div className="mt-1 text-xs text-muted-foreground">Cadastrado por {row.createdByName}</div>
           <div className="mt-1 flex flex-wrap gap-1">

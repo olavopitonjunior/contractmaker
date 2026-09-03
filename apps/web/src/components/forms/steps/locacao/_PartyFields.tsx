@@ -12,6 +12,7 @@ import { MoneyInput } from "@/components/forms/MoneyInput";
 import { DecimalInput } from "@/components/forms/DecimalInput";
 import { FormField } from "@/components/forms/fields/FormField";
 import { ConjugeFields } from "@/components/forms/steps/ConjugeFields";
+import { isMarried } from "@/lib/forms/estado-civil";
 import {
   maskCPF,
   maskCNPJ,
@@ -142,8 +143,12 @@ export function PessoaFisicaLocacaoFields({
   prefix: string;
 }) {
   const estadoCivil = form.watch(`${prefix}.estado_civil`);
-  const showConjuge =
-    estadoCivil === "Casado(a)" || estadoCivil === "União Estável";
+  // Mesmo predicado do finalize (`collectConjugeIssues` → `isMarried`). A
+  // igualdade estrita com "Casado(a)"/"União Estável" escondia os campos para
+  // "casado"/"União estável" (o que o OCR devolve) enquanto o finalize cobrava
+  // nome e CPF do cônjuge — pendência sem campo na tela. Vale para locador,
+  // locatário e fiador: os três renderizam por aqui.
+  const showConjuge = isMarried(estadoCivil);
 
   return (
     <div className="space-y-4">
@@ -201,6 +206,31 @@ export function PessoaFisicaLocacaoFields({
           <Input
             {...form.register(`${prefix}.data_nascimento`, { validate: dataNascimentoRule })}
             type="date"
+          />
+        </FormField>
+        {/* Sexo e nome da mãe (2026-09-03): as certidões TJSP (cível + execução
+            fiscal) e antecedentes exigem; sem eles o motor pula a certidão
+            mais útil para crédito. Mesmos valores da venda (M/F). */}
+        <FormField form={form} name={`${prefix}.sexo`} label="Sexo">
+          <NativeSelect
+            value={form.watch(`${prefix}.sexo`) || ""}
+            onChange={(v) => form.setValue(`${prefix}.sexo`, v, { shouldDirty: true })}
+            options={[
+              { value: "", label: "Não informado" },
+              { value: "M", label: "Masculino" },
+              { value: "F", label: "Feminino" },
+            ]}
+          />
+        </FormField>
+        <FormField
+          form={form}
+          name={`${prefix}.nome_mae`}
+          label="Nome da Mãe"
+          className="md:col-span-2"
+        >
+          <Input
+            {...form.register(`${prefix}.nome_mae`)}
+            placeholder="Nome completo da mãe (usado nas certidões)"
           />
         </FormField>
         <FormField

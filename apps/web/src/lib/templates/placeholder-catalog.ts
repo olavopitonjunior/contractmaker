@@ -437,6 +437,28 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   },
 ];
 
+/**
+ * Chaves de DADO: cobrem só o dado em si (uma qualificação, uma via de
+ * pagamento) e convivem com vizinhas no mesmo parágrafo. Uma proposta para
+ * uma delas que CONTÉM a proposta de outra chave é recusada
+ * (`engulfs-neighbor`) em vez de aplicada — medido em produção em 02/09/2026:
+ * o item a) inteiro da cláusula de rateio entrou como `imobiliaria_qualificacao`
+ * e o parágrafo colapsou, com o gate de PII liberando por cima. Conjunto
+ * EXPLÍCITO de propósito (não derivado por sufixo): o teste do catálogo quebra
+ * quando entrar uma chave nova, para a decisão ser tomada e não herdada.
+ */
+export const DATA_KEYS: ReadonlySet<string> = new Set([
+  "locadores_qualificacao",
+  "locatarios_qualificacao",
+  "fiador_qualificacao",
+  "vendedores_qualificacao",
+  "compradores_qualificacao",
+  "corretagem_qualificacao",
+  "corretagem_dados_pagamento",
+  "imobiliaria_qualificacao",
+  "imobiliaria_dados_pagamento",
+]);
+
 export function catalogForModalidade(modalidade: string): PlaceholderDef[] {
   return PLACEHOLDER_CATALOG.filter((d) =>
     d.modalidades.includes(modalidade as PlaceholderModalidade)

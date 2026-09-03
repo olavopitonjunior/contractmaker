@@ -63,7 +63,7 @@ Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, {{thi
 {{/if}}
 {{/each}}
 
-{{#if (eq garantia.tipo "fiador")}}
+{{#if (temFiador garantia)}}
 <h3>FIADOR(A)</h3>
 {{#if (eq garantia.fiador.tipo_pessoa "juridica")}}
 <p>
@@ -110,7 +110,7 @@ Endereço: {{garantia.fiador.endereco}}, nº {{garantia.fiador.numero}}, Cidade:
 <p>5.2. O LOCATÁRIO obriga-se a obter e manter, às suas expensas, todas as licenças e autorizações necessárias ao exercício de sua atividade no imóvel, respondendo por eventuais infrações administrativas.</p>
 
 <h2>CLÁUSULA 6ª — DA GARANTIA</h2>
-{{#if (eq garantia.tipo "fiador")}}
+{{#if (temFiador garantia)}}
 <p>6.1. Em garantia das obrigações deste contrato, o(a) FIADOR(A) acima qualificado(a) assume responsabilidade solidária com o LOCATÁRIO, com expressa renúncia ao benefício de ordem (arts. 827 e 838 do Código Civil), respondendo até a efetiva entrega das chaves, ainda que a locação se prorrogue por prazo indeterminado.</p>
 {{else if (eq garantia.tipo "caucao")}}
 <p>6.1. A título de caução, o LOCATÁRIO deposita o equivalente a {{garantia.caucao_meses}} ({{numeroExtenso garantia.caucao_meses}}) aluguéis, nos termos do art. 38 da Lei nº 8.245/91, a ser restituído ao final da locação, deduzidos eventuais débitos e danos apurados em vistoria.</p>

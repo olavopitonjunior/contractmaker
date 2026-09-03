@@ -8,12 +8,16 @@ import {
   type LocacaoFormSnapshot,
 } from "@/lib/forms/extracted-to-form-locacao";
 import type { DocumentosStepAdapter } from "@/components/forms/steps/doc-step-adapter";
+import { applyFiadorFlip, FIADOR_FLIP_TOAST } from "@/lib/forms/garantia-fiador-flip";
 
 /**
  * Adapter da etapa 0 pro form de LOCAÇÃO (dadosLocacaoSchema): slots
- * Locadores/Locatários/Fiador/Representantes/Imóvel (singular). O fiador só
- * aparece quando a garantia escolhida é fiador; o imóvel não tem "+ Novo"
- * (locação trata UM imóvel por contrato).
+ * Locadores/Locatários/Fiador/Representantes/Imóvel (singular). Fiador e
+ * cônjuge do fiador aparecem SEMPRE (2026-09-02): a etapa Documentos vem antes
+ * da etapa Garantia, então condicionar o grupo a `garantia.tipo === "fiador"`
+ * o escondia justamente num formulário novo. Atribuir um doc a eles é o que
+ * define a modalidade (`onAssign`). O imóvel não tem "+ Novo" (locação trata UM
+ * imóvel por contrato).
  */
 
 const KIND_LABELS: Partial<Record<DocumentKind, string>> = {
@@ -73,20 +77,17 @@ export function buildLocacaoOptions(
     { label: "Locatários", options: buildPartyOptions("locatario", snapshot.locatarios, "Locatário") },
   ];
 
-  // Fiador: só quando a garantia é por fiador (ou já há doc atribuído a ele).
-  const hasFiador =
-    snapshot.garantia?.tipo === "fiador" ||
-    maxAssigned("fiador") >= 0 ||
-    maxAssigned("conjuge_fiador") >= 0;
-  if (hasFiador) {
-    const fiadorName = nameOf(snapshot.garantia?.fiador);
-    groups.push({
-      label: "Fiador",
-      options: [
-        { value: "fiador:0", label: fiadorName ? `Fiador — ${fiadorName}` : "Fiador" },
-      ],
-    });
-  }
+  // Fiador: sempre disponível (ver cabeçalho). O nome entra no rótulo quando a
+  // etapa 5 já o tem. Os links por papel que não têm `garantia` no escopo
+  // (locador) perdem o grupo em `filterAssignmentOptionsByScope`, coerente com
+  // o 403 do servidor.
+  const fiadorName = nameOf(snapshot.garantia?.fiador);
+  groups.push({
+    label: "Fiador",
+    options: [
+      { value: "fiador:0", label: fiadorName ? `Fiador — ${fiadorName}` : "Fiador" },
+    ],
+  });
 
   // Cônjuges: oferecidos pra todo pai que não é PJ. NÃO exigimos
   // `estado_civil === "Casado(a)"` — a etapa 0 vem ANTES das etapas de parte,
@@ -119,8 +120,7 @@ export function buildLocacaoOptions(
   pushConjuges("conjuge_locador", "locador", snapshot.locadores, "Locador");
   pushConjuges("conjuge_locatario", "locatario", snapshot.locatarios, "Locatário");
   // Fiador PJ (fiança comercial) não tem cônjuge — mesmo guard dos demais pais.
-  if (hasFiador && snapshot.garantia?.fiador?.tipo_pessoa !== "juridica") {
-    const fiadorName = nameOf(snapshot.garantia?.fiador);
+  if (snapshot.garantia?.fiador?.tipo_pessoa !== "juridica") {
     conjugeOptions.push({
       value: "conjuge_fiador:0",
       label: fiadorName ? `Cônjuge do fiador — ${fiadorName}` : "Cônjuge do fiador",
@@ -197,6 +197,23 @@ export const locacaoDocAdapter: DocumentosStepAdapter = {
   kindLabel: (kind) => KIND_LABELS[kind] ?? kind,
   // `garantia` entra porque o fiador (e o cônjuge dele) se qualificam lá dentro.
   partyListKeys: ["locadores", "locatarios", "garantia"],
+  // Doc no fiador/cônjuge do fiador ⇒ a garantia é fiança. `shouldDirty` é o
+  // que põe `garantia` no escopo sujo do auto-save; `shouldTouch` faz a etapa 5
+  // já abrir com o select em "Fiador". Idempotente e sem reversão: reatribuir o
+  // doc para outra parte NÃO volta o tipo (pode haver outros docs no fiador,
+  // o tipo pode ter sido manual, e "voltar para quê" seria chute).
+  onAssign(kind, _index, form) {
+    const flipped = applyFiadorFlip(
+      kind,
+      (path) => form.getValues(path as never) as unknown,
+      (path, value) =>
+        form.setValue(path as never, value as never, {
+          shouldDirty: true,
+          shouldTouch: true,
+        })
+    );
+    return flipped ? FIADOR_FLIP_TOAST : null;
+  },
   topKeyForKind(kind) {
     switch (kind) {
       case "locador":
