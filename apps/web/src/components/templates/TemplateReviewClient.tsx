@@ -123,6 +123,15 @@ const SKIP_REASON: Record<string, string> = {
   "doc-truncated": "o documento é maior que o limite lido pela IA — esta parte ficou fora da leitura",
   "response-truncated": "a resposta da IA veio cortada antes de chegar aqui — rode a IA de novo",
   "response-unparsed": "a resposta da IA não pôde ser lida (veio com texto fora do JSON) — rode a IA de novo",
+  // Motivos que só as edições do app produzem (`doc-edit.ts`).
+  "phrase-has-token":
+    "o trecho a remover carrega uma chave de preenchimento — removê-lo apagaria o campo",
+  "same-token": "a chave de destino é a mesma da origem: não há o que trocar",
+  "token-missing-in-phrase":
+    "o parágrafo não tem mais a chave que seria trocada (ou tem mais de uma) — revalide",
+  "empty-source": "não há texto de origem para restaurar",
+  "structure-not-found":
+    "não localizei esse parágrafo na estrutura do documento — ele foi editado no Google Docs desde a última verificação",
 };
 
 const SLOT_LABEL: Record<string, string> = {
@@ -152,11 +161,33 @@ const SEVERITY_STYLE: Record<string, string> = {
   info: "border-border bg-muted/40",
 };
 
+/** Verbo do conserto → o que o botão diz que vai fazer. */
+const FIX_LABEL: Record<string, string> = {
+  rekey: "Corrigir a chave",
+  "remove-leftover": "Remover o trecho",
+  "restore-paragraph": "Restaurar o parágrafo",
+};
+
 /**
  * Um achado semântico. Mostra o que está errado e ONDE — o excerto é o que
- * permite ao operador achar o parágrafo no Doc ao lado sem procurar às cegas.
+ * permite ao operador achar o parágrafo no Doc ao lado sem procurar às cegas —
+ * e o botão do conserto, quando existe conserto automático.
  */
-function SemanticFindingRow({ finding }: { finding: SemanticFinding }) {
+function SemanticFindingRow({
+  finding,
+  onFix,
+  fixing,
+  disabled,
+}: {
+  finding: SemanticFinding;
+  onFix: (findingId: string) => void;
+  fixing: boolean;
+  disabled: boolean;
+}) {
+  // `manual` e ausência não ganham botão: dado da própria imobiliária fixo no
+  // modelo e citação de item inexistente não têm conserto automático, e um
+  // botão que não resolve é pior que nenhum.
+  const label = finding.suggestedFix ? FIX_LABEL[finding.suggestedFix.op] : undefined;
   return (
     <div className={`space-y-1 rounded-md border p-2 ${SEVERITY_STYLE[finding.severity] ?? ""}`}>
       <p className="font-medium">
@@ -170,6 +201,18 @@ function SemanticFindingRow({ finding }: { finding: SemanticFinding }) {
         <p className="rounded bg-muted px-1.5 py-1 font-mono text-[11px] leading-snug">
           {finding.excerpt}
         </p>
+      )}
+      {label && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs"
+          disabled={disabled}
+          onClick={() => onFix(finding.id)}
+        >
+          {fixing ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+          {label}
+        </Button>
       )}
     </div>
   );
@@ -234,6 +277,8 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
   const [paragraphs, setParagraphs] = useState<string[]>([]);
   const [selText, setSelText] = useState("");
   const [mapping, setMapping] = useState(false);
+  /** Achado cuja correção está sendo aplicada (um por vez: o Doc é um só). */
+  const [fixingId, setFixingId] = useState<string | null>(null);
   const [iframeKey, setIframeKey] = useState(0);
 
   const revalidate = useCallback(async () => {
@@ -346,6 +391,55 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
       toast.error(err instanceof Error ? err.message : "Falha na revisão por IA");
     } finally {
       setAiRunning(false);
+    }
+  }
+
+  /**
+   * Aplica o conserto que a checagem propôs para este achado.
+   *
+   * Manda só o ID: o servidor recalcula as checagens e usa a frase que ele
+   * mesmo produziu contra o estado ATUAL do Doc. A tela nunca recebeu as frases
+   * (o relatório traz só o verbo do conserto), e por este caminho ela também
+   * não pode pedir a edição de um trecho arbitrário.
+   */
+  async function fixFinding(findingId: string) {
+    setFixingId(findingId);
+    try {
+      const res = await fetch(`/api/templates/${template.id}/doc-edit`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ findingId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Não consegui aplicar a correção.");
+
+      const result = data.results?.[0];
+      if (result?.status !== "applied") {
+        // Recusa não é erro de sistema: é o documento dizendo que o trecho
+        // ficou ambíguo ou não está mais lá.
+        toast.warning(SKIP_REASON[result?.reason] ?? "A correção não pôde ser aplicada.");
+      } else {
+        toast.success("Correção aplicada no documento.");
+      }
+
+      // A rota já revalidou; usa o resultado dela em vez de pedir de novo.
+      if (data.validation) {
+        setValidation(data.validation);
+        setReport((prev) => ({
+          ...(prev ?? {}),
+          ...(Array.isArray(data.validation.slots) ? { slots: data.validation.slots } : {}),
+          ...(data.validation.pii ? { pii: data.validation.pii } : {}),
+          ...(data.validation.semantic ? { semantic: data.validation.semantic } : {}),
+        }));
+      } else {
+        await revalidate();
+      }
+      await refreshDocText();
+      setIframeKey((k) => k + 1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Falha ao aplicar a correção");
+    } finally {
+      setFixingId(null);
     }
   }
 
@@ -747,7 +841,13 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                   </p>
                 ) : (
                   semanticFindings.map((f) => (
-                    <SemanticFindingRow key={f.id} finding={f} />
+                    <SemanticFindingRow
+                      key={f.id}
+                      finding={f}
+                      onFix={fixFinding}
+                      fixing={fixingId === f.id}
+                      disabled={fixingId !== null || validating}
+                    />
                   ))
                 )}
                 {/* O que a checagem NÃO pôde afirmar é parte do resultado: sem
@@ -945,8 +1045,10 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
         </div>
       </div>
 
-      {/* Mapeamento manual */}
-      {missing.length > 0 && (
+      {/* Mapeamento manual — só em rascunho: modelo ativo não muda de texto
+          debaixo de contrato já gerado (a rota devolve 409, e um painel que
+          convida a uma ação recusada é pior que painel ausente). */}
+      {missing.length > 0 && status !== "active" && (
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-1.5 text-sm">
@@ -993,7 +1095,7 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                   draggable
                   onDragStart={(e) => e.dataTransfer.setData("text/plain", c.token)}
                   onClick={() => mapField(c.token, selText)}
-                  disabled={mapping}
+                  disabled={mapping || fixingId !== null}
                   title={c.description || c.label}
                   className="inline-flex cursor-grab items-center gap-1 rounded-full border border-brand-accent/40 bg-brand-accent/5 px-2.5 py-1 text-[11px] font-medium text-brand-accent hover:bg-brand-accent/10 active:cursor-grabbing disabled:opacity-50"
                 >
