@@ -792,10 +792,20 @@ export function SalesFormWizard({
    */
   const stepHasPending = (stepIndex: number): boolean => {
     const trueIndex = visibleStepIndexes[stepIndex] ?? stepIndex;
-    const paths = [
-      ...(effectiveRequiredFields[trueIndex] ?? []),
-      ...(trueIndex === 3 ? conditionalRequired : []),
-    ];
+    // QUARTO leitor da lista de obrigatórios, junto de gate, asterisco e
+    // contagem — e por isso passa pela MESMA expansão. Sem ela o ponto de
+    // pendência do stepper não acendia para "parte sem nome" nos presets que
+    // declaram só o guarda-chuva (`legado`/`minimo`/`essencial`): o gate
+    // barrava, mas o indicador dizia que estava tudo certo. Pior em
+    // `?prefilled=1`, onde o corretor revisa uma proposta extraída confiando
+    // justamente nesse ponto.
+    const paths = expandPartyUmbrellaPaths(
+      [
+        ...(effectiveRequiredFields[trueIndex] ?? []),
+        ...(trueIndex === 3 ? conditionalRequired : []),
+      ],
+      readValue,
+    );
     if (paths.length === 0) return false;
     return findMissingRequired(paths, readValue).length > 0;
   };
