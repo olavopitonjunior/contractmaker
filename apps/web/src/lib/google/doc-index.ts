@@ -66,6 +66,84 @@ export interface ParagraphRange {
 }
 
 /**
+ * Parágrafos do corpo, com o intervalo de cada um E a posição no `body.content`
+ * ORIGINAL.
+ *
+ * A posição original importa: `body.content` também guarda tabela, quebra de
+ * seção e sumário, que não são parágrafo e são pulados aqui. Sem guardar de
+ * onde cada parágrafo veio, dois parágrafos com uma TABELA entre eles pareceriam
+ * vizinhos — e o intervalo "do primeiro ao último" apagaria a tabela junto.
+ */
+function paragraphsOf(
+  doc: docs_v1.Schema$Document
+): Array<{ texto: string; range: ParagraphRange; posicao: number }> {
+  const out: Array<{ texto: string; range: ParagraphRange; posicao: number }> = [];
+  const content = doc.body?.content || [];
+  for (let posicao = 0; posicao < content.length; posicao += 1) {
+    const block = content[posicao]!;
+    const para = block.paragraph;
+    if (!para) continue;
+    const elements = (para.elements || []).filter(
+      (el) => el.textRun?.content && el.startIndex !== undefined && el.startIndex !== null
+    );
+    if (elements.length === 0) continue;
+    const conteudo = elements.map((el) => el.textRun!.content!).join("");
+    const start = elements[0]!.startIndex!;
+    const semNewline = conteudo.replace(/\n+$/, "").length;
+    out.push({
+      texto: conteudo.replace(/\n+$/, "").trim(),
+      range: { startIndex: start, endIndex: start + semNewline },
+      posicao,
+    });
+  }
+  return out;
+}
+
+/**
+ * Intervalo que cobre uma sequência CONSECUTIVA de parágrafos, do início do
+ * primeiro ao fim do último.
+ *
+ * Exigir que sejam consecutivos não é detalhe: sem isso, três parágrafos
+ * espalhados pelo documento produziriam um intervalo que engole tudo que está
+ * entre eles — e o que está entre eles é contrato. Ambíguo (a mesma sequência
+ * aparece duas vezes) devolve `null` pelo mesmo motivo de sempre: apagar
+ * intervalo é destrutivo, e escolher um dos dois seria arbitrário.
+ *
+ * "Consecutivos" é medido no `body.content` ORIGINAL, não na lista já filtrada
+ * de parágrafos. A diferença é destrutiva: uma TABELA (ou quebra de seção, ou
+ * sumário) entre dois parágrafos não é parágrafo, sai da lista filtrada e os
+ * dois pareceriam vizinhos — mas ela ocupa índices no documento, e o intervalo
+ * "do primeiro ao último" a apagaria junto. Como a conferência posterior só
+ * verifica que os parágrafos PRETENDIDOS sumiram, e nunca que nada além deles
+ * sumiu, o estrago seria reportado como sucesso.
+ */
+export function findBlockRange(
+  doc: docs_v1.Schema$Document,
+  textos: readonly string[]
+): ParagraphRange | null {
+  const alvos = textos.map((t) => t.trim()).filter(Boolean);
+  if (alvos.length === 0) return null;
+
+  const paras = paragraphsOf(doc);
+  let achado: ParagraphRange | null = null;
+  for (let i = 0; i + alvos.length <= paras.length; i += 1) {
+    const casa = alvos.every((t, k) => paras[i + k]!.texto === t);
+    if (!casa) continue;
+    // Nada entre eles no `body.content` original — nem bloco que não é parágrafo.
+    const semIntruso = alvos.every(
+      (_t, k) => k === 0 || paras[i + k]!.posicao === paras[i + k - 1]!.posicao + 1
+    );
+    if (!semIntruso) continue;
+    if (achado) return null; // a mesma sequência aparece mais de uma vez
+    achado = {
+      startIndex: paras[i]!.range.startIndex,
+      endIndex: paras[i + alvos.length - 1]!.range.endIndex,
+    };
+  }
+  return achado;
+}
+
+/**
  * Intervalo do parágrafo cujo texto, aparado, é exatamente `text`.
  *
  * Devolve `null` quando não existe ou quando aparece em MAIS de um parágrafo:
