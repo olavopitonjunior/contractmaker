@@ -334,6 +334,11 @@ export const previewSampleDataLocacao = {
     administradora_nome: "Imobiliária Exemplo Negócios Imobiliários Ltda",
     administradora_creci: "24.342-J/SP",
     administradora_endereco: "Rua Roque Petrella, 188, Brooklin, CEP 04581-050, São Paulo/SP",
+    // Campo real do formulário (GarantiaStep), que faltava aqui: sem ele, a
+    // cláusula de multa por rescisão antecipada rendia buraco na prévia e um
+    // aviso permanente de "chave que sai vazia" na revisão do acervo — sobre
+    // uma cláusula correta.
+    multa_rescisoria_meses: 3,
   },
   // Corretagem: existe para a pré-visualização mostrar o que
   // `{{corretagem_qualificacao}}` e `{{corretagem_dados_pagamento}}` produzem —
@@ -388,6 +393,19 @@ export const previewSampleDataLocacaoComercial = {
     destinacao: "comércio varejista de vestuário e acessórios",
     descricao:
       "Sala comercial com recepção, 2 ambientes de atendimento, copa e banheiro privativo, totalizando 85m² de área privativa.",
+  },
+  /**
+   * CAUÇÃO aqui, título de capitalização na residencial — de propósito.
+   *
+   * A esteira de locação é provada contra as DUAS amostras, então cobrir um
+   * tipo de garantia em cada uma faz o par exercitar `garantia.caucao_meses` e
+   * `garantia.titulo_valor`. Com as duas em título, qualquer cláusula de caução
+   * do acervo aparecia com a chave "saindo vazia" para sempre — medido no smoke
+   * de 03/09 na "Garantia Locatícia — Caução", que está correta.
+   */
+  garantia: {
+    tipo: "caucao",
+    caucao_meses: 3,
   },
 };
 
