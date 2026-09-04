@@ -160,6 +160,42 @@ describe("POST /api/templates/[id]/doc-edit — efeitos", () => {
     );
   });
 
+  it("com `findingId` de lista de rateio: monta o replace-block com os itens do servidor", async () => {
+    // É o caminho que corrige os 16 modelos da RE/MAX Trio. Sem este mapeamento
+    // o achado aparece na tela e o botão devolve 422 — a regra existiria só para
+    // dizer que o defeito está lá, sem conserto.
+    const ITENS = [
+      "a) R$0000 (...), a ser pago à imobiliária intermediadora {{imobiliaria_qualificacao}};",
+      "b) R$ 1.315,15 (...), a ser pago à corretora intermediadora {{corretagem_dados_pagamento}}",
+    ];
+    validateMock.mockResolvedValue({
+      found: [],
+      unknown: [],
+      semantic: {
+        findings: [
+          {
+            id: "split-list-tokenized:15:rateio_primeiro_aluguel",
+            suggestedFix: {
+              op: "replace-block",
+              paragraphs: ITENS,
+              token: "rateio_primeiro_aluguel",
+            },
+          },
+        ],
+      },
+    });
+
+    const res = await call({ findingId: "split-list-tokenized:15:rateio_primeiro_aluguel" });
+    expect(res.status).toBe(200);
+    expect(applyDocEditsMock.mock.calls[0][0].ops).toEqual([
+      { op: "replace-block", paragraphs: ITENS, token: "rateio_primeiro_aluguel" },
+    ]);
+    // No log fica a CONTAGEM e o primeiro parágrafo mascarado, nunca a lista toda.
+    const meta = auditMock.mock.calls[0][1].metadata;
+    expect(meta.ops[0].paragraphs).toBe(2);
+    expect(meta.ops[0].token).toBe("rateio_primeiro_aluguel");
+  });
+
   it("achado que não existe mais: 409 em vez de editar às cegas", async () => {
     const res = await call({ findingId: "wrong-entity:9:corretagem_qualificacao" });
     expect(res.status).toBe(409);
