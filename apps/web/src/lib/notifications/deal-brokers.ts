@@ -44,12 +44,26 @@ function toRecipient(r: SplitRecipient): BrokerRecipient {
   };
 }
 
+/**
+ * Corretores declarados no dataJson, três listas com o mesmo shape de linha:
+ *   - `comissao.comissionados[]` (venda) e `comissao.angariadores[]` (locação)
+ *     — a distribuição da comissão. Até 09/2026 só a de venda era lida; o
+ *     angariador de locação, auto-cadastrado no finalize, nunca recebia aviso.
+ *   - `corretores_parceiros[]` (topo) — corretores PARCEIROS da proposta, que
+ *     acompanham por e-mail sem serem comissionados (lib/proposals/
+ *     partner-brokers.ts). Chegam ao Deal verbatim pelo convert.
+ * Aqui só interessa QUEM avisar; comissão é problema de outro módulo.
+ */
 function comissionadosOf(formDataJson: unknown): ComissionadoLike[] {
   const data = (formDataJson as Record<string, unknown> | null) ?? {};
   const comissao = data.comissao as Record<string, unknown> | undefined;
-  return Array.isArray(comissao?.comissionados)
-    ? (comissao!.comissionados as ComissionadoLike[])
-    : [];
+  const list = (v: unknown): ComissionadoLike[] =>
+    Array.isArray(v) ? (v as ComissionadoLike[]) : [];
+  return [
+    ...list(comissao?.comissionados),
+    ...list(comissao?.angariadores),
+    ...list(data.corretores_parceiros),
+  ];
 }
 
 /** Índices do registry da org — carregados uma vez e reusados por N deals. */

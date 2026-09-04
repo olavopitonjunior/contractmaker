@@ -33,6 +33,9 @@ import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
 import { summarizeProposalData } from "@/lib/proposals/summarize";
 import { formatDateTimeBR } from "@/lib/format/datetime";
+import { waitUntil } from "@vercel/functions";
+import { validatePartnerBrokersInData } from "@/lib/proposals/partner-brokers";
+import { autoRegisterProposalCommissioners } from "@/lib/proposals/auto-register-commissioners";
 
 // Schema e default de validade vivem em lib/proposals/create-schema.ts: são a
 // fonte da verdade compartilhada com a tool MCP `create_proposal`, e o teste de
@@ -133,6 +136,16 @@ export async function POST(req: NextRequest) {
     );
   }
   const input = parsed.data;
+  // Corretores parceiros vivem dentro do dataJson (`corretores_parceiros[]`);
+  // o Zod acima não os enxerga. Validação leve aqui: teto, CRECI, telefone,
+  // e-mail — 400 acionável em vez de e-mail que nunca sai.
+  const partnerIssues = validatePartnerBrokersInData(input.dataJson);
+  if (partnerIssues.length > 0) {
+    return NextResponse.json(
+      { error: partnerIssues.join(" "), issues: partnerIssues },
+      { status: 400 }
+    );
+  }
 
   try {
     await featureGuard(auth.org.id, input.schemaType);
@@ -346,6 +359,12 @@ export async function POST(req: NextRequest) {
           ),
         }
       ).catch(() => {});
+      // Parceiros → registry (match-ou-cria + backfill de splitRecipientId).
+      // Fire-and-forget: é o que dá a eles preferência de notificação antes
+      // do primeiro e-mail e linha casada no Deal depois do convert.
+      waitUntil(
+        autoRegisterProposalCommissioners({ proposalId: proposal.id, orgId: auth.org.id })
+      );
       return { status: 201, body: { proposal } };
     },
     });
