@@ -90,8 +90,11 @@ jobs:
               echo "✓ label '$WANTED' presente; head $HEAD_SHA carimbado ($ACTION)"
               exit 0
             fi
-            STAMPED=$(gh api "repos/$REPO/commits/$HEAD_SHA/statuses" --paginate \
-              --jq ".[] | select(.context == \"$CONTEXT\" and .state == \"success\") | .context" | head -n1)
+            # Lê tudo antes de cortar: `| head -n1` fecha o cano cedo e, com
+            # pipefail + errexit, um EPIPE abortaria o passo sem a mensagem.
+            RAW=$(gh api "repos/$REPO/commits/$HEAD_SHA/statuses" --paginate \
+              --jq ".[] | select(.context == \"$CONTEXT\" and .state == \"success\") | .context")
+            STAMPED=$(printf '%s\n' "$RAW" | head -n1)
             if [ -z "$STAMPED" ]; then
               echo "::error::O head $HEAD_SHA não tem o carimbo da label '$WANTED': a staging recebeu merge com a promoção aberta. Faça o smoke de novo no head atual, remova e reaplique a label."
               exit 1
