@@ -111,6 +111,13 @@ export type AuditAction =
   // Doc-modelo. A proposta em si não é auditada (é leitura + chamada de modelo,
   // com custo em AIUsage); a escrita, sim — com quem confirmou e o que entrou.
   | "TEMPLATE_AI_PROPOSALS_APPLIED"
+  // Padronização refeita a partir do arquivo original do lote: Doc novo, o
+  // anterior vai para a lixeira. Sem esta linha, o histórico do Drive mostra um
+  // Doc apagado e outro criado sem dizer quem pediu nem de qual lote veio.
+  | "TEMPLATE_REDO"
+  // Lote de ingestão descartado antes de terminar (itens não executados viram
+  // `discarded`; o que já virou modelo fica).
+  | "INGESTION_RUN_CANCELLED"
   | "ORG_FEES_UPDATED"
   // iList/RexAPI (integração RE/MAX) — provisioning super-admin + sync + import
   | "ILIST_CONNECTION_UPDATED"
