@@ -66,9 +66,16 @@ function fakeStructure(text: string) {
  * precisam mexer num dos dois lados.
  */
 let state = "";
-function useDoc(doc: string) {
+/**
+ * `exportNormalizes`: o `drive.files.export text/plain` real troca NBSP por
+ * espaço. Com a opção, `getDocPlainText` devolve o estado normalizado — a
+ * estrutura e o `batchUpdate` continuam vendo o estado REAL, como no Docs.
+ */
+function useDoc(doc: string, opts: { exportNormalizes?: boolean } = {}) {
   state = doc;
-  mockGetDocPlainText.mockImplementation(async () => state);
+  mockGetDocPlainText.mockImplementation(async () =>
+    opts.exportNormalizes ? state.replace(/\u00A0/g, " ") : state
+  );
   mockGetDocStructure.mockImplementation(async () => fakeStructure(state));
   mockBatchUpdate.mockImplementation(async (arg: { requestBody: { requests: AnyReq[] } }) => {
     const replies = arg.requestBody.requests.map((r) => {
@@ -162,6 +169,54 @@ describe("insertPlaceholdersWithAI — travas no texto plano", () => {
       (c) => (c[0] as { requestBody: { requests: AnyReq[] } }).requestBody.requests
     );
     expect(reqs.some((r) => r.replaceAllText)).toBe(false);
+  });
+
+  it("NBSP no Doc, espaço no export: o request leva a forma REAL e a releitura confirma", async () => {
+    // Staging 04/09: a cláusula de caução saía `replace-noop` porque o trecho
+    // lido (espaço) era enviado ao Docs, que tem NBSP e não normaliza.
+    useDoc("8. GARANTIA\n8.1.\u00A0Como garantia, caução de R$\u00A01.000,00.\n9. FORO", {
+      exportNormalizes: true,
+    });
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([
+        { trecho_literal: "8.1. Como garantia, caução de R$ 1.000,00.", token: "clausula_garantia" },
+      ])
+    );
+
+    const report = await run("d-nbsp");
+
+    expect(report.inserted.map((i) => i.token)).toEqual(["clausula_garantia"]);
+    const req = mockBatchUpdate.mock.calls[0][0].requestBody.requests[0] as ReplaceReq;
+    expect(req.replaceAllText.containsText.text).toBe(
+      "8.1.\u00A0Como garantia, caução de R$\u00A01.000,00."
+    );
+    expect(state).toBe("8. GARANTIA\n{{clausula_garantia}}\n9. FORO");
+  });
+
+  it("estrutura indisponível: segue com a forma lida e a reply decide (replace-noop)", async () => {
+    useDoc("8.1.\u00A0Como garantia.", { exportNormalizes: true });
+    mockGetDocStructure.mockRejectedValue(new Error("Drive fora"));
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([{ trecho_literal: "8.1. Como garantia.", token: "clausula_garantia" }])
+    );
+    const report = await run("d-nbsp-2");
+    expect(report.inserted).toEqual([]);
+    expect(report.skippedAmbiguous[0]).toEqual(
+      expect.objectContaining({ token: "clausula_garantia", reason: "replace-noop" })
+    );
+  });
+
+  it("estrutura sem o trecho (vive numa tabela): request mantém a forma lida e a reply decide", async () => {
+    useDoc("Valor do aluguel: R$ 1.000,00 mensais.");
+    mockGetDocStructure.mockResolvedValue(fakeStructure("Parágrafo de nível superior sem o valor."));
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([{ trecho_literal: "R$ 1.000,00", token: "aluguel_valor" }])
+    );
+    const report = await run("d-nbsp-3");
+    expect(report.inserted.map((i) => i.token)).toEqual(["aluguel_valor"]);
+    const req = mockBatchUpdate.mock.calls[0][0].requestBody.requests[0] as ReplaceReq;
+    expect(req.replaceAllText.containsText.text).toBe("R$ 1.000,00");
+    expect(state).toBe("Valor do aluguel: {{aluguel_valor}} mensais.");
   });
 
   it("bloco multi-parágrafo NÃO consecutivo no documento é recusado sem escrever", async () => {

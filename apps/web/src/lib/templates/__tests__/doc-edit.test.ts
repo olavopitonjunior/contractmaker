@@ -25,7 +25,7 @@ import { applyDocEdits, type DocEditOp } from "../doc-edit";
  * justamente esse tipo de bloco que o localizador precisa enxergar para não
  * apagá-lo junto ao atravessá-lo.
  */
-function fakeDoc(paragrafos: string[]) {
+function fakeDoc(paragrafos: Array<string | string[][]>) {
   let index = 1;
   return {
     body: {
@@ -34,6 +34,24 @@ function fakeDoc(paragrafos: string[]) {
           const bloco = { startIndex: index, endIndex: index + 10, table: { rows: 1, columns: 1 } };
           index += 10;
           return bloco;
+        }
+        if (Array.isArray(p)) {
+          // Tabela de uma linha com células preenchidas: cada item é uma célula
+          // com seus parágrafos (o bloco de assinaturas da Trio).
+          const startIndex = index;
+          index += 1;
+          const tableCells = p.map((cell) => {
+            const cellStart = index;
+            const content = cell.map((t) => {
+              const texto = `${t}\n`;
+              const el = { startIndex: index, endIndex: index + texto.length, textRun: { content: texto } };
+              index += texto.length;
+              return { paragraph: { elements: [el] } };
+            });
+            return { startIndex: cellStart, endIndex: index, content };
+          });
+          index += 1;
+          return { startIndex, endIndex: index, table: { rows: 1, columns: p.length, tableRows: [{ tableCells }] } };
         }
         const texto = `${p}\n`;
         const el = { startIndex: index, endIndex: index + texto.length, textRun: { content: texto } };
@@ -557,5 +575,88 @@ describe("replace-block — a sequência identifica o bloco, não cada parágraf
     expect(out.results[0]).toMatchObject({ status: "applied" });
     const reqs = batchUpdateDocMock.mock.calls[0][1];
     expect(reqs[0].deleteContentRange.range.startIndex).toBe(1 + 5 + 16);
+  });
+});
+
+describe("NBSP — a forma que vai ao Docs é a da estrutura, não a do export", () => {
+  it("map-field com frase lida (espaço) manda a forma real (NBSP) e confere tolerando a diferença", async () => {
+    const real = "8.1.\u00A0Como garantia, caução de R$\u00A01.000,00.";
+    const lido = real.replace(/\u00A0/g, " ");
+    getDocPlainTextMock.mockResolvedValueOnce(lido).mockResolvedValueOnce("{{clausula_garantia}}");
+    getDocStructureMock.mockResolvedValue(fakeDoc([real]));
+
+    const out = await run([{ op: "map-field", phrase: lido, token: "clausula_garantia" }]);
+
+    expect(out.results[0]).toMatchObject({ op: "map-field", status: "applied" });
+    const req = batchUpdateDocMock.mock.calls[0][1][0].replaceAllText;
+    expect(req.containsText.text).toBe(real);
+  });
+});
+
+describe("replace-block — bloco que é uma TABELA inteira (o caso real da Trio)", () => {
+  // O export achata as células em parágrafos; a estrutura só tem a tabela. O
+  // intervalo apagado é o da tabela, e a chave entra no início dele.
+  const intro = "E por estarem justos, assinam.";
+  const celulas = [
+    ["", "____", "PARTE LOCATÁRIA", ""],
+    ["", "____", "PARTE LOCADORA"],
+  ];
+  const bloco = ["____", "PARTE LOCATÁRIA", "____", "PARTE LOCADORA"];
+
+  it("apaga a tabela como unidade e insere a chave no início dela", async () => {
+    const estrutura = fakeDoc([intro, celulas, "Rodapé"]);
+    const tabela = estrutura.body.content[1] as { startIndex: number; endIndex: number };
+    getDocPlainTextMock
+      .mockResolvedValueOnce([intro, ...bloco, "Rodapé"].join("\n"))
+      .mockResolvedValueOnce([intro, "{{assinaturas}}", "Rodapé"].join("\n"));
+    getDocStructureMock.mockResolvedValue(estrutura);
+
+    const out = await run([{ op: "replace-block", paragraphs: bloco, token: "assinaturas" }]);
+
+    expect(out.results[0]).toMatchObject({ op: "replace-block", status: "applied" });
+    const reqs = batchUpdateDocMock.mock.calls[0][1];
+    expect(reqs[0].deleteContentRange.range).toEqual({
+      startIndex: tabela.startIndex,
+      endIndex: tabela.endIndex,
+    });
+    expect(reqs[1].insertText).toEqual({
+      location: { index: tabela.startIndex },
+      text: "{{assinaturas}}",
+    });
+  });
+
+  it("bloco que cobre só metade das células não apaga tabela nenhuma", async () => {
+    getDocPlainTextMock.mockResolvedValue([intro, ...bloco, "Rodapé"].join("\n"));
+    getDocStructureMock.mockResolvedValue(fakeDoc([intro, celulas, "Rodapé"]));
+    const out = await run([
+      { op: "replace-block", paragraphs: ["____", "PARTE LOCATÁRIA"], token: "assinaturas" },
+    ]);
+    // No texto plano a sequência de 2 aparece uma vez; na estrutura é parte da
+    // tabela e NÃO casa. A recusa vem da estrutura, antes de escrever.
+    expect(out.results[0]).toMatchObject({ status: "failed", reason: "structure-not-found" });
+    expect(batchUpdateDocMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("NBSP — quando a estrutura não confirma, vale a forma lida", () => {
+  it("trecho que a estrutura não tem (está numa tabela): request mantém a forma lida e a reply decide", async () => {
+    const lido = "Valor: R$ 1.000,00.";
+    getDocPlainTextMock.mockResolvedValueOnce(lido).mockResolvedValueOnce("Valor: {{aluguel_valor}}.");
+    // A estrutura de nível superior não contém o trecho (ex.: vive numa célula).
+    getDocStructureMock.mockResolvedValue(fakeDoc(["Outro parágrafo qualquer."]));
+    const out = await run([{ op: "map-field", phrase: "R$ 1.000,00", token: "aluguel_valor" }]);
+    expect(out.results[0]).toMatchObject({ op: "map-field", status: "applied" });
+    expect(batchUpdateDocMock.mock.calls[0][1][0].replaceAllText.containsText.text).toBe("R$ 1.000,00");
+  });
+
+  it("trecho ambíguo na estrutura (duas formas): request mantém a forma lida", async () => {
+    const lido = "a) R$ 1.000,00 hoje.";
+    getDocPlainTextMock.mockResolvedValueOnce(lido).mockResolvedValueOnce("a) {{aluguel_valor}} hoje.");
+    getDocStructureMock.mockResolvedValue(
+      fakeDoc(["a) R$\u00A01.000,00 hoje.", "b) R$ 1.000,00 amanhã."])
+    );
+    const out = await run([{ op: "map-field", phrase: "R$ 1.000,00", token: "aluguel_valor" }]);
+    expect(out.results[0]).toMatchObject({ status: "applied" });
+    expect(batchUpdateDocMock.mock.calls[0][1][0].replaceAllText.containsText.text).toBe("R$ 1.000,00");
   });
 });
