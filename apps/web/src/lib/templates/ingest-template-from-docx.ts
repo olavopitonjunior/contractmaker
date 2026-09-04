@@ -60,6 +60,11 @@ import { exportDocAsPdf, getDocPlainText } from "@/lib/google/docs";
 import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
 import { auditTemplateText, type TemplatePiiReport } from "@/lib/templates/pii-gate";
 import {
+  persistableSemanticReport,
+  runSemanticChecks,
+  type SemanticReport,
+} from "@/lib/templates/semantic-checks";
+import {
   slotDeclarationComment,
   slotToken,
   type ClauseSlotKey,
@@ -120,6 +125,22 @@ export interface IngestTemplateFromDocxInput {
    * houver gabarito de venda. Falha = sem gabarito, fluxo antigo.
    */
   extractGabarito?: { userId?: string | null } | null;
+  /**
+   * Texto do contrato ORIGINAL, para as checagens semânticas compararem o
+   * modelo com o que ele era antes.
+   *
+   * Opcional, e o que se perde sem ele é pouco: das seis regras, só duas
+   * (cláusula colapsada, citação órfã) usam o fonte, e sem ele elas degradam de
+   * "erro" para "aviso" em vez de sumir. As que pegaram os defeitos medidos na
+   * RE/MAX Trio — lista de rateio item a item, chave da parte errada, dado da
+   * própria imobiliária, identificador ao lado da chave — não dependem dele.
+   *
+   * Quem tem esse texto de graça é o lote (`IngestionItem.text`). O envio
+   * avulso não tem, e por isso o campo não é obrigatório: exigir o fonte
+   * deixaria o caminho mais comum sem NENHUMA checagem, que é o estado que
+   * este campo existe para acabar.
+   */
+  sourceText?: string | null;
 }
 
 export interface IngestTemplateFromDocxResult {
@@ -390,6 +411,50 @@ export async function ingestTemplateFromDocx(
   // `blocked: false` sobre um export vazio seria a mentira mais barata do fluxo.
   const pii: TemplatePiiReport | null = finalDocText ? auditTemplateText(finalDocText) : null;
 
+  // ─── CHECAGENS SEMÂNTICAS ─────────────────────────────────────────────────
+  // Aqui, e não só na revalidação. Este era o buraco estrutural do fluxo: as
+  // regras semânticas existiam desde 03/09 e só rodavam quando ALGUÉM abria a
+  // tela de revisão e clicava em "Revalidar". Um modelo recém-ingerido nascia
+  // com o defeito INVISÍVEL — e foi exatamente assim que os 16 modelos da
+  // RE/MAX Trio chegaram a "prontos" com a lista de rateio chaveada item a
+  // item: ninguém tinha o que olhar.
+  //
+  // Este é o melhor momento do sistema para rodá-las, e por dois motivos que
+  // não se repetem depois:
+  //
+  //  - o texto FINAL do Doc já está em mãos (a releitura acima), de graça;
+  //  - o texto do contrato ORIGINAL é o input desta função. Na revalidação ele
+  //    precisa ser reencontrado por `(sourceHash, run.orgId)`, uma junção sem
+  //    FK que falha para modelo enviado fora de um lote. Aqui ele é certo.
+  //
+  // Best-effort como o gate de PII: nada aqui bloqueia a ingestão. O que muda é
+  // que o operador ABRE a tela já sabendo o que está errado, em vez de precisar
+  // desconfiar primeiro.
+  let semantic: SemanticReport | null = null;
+  if (finalDocText) {
+    try {
+      const org = await prisma.organization.findUnique({
+        where: { id: orgId },
+        select: {
+          legalName: true,
+          cnpj: true,
+          creci: true,
+          pixAddressKey: true,
+          bankBranch: true,
+          bankAccount: true,
+        },
+      });
+      semantic = runSemanticChecks({
+        docText: finalDocText,
+        modalidade,
+        org,
+        sourceText: input.sourceText ?? null,
+      });
+    } catch (err) {
+      console.error("[templates/from-docx] checagens semânticas falharam:", err);
+    }
+  }
+
   // O relatório do passe de IA foi medido ANTES do estágio determinístico:
   // reconciliar com o texto final (token que o reverse-merge pôs deixa de ser
   // "não mapeado") e enriquecer cada faltante com o que o gabarito sabe —
@@ -455,7 +520,7 @@ export async function ingestTemplateFromDocx(
   // O relatório é gravado FORA do try do pass de IA: os avisos de slot precisam
   // chegar à página de revisão mesmo quando a IA falha (antes, um erro na IA
   // engolia junto o motivo de o slot não ter aberto).
-  if (report || finalSlotReports.length > 0 || neutralization || reverseMerge || pii) {
+  if (report || finalSlotReports.length > 0 || neutralization || reverseMerge || pii || semantic) {
     try {
       await prisma.contractTemplate.update({
         where: { id: template.id },
@@ -466,6 +531,10 @@ export async function ingestTemplateFromDocx(
             ...(neutralization ? { neutralization } : {}),
             ...(reverseMerge ? { reverseMerge: maskReverseMergeReport(reverseMerge) } : {}),
             ...(pii ? { pii } : {}),
+            // Forma persistível: excerto mascarado e o conserto reduzido ao
+            // verbo. O relatório vai para jsonb e é lido na tela — não guarda
+            // frase crua de contrato.
+            ...(semantic ? { semantic: persistableSemanticReport(semantic) } : {}),
           } as object,
         },
       });

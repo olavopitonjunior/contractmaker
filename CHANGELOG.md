@@ -4,6 +4,21 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-04 - O bloco que nenhum parágrafo identifica
+
+### Corrigido
+
+- **O bloco de assinaturas ficava fixo no modelo — em 16 de 16 modelos da RE/MAX Trio, dois deles com os nomes das partes do contrato-fonte.** A IA propôs a chave `assinaturas` nas 16; o passe recusou nas 16. A linha de sublinhados aparece uma vez por signatário e "PARTE LOCATÁRIA" aparece dezenas de vezes num contrato de locação, e a troca por texto exigia que cada parágrafo do bloco fosse único. Nenhum é; a **sequência** é. Bloco composto cujos parágrafos se repetem mas cuja sequência consecutiva é única passa a entrar pelo caminho estrutural (apagar o intervalo, inserir a chave), com a estrutura relida antes de escrever e a releitura decidindo se entrou. O mesmo vale para a operação "trocar o bloco pela chave" da tela de revisão — que também recusava esse bloco. Sem a chave, todo contrato gerado sairia com a página de assinaturas de outro negócio; o gate de PII não vê nome de pessoa e o validador não exige a chave.
+- **A cláusula de garantia por caução saía inteira como "não encontrei no texto".** O DOCX traz espaço não-quebrável depois de "8.1." e o modelo devolve a cópia com espaço comum. Em 3 de 16 modelos a cláusula ficou com o valor fixo. O casamento agora tolera a diferença, e o que vai para o Google é a forma real do documento — nunca a do modelo.
+- **Valor e extenso na mesma proposta apagavam o extenso em silêncio.** "R$ 3.000,00 (três mil reais)" proposto como valor, com "três mil reais" proposto como extenso: o maior engolia o menor e `{{aluguel_valor}}` imprime só o número. O par é inequívoco (`<chave>_extenso` dentro de `(...)`), então o valor é aparado e os dois entram. Chave simples cujo trecho contém as propostas de **duas ou mais** outras chaves é frase, não valor — "30 (trinta) meses, a contar de … e com término em …" — e é recusada para que as datas entrem.
+- **Bloco composto cujos parágrafos não são consecutivos no documento é recusado inteiro.** O caminho de texto esvaziava cada parágrafo do trecho onde quer que ele fosse único, sem olhar se era vizinho do anterior — um "Nome" solto numa ficha no fim do modelo sumiria junto com o bloco de assinaturas. A sequência tem de existir uma vez; só então se decide entre o caminho de texto (todos únicos) e o estrutural.
+- **Dado cadastral degenerado da própria imobiliária não acusa mais nada.** CRECI `00000-J` casava dentro de `R$ 00.000,00` e a revisão apontava três "dados da imobiliária fixos no modelo" que eram do próprio bench. Identificar exige pelo menos três dígitos distintos; o CNPJ real continua sendo acusado.
+
+### Adicionado
+
+- **Regra "bloco de assinaturas fixo no modelo"** na checagem semântica, com o conserto "trocar o bloco pela chave" — `error` quando há nome de pessoa no bloco, `warning` sem. Vale para qualquer tenant a partir de agora, na ingestão e na revisão da biblioteca.
+- **Bateria sem gabarito** (`--corpus-dir`): mede "sem defeito" e **cobertura** sobre o texto real de um tenant, e a cobertura conta as chaves que um bloco composto presente já renderiza (a qualificação da imobiliária dentro do rateio não está faltando — o passe a recusa de propósito). Medido nos 16 da Trio, em replay das mesmas respostas do modelo: cobertura 62,1% → 70,0%; `not-found` 3 → 0; `assinaturas` recusada 16 → 0; 15 de 16 sem obrigatória faltando (era 14).
+
 ## [Unreleased] - 2026-09-03 - O conserto que devolvia o CPF ao modelo
 
 ### Corrigido

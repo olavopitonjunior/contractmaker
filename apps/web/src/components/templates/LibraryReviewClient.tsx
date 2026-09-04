@@ -64,7 +64,7 @@ const FIX_LABEL: Record<string, string> = {
   rekey: "trocar a chave",
   "remove-leftover": "remover o trecho",
   "restore-paragraph": "restaurar o parágrafo",
-  "replace-block": "trocar a lista inteira por uma chave",
+  "replace-block": "trocar o bloco inteiro por uma chave",
 };
 
 export function LibraryReviewClient() {

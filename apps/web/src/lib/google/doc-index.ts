@@ -126,18 +126,42 @@ export function findBlockRange(
 
   const paras = paragraphsOf(doc);
   let achado: ParagraphRange | null = null;
-  for (let i = 0; i + alvos.length <= paras.length; i += 1) {
-    const casa = alvos.every((t, k) => paras[i + k]!.texto === t);
+  for (let i = 0; i < paras.length; i += 1) {
+    if (paras[i]!.texto !== alvos[0]) continue;
+    // Anda pelo `body.content` a partir do primeiro parágrafo casado. Parágrafo
+    // VAZIO no meio do bloco é aceito e entra no intervalo: o export do Drive
+    // intercala linhas em branco (o bloco de assinaturas é o caso típico, com
+    // várias entre uma linha de assinatura e a próxima), e quem manda o bloco
+    // vem de `splitDocParagraphs`, que as descarta. Texto diferente, ou
+    // qualquer bloco que não seja parágrafo (tabela, quebra de seção — a
+    // posição salta), encerra a tentativa: o que está entre os parágrafos
+    // seria apagado junto.
+    let k = 1;
+    let j = i + 1;
+    let casa = true;
+    while (k < alvos.length) {
+      const p = paras[j];
+      if (!p || p.posicao !== paras[j - 1]!.posicao + 1) {
+        casa = false;
+        break;
+      }
+      if (p.texto === alvos[k]) {
+        k += 1;
+        j += 1;
+        continue;
+      }
+      if (p.texto === "") {
+        j += 1;
+        continue;
+      }
+      casa = false;
+      break;
+    }
     if (!casa) continue;
-    // Nada entre eles no `body.content` original — nem bloco que não é parágrafo.
-    const semIntruso = alvos.every(
-      (_t, k) => k === 0 || paras[i + k]!.posicao === paras[i + k - 1]!.posicao + 1
-    );
-    if (!semIntruso) continue;
     if (achado) return null; // a mesma sequência aparece mais de uma vez
     achado = {
       startIndex: paras[i]!.range.startIndex,
-      endIndex: paras[i + alvos.length - 1]!.range.endIndex,
+      endIndex: paras[j - 1]!.range.endIndex,
     };
   }
   return achado;

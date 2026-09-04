@@ -28,6 +28,8 @@ export interface InsertedToken {
   /** Em blocos multi-parágrafo: parágrafos do trecho que NÃO puderam ser
    *  removidos com segurança (ambíguos no doc) e ficaram pra revisão manual. */
   leftoverParagraphs?: string[];
+  /** Entrou pelo caminho estrutural (intervalo apagado + chave inserida). */
+  structural?: boolean;
 }
 
 export type SkipReason =
@@ -58,7 +60,12 @@ export type SkipReason =
   /** A API disse que trocou, mas a releitura não mostra o token (ou ainda mostra o trecho). */
   | "verify-failed"
   /** Não deu para reler o Doc — e "não sei" não é "deu certo". */
-  | "verify-unavailable";
+  | "verify-unavailable"
+  // Blocos pelo caminho estrutural (vocabulário do `doc-edit`).
+  /** Os parágrafos do bloco existem, mas não em sequência consecutiva. */
+  | "block-not-consecutive"
+  /** O texto plano mostrava o bloco; a estrutura do Doc não o localizou. */
+  | "structure-not-found";
 
 export interface SkippedToken {
   token: string;

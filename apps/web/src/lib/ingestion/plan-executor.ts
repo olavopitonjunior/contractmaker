@@ -679,6 +679,11 @@ async function applyTemplate(args: {
       extractGabarito: isFilledInstance(item.classification)
         ? { userId: args.createdBy }
         : null,
+      // O texto do contrato ORIGINAL, que o lote já tem em mãos. É o que
+      // permite às checagens semânticas compararem o modelo com o que ele era
+      // — e é aqui que ele está disponível de graça: depois, a revalidação
+      // precisa reencontrá-lo por `(sourceHash, run.orgId)`, uma junção sem FK.
+      sourceText: item.text ?? null,
     });
 
     return {
