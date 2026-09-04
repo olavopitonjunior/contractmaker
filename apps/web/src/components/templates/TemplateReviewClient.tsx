@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { describePiiKinds, type TemplatePiiReport } from "@/lib/templates/pii-gate";
 import { maskForReport, readNotMapped } from "@/lib/templates/insertion-report";
+import { DOC_EDIT_REASON } from "@/lib/templates/doc-edit-reasons";
 import {
   SEMANTIC_CATEGORY_LABEL,
   countBySeverity,
@@ -102,6 +103,10 @@ interface TemplateInfo {
 }
 
 const SKIP_REASON: Record<string, string> = {
+  // Motivos das edições do app vêm de UMA fonte, compartilhada com o painel da
+  // biblioteca: duas telas que explicam a mesma recusa de formas diferentes é
+  // como uma delas fica para trás (o painel dizia só "não aplicado").
+  ...DOC_EDIT_REASON,
   ambiguous: "aparece em mais de um lugar",
   "not-found": "não encontrei no texto",
   "unknown-token": "chave fora do catálogo",
