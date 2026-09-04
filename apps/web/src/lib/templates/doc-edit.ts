@@ -32,7 +32,14 @@
  */
 import type { docs_v1 } from "googleapis";
 import { batchUpdateDoc, getDocPlainText, getDocStructure } from "@/lib/google/docs";
-import { findBlockRange, findParagraphRange } from "@/lib/google/doc-index";
+import {
+  collectTextSegments,
+  findBlockRange,
+  findForms,
+  findParagraphRange,
+  plainTextOf,
+  realFormOf,
+} from "@/lib/google/doc-index";
 import { countOccurrences } from "@/lib/templates/apply-clause-slot";
 import { isKnownToken } from "@/lib/templates/placeholder-catalog";
 
@@ -381,9 +388,29 @@ export async function applyDocEdits(input: {
   // ── BATCH DE TEXTO (depois; `replaceAllText` não usa índices) ───────────
   const pendentes: PlannedText[] = [];
   if (requests.length > 0) {
+    // Forma REAL de cada trecho pela estrutura: o export troca NBSP por espaço
+    // e a API não normaliza (ver `doc-index.realFormOf`). Estrutura
+    // indisponível → forma lida, e a reply decide.
+    const requestsReais = requests.map((r) => ({ ...r }));
+    try {
+      const realText = plainTextOf(collectTextSegments(await getDocStructure(docId)));
+      for (const r of requestsReais) {
+        const t = r.replaceAllText?.containsText?.text;
+        if (!t) continue;
+        const real = realFormOf(realText, t);
+        if (real !== null && real !== t) {
+          r.replaceAllText = {
+            ...r.replaceAllText,
+            containsText: { ...r.replaceAllText!.containsText, text: real },
+          };
+        }
+      }
+    } catch (err) {
+      console.error("[doc-edit] estrutura indisponível; forma lida segue:", err);
+    }
     let replies: docs_v1.Schema$Response[] | null = null;
     try {
-      const res = await batchUpdateDoc(docId, requests);
+      const res = await batchUpdateDoc(docId, requestsReais);
       replies = res?.data?.replies ?? [];
     } catch (err) {
       console.error("[doc-edit] batchUpdate falhou:", err);
@@ -440,10 +467,11 @@ export async function applyDocEdits(input: {
   }
 
   for (const p of pendentes) {
-    const foiEmbora = countOccurrences(finalText, p.needle) === 0;
+    // Releitura pelo export (espaço onde o Doc tem NBSP): tolerar a diferença.
+    const foiEmbora = findForms(finalText, p.needle).count === 0;
     // Substituição por "" não deixa nada para procurar; o que se confere é a
     // ausência do trecho.
-    const chegou = p.replacement === "" || finalText.includes(p.replacement);
+    const chegou = p.replacement === "" || findForms(finalText, p.replacement).count > 0;
     results[p.index] =
       foiEmbora && chegou
         ? { op: p.op, status: "applied", target: p.target }
@@ -466,7 +494,7 @@ export async function applyDocEdits(input: {
     // se pensava. (Parágrafo que também existe fora do bloco continua lá, e
     // isso é o esperado — ver `restantes`.)
     const sumiu = e.paragrafos.every(
-      (par, k) => countOccurrences(finalText, par) <= (e.restantes[k] ?? 0)
+      (par, k) => findForms(finalText, par).count <= (e.restantes[k] ?? 0)
     );
     results[e.index] =
       entrou && sumiu

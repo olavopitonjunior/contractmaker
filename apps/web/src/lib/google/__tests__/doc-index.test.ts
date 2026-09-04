@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { findBlockRange, findParagraphRange } from "../doc-index";
+import { findBlockRange, findForms, findParagraphRange, realFormOf } from "../doc-index";
 
 /**
  * Doc simulado: um `textRun` por parágrafo, índices como a API devolve. `""`
  * é um parágrafo vazio (o export do Drive intercala vários entre as linhas do
  * bloco de assinaturas); `"[[TABELA]]"` é um bloco que não é parágrafo.
  */
-function fakeDoc(paragrafos: string[]) {
+function fakeDoc(paragrafos: Array<string | string[][]>) {
   let index = 1;
   return {
     body: {
@@ -15,6 +15,27 @@ function fakeDoc(paragrafos: string[]) {
           const bloco = { startIndex: index, endIndex: index + 10, table: { rows: 1, columns: 1 } };
           index += 10;
           return bloco;
+        }
+        if (Array.isArray(p)) {
+          // Tabela de uma linha: cada item é uma célula com seus parágrafos.
+          const startIndex = index;
+          index += 1; // marca de início da tabela
+          const tableCells = p.map((cell) => {
+            const cellStart = index;
+            const content = cell.map((t) => {
+              const texto = `${t}\n`;
+              const el = { startIndex: index, endIndex: index + texto.length, textRun: { content: texto } };
+              index += texto.length;
+              return { paragraph: { elements: [el] } };
+            });
+            return { startIndex: cellStart, endIndex: index, content };
+          });
+          index += 1; // marca de fim da linha
+          return {
+            startIndex,
+            endIndex: index,
+            table: { rows: 1, columns: p.length, tableRows: [{ tableCells }] },
+          };
         }
         const texto = `${p}\n`;
         const el = { startIndex: index, endIndex: index + texto.length, textRun: { content: texto } };
@@ -71,5 +92,48 @@ describe("findBlockRange — a sequência identifica o bloco, não cada parágra
     expect(findBlockRange(doc, ["Único."])).toBeNull();
     expect(findParagraphRange(doc, "Único.")).toBeNull();
     expect(findBlockRange(doc, ["Outro."])).toEqual(findParagraphRange(doc, "Outro."));
+  });
+});
+
+describe("findBlockRange — bloco que é uma tabela inteira", () => {
+  // O bloco de assinaturas dos modelos da Trio é uma tabela: uma linha de
+  // assinatura por célula. O export achata as células em parágrafos, linha a
+  // linha; a estrutura só tem a tabela.
+  const celulas = [
+    ["", "____", "PARTE LOCATÁRIA", ""],
+    ["", "____", "PARTE LOCADORA"],
+  ];
+
+  it("células na ordem de leitura == bloco → intervalo da tabela inteira", () => {
+    const doc = fakeDoc(["Assinam:", celulas, "Fim"]);
+    const r = findBlockRange(doc, ["____", "PARTE LOCATÁRIA", "____", "PARTE LOCADORA"]);
+    const tabela = doc.body.content[1] as { startIndex: number; endIndex: number };
+    expect(r).toEqual({ startIndex: tabela.startIndex, endIndex: tabela.endIndex });
+  });
+
+  it("bloco que cobre só PARTE da tabela não casa", () => {
+    const doc = fakeDoc(["Assinam:", celulas, "Fim"]);
+    expect(findBlockRange(doc, ["____", "PARTE LOCATÁRIA"])).toBeNull();
+  });
+
+  it("a mesma tabela duas vezes é ambígua", () => {
+    const doc = fakeDoc([celulas, "meio", celulas]);
+    expect(findBlockRange(doc, ["____", "PARTE LOCATÁRIA", "____", "PARTE LOCADORA"])).toBeNull();
+  });
+});
+
+describe("NBSP — o export normaliza, a estrutura não", () => {
+  it("findBlockRange e findParagraphRange casam parágrafo com NBSP contra alvo com espaço", () => {
+    const doc = fakeDoc(["8. GARANTIA", "8.1.\u00A0Como garantia das obrigações.", "9. FORO"]);
+    expect(findParagraphRange(doc, "8.1. Como garantia das obrigações.")).not.toBeNull();
+    expect(findBlockRange(doc, ["8. GARANTIA", "8.1. Como garantia das obrigações."])).not.toBeNull();
+  });
+
+  it("findForms devolve a forma REAL; realFormOf só quando única", () => {
+    const real = "a) R$\u00A03.000,00 hoje. b) R$ 3.000,00 amanhã.";
+    expect(findForms(real, "R$ 3.000,00").forms).toEqual(["R$\u00A03.000,00", "R$ 3.000,00"]);
+    expect(realFormOf(real, "R$ 3.000,00")).toBeNull();
+    expect(realFormOf(real, "R$ 3.000,00 hoje")).toBe("R$\u00A03.000,00 hoje");
+    expect(realFormOf(real, "não existe")).toBeNull();
   });
 });

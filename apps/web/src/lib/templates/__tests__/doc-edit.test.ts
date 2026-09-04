@@ -559,3 +559,18 @@ describe("replace-block — a sequência identifica o bloco, não cada parágraf
     expect(reqs[0].deleteContentRange.range.startIndex).toBe(1 + 5 + 16);
   });
 });
+
+describe("NBSP — a forma que vai ao Docs é a da estrutura, não a do export", () => {
+  it("map-field com frase lida (espaço) manda a forma real (NBSP) e confere tolerando a diferença", async () => {
+    const real = "8.1.\u00A0Como garantia, caução de R$\u00A01.000,00.";
+    const lido = real.replace(/\u00A0/g, " ");
+    getDocPlainTextMock.mockResolvedValueOnce(lido).mockResolvedValueOnce("{{clausula_garantia}}");
+    getDocStructureMock.mockResolvedValue(fakeDoc([real]));
+
+    const out = await run([{ op: "map-field", phrase: lido, token: "clausula_garantia" }]);
+
+    expect(out.results[0]).toMatchObject({ op: "map-field", status: "applied" });
+    const req = batchUpdateDocMock.mock.calls[0][1][0].replaceAllText;
+    expect(req.containsText.text).toBe(real);
+  });
+});

@@ -1,5 +1,6 @@
 import type { docs_v1 } from "googleapis";
-import { batchUpdateDoc, getDocPlainText } from "@/lib/google/docs";
+import { batchUpdateDoc, getDocPlainText, getDocStructure } from "@/lib/google/docs";
+import { collectTextSegments, findForms, normalizeSpaces, plainTextOf, realFormOf } from "@/lib/google/doc-index";
 import { extractPlaceholdersFromText } from "@/lib/google/replace-placeholders";
 import { getAnthropicClient, SONNET_MODEL } from "@/lib/ai/shared/anthropic-client";
 import { recordAIUsage } from "@/lib/ai/usage";
@@ -84,31 +85,9 @@ function countOccurrences(haystack: string, needle: string): number {
   return count;
 }
 
-/**
- * Espaço não-quebrável ≠ espaço. O DOCX da imobiliária traz NBSP depois de
- * "8.1." (autocorreção do Word) e o modelo devolve a cópia com espaço comum —
- * a cláusula de garantia inteira saía como `not-found` em 3 de 16 modelos da
- * Trio. Casar tolerando a diferença é seguro porque o que vai para o Docs é a
- * forma REAL do documento (`forms`), nunca a do modelo.
- */
-const NBSP_RE = /[\u00A0\u202F]/g;
-function normSpaces(text: string): string {
-  return text.replace(NBSP_RE, " ");
-}
-
-/** Ocorrências de `needle` em `hay` tolerando NBSP, com a forma real de cada uma. */
-function locate(hay: string, needle: string): { count: number; forms: string[] } {
-  if (!needle) return { count: 0, forms: [] };
-  const nh = normSpaces(hay);
-  const nn = normSpaces(needle);
-  const forms: string[] = [];
-  let idx = nh.indexOf(nn);
-  while (idx !== -1) {
-    forms.push(hay.slice(idx, idx + nn.length));
-    idx = nh.indexOf(nn, idx + 1);
-  }
-  return { count: forms.length, forms };
-}
+/** Casamento tolerante a NBSP — ver `doc-index.findForms`. */
+const locate = findForms;
+const normSpaces = normalizeSpaces;
 
 /**
  * Posições em que os parágrafos aparecem CONSECUTIVOS (só espaço em branco
@@ -735,9 +714,31 @@ export async function commitInsertion(input: {
   let finalText = docText;
 
   if (candidates.length > 0) {
+    // A forma REAL de cada trecho vem da estrutura (`documents.get`), não do
+    // export: o export troca NBSP por espaço, e a API não normaliza. Sem isto
+    // um parágrafo com NBSP casa zero e sai `replace-noop` — foi o que a
+    // cláusula de garantia fez em staging. Estrutura indisponível → segue com
+    // a forma lida e a reply decide, como antes.
+    const requestsReais = requests.map((r) => ({ ...r }));
+    try {
+      const realText = plainTextOf(collectTextSegments(await getDocStructure(docId)));
+      for (const r of requestsReais) {
+        const t = r.replaceAllText?.containsText?.text;
+        if (!t) continue;
+        const real = realFormOf(realText, t);
+        if (real !== null && real !== t) {
+          r.replaceAllText = {
+            ...r.replaceAllText,
+            containsText: { ...r.replaceAllText!.containsText, text: real },
+          };
+        }
+      }
+    } catch (err) {
+      console.error("[ai-placeholder-insertion] estrutura indisponível; forma lida segue:", err);
+    }
     let replies: docs_v1.Schema$Response[] | null = null;
     try {
-      const res = await batchUpdateDoc(docId, requests);
+      const res = await batchUpdateDoc(docId, requestsReais);
       replies = res?.data?.replies ?? [];
     } catch (err) {
       console.error("[ai-placeholder-insertion] batchUpdate falhou:", err);
@@ -793,11 +794,13 @@ export async function commitInsertion(input: {
         finalText = reread;
         for (const c of pending) {
           const tokenPresent = reread.includes(`{{${c.token}}}`);
-          const trechoGone = countOccurrences(reread, c.first) === 0;
+          // Releitura vem do export (espaço onde o Doc tem NBSP): comparar
+          // tolerando a diferença, senão "sumiu" seria verdade por acidente.
+          const trechoGone = locate(reread, c.first).count === 0;
           // Parágrafo de bloco cuja reply faltou: conferir na releitura em vez
           // de presumir apagado — se ainda está no Doc, é leftover.
           for (const r of c.rest) {
-            if (changedAt(r.idx) === null && countOccurrences(reread, r.par) > 0) {
+            if (changedAt(r.idx) === null && locate(reread, r.par).count > 0) {
               c.leftover.push(r.par);
             }
           }
