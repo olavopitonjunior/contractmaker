@@ -4,6 +4,13 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-04 - Documentos por parte na proposta de locação
+
+### Adicionado
+
+- **Documentos por parte na proposta de locação, com leitura por IA.** Na tela da proposta (com a feature "Análise de crédito — locação" ligada), o corretor anexa RG/CNH, comprovantes de renda e de endereço dizendo de quem é cada documento (locatário, cônjuge, fiador, cônjuge do fiador, locador, imóvel), agrupados por papel como na aba de documentos do negócio. "Extrair com IA" lê o documento sob demanda (um clique só paga um OCR — dois cliques no mesmo card não pagam dois); "Mover para…" corrige a atribuição; mover para o fiador avisa que a garantia vira fiança ao converter. Documentos enviados pelo cliente ficam marcados. Subir de novo o mesmo arquivo escolhendo outra parte move o documento existente (antes respondia "ok" e mantinha a parte antiga). O "Anexar Registro do Aceite" continua no mesmo lugar com a feature ligada. Sem a feature, a lista simples de documentos continua igual.
+- **A conversão em negócio aproveita o que foi lido.** CPF, nascimento, endereço e demais campos extraídos de documentos com atribuição feita por uma pessoa entram no formulário e no negócio sem redigitar, sem sobrescrever o que a proposta já trazia; a leitura e a atribuição seguem com o documento para a pasta do negócio, e o que veio do cliente continua identificado.
+
 ## [Unreleased] - 2026-09-04 - A imobiliária conecta a própria conta Ficha Certa
 
 ### Adicionado

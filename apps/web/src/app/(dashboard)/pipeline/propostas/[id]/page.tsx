@@ -26,6 +26,9 @@ import { plannedProposalCostCents } from "@/lib/proposals/cost";
 import { getSignatureSettings } from "@/lib/clicksign/account";
 import { readPartnerBrokerRows } from "@/lib/proposals/partner-brokers";
 import { resolveDealBrokers } from "@/lib/notifications/deal-brokers";
+import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
+import { FEATURE } from "@/lib/modules/catalog";
+import { proposalPartiesSnapshot } from "@/lib/proposals/attachment-assignment";
 
 export const dynamic = "force-dynamic";
 
@@ -231,6 +234,18 @@ export default async function PropostaDetailPage({
   // Mesmo resumo da listagem (lib compartilhada) — o local `summarize()` que
   // vivia aqui divergia dela (sem número do imóvel, sem trim).
   const resumo = summarizeProposalData(d, proposal.kind);
+  // Documentos por parte + análise de crédito (locação) — só com a feature
+  // `locacao.credito` ligada para a org; sem ela a seção antiga de Documentos
+  // continua igual.
+  const modulesView = await getOrgModules(org.id);
+  const creditFeatureEnabled =
+    proposal.kind === "locacao" && isFeatureEnabled(modulesView, FEATURE.LOCACAO_CREDITO);
+  const partiesSnapshotFull = proposalPartiesSnapshot(d);
+  const partiesSnapshot = {
+    locadores: partiesSnapshotFull.locadores,
+    locatarios: partiesSnapshotFull.locatarios,
+    garantia: partiesSnapshotFull.garantia,
+  };
 
   // Corretores parceiros: linhas do dataJson + "notifica?" resolvido no registry
   // (mesma regra do e-mail: notifyByEmail, sem opt-out, com endereço).
@@ -390,7 +405,15 @@ export default async function PropostaDetailPage({
         filename: a.filename,
         category: a.category,
         url: a.url,
+        mime: a.mime,
+        source: a.source,
+        status: a.status,
+        extractError: a.extractError,
+        extractedData: (a.extractedData as Record<string, unknown> | null) ?? null,
+        createdAt: a.createdAt.toISOString(),
       }))}
+      creditFeatureEnabled={creditFeatureEnabled}
+      partiesSnapshot={partiesSnapshot}
       members={memberRows.map((m) => ({ id: m.user.id, name: m.user.name ?? "Sem nome" }))}
       permissions={permissions}
       planVendedores={planVendedores}
