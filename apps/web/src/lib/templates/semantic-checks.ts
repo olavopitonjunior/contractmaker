@@ -384,30 +384,86 @@ const SIGN_LABEL =
   /^(?:PARTE\s+)?(?:LOCAT[ÁA]RI[OA]S?|LOCADOR(?:A|ES|AS)?|FIADOR(?:A|ES|AS)?|TESTEMUNHAS?|INTERVENIENTES?|ANUENTES?|ADMINISTRADORA|VENDEDOR(?:A|ES|AS)?|COMPRADOR(?:A|ES|AS)?|CAUCIONANTES?|PROCURADOR(?:A|ES)?)\b/i;
 /** Campo em branco do bloco ("Nome", "CPF", "CPF: 000.000.000-00", "RG"). */
 const SIGN_FIELD = /^(?:nome|cpf|rg|cnpj)\b[^\n]{0,40}$/i;
-/** Linha de nome: só letras, espaços e pontuação de nome, curta. */
-const NAME_LIKE = /^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ .'\-]{0,90}$/;
 /** Nome de exemplo do arquivo ("xxxxxxxx", "Nome do locador", "_____"). */
 const NAME_PLACEHOLDER = /^(?:x+|nome\b.*|_+)$/i;
-/** Título de seção que a forma de nome deixaria passar ("ANEXO I - VISTORIA"). */
-const HEADING_LIKE = /^(?:anexo|cl[áa]usula|cap[íi]tulo|t[íi]tulo|se[çc][ãa]o|par[áa]grafo)\b|\s[-–—]\s/i;
+/** Só letras, espaços e pontuação de nome, curta. Necessário, não suficiente. */
+const NAME_CHARS = /^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ .'\-]{0,90}$/;
+/** Começo de título de seção ou de cláusula ("DA VIGÊNCIA", "ANEXO I"). */
+const HEADING_START = /^(?:d[aeo]s?|anexo|cl[áa]usula|cap[íi]tulo|t[íi]tulo|se[çc][ãa]o|par[áa]grafo)\b/i;
+/** Vocabulário de cláusula: uma linha com isto é contrato, não nome. */
+const CLAUSE_WORDS =
+  /\b(?:foro|comarca|contrato|cl[áa]usula|vig[êe]ncia|disposi[çc][õo]es|gerais|pagamento|aluguel|loca[çc][ãa]o|garantia|multa|prazo|rescis[ãa]o|obriga[çc][õo]es|presente|fica|eleito|ser[áa]|dever[áa]|im[óo]vel|valor|data|assinatura|vistoria|anexo|condi[çc][õo]es|entrega|chaves)\b/i;
+/** Partícula de nome que pode ficar em minúscula ("de", "da", "dos"). */
+const NAME_CONNECTOR = /^(?:de|da|do|das|dos|e|di|del|della|van|von|la|le)$/i;
+/** Sufixo de pessoa jurídica que legitima um ponto final ("Ltda."). */
+const PJ_SUFFIX = /\b(?:ltda|s\.a|s\/a|me|epp|eireli)\.?$/i;
 /** Quantas linhas de material cabem depois de cada linha de assinatura. */
 const SIGN_GROUP_LINES = 4;
+
+/**
+ * Tem FORMA de nome: cada palavra começa em maiúscula (ou é partícula), sem
+ * vocabulário de cláusula, sem começo de título, sem ponto final (salvo
+ * sufixo de PJ), no máximo 8 palavras. "Fica eleito o foro da comarca" tem
+ * minúsculas; "DA VIGÊNCIA DO CONTRATO" começa como título e fala de contrato.
+ * A revisão de código do #580 mostrou que a forma anterior (só letras e
+ * espaços) aceitava os dois — e um `error` com conserto "trocar o bloco pela
+ * chave" apagaria cláusula.
+ */
+function nameShaped(t: string): boolean {
+  if (!NAME_CHARS.test(t) || HEADING_START.test(t) || CLAUSE_WORDS.test(t)) return false;
+  if (t.endsWith(".") && !PJ_SUFFIX.test(t)) return false;
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length === 0 || words.length > 8) return false;
+  return words.every((w) => NAME_CONNECTOR.test(w) || /^[A-ZÀ-Ý]/.test(w));
+}
 
 function isSignatureMaterial(p: string): boolean {
   const t = normalizeForMatch(p).trim();
   if (UNDERSCORE_LINE.test(t) || SIGN_LABEL.test(t) || SIGN_FIELD.test(t)) return true;
-  return NAME_LIKE.test(t) && !HEADING_LIKE.test(t);
+  if (NAME_PLACEHOLDER.test(t)) return true;
+  return nameShaped(t);
 }
 
 /** Linha que parece nome de PESSOA do contrato-fonte (não rótulo, não campo em branco). */
 function looksLikeRealName(p: string): boolean {
   const t = normalizeForMatch(p).trim();
-  if (!NAME_LIKE.test(t) || HEADING_LIKE.test(t)) return false;
   if (UNDERSCORE_LINE.test(t) || SIGN_LABEL.test(t) || SIGN_FIELD.test(t)) return false;
-  if (NAME_PLACEHOLDER.test(t)) return false;
+  if (NAME_PLACEHOLDER.test(t) || !nameShaped(t)) return false;
   // Nome de pessoa tem pelo menos duas palavras; um rótulo solto ("Testemunha")
   // já saiu acima, e uma palavra só ("Locador") não identifica ninguém.
   return t.split(/\s+/).filter((w) => w.length > 1).length >= 2;
+}
+
+/**
+ * Anda a partir de uma linha de sublinhados aceitando só material de
+ * assinatura, num orçamento curto por linha. Devolve o fim do bloco e quantas
+ * linhas de assinatura e rótulos ele tem.
+ */
+function walkSignatureBlock(
+  docParagraphs: readonly string[],
+  inicio: number
+): { fim: number; linhas: number; rotulos: number } {
+  let fim = inicio;
+  let orcamento = SIGN_GROUP_LINES;
+  let linhas = 1;
+  let rotulos = 0;
+  for (let i = inicio + 1; i < docParagraphs.length; i += 1) {
+    const t = normalizeForMatch(docParagraphs[i]!).trim();
+    if (UNDERSCORE_LINE.test(t)) {
+      linhas += 1;
+      orcamento = SIGN_GROUP_LINES;
+      fim = i;
+      continue;
+    }
+    if (orcamento > 0 && isSignatureMaterial(docParagraphs[i]!)) {
+      if (SIGN_LABEL.test(t)) rotulos += 1;
+      orcamento -= 1;
+      fim = i;
+      continue;
+    }
+    break;
+  }
+  return { fim, linhas, rotulos };
 }
 
 /**
@@ -422,11 +478,15 @@ function looksLikeRealName(p: string): boolean {
  * exige `assinaturas` (é opcional no catálogo), e o contrato gerado sairia com
  * a página de assinaturas de OUTRO negócio. Sintaticamente perfeito.
  *
- * A regra é conservadora por construção: só reconhece o bloco a partir de uma
- * linha de sublinhados, só aceita material de assinatura (linha, rótulo, campo
- * em branco, nome) num orçamento curto após cada linha, e para no primeiro
- * parágrafo que não é isso. O conserto é `replace-block` sobre a sequência
- * exata — e o `doc-edit` só aplica se a sequência for única no documento.
+ * A regra é conservadora por construção: toda linha de sublinhados é tentada
+ * como início, mas só conta como bloco a que tem pelo menos DUAS linhas de
+ * assinatura e pelo menos UM rótulo de signatário (uma lista de vistoria com
+ * traços para preencher não tem "PARTE LOCADORA"); o material aceito entre as
+ * linhas é rótulo, campo em branco ou coisa com forma de nome, num orçamento
+ * curto; e a caminhada para no primeiro parágrafo que não é isso. O conserto
+ * é `replace-block` sobre a sequência exata — e o `doc-edit` só aplica se a
+ * sequência for única no documento. Um achado por documento: o primeiro
+ * bloco que satisfaz as regras.
  */
 function checkLiteralSignatureBlock(
   docParagraphs: readonly string[],
@@ -437,47 +497,37 @@ function checkLiteralSignatureBlock(
   if (!isKnownToken(ASSINATURAS_TOKEN, modalidade)) return;
   if (docParagraphs.some((p) => ASSINATURAS_RE.test(p))) return;
 
-  const inicio = docParagraphs.findIndex((p) => UNDERSCORE_LINE.test(normalizeForMatch(p).trim()));
-  if (inicio === -1) return;
-
-  let fim = inicio;
-  let orcamento = SIGN_GROUP_LINES;
-  let linhas = 1;
-  for (let i = inicio + 1; i < docParagraphs.length; i += 1) {
-    const p = docParagraphs[i]!;
-    const t = normalizeForMatch(p).trim();
-    if (UNDERSCORE_LINE.test(t)) {
-      linhas += 1;
-      orcamento = SIGN_GROUP_LINES;
-      fim = i;
+  let i = 0;
+  while (i < docParagraphs.length) {
+    if (!UNDERSCORE_LINE.test(normalizeForMatch(docParagraphs[i]!).trim())) {
+      i += 1;
       continue;
     }
-    if (orcamento > 0 && isSignatureMaterial(p)) {
-      orcamento -= 1;
-      fim = i;
+    const { fim, linhas, rotulos } = walkSignatureBlock(docParagraphs, i);
+    if (linhas < 2 || rotulos < 1) {
+      // Não é bloco de assinaturas; pula o que a caminhada consumiu.
+      i = fim + 1;
       continue;
     }
-    break;
+    const bloco = docParagraphs.slice(i, fim + 1);
+    const nomes = bloco.filter(looksLikeRealName);
+    const comNome = nomes.length > 0;
+    pushFinding(findings, seen, {
+      severity: comNome ? "error" : "warning",
+      category: "literal-signature-block",
+      paragraphIndex: i,
+      token: ASSINATURAS_TOKEN,
+      excerpt: excerptOf(comNome ? nomes[0]! : bloco.slice(0, 3).join(" / ")),
+      message: comNome
+        ? `O bloco de assinaturas ficou fixo no modelo, com o nome de ${nomes.length === 1 ? "uma parte" : `${nomes.length} partes`} do contrato-fonte. ` +
+          `Todo contrato gerado sairia com a página de assinaturas de outro negócio. ` +
+          `O bloco inteiro (${bloco.length} linhas) deve virar {{${ASSINATURAS_TOKEN}}}, que monta as linhas de todas as partes e das testemunhas.`
+        : `O bloco de assinaturas ficou fixo no modelo (${linhas} linhas de assinatura, ${bloco.length} parágrafos). ` +
+          `Sem {{${ASSINATURAS_TOKEN}}} o contrato gerado não lista as partes do negócio na página de assinaturas.`,
+      suggestedFix: { op: "replace-block", paragraphs: bloco, token: ASSINATURAS_TOKEN },
+    });
+    return;
   }
-  if (linhas < 2) return;
-
-  const bloco = docParagraphs.slice(inicio, fim + 1);
-  const nomes = bloco.filter(looksLikeRealName);
-  const comNome = nomes.length > 0;
-  pushFinding(findings, seen, {
-    severity: comNome ? "error" : "warning",
-    category: "literal-signature-block",
-    paragraphIndex: inicio,
-    token: ASSINATURAS_TOKEN,
-    excerpt: excerptOf(comNome ? nomes[0]! : bloco.slice(0, 3).join(" / ")),
-    message: comNome
-      ? `O bloco de assinaturas ficou fixo no modelo, com o nome de ${nomes.length === 1 ? "uma parte" : `${nomes.length} partes`} do contrato-fonte. ` +
-        `Todo contrato gerado sairia com a página de assinaturas de outro negócio. ` +
-        `O bloco inteiro (${bloco.length} linhas) deve virar {{${ASSINATURAS_TOKEN}}}, que monta as linhas de todas as partes e das testemunhas.`
-      : `O bloco de assinaturas ficou fixo no modelo (${linhas} linhas de assinatura, ${bloco.length} parágrafos). ` +
-        `Sem {{${ASSINATURAS_TOKEN}}} o contrato gerado não lista as partes do negócio na página de assinaturas.`,
-    suggestedFix: { op: "replace-block", paragraphs: bloco, token: ASSINATURAS_TOKEN },
-  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

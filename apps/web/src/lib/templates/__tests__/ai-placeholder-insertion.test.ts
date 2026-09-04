@@ -128,16 +128,17 @@ describe("insertPlaceholdersWithAI — travas no texto plano", () => {
     expect(state).toContain("{{aluguel_valor}}");
   });
 
-  it("bloco multi-parágrafo: 1º parágrafo vira token, demais únicos viram vazio, repetidos ficam no relatório", async () => {
-    // "Parágrafo fora do trecho" quebra a sequência: o bloco NÃO é consecutivo
-    // no documento, então o caminho estrutural não se aplica e vale o de texto.
+  it("bloco multi-parágrafo com parágrafo repetido fora dele entra pelo caminho estrutural, sem tocar a repetição", async () => {
+    // "____ linha repetida ____" está dentro do bloco E solta no fim do
+    // documento. A versão anterior deixava o de dentro como `leftover`; hoje a
+    // sequência única leva o bloco inteiro por índice, e a linha de fora fica.
     useDoc(
       [
         "8.1. Primeira cláusula da garantia.",
         "8.2. Segunda cláusula única.",
-        "Parágrafo fora do trecho.",
         "____ linha repetida ____",
         "8.3. Terceira cláusula única.",
+        "Cláusula 9.",
         "____ linha repetida ____",
       ].join("\n")
     );
@@ -153,18 +154,40 @@ describe("insertPlaceholdersWithAI — travas no texto plano", () => {
 
     const report = await run("d2");
 
-    expect(report.inserted).toHaveLength(1);
-    expect(report.inserted[0].token).toBe("clausula_garantia");
-    expect(report.inserted[0].leftoverParagraphs).toEqual(["____ linha repetida ____"]);
-
-    const requests = mockBatchUpdate.mock.calls[0][0].requestBody.requests as ReplaceReq[];
-    const byText = Object.fromEntries(
-      requests.map((r) => [r.replaceAllText.containsText.text, r.replaceAllText.replaceText])
+    expect(report.inserted).toEqual([
+      expect.objectContaining({ token: "clausula_garantia", structural: true }),
+    ]);
+    expect(state).toBe("{{clausula_garantia}}\nCláusula 9.\n____ linha repetida ____");
+    const reqs = mockBatchUpdate.mock.calls.flatMap(
+      (c) => (c[0] as { requestBody: { requests: AnyReq[] } }).requestBody.requests
     );
-    expect(byText["8.1. Primeira cláusula da garantia."]).toBe("{{clausula_garantia}}");
-    expect(byText["8.2. Segunda cláusula única."]).toBe("");
-    expect(byText["8.3. Terceira cláusula única."]).toBe("");
-    expect(byText["____ linha repetida ____"]).toBeUndefined();
+    expect(reqs.some((r) => r.replaceAllText)).toBe(false);
+  });
+
+  it("bloco multi-parágrafo NÃO consecutivo no documento é recusado sem escrever", async () => {
+    useDoc(
+      [
+        "8.1. Primeira cláusula da garantia.",
+        "Parágrafo fora do trecho.",
+        "8.2. Segunda cláusula única.",
+      ].join("\n")
+    );
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([
+        {
+          trecho_literal: "8.1. Primeira cláusula da garantia.\n8.2. Segunda cláusula única.",
+          token: "clausula_garantia",
+        },
+      ])
+    );
+
+    const report = await run("d2b");
+
+    expect(report.inserted).toHaveLength(0);
+    expect(report.skippedAmbiguous[0]).toEqual(
+      expect.objectContaining({ token: "clausula_garantia", reason: "block-not-consecutive" })
+    );
+    expect(mockBatchUpdate).not.toHaveBeenCalled();
   });
 
   it("multi-parágrafo com 1º parágrafo ambíguo E sequência repetida: skip inteiro", async () => {

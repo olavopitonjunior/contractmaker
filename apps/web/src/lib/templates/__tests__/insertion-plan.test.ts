@@ -108,14 +108,26 @@ describe("planInsertion — travas do texto plano", () => {
     ]);
   });
 
-  it("parágrafo ambíguo dentro do bloco NÃO consecutivo vira leftover, nunca request", () => {
-    // A IA pulou "meio": o bloco não é uma sequência no documento, então o
-    // caminho estrutural não se aplica e vale o de texto — com o repetido de fora.
+  it("bloco composto cujos parágrafos NÃO são consecutivos é recusado inteiro", () => {
+    // A IA pulou "meio": o trecho não é uma sequência no documento. Esvaziar
+    // "repetido" onde quer que ele estivesse (a versão anterior) apagava texto
+    // fora do bloco; agora nada é enviado.
     const doc = ["Bloco X", "meio", "repetido", "outro", "repetido"].join("\n");
     const p = plan(doc, [M("assinaturas", "Bloco X\nrepetido")]);
     expect(p.blocks).toHaveLength(0);
-    expect(p.candidates[0].rest).toHaveLength(0);
-    expect(p.candidates[0].leftover).toEqual(["repetido"]);
+    expect(p.candidates).toHaveLength(0);
+    expect(reasons(p)).toEqual({ assinaturas: "block-not-consecutive" });
+  });
+
+  it("parágrafo único do bloco que também existe SOLTO em outro lugar não é esvaziado lá", () => {
+    // "Nome" existe no bloco e, sozinho, numa ficha no fim do documento. O
+    // caminho de texto trocaria os dois; a sequência manda o bloco pelo
+    // caminho estrutural e a ficha fica intacta.
+    const doc = ["____", "Nome", "PARTE LOCADORA", "____", "Testemunha", "Ficha:", "Nome"].join("\n");
+    const p = plan(doc, [M("assinaturas", "____\nNome\nPARTE LOCADORA\n____\nTestemunha")]);
+    expect(p.blocks).toHaveLength(1);
+    expect(p.requests).toHaveLength(0);
+    expect(p.simulatedText).toBe("{{assinaturas}}\nFicha:\nNome");
   });
 
   it("bloco com parágrafo repetido, mas SEQUÊNCIA única, entra pelo caminho estrutural", () => {
@@ -257,6 +269,15 @@ describe("planInsertion — o que a Trio ensinou em 04/09/2026", () => {
     expect(p.simulatedText).toBe(
       "O aluguel mensal é de {{aluguel_valor}} ({{aluguel_valor_extenso}}), pago até o dia 10."
     );
+  });
+
+  it("valor + extenso com espaço dentro do parêntese: o par ainda é reconhecido", () => {
+    const doc = "Aluguel de R$ 3.000,00 ( três mil reais ) mensais.";
+    const p = plan(doc, [
+      M("aluguel_valor", "R$ 3.000,00 ( três mil reais )"),
+      M("aluguel_valor_extenso", "três mil reais"),
+    ]);
+    expect(p.simulatedText).toBe("Aluguel de {{aluguel_valor}} ( {{aluguel_valor_extenso}} ) mensais.");
   });
 
   it("extenso sem o par exato não apara nada (o longest-first de sempre)", () => {

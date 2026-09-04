@@ -505,11 +505,13 @@ export function planInsertion(input: {
   // `<token>_extenso` e o trecho termina em `(<extenso>)`), então o conserto é
   // aparar o valor até antes do parêntese; os dois entram.
   for (const m of propostas) {
-    const irmao = propostas.find(
-      (o) => o.token === `${m.token}_extenso` && m.trecho.endsWith(`(${o.trecho})`)
-    );
+    if (!m.trecho.endsWith(")")) continue;
+    const abre = m.trecho.lastIndexOf("(");
+    if (abre <= 0) continue;
+    const dentro = m.trecho.slice(abre + 1, -1).trim();
+    const irmao = propostas.find((o) => o.token === `${m.token}_extenso` && o.trecho === dentro);
     if (!irmao) continue;
-    const cabeca = m.trecho.slice(0, m.trecho.length - irmao.trecho.length - 2).trim();
+    const cabeca = m.trecho.slice(0, abre).trim();
     if (cabeca) m.trecho = cabeca;
   }
 
@@ -607,18 +609,29 @@ export function planInsertion(input: {
 
     const firstHit = locate(sim, first);
 
-    if (paragraphs.length > 1 && composedTokens.has(token)) {
-      const textoLimpo =
-        firstHit.count === 1 && paragraphs.slice(1).every((p) => locate(sim, p).count === 1);
-      if (!textoLimpo) {
-        const sequencias = locateBlock(sim, paragraphs);
-        if (sequencias.length === 1) {
-          const seq = sequencias[0]!;
-          blocks.push({ token, trecho, paragraphs: seq.forms });
-          sim = `${sim.slice(0, seq.start)}{{${token}}}${sim.slice(seq.end)}`;
-          seenComposed.add(token);
-          continue;
-        }
+    // Bloco composto multi-parágrafo: a SEQUÊNCIA consecutiva tem de existir
+    // uma vez — sempre, não só quando algum parágrafo se repete. Sem isto, o
+    // caminho de texto esvaziava cada parágrafo do trecho onde quer que ele
+    // fosse único no documento, sem olhar se era vizinho do anterior (achado
+    // da revisão do #580). Com a sequência única: se cada parágrafo também é
+    // único, o caminho de texto serve (é o mesmo bloco); senão, estrutural.
+    if (paragraphs.length > 1 && composedTokens.has(token) && firstHit.count > 0) {
+      const sequencias = locateBlock(sim, paragraphs);
+      if (sequencias.length === 0) {
+        skippedAmbiguous.push({ token, trecho, reason: "block-not-consecutive" });
+        continue;
+      }
+      if (sequencias.length > 1) {
+        skippedAmbiguous.push({ token, trecho, reason: "ambiguous" });
+        continue;
+      }
+      const seq = sequencias[0]!;
+      const todosUnicos = seq.forms.every((f) => locate(sim, f).count === 1);
+      if (!todosUnicos) {
+        blocks.push({ token, trecho, paragraphs: seq.forms });
+        sim = `${sim.slice(0, seq.start)}{{${token}}}${sim.slice(seq.end)}`;
+        seenComposed.add(token);
+        continue;
       }
     }
 

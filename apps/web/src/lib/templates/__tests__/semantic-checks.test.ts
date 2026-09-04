@@ -564,6 +564,59 @@ describe("literal-signature-block — bloco de assinaturas fixo no modelo", () =
     expect((f[0]!.suggestedFix as { paragraphs: string[] }).paragraphs).toEqual(blocoAnonimo);
   });
 
+  it("ADVERSARIAL: título em caixa alta e frase de cláusula depois das linhas NÃO entram no bloco", () => {
+    // A revisão do #580: "DA VIGÊNCIA DO CONTRATO" e "Fica eleito o foro da
+    // comarca de São Paulo" tinham forma de nome para a regra anterior. Um
+    // `error` com "trocar o bloco pela chave" apagaria cláusula.
+    const cauda = [
+      "DA VIGÊNCIA DO CONTRATO",
+      "DAS DISPOSIÇÕES GERAIS",
+      "Fica eleito o foro da comarca de São Paulo",
+    ];
+    const r = run([...corpo, ...blocoAnonimo, ...cauda].join("\n"));
+    const f = byCategory(r.findings, "literal-signature-block");
+    expect(f).toHaveLength(1);
+    expect(f[0]!.severity).toBe("warning");
+    expect((f[0]!.suggestedFix as { paragraphs: string[] }).paragraphs).toEqual(blocoAnonimo);
+  });
+
+  it("ADVERSARIAL: linhas de sublinhado sem rótulo de signatário (ficha de vistoria) não são bloco", () => {
+    const vistoria = [
+      "VISTORIA DE ENTRADA",
+      "Estado da pintura",
+      "________________",
+      "Estado do piso",
+      "________________",
+      "Observações",
+      "________________",
+    ];
+    const r = run([...corpo, ...vistoria].join("\n"));
+    expect(byCategory(r.findings, "literal-signature-block")).toEqual([]);
+  });
+
+  it("ADVERSARIAL: seção com sublinhados ANTES do bloco real não desloca o achado", () => {
+    const ficha = ["Endereço para correspondência", "________________", "Telefone", "________________"];
+    const r = run([...corpo, ...ficha, "CLÁUSULA FINAL", ...blocoAnonimo].join("\n"));
+    const f = byCategory(r.findings, "literal-signature-block");
+    expect(f).toHaveLength(1);
+    expect(f[0]!.paragraphIndex).toBe(corpo.length + ficha.length + 1);
+    expect((f[0]!.suggestedFix as { paragraphs: string[] }).paragraphs).toEqual(blocoAnonimo);
+  });
+
+  it("razão social com 'Ltda.' abaixo da linha conta como nome; cidade solta não vira cláusula", () => {
+    const bloco = [
+      "____________________________________________",
+      "Atrio Negócios Imobiliários Ltda.",
+      "ADMINISTRADORA",
+      "____________________________________________",
+      "PARTE LOCADORA",
+    ];
+    const r = run([...corpo, ...bloco].join("\n"));
+    const f = byCategory(r.findings, "literal-signature-block");
+    expect(f).toHaveLength(1);
+    expect(f[0]!.severity).toBe("error");
+  });
+
   it("cala quando {{assinaturas}} já está no documento", () => {
     const r = run([...corpo, "{{assinaturas}}"].join("\n"));
     expect(byCategory(r.findings, "literal-signature-block")).toEqual([]);
