@@ -24,6 +24,9 @@ export const TARGET_KINDS = [
   "fiador",
   "conjuge_fiador",
   "locador",
+  // 2026-09 — cônjuge do locatário: pretendente da análise de crédito
+  // (CONJUGE_INQUILINO na Ficha Certa). Vive em `locatarios[N].conjuge`.
+  "conjuge_locatario",
 ] as const;
 
 export type TargetKind = (typeof TARGET_KINDS)[number];
@@ -34,6 +37,7 @@ export const LOCACAO_TARGET_KINDS: ReadonlySet<TargetKind> = new Set<TargetKind>
   "fiador",
   "conjuge_fiador",
   "locador",
+  "conjuge_locatario",
 ]);
 
 export type JobStatus =

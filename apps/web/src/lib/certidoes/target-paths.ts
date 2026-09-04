@@ -49,6 +49,8 @@ export function basePathForTarget(
       return "garantia.fiador";
     case "conjuge_fiador":
       return "garantia.fiador.conjuge";
+    case "conjuge_locatario":
+      return `locatarios.${index}.conjuge`;
   }
 }
 
@@ -65,4 +67,5 @@ export const TARGET_KIND_LABELS: Record<TargetKind, string> = {
   fiador: "Fiador",
   conjuge_fiador: "Cônjuge do fiador",
   locador: "Locador",
+  conjuge_locatario: "Cônjuge do locatário",
 };

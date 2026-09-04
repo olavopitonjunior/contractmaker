@@ -4,6 +4,12 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-04 - Costura para análise de crédito e certidões na proposta
+
+### Adicionado
+
+- **Base de dados para documentos, certidões e análise de crédito na proposta (pré-negócio).** Só a costura: conta da Ficha Certa Digital por imobiliária (credenciais e segredos do webhook cifrados, no molde da conta ClickSign), agregado neutro de provedor para uma análise de crédito com N pretendentes, vínculo do job de certidão/laudo com a proposta, OCR nos anexos da proposta e consentimento LGPD na proposta. Catálogo ganha os laudos Ficha Certa PF/PJ, o alvo "cônjuge do locatário" e a feature `locacao.credito` (nasce desligada). Nenhuma tela ou rota lê isso ainda — os próximos lotes ligam.
+
 ## [Unreleased] - 2026-09-04 - A label de promoção passa a atestar o head
 
 ### Corrigido

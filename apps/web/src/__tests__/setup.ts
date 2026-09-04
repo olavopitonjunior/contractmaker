@@ -586,7 +586,27 @@ vi.mock("@/lib/db/prisma", () => {
       create: vi.fn(),
       createMany: vi.fn(),
       findFirst: vi.fn().mockResolvedValue(null),
+      findUnique: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
+      update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    // Análise de crédito na proposta (Ficha Certa) — agregado + conta por org.
+    // `updateMany` default count 0: o CAS de submit é opt-in no sucesso.
+    creditAnalysisRequest: {
+      create: vi.fn().mockResolvedValue({ id: "car-mock" }),
+      findUnique: vi.fn().mockResolvedValue(null),
+      findFirst: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+      update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    fichaCertaAccount: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      findFirst: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn().mockResolvedValue({}),
+      update: vi.fn().mockResolvedValue({}),
+      delete: vi.fn().mockResolvedValue({}),
     },
     // Revisão pós-geração de contrato (Workstream B). Mesmo racional do
     // ingestionRun: o claim é um updateMany com a disponibilidade no where —

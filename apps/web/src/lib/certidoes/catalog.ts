@@ -49,6 +49,7 @@ export function listEndpointsByCategory(
     estadual: 1,
     municipal: 2,
     serasa: 3,
+    credito: 4,
   };
   return listAllForPicker()
     .filter((e) => e.category === category)

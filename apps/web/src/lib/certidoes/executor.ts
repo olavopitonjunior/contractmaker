@@ -17,7 +17,7 @@ import {
   isEndpointNotEnabled,
 } from "./error-codes";
 import type { InfosimplesResponse, JobStatus, Situacao, TargetKind } from "./types";
-import { monthlyBudgetCents, monthlySpendWhere } from "./budget";
+import { monthlyBudgetCents, monthlySpendWhere, type CertidoesProvider } from "./budget";
 import { emitNotification } from "@/lib/notifications/emit";
 import { classifyJobBucket, missingFieldHint } from "./health-monitor";
 import { persistLeaseClientDocument } from "@/lib/locacao/client-attachments";
@@ -1789,6 +1789,9 @@ async function downloadAndAttach(
       "locador",
       "fiador",
       "conjuge_fiador",
+      // 2026-09-04 — cônjuge do locatário (pretendente da análise de crédito);
+      // DocumentKind já existe em extracted-to-form.ts.
+      "conjuge_locatario",
     ]);
     const assignmentKind = ASSIGNABLE_KINDS.has(targetKind) ? targetKind : "outro";
     // Aqui dealId é garantidamente não-nulo (caso cliente já retornou acima, e
@@ -2032,7 +2035,7 @@ export async function observedPriceByEndpoint(
  */
 export async function getMonthlySpendByProvider(
   orgId: string,
-  provider: "infosimples" | "serasa"
+  provider: CertidoesProvider
 ): Promise<{ spentCents: number; budgetCents: number; exceeded: boolean }> {
   // Teto e contagem vêm de lib/certidoes/budget.ts — a mesma cláusula que o
   // monitor e a API do dashboard usam (antes cada um contava de um jeito).
