@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import type { CSSProperties } from "react";
 import { auth, getUserOrg } from "@/lib/auth/auth";
-import { isImpersonating } from "@/lib/auth/impersonation";
+import { getImpersonationFor } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/db/prisma";
 import { getTenantBranding, getOrgBrand } from "@/lib/tenant/branding";
 import { getOrgModules } from "@/lib/modules/read";
@@ -43,7 +43,11 @@ export default async function DashboardLayout({
   // Entitlements de módulos da org → filtram a navegação na sidebar.
   const modules = org ? await getOrgModules(org.id) : null;
   // "Testar como": super_admin operando este tenant como o dono → banner de aviso.
-  const impersonating = org ? await isImpersonating(session.user.id) : false;
+  // O contexto traz `endsAt`: o banner mostra a hora e vigia o vencimento —
+  // sem isso a tela seguia afirmando "você está operando X" com a sessão já
+  // vencida enquanto as rotas respondiam 404 (issue #587).
+  const impersonation = org ? await getImpersonationFor(session.user.id) : null;
+  const impersonating = impersonation !== null;
   // Onboarding: checklist "Primeiros passos" na sidebar — só pra OWNER/ADMIN com
   // o onboarding em aberto (`onboardingCompletedAt` null). Gate barato primeiro
   // (flag + role) — o status completo (~6 counts) só roda nessa janela.
@@ -114,8 +118,12 @@ export default async function DashboardLayout({
           brand={brand ? { logoUrl: brand.logoUrl, displayName: brand.displayName } : null}
         />
         <SidebarInset>
-          {impersonating && org && (
-            <ImpersonationBanner orgId={org.id} orgName={org.name} />
+          {impersonation && org && (
+            <ImpersonationBanner
+              orgId={org.id}
+              orgName={org.name}
+              endsAt={impersonation.endsAt.toISOString()}
+            />
           )}
           <DashboardHeader tenantSwitcher={tenantSwitcher} modules={modules} />
           {/* pb-24: folga pro AIAssistButton (fixed bottom-6 right-6) não
