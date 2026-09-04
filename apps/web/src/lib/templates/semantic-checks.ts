@@ -417,10 +417,13 @@ function nameShaped(t: string): boolean {
   return words.every((w) => NAME_CONNECTOR.test(w) || /^[A-ZÀ-Ý]/.test(w));
 }
 
+/** Linha que é SÓ uma chave: um passe anterior já pôs a qualificação no lugar do nome. */
+const TOKEN_ONLY_LINE = /^\{\{\s*[a-zA-Z0-9_]+\s*\}\}$/;
+
 function isSignatureMaterial(p: string): boolean {
   const t = normalizeForMatch(p).trim();
   if (UNDERSCORE_LINE.test(t) || SIGN_LABEL.test(t) || SIGN_FIELD.test(t)) return true;
-  if (NAME_PLACEHOLDER.test(t)) return true;
+  if (NAME_PLACEHOLDER.test(t) || TOKEN_ONLY_LINE.test(t)) return true;
   return nameShaped(t);
 }
 
@@ -428,7 +431,7 @@ function isSignatureMaterial(p: string): boolean {
 function looksLikeRealName(p: string): boolean {
   const t = normalizeForMatch(p).trim();
   if (UNDERSCORE_LINE.test(t) || SIGN_LABEL.test(t) || SIGN_FIELD.test(t)) return false;
-  if (NAME_PLACEHOLDER.test(t) || !nameShaped(t)) return false;
+  if (NAME_PLACEHOLDER.test(t) || TOKEN_ONLY_LINE.test(t) || !nameShaped(t)) return false;
   // Nome de pessoa tem pelo menos duas palavras; um rótulo solto ("Testemunha")
   // já saiu acima, e uma palavra só ("Locador") não identifica ninguém.
   return t.split(/\s+/).filter((w) => w.length > 1).length >= 2;
@@ -456,6 +459,16 @@ function walkSignatureBlock(
       continue;
     }
     if (orcamento > 0 && isSignatureMaterial(docParagraphs[i]!)) {
+      // Linha que é só uma chave só conta na POSIÇÃO de nome: logo abaixo de
+      // uma linha de assinatura ou logo acima de um rótulo. Fora disso é a
+      // chave de outra cláusula que por acaso ficou perto — e o conserto
+      // apagaria o bloco inteiro com ela dentro. (Se o bloco for uma tabela a
+      // estrutura recusaria de qualquer forma; se for parágrafos soltos, não.)
+      if (TOKEN_ONLY_LINE.test(t)) {
+        const anterior = normalizeForMatch(docParagraphs[i - 1] ?? "").trim();
+        const proximo = normalizeForMatch(docParagraphs[i + 1] ?? "").trim();
+        if (!UNDERSCORE_LINE.test(anterior) && !SIGN_LABEL.test(proximo)) break;
+      }
       if (SIGN_LABEL.test(t)) rotulos += 1;
       orcamento -= 1;
       fim = i;
