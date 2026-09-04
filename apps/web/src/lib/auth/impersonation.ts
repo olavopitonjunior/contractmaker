@@ -47,6 +47,8 @@ const RAW_PATH_PREFIXES = ["/admin", "/api/admin", "/api/me", "/api/security", "
 export interface ImpersonationContext {
   orgId: string;
   ownerUserId: string;
+  /** Quando a sessão de impersonation vence (TTL) — o banner mostra e vigia. */
+  endsAt: Date;
 }
 
 /**
@@ -89,7 +91,7 @@ export const getImpersonationFor = cache(
     // Sessão de impersonation ativa (respeita o TTL de endsAt).
     const active = await prisma.tenantImpersonationSession.findFirst({
       where: { adminUserId: userId, orgId, endedAt: null, endsAt: { gt: new Date() } },
-      select: { id: true },
+      select: { id: true, endsAt: true },
     });
     if (!active) return null;
 
@@ -100,7 +102,7 @@ export const getImpersonationFor = cache(
     });
     if (!owner) return null;
 
-    return { orgId, ownerUserId: owner.userId };
+    return { orgId, ownerUserId: owner.userId, endsAt: active.endsAt };
   }
 );
 

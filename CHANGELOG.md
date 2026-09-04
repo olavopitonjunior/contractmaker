@@ -4,6 +4,12 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-04 - O banner que afirmava uma sessão já vencida
+
+### Corrigido
+
+- **O banner "Você está operando X como o dono" continuava na tela com a sessão vencida.** A sessão de teste em tenant tem 8 horas; a página é renderizada uma vez e pode ficar aberta além disso — e aí as rotas do tenant já respondem 404 enquanto o banner afirma o contrário. Medido em produção (issue #587): o diagnóstico só fechou indo ao banco. O banner passa a mostrar a hora do vencimento e, passada a hora, troca por "a sessão de teste venceu — as ações serão recusadas; reabra em Tenants". A autoridade continua sendo o servidor; a tela só informa (o relógio do browser pode divergir alguns segundos).
+
 ## [Unreleased] - 2026-09-04 - O corretor parceiro acompanha a proposta
 
 ### Adicionado
