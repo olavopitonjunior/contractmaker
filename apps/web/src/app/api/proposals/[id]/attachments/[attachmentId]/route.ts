@@ -1,12 +1,88 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { loadScopedProposal, proposalFeatureGuard } from "@/lib/proposals/route-helpers";
 import { archiveAttachment } from "@/lib/attachments/archive";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import {
+  esteiraForProposalKind,
+  parseProposalAssignment,
+} from "@/lib/proposals/attachment-assignment";
+import { shouldFlipGarantiaToFiador } from "@/lib/forms/garantia-fiador-flip";
 
 export const runtime = "nodejs";
+
+const patchSchema = z.object({
+  assignment: z.object({ kind: z.string().min(1).max(40), index: z.number().int().min(0).max(50) }),
+});
+
+/**
+ * PATCH /api/proposals/:id/attachments/:attachmentId — "Mover para…": grava o
+ * assignment HUMANO em `extractedData.assignment` (+ `assignmentPersisted`).
+ *
+ * Locação: mover para o fiador/cônjuge do fiador DEFINE a garantia por fiança
+ * — mas a proposta enviada é imutável (snapshot assinado), então aqui só
+ * devolvemos `garantiaFlipped` para a UI avisar; o flip real acontece no
+ * convert (`applyProposalExtractions` → `applyFiadorFlip`).
+ */
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: { id: string; attachmentId: string } }
+) {
+  const r = await loadScopedProposal(req, params.id);
+  if ("fail" in r) return r.fail;
+  const { auth: authCtx, eff, proposal } = r;
+  if (!can(eff, PERMISSION.PROPOSAL_SEND)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  const feat = await proposalFeatureGuard(authCtx.org.id, proposal.kind);
+  if (feat) return feat;
+
+  const parsed = patchSchema.safeParse(await req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Bad Request", details: parsed.error.flatten() }, { status: 400 });
+  }
+  const esteira = esteiraForProposalKind(proposal.kind);
+  const assignment = parseProposalAssignment(parsed.data.assignment, esteira);
+  if (!assignment) {
+    return NextResponse.json({ error: "Atribuição inválida para esta proposta" }, { status: 400 });
+  }
+
+  const attachment = await prisma.proposalAttachment.findUnique({ where: { id: params.attachmentId } });
+  if (!attachment || attachment.proposalId !== proposal.id) {
+    return NextResponse.json({ error: "Anexo não encontrado nesta proposta" }, { status: 404 });
+  }
+
+  const current = (attachment.extractedData as Record<string, unknown> | null) ?? {};
+  await prisma.proposalAttachment.update({
+    where: { id: attachment.id },
+    data: {
+      extractedData: { ...current, assignment, assignmentPersisted: true } as unknown as Prisma.InputJsonValue,
+    },
+  });
+
+  const garantia = ((proposal.dataJson as Record<string, unknown> | null)?.garantia ?? {}) as {
+    tipo?: string;
+  };
+  const garantiaFlipped =
+    esteira === "locacao" && shouldFlipGarantiaToFiador(assignment.kind, garantia.tipo);
+
+  await audit(
+    extractAuditContextFromRequest(req, authCtx.org.id, authCtx.actor.effectiveUserId),
+    {
+      action: "ATTACHMENT_RECLASSIFY",
+      result: "SUCCESS",
+      resource: attachment.id,
+      resourceType: "ProposalAttachment",
+      metadata: { proposalId: proposal.id, assignment, garantiaFlipped },
+    }
+  ).catch(() => {});
+
+  return NextResponse.json({ ok: true, assignment, garantiaFlipped });
+}
 
 /**
  * DELETE /api/proposals/:id/attachments/:attachmentId

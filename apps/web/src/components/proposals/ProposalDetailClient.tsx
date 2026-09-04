@@ -35,6 +35,7 @@ import { ProposalDecisionCard } from "./ProposalDecisionCard";
 import type { PlanVendedor } from "./EnviarProprietarioDialog";
 import { ProposalDocumentCard } from "./ProposalDocumentCard";
 import { ProposalAttachmentUpload } from "./ProposalAttachmentUpload";
+import { ProposalDocumentsSection, type ProposalDocumentRow } from "./ProposalDocumentsSection";
 import { ProposalSignaturesSection } from "./ProposalSignaturesSection";
 import type { ProposalPermissions } from "./ProposalRowActions";
 import type { ProposalDetails, ProposalPartyLine } from "@/lib/proposals/summarize";
@@ -156,6 +157,8 @@ export function ProposalDetailClient({
   events,
   attachments,
   members,
+  creditFeatureEnabled = false,
+  partiesSnapshot,
   permissions,
   sentSnapshotHtml,
   planVendedores = [],
@@ -180,8 +183,15 @@ export function ProposalDetailClient({
     /** Razão extraída do payload (falhas da 2ª via, preflight etc.). */
     detail?: string | null;
   }[];
-  attachments: { id: string; filename: string; category: string | null; url: string }[];
+  attachments: ProposalDocumentRow[];
   members: { id: string; name: string }[];
+  /** Feature `locacao.credito` ligada (locação): seção de documentos por parte. */
+  creditFeatureEnabled?: boolean;
+  partiesSnapshot?: {
+    locadores: Array<Record<string, unknown>>;
+    locatarios: Array<Record<string, unknown>>;
+    garantia?: { tipo?: string; fiador?: Record<string, unknown> };
+  };
   permissions: ProposalPermissions;
   /** Documento congelado no envio (null enquanto a proposta não saiu). */
   sentSnapshotHtml: string | null;
@@ -778,8 +788,33 @@ export function ProposalDetailClient({
         snapshotHtml={sentSnapshotHtml}
       />
 
+      {/* Documentos por parte (locação com análise de crédito) */}
+      {creditFeatureEnabled && partiesSnapshot && (
+        <ProposalDocumentsSection
+          proposalId={proposal.id}
+          attachments={attachments}
+          snapshot={partiesSnapshot}
+          canEdit={canAttach}
+          dossierUrl={proposal.dossierUrl}
+          // O Registro do Aceite é documento do SISTEMA (categoria própria, sem
+          // parte): a dropzone por parte não serve para ele. O botão continua
+          // existindo com a feature ligada — o aviso lá em cima manda "anexar em
+          // Documentos".
+          headerAction={
+            isAceite && canAttach ? (
+              <ProposalAttachmentUpload
+                proposalId={proposal.id}
+                category="aceite_registro_clicksign"
+                label="Anexar Registro do Aceite"
+                onUploaded={() => router.refresh()}
+              />
+            ) : null
+          }
+        />
+      )}
+
       {/* Documentos */}
-      {(attachments.length > 0 || canAttach) && (
+      {!creditFeatureEnabled && (attachments.length > 0 || canAttach) && (
         <Card className="space-y-2 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-medium">Documentos</h2>
