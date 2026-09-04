@@ -198,9 +198,42 @@ export async function applyDocEdits(input: {
       // Consecutivos no texto: o intervalo vai do primeiro ao último, e o que
       // estiver entre eles seria apagado junto. Conferido de novo na estrutura
       // antes de escrever (`findBlockRange`), mas recusar aqui evita a chamada.
-      const juntos = paragrafos.join("\n");
-      if (countOccurrences(sim, juntos) !== 1) {
-        return recusar(i, "block-not-consecutive", paragrafos[0]!);
+      //
+      // "Consecutivo" NÃO é `paragrafos.join("\n")` aparecer literalmente. Essa
+      // era a versão anterior, e ela só funcionava no harness de teste, que
+      // sempre juntou os parágrafos com um "\n" exato. Documento real não é
+      // assim: o export do Drive intercala parágrafos vazios, e um parágrafo
+      // pode terminar em espaço — enquanto os textos que chegam aqui vêm
+      // APARADOS de `splitDocParagraphs`. O bloco da Trio era recusado por essa
+      // diferença de separador, e a tela dizia apenas "não aplicado".
+      //
+      // Agora a adjacência é medida por POSIÇÃO, e o que se exige do vão entre
+      // um parágrafo e o próximo é que ele seja só espaço em branco. Texto no
+      // meio continua recusado — é a garantia que importa, porque o que está
+      // entre os itens é contrato.
+      const posicoes: number[] = [];
+      let cursor = 0;
+      for (const par of paragrafos) {
+        const at = sim.indexOf(par, cursor);
+        if (at === -1) return recusar(i, "block-not-consecutive", par);
+        posicoes.push(at);
+        cursor = at + par.length;
+      }
+      for (let k = 1; k < paragrafos.length; k += 1) {
+        const fimAnterior = posicoes[k - 1]! + paragrafos[k - 1]!.length;
+        if (!/^\s*$/.test(sim.slice(fimAnterior, posicoes[k]!))) {
+          return recusar(i, "block-not-consecutive", paragrafos[k]!);
+        }
+      }
+      // O trecho REAL (com os separadores como estão no documento) é o que sai
+      // do texto simulado — trocar pelo `join("\n")` deixaria os separadores
+      // órfãos e faria as operações de texto seguintes casarem contra um
+      // simulado que não corresponde ao documento.
+      const inicio = posicoes[0]!;
+      const fim = posicoes[posicoes.length - 1]! + paragrafos[paragrafos.length - 1]!.length;
+      const trechoReal = sim.slice(inicio, fim);
+      if (countOccurrences(sim, trechoReal) !== 1) {
+        return recusar(i, "ambiguous", paragrafos[0]!);
       }
       estruturais.push({
         index: i,
@@ -209,7 +242,7 @@ export async function applyDocEdits(input: {
         paragrafos,
         texto: `{{${op.token}}}`,
       });
-      aplicarSim(juntos, `{{${op.token}}}`);
+      aplicarSim(trechoReal, `{{${op.token}}}`);
       return;
     }
   });

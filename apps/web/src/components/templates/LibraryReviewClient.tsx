@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { modalidadeLabel } from "@/lib/contracts/template-category";
 import { SEMANTIC_CATEGORY_LABEL } from "@/lib/templates/semantic-checks";
+import { motivoDaRecusa } from "@/lib/templates/doc-edit-reasons";
 import type { LibraryReviewResult, LibraryReviewRow } from "@/lib/templates/library-review";
 import type { ClauseReviewResult, ClauseReviewRow } from "@/lib/templates/clause-review";
 
@@ -113,7 +114,7 @@ export function LibraryReviewClient() {
         });
         const json = await res.json();
         if (res.ok && json?.ok) feitos += 1;
-        else falhas.push(json?.error || `${achado.id}: não aplicado`);
+        else falhas.push(json?.error || motivoDaRecusa(json));
       } catch (e) {
         falhas.push(e instanceof Error ? e.message : String(e));
       }
