@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { findBlockRange, findForms, findParagraphRange, realFormOf } from "../doc-index";
+import { findBlockRange, findForms, findParagraphRange, realFormOf, sameParagraph } from "../doc-index";
 
 /**
  * Doc simulado: um `textRun` por parágrafo, índices como a API devolve. `""`
@@ -132,6 +132,49 @@ describe("findBlockRange — bloco que é uma tabela inteira", () => {
   it("a mesma tabela duas vezes é ambígua", () => {
     const doc = fakeDoc([celulas, "meio", celulas]);
     expect(findBlockRange(doc, ["____", "PARTE LOCATÁRIA", "____", "PARTE LOCADORA"])).toBeNull();
+  });
+});
+
+describe("tabulação — o export troca por espaços, a estrutura guarda o \\t", () => {
+  // Produção, 04/09: bloco de assinaturas em COLUNAS ("Nome\tNome"), sem
+  // tabela. O export mostra "Nome         Nome"; a comparação de parágrafo
+  // inteiro tem de ignorar a diferença. `findForms` NÃO (fatia por índice).
+  const estrutura = [
+    " \t___________________________________________ ",
+    "\tXXXXXXXXXXXXXXX \tXXXXXXX ",
+    "\tPARTE LOCATÁRIA \tPARTE LOCATÁRIA ",
+    "PARTE LOCADORA ",
+    "___________________________________________ \t___________________________________________ ",
+    "Nome \tNome ",
+    "Fim",
+  ];
+  const exportado = [
+    "___________________________________________",
+    "XXXXXXXXXXXXXXX         XXXXXXX",
+    "PARTE LOCATÁRIA         PARTE LOCATÁRIA",
+    "PARTE LOCADORA",
+    "___________________________________________         ___________________________________________",
+    "Nome         Nome",
+  ];
+
+  it("findBlockRange casa a sequência em colunas e para antes de 'Fim'", () => {
+    const doc = fakeDoc(estrutura);
+    const r = findBlockRange(doc, exportado);
+    expect(r).not.toBeNull();
+    const fimTexto = estrutura.slice(0, 6).map((p) => `${p}\n`).join("").length;
+    expect(r!.startIndex).toBe(1);
+    expect(r!.endIndex).toBe(1 + fimTexto - 1);
+  });
+
+  it("findParagraphRange e sameParagraph ignoram tabulação e pontas", () => {
+    const doc = fakeDoc(estrutura);
+    expect(findParagraphRange(doc, "Nome         Nome")).not.toBeNull();
+    expect(sameParagraph("Nome \tNome ", "Nome         Nome")).toBe(true);
+    expect(sameParagraph("Nome Nome", "Nome Outro")).toBe(false);
+  });
+
+  it("findForms continua exigindo largura 1:1 — tab não vira espaço nele", () => {
+    expect(findForms("Nome \tNome", "Nome         Nome").count).toBe(0);
   });
 });
 
