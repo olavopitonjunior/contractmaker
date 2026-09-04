@@ -316,6 +316,11 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
   const [proposta, setProposta] = useState<ProposeView | null>(null);
   const [selecionadas, setSelecionadas] = useState<Set<string>>(() => new Set());
   const [aplicando, setAplicando] = useState(false);
+  // O Doc do modelo pode ser TROCADO nesta sessão ("Refazer padronização"):
+  // o iframe e o link "Abrir no Google Docs" seguem o estado, não a prop.
+  const [doc, setDoc] = useState({ docId: template.docId, embedLink: template.embedLink });
+  const [refazendo, setRefazendo] = useState(false);
+  const [confirmarRefazer, setConfirmarRefazer] = useState(false);
 
   /**
    * Slots de cláusula que a ingestão NÃO conseguiu abrir. O modelo ficou com a
@@ -528,6 +533,36 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
       toast.error(err instanceof Error ? err.message : "Falha na revisão por IA");
     } finally {
       setAiRunning(false);
+    }
+  }
+
+  /**
+   * "Refazer padronização": Doc NOVO a partir do arquivo original do lote, o
+   * pipeline inteiro de novo (slots, neutralização, chaves, checagens); o Doc
+   * atual vai para a lixeira do Drive. O link do modelo não muda — só o Doc.
+   */
+  async function refazerPadronizacao() {
+    if (refazendo) return;
+    setRefazendo(true);
+    setConfirmarRefazer(false);
+    try {
+      const res = await fetch(`/api/templates/${template.id}/redo`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Falha ao refazer a padronização");
+      setDoc({ docId: data.docId, embedLink: data.embedLink });
+      setReport(parseDraftReport(data.report));
+      // Propostas e prévia descreviam o Doc antigo.
+      setProposta(null);
+      setPreviaHtml(null);
+      toast.success(
+        "Padronização refeita a partir do arquivo original. O documento anterior foi para a lixeira do Drive."
+      );
+      await Promise.all([revalidate(), refreshDocText()]);
+      setIframeKey((k) => k + 1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Falha ao refazer a padronização");
+    } finally {
+      setRefazendo(false);
     }
   }
 
@@ -923,7 +958,7 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
               </Button>
             )}
             <a
-              href={`https://docs.google.com/document/d/${template.docId}/edit`}
+              href={`https://docs.google.com/document/d/${doc.docId}/edit`}
               target="_blank"
               rel="noreferrer"
               className="ml-auto text-xs font-medium underline text-muted-foreground hover:text-foreground"
@@ -936,7 +971,7 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
             <div className="min-h-[64vh] overflow-hidden rounded-lg border">
               <iframe
                 key={iframeKey}
-                src={template.embedLink}
+                src={doc.embedLink}
                 className="h-full min-h-[64vh] w-full"
                 title="Modelo da imobiliária"
               />
@@ -1063,6 +1098,21 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                     Ativar template
                   </Button>
                 )}
+                {status !== "active" && !confirmarRefazer && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setConfirmarRefazer(true)}
+                    disabled={refazendo || aiRunning || aplicando || activating}
+                  >
+                    {refazendo ? (
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                    )}
+                    Refazer padronização
+                  </Button>
+                )}
                 {status === "active" && !isDefault && (
                   <Button
                     size="sm"
@@ -1075,6 +1125,24 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                   </Button>
                 )}
               </div>
+              {confirmarRefazer && (
+                <div className="space-y-2 rounded-md border border-warning/40 bg-warning/10 p-2 text-xs">
+                  <p>
+                    Cria um Google Doc novo a partir do arquivo original do lote e refaz slots,
+                    neutralização de fornecedor, chaves e checagens. O documento atual vai para a
+                    lixeira do Drive — edições feitas nele se perdem. O link do modelo continua o
+                    mesmo.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="destructive" onClick={refazerPadronizacao} disabled={refazendo}>
+                      Confirmar: refazer do arquivo original
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setConfirmarRefazer(false)} disabled={refazendo}>
+                      Cancelar
+                    </Button>
+                  </div>
+                </div>
+              )}
               {validation && validation.unknown.length > 0 && (
                 <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />

@@ -129,6 +129,9 @@ const LIVE_STATUSES = [
 
 const POLL_MS = 4000;
 
+/** Espelha `TERMINAL_RUN_STATUSES` (lib/ingestion/run-state.ts). */
+const TERMINAL_STATUSES = ["done", "failed", "cancelled"];
+
 /** Estado mínimo de uma família do fanout, lido do report (client-safe). */
 interface FamilyProgressState {
   nextStepIndex: number | null;
@@ -255,6 +258,29 @@ export function IngestionReviewClient({
     setRun((current) => ({ ...current, status: "planning", error: null }));
   }
 
+  // "Descartar lote": encerra um lote que não vai ser aplicado (travou, ou a
+  // conferência mostrou que não vale a pena). Os modelos já criados ficam.
+  const [descartando, setDescartando] = useState(false);
+  const [confirmarDescarte, setConfirmarDescarte] = useState(false);
+  async function descartar() {
+    if (descartando) return;
+    setDescartando(true);
+    try {
+      const res = await fetch(`/api/templates/ingest/runs/${run.id}/cancel`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Falha ao descartar o lote");
+      setConfirmarDescarte(false);
+      setRun((current) => ({ ...current, status: "cancelled", error: null }));
+      const n = typeof data.itemsDiscarded === "number" ? data.itemsDiscarded : 0;
+      toast.success(n > 0 ? `Lote descartado — ${n} arquivo(s) saíram da fila.` : "Lote descartado.");
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Falha ao descartar o lote");
+    } finally {
+      setDescartando(false);
+    }
+  }
+
   const pct =
     run.itemsTotal > 0
       ? Math.min(100, Math.round((run.itemsDone / run.itemsTotal) * 100))
@@ -308,6 +334,45 @@ export function IngestionReviewClient({
                 >
                   <RefreshCcw className="mr-1.5 h-3.5 w-3.5" />
                   Tentar de novo
+                </Button>
+              )}
+            </div>
+          )}
+          {!TERMINAL_STATUSES.includes(run.status) && (
+            <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+              {confirmarDescarte ? (
+                <>
+                  <span className="text-xs text-muted-foreground">
+                    Descartar encerra o lote: os arquivos ainda não aplicados saem da fila; os
+                    modelos já criados ficam como rascunho.
+                  </span>
+                  <Button size="sm" variant="destructive" onClick={descartar} disabled={descartando}>
+                    {descartando ? (
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                    )}
+                    Confirmar descarte
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setConfirmarDescarte(false)}
+                    disabled={descartando}
+                  >
+                    Cancelar
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-muted-foreground"
+                  onClick={() => setConfirmarDescarte(true)}
+                  disabled={submitting || descartando}
+                >
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                  Descartar lote
                 </Button>
               )}
             </div>
