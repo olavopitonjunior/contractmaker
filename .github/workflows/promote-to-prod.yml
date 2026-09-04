@@ -53,10 +53,41 @@ jobs:
 
           # `grep -qx` (linha inteira) e não `-q`: o antigo casava SUBSTRING, então
           # um label chamado "nao-staging-smoke-passed-x" satisfazia o gate.
-          if printf '%s\n' "$LABELS" | grep -qx "$WANTED"; then
-            echo "✓ label '$WANTED' presente (head: $HEAD_REF)"
+          if ! printf '%s\n' "$LABELS" | grep -qx "$WANTED"; then
+            echo "::error::Faltando o label '$WANTED'. $WHY."
+            exit 1
+          fi
+
+          # A label atesta um SHA, não um PR. O head de staging → master é a
+          # BRANCH `staging`: se outro merge entrar nela com a promoção aberta,
+          # o head avança e a label continua lá — e código que nunca passou pelo
+          # smoke chega a produção sob a label do smoke anterior (issue #591).
+          # Regra: o commit do head não pode ser POSTERIOR ao momento em que a
+          # label foi aplicada pela última vez. Só para a promoção normal — o
+          # hotfix é consciente por definição.
+          if [ "$HEAD_REF" = "staging" ]; then
+            REPO="${{ github.repository }}"
+            PR="${{ github.event.pull_request.number }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            # `--paginate` aplica o --jq a CADA página e concatena: sem o `tail -n1`
+            # o "last" seria o último de cada página, e a comparação usaria a
+            # aplicação MAIS ANTIGA — travando justamente quem reaplicou a label.
+            LABELED_AT=$(gh api "repos/$REPO/issues/$PR/events" --paginate \
+              --jq "[.[] | select(.event == \"labeled\" and .label.name == \"$WANTED\")] | last | .created_at // empty" \
+              | grep -v '^$' | tail -n1)
+            HEAD_AT=$(gh api "repos/$REPO/commits/$HEAD_SHA" --jq '.commit.committer.date')
+            if [ -z "$LABELED_AT" ] || [ -z "$HEAD_AT" ]; then
+              echo "::error::Não consegui ler quando a label foi aplicada ($LABELED_AT) ou a data do head ($HEAD_AT)."
+              exit 1
+            fi
+            # ISO-8601 em UTC: a ordem lexicográfica é a ordem no tempo.
+            if [[ "$HEAD_AT" > "$LABELED_AT" ]]; then
+              echo "::error::O head ($HEAD_SHA, $HEAD_AT) avançou DEPOIS da label '$WANTED' ($LABELED_AT): a staging recebeu merge com a promoção aberta. Faça o smoke de novo, remova e reaplique a label."
+              exit 1
+            fi
+            echo "✓ label '$WANTED' aplicada em $LABELED_AT, head de $HEAD_AT (anterior)"
             exit 0
           fi
 
-          echo "::error::Faltando o label '$WANTED'. $WHY."
-          exit 1
+          echo "✓ label '$WANTED' presente (head: $HEAD_REF)"
+          exit 0

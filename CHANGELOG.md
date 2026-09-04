@@ -4,6 +4,12 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-04 - A label de promoção passa a atestar o head
+
+### Corrigido
+
+- **A label `staging-smoke-passed` atestava um head móvel.** O PR `staging → master` tem como head a branch `staging`: se outro merge entrar nela com a promoção aberta, o head avança, a label continua lá e o gate passa — código sem smoke chega a produção sob a label do smoke anterior (issue #591; aconteceu hoje com o #593 entrando na staging entre duas promoções). O gate agora compara a data da última aplicação da label com a data do commit do head e falha quando o head é posterior: smoke de novo, remover e reaplicar a label. Só na promoção normal; o hotfix segue como estava.
+
 ## [Unreleased] - 2026-09-04 - O banner que afirmava uma sessão já vencida
 
 ### Corrigido
