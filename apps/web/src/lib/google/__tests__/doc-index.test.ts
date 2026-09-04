@@ -111,6 +111,19 @@ describe("findBlockRange — bloco que é uma tabela inteira", () => {
     expect(r).toEqual({ startIndex: tabela.startIndex, endIndex: tabela.endIndex });
   });
 
+  it("quebra de linha suave (\\u000B) dentro da célula conta como linha, como no export", () => {
+    // Produção, 04/09: "CINDY TAVARES COSTA \u000BPARTE LOCATÁRIA" é um parágrafo no
+    // Doc e duas linhas no texto exportado — o bloco vem do export.
+    const doc = fakeDoc([
+      [
+        ["", "____", "CINDY TAVARES COSTA \u000BPARTE LOCATÁRIA", ""],
+        ["", "____", "PARTE LOCADORA"],
+      ],
+    ]);
+    const r = findBlockRange(doc, ["____", "CINDY TAVARES COSTA", "PARTE LOCATÁRIA", "____", "PARTE LOCADORA"]);
+    expect(r).not.toBeNull();
+  });
+
   it("bloco que cobre só PARTE da tabela não casa", () => {
     const doc = fakeDoc(["Assinam:", celulas, "Fim"]);
     expect(findBlockRange(doc, ["____", "PARTE LOCATÁRIA"])).toBeNull();

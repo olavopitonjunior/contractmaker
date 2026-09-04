@@ -417,10 +417,13 @@ function nameShaped(t: string): boolean {
   return words.every((w) => NAME_CONNECTOR.test(w) || /^[A-ZÀ-Ý]/.test(w));
 }
 
+/** Linha que é SÓ uma chave: um passe anterior já pôs a qualificação no lugar do nome. */
+const TOKEN_ONLY_LINE = /^\{\{\s*[a-zA-Z0-9_]+\s*\}\}$/;
+
 function isSignatureMaterial(p: string): boolean {
   const t = normalizeForMatch(p).trim();
   if (UNDERSCORE_LINE.test(t) || SIGN_LABEL.test(t) || SIGN_FIELD.test(t)) return true;
-  if (NAME_PLACEHOLDER.test(t)) return true;
+  if (NAME_PLACEHOLDER.test(t) || TOKEN_ONLY_LINE.test(t)) return true;
   return nameShaped(t);
 }
 
@@ -428,7 +431,7 @@ function isSignatureMaterial(p: string): boolean {
 function looksLikeRealName(p: string): boolean {
   const t = normalizeForMatch(p).trim();
   if (UNDERSCORE_LINE.test(t) || SIGN_LABEL.test(t) || SIGN_FIELD.test(t)) return false;
-  if (NAME_PLACEHOLDER.test(t) || !nameShaped(t)) return false;
+  if (NAME_PLACEHOLDER.test(t) || TOKEN_ONLY_LINE.test(t) || !nameShaped(t)) return false;
   // Nome de pessoa tem pelo menos duas palavras; um rótulo solto ("Testemunha")
   // já saiu acima, e uma palavra só ("Locador") não identifica ninguém.
   return t.split(/\s+/).filter((w) => w.length > 1).length >= 2;

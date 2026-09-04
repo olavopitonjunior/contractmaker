@@ -625,6 +625,19 @@ describe("replace-block — bloco que é uma TABELA inteira (o caso real da Trio
     });
   });
 
+  it("bloco que absorveu uma chave de FORA da tabela é recusado pela estrutura, sem escrever", async () => {
+    // A regra aceita linha-só-de-chave como material do bloco. Se a caminhada
+    // absorver um {{token}} que está no parágrafo seguinte à tabela, o bloco
+    // proposto é tabela + parágrafo — e nada na estrutura casa isso: nem a
+    // tabela (sobra uma linha), nem a sequência de parágrafos. Recusa fechada.
+    const blocoComSobra = [...bloco, "{{clausula_garantia}}"];
+    getDocPlainTextMock.mockResolvedValue([intro, ...blocoComSobra, "Rodapé"].join("\n"));
+    getDocStructureMock.mockResolvedValue(fakeDoc([intro, celulas, "{{clausula_garantia}}", "Rodapé"]));
+    const out = await run([{ op: "replace-block", paragraphs: blocoComSobra, token: "assinaturas" }]);
+    expect(out.results[0]).toMatchObject({ status: "failed", reason: "structure-not-found" });
+    expect(batchUpdateDocMock).not.toHaveBeenCalled();
+  });
+
   it("bloco que cobre só metade das células não apaga tabela nenhuma", async () => {
     getDocPlainTextMock.mockResolvedValue([intro, ...bloco, "Rodapé"].join("\n"));
     getDocStructureMock.mockResolvedValue(fakeDoc([intro, celulas, "Rodapé"]));

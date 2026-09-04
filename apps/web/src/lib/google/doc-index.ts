@@ -148,7 +148,17 @@ function paragraphsOf(
   return out;
 }
 
-/** Textos não vazios das células de uma tabela, na ordem de leitura (linha a linha). */
+/** Quebra de linha suave (vertical tab) — o export a mostra como `\n`. */
+const SOFT_BREAK_RE = /[\u000B\r]/;
+
+/**
+ * Textos não vazios das células de uma tabela, na ordem de leitura (linha a
+ * linha), LINHA A LINHA: a quebra de linha suave (`\u000B`, Shift+Enter) fica
+ * dentro de um parágrafo na estrutura, mas o export `text/plain` a mostra como
+ * linha nova — e é o export que produz os parágrafos do bloco. Medido em
+ * produção: "CINDY TAVARES COSTA \u000BPARTE LOCATÁRIA" era um parágrafo no
+ * Doc e duas linhas no bloco, e a tabela inteira não casava.
+ */
 function tableTexts(table: docs_v1.Schema$Table): string[] {
   const out: string[] = [];
   for (const row of table.tableRows || []) {
@@ -159,14 +169,17 @@ function tableTexts(table: docs_v1.Schema$Table): string[] {
         const texto = (para.elements || [])
           .map((el) => el.textRun?.content ?? "")
           .join("")
-          .replace(/\n+$/, "")
-          .trim();
-        if (texto) out.push(normalizeSpaces(texto));
+          .replace(/\n+$/, "");
+        for (const linha of texto.split(SOFT_BREAK_RE)) {
+          const t = linha.trim();
+          if (t) out.push(normalizeSpaces(t));
+        }
       }
     }
   }
   return out;
 }
+
 
 /**
  * Intervalo que cobre uma sequência CONSECUTIVA de parágrafos, do início do
