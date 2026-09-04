@@ -1,7 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { shouldRecordConsent, PRIVACY_POLICY_VERSION } from "../privacy-consent";
+import type { NextRequest } from "next/server";
+import {
+  shouldRecordConsent,
+  consentFields,
+  PRIVACY_POLICY_VERSION,
+} from "../privacy-consent";
 
 /**
  * A regra que decide se a evidência de consentimento é gravada.
@@ -48,6 +53,46 @@ describe("shouldRecordConsent", () => {
 
   it("a versão da política é uma só, e não vazia", () => {
     expect(PRIVACY_POLICY_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+/**
+ * `consentFields` monta o que vai para o `update`. Sem teste próprio, um erro de
+ * digitação num dos três nomes de campo passaria: o canário de fiação olha o
+ * wizard, e a suíte de `shouldRecordConsent` é pura e não sabe o que é gravado.
+ */
+describe("consentFields", () => {
+  const req = (headers: Record<string, string> = {}) =>
+    ({
+      headers: { get: (k: string) => headers[k.toLowerCase()] ?? null },
+    }) as unknown as NextRequest;
+
+  it("devolve exatamente os três campos de evidência", () => {
+    const f = consentFields(req());
+    expect(Object.keys(f).sort()).toEqual(
+      ["privacyAcceptedAt", "privacyIpHash", "privacyPolicyVersion"].sort(),
+    );
+    expect(f.privacyAcceptedAt).toBeInstanceOf(Date);
+    expect(f.privacyPolicyVersion).toBe(PRIVACY_POLICY_VERSION);
+  });
+
+  it("hash do IP, nunca o IP cru", () => {
+    const ip = "203.0.113.7";
+    const f = consentFields(req({ "x-forwarded-for": `${ip}, 10.0.0.1` }));
+    expect(f.privacyIpHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(f.privacyIpHash).not.toContain(ip);
+  });
+
+  it("sem cabeçalho de IP, o hash é nulo — não uma string de placeholder", () => {
+    expect(consentFields(req()).privacyIpHash).toBeNull();
+  });
+
+  // Controle: dois IPs diferentes têm de dar hashes diferentes. Sem isto, uma
+  // implementação que devolvesse constante passaria nos testes acima.
+  it("CONTROLE: IPs diferentes geram hashes diferentes", () => {
+    const a = consentFields(req({ "x-forwarded-for": "203.0.113.7" })).privacyIpHash;
+    const b = consentFields(req({ "x-real-ip": "198.51.100.4" })).privacyIpHash;
+    expect(a).not.toBe(b);
   });
 });
 
