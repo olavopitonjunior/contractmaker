@@ -617,6 +617,38 @@ describe("literal-signature-block — bloco de assinaturas fixo no modelo", () =
     expect(f[0]!.severity).toBe("error");
   });
 
+  it("linha que é só uma chave (qualificação no lugar do nome) é material do bloco, não corte", () => {
+    // Produção, 04/09: dois modelos de fiador tinham {{locadores_qualificacao}}
+    // na célula do locador; a regra parava ali, propunha bloco parcial, e a
+    // estrutura recusava (a tabela inteira não casava).
+    const bloco = [
+      "____________________________________________",
+      "JAQUELINE AGUILAR BORGES",
+      "PARTE LOCATÁRIA",
+      "____________________________________________",
+      "{{locadores_qualificacao}}",
+      "PARTE LOCADORA",
+      "___________________________________________",
+      "Nome",
+      "CPF",
+      "Testemunha",
+    ];
+    const r = run([...corpo, ...bloco, "Rodapé da imobiliária"].join("\n"));
+    const f = byCategory(r.findings, "literal-signature-block");
+    expect(f).toHaveLength(1);
+    expect(f[0]!.severity).toBe("error");
+    expect((f[0]!.suggestedFix as { paragraphs: string[] }).paragraphs).toEqual(bloco);
+  });
+
+  it("chave de OUTRA cláusula logo depois do bloco não é absorvida", () => {
+    // Bloco em parágrafos soltos (não tabela): se a caminhada absorvesse
+    // {{clausula_garantia}}, o replace-block apagaria a chave junto.
+    const r = run([...corpo, ...blocoAnonimo, "{{clausula_garantia}}", "Rodapé"].join("\n"));
+    const f = byCategory(r.findings, "literal-signature-block");
+    expect(f).toHaveLength(1);
+    expect((f[0]!.suggestedFix as { paragraphs: string[] }).paragraphs).toEqual(blocoAnonimo);
+  });
+
   it("cala quando {{assinaturas}} já está no documento", () => {
     const r = run([...corpo, "{{assinaturas}}"].join("\n"));
     expect(byCategory(r.findings, "literal-signature-block")).toEqual([]);
