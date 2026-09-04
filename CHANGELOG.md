@@ -4,6 +4,12 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-04 - A imobiliária conecta a própria conta Ficha Certa
+
+### Adicionado
+
+- **Conta Ficha Certa Digital por imobiliária em Configurações › Integrações.** O owner/admin informa login e senha da API (produção ou homologação) e os produtos contratados; a plataforma valida a credencial consultando os créditos, provisiona o webhook da conta apontando para o nosso endereço (com o par usuário/senha que a Ficha Certa usa para se autenticar antes de cada entrega) e guarda tudo cifrado. "Testar" confere créditos e se o webhook cadastrado lá é o nosso; "Reconectar" mantém o endereço do webhook. Sem conta conectada não há análise de crédito — não existe credencial de plataforma. Cliente HTTP, normalizador do laudo (restrição só por protestos/pendências/ações/cheques, CPF irregular ou suspeita de óbito; renda é parecer) e fixtures da documentação entram junto; o disparo pela proposta vem no próximo lote.
+
 ## [Unreleased] - 2026-09-04 - Costura para análise de crédito e certidões na proposta
 
 ### Adicionado

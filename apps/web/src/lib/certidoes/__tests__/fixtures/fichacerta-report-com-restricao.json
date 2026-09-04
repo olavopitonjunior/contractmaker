@@ -1,0 +1,50 @@
+{
+  "solicitacao": { "id": 221, "cliente_id": 142, "status": "CONCLUIDA", "data_criacao": "2019-07-15 17:03:41", "data_conclusao": "2019-07-17 19:17:33" },
+  "pretendentes": [
+    {
+      "pessoa": {
+        "id": 573,
+        "nome": "JULIA DA SILVA",
+        "tipo_pretendente": "FIADOR",
+        "cpf": "52978015918",
+        "produtos": [
+          { "id": 1, "nome": "FC ANALISE", "status": "CONCLUIDO", "data": "2019-07-17 14:19:20", "data_atualizacao": "2019-07-17 14:19:28" },
+          { "id": 9, "nome": "FC SCORE", "status": "CONCLUIDO", "data": "2019-07-17 14:19:20", "data_atualizacao": "2019-07-17 14:19:30" }
+        ]
+      },
+      "laudo": {
+        "data_conclusao": "2019-07-17 19:17:33",
+        "restricoes_financeiras": {
+          "result": {
+            "protestos": { "resumo": { "total": 2 }, "detalhes": [{ "valor": "1.200,00" }], "info": "CONSTA" },
+            "pendencias": { "resumo": {}, "detalhes": [], "info": "NADA CONSTA" },
+            "acoes": { "resumo": {}, "detalhes": [], "info": "NADA CONSTA" },
+            "cheques": { "resumo": {}, "detalhes": [], "info": "NADA CONSTA" }
+          },
+          "icon": "negativo",
+          "recommendation": [],
+          "caution": []
+        },
+        "parecer_sistemico": [
+          { "parecer": "RENDA INCOMPATÍVEL", "score_fc": 178, "recomendacao": ["RECOMENDA-SE A COMPLEMENTAÇÃO OU A COMPOSIÇÃO DE RENDA COM OUTRO(S) PRETENDENTE(S)."], "risco": null }
+        ],
+        "compatibilidade_renda": {
+          "result": { "valor_locacao": 8600, "renda": 12500, "vezes": 1.4534883720930232 },
+          "icon": "negativo",
+          "recommendation": { "titulo": "Considerando uma locação de imóvel residencial para uso próprio", "observacoes": ["A RENDA PESSOAL declarada (1,5 vezes o valor da locação) é incompatível com esta locação."] },
+          "caution": []
+        },
+        "situacao_cpf": { "result": "Ativo", "icon": "positivo", "recommendation": [], "caution": [] },
+        "suspeita_obito": { "result": false, "icon": "positivo", "recommendation": [], "caution": [] }
+      }
+    }
+  ],
+  "parecer": {
+    "sintese": [{ "cpf": "52978015918", "nome": "JULIA DA SILVA", "pretendente_id": 573, "parecer": [{ "parecer": "RENDA INCOMPATÍVEL", "score_fc": 178 }] }],
+    "locacao": {
+      "parecer_fiadores": { "parecer": "RISCO ALTO", "aprovados": null, "nao_aprovados": "Não recomendada a aceitação do FIADOR: JULIA DA SILVA" },
+      "parecer_inquilinos": {},
+      "risco": "Os riscos acima consideram o valor da locação, as rendas declaradas e presumidas."
+    }
+  }
+}

@@ -1,0 +1,3 @@
+{
+  "message": "O campo pretendente.participante é obrigatório quando pretendente.tipo_pretendente é INQUILINO e locacao.tipo_imovel é NAO_RESIDENCIAL."
+}
