@@ -10,6 +10,9 @@ on:
 permissions:
   contents: read
   pull-requests: read
+  # `issues/{n}/events` (quando a label foi aplicada) vive na API de Issues,
+  # mesmo para PR — sem este escopo o gate morreria em 403 em toda promoção.
+  issues: read
 
 # O trigger inclui `labeled`/`unlabeled`, então mexer em label várias vezes
 # empilharia runs redundantes. Escopo por PR: nunca cancela o run de outro.
@@ -72,10 +75,23 @@ jobs:
             # `--paginate` aplica o --jq a CADA página e concatena: sem o `tail -n1`
             # o "last" seria o último de cada página, e a comparação usaria a
             # aplicação MAIS ANTIGA — travando justamente quem reaplicou a label.
+            # (`// empty` não emite linha nenhuma sem evento; `tail` aceita vazio.)
             LABELED_AT=$(gh api "repos/$REPO/issues/$PR/events" --paginate \
               --jq "[.[] | select(.event == \"labeled\" and .label.name == \"$WANTED\")] | last | .created_at // empty" \
-              | grep -v '^$' | tail -n1)
-            HEAD_AT=$(gh api "repos/$REPO/commits/$HEAD_SHA" --jq '.commit.committer.date')
+              | tail -n1)
+            # QUANDO o head chegou à branch: o PushEvent do repositório é carimbo
+            # do SERVIDOR. A data do committer não serve como primeira fonte —
+            # commit feito ontem e empurrado hoje carrega a data de ontem, e
+            # passaria por "anterior à label" sem ter passado pelo smoke.
+            HEAD_AT=$(gh api "repos/$REPO/events" --paginate \
+              --jq ".[] | select(.type == \"PushEvent\" and .payload.head == \"$HEAD_SHA\") | .created_at" \
+              | head -n1)
+            if [ -z "$HEAD_AT" ]; then
+              # Fora da janela de eventos do repositório (90 dias / 300 eventos):
+              # cai para a data do committer e diz que caiu.
+              HEAD_AT=$(gh api "repos/$REPO/commits/$HEAD_SHA" --jq '.commit.committer.date')
+              echo "::warning::PushEvent do head $HEAD_SHA não encontrado; usando a data do committer ($HEAD_AT) — sinal mais fraco."
+            fi
             if [ -z "$LABELED_AT" ] || [ -z "$HEAD_AT" ]; then
               echo "::error::Não consegui ler quando a label foi aplicada ($LABELED_AT) ou a data do head ($HEAD_AT)."
               exit 1
