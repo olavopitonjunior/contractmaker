@@ -640,6 +640,15 @@ describe("literal-signature-block — bloco de assinaturas fixo no modelo", () =
     expect((f[0]!.suggestedFix as { paragraphs: string[] }).paragraphs).toEqual(bloco);
   });
 
+  it("chave de OUTRA cláusula logo depois do bloco não é absorvida", () => {
+    // Bloco em parágrafos soltos (não tabela): se a caminhada absorvesse
+    // {{clausula_garantia}}, o replace-block apagaria a chave junto.
+    const r = run([...corpo, ...blocoAnonimo, "{{clausula_garantia}}", "Rodapé"].join("\n"));
+    const f = byCategory(r.findings, "literal-signature-block");
+    expect(f).toHaveLength(1);
+    expect((f[0]!.suggestedFix as { paragraphs: string[] }).paragraphs).toEqual(blocoAnonimo);
+  });
+
   it("cala quando {{assinaturas}} já está no documento", () => {
     const r = run([...corpo, "{{assinaturas}}"].join("\n"));
     expect(byCategory(r.findings, "literal-signature-block")).toEqual([]);

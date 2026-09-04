@@ -625,6 +625,39 @@ describe("replace-block — bloco que é uma TABELA inteira (o caso real da Trio
     });
   });
 
+  it("célula que já tem uma chave no lugar do nome: a tabela inteira casa e vira a chave", async () => {
+    // Os dois modelos de fiador da Trio: {{locadores_qualificacao}} na célula
+    // do locador, posto por um passe anterior. O bloco (export) traz a chave
+    // como linha; a tabela casa célula a célula, chave inclusa.
+    const celulasComChave = [
+      ["", "____", "JAQUELINE AGUILAR BORGES", "PARTE LOCATÁRIA", ""],
+      ["", "____", "{{locadores_qualificacao}}", "PARTE LOCADORA"],
+    ];
+    const blocoComChave = [
+      "____",
+      "JAQUELINE AGUILAR BORGES",
+      "PARTE LOCATÁRIA",
+      "____",
+      "{{locadores_qualificacao}}",
+      "PARTE LOCADORA",
+    ];
+    const estrutura = fakeDoc([intro, celulasComChave, "Rodapé"]);
+    const tabela = estrutura.body.content[1] as { startIndex: number; endIndex: number };
+    getDocPlainTextMock
+      .mockResolvedValueOnce([intro, ...blocoComChave, "Rodapé"].join("\n"))
+      .mockResolvedValueOnce([intro, "{{assinaturas}}", "Rodapé"].join("\n"));
+    getDocStructureMock.mockResolvedValue(estrutura);
+
+    const out = await run([{ op: "replace-block", paragraphs: blocoComChave, token: "assinaturas" }]);
+
+    expect(out.results[0]).toMatchObject({ op: "replace-block", status: "applied" });
+    const reqs = batchUpdateDocMock.mock.calls[0][1];
+    expect(reqs[0].deleteContentRange.range).toEqual({
+      startIndex: tabela.startIndex,
+      endIndex: tabela.endIndex,
+    });
+  });
+
   it("bloco que absorveu uma chave de FORA da tabela é recusado pela estrutura, sem escrever", async () => {
     // A regra aceita linha-só-de-chave como material do bloco. Se a caminhada
     // absorver um {{token}} que está no parágrafo seguinte à tabela, o bloco

@@ -459,6 +459,16 @@ function walkSignatureBlock(
       continue;
     }
     if (orcamento > 0 && isSignatureMaterial(docParagraphs[i]!)) {
+      // Linha que é só uma chave só conta na POSIÇÃO de nome: logo abaixo de
+      // uma linha de assinatura ou logo acima de um rótulo. Fora disso é a
+      // chave de outra cláusula que por acaso ficou perto — e o conserto
+      // apagaria o bloco inteiro com ela dentro. (Se o bloco for uma tabela a
+      // estrutura recusaria de qualquer forma; se for parágrafos soltos, não.)
+      if (TOKEN_ONLY_LINE.test(t)) {
+        const anterior = normalizeForMatch(docParagraphs[i - 1] ?? "").trim();
+        const proximo = normalizeForMatch(docParagraphs[i + 1] ?? "").trim();
+        if (!UNDERSCORE_LINE.test(anterior) && !SIGN_LABEL.test(proximo)) break;
+      }
       if (SIGN_LABEL.test(t)) rotulos += 1;
       orcamento -= 1;
       fim = i;
