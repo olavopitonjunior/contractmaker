@@ -26,6 +26,7 @@ export {
 
 import { catalogForModalidade, requiredTokens, isKnownToken, DATA_KEYS } from "./placeholder-catalog";
 import { textFingerprint } from "@/lib/ingestion/pii";
+import { applyDocEdits, type DocEditReason } from "./doc-edit";
 
 /**
  * Teto do texto enviado à IA. Era 24.000 chars — um contrato de locação de
@@ -81,6 +82,66 @@ function countOccurrences(haystack: string, needle: string): number {
     idx = haystack.indexOf(needle, idx + 1);
   }
   return count;
+}
+
+/**
+ * Espaço não-quebrável ≠ espaço. O DOCX da imobiliária traz NBSP depois de
+ * "8.1." (autocorreção do Word) e o modelo devolve a cópia com espaço comum —
+ * a cláusula de garantia inteira saía como `not-found` em 3 de 16 modelos da
+ * Trio. Casar tolerando a diferença é seguro porque o que vai para o Docs é a
+ * forma REAL do documento (`forms`), nunca a do modelo.
+ */
+const NBSP_RE = /[\u00A0\u202F]/g;
+function normSpaces(text: string): string {
+  return text.replace(NBSP_RE, " ");
+}
+
+/** Ocorrências de `needle` em `hay` tolerando NBSP, com a forma real de cada uma. */
+function locate(hay: string, needle: string): { count: number; forms: string[] } {
+  if (!needle) return { count: 0, forms: [] };
+  const nh = normSpaces(hay);
+  const nn = normSpaces(needle);
+  const forms: string[] = [];
+  let idx = nh.indexOf(nn);
+  while (idx !== -1) {
+    forms.push(hay.slice(idx, idx + nn.length));
+    idx = nh.indexOf(nn, idx + 1);
+  }
+  return { count: forms.length, forms };
+}
+
+/**
+ * Posições em que os parágrafos aparecem CONSECUTIVOS (só espaço em branco
+ * entre um e o próximo), tolerando NBSP. Cada ocorrência do primeiro parágrafo
+ * é um início candidato. Devolve, por sequência, as formas REAIS dos parágrafos.
+ */
+function locateBlock(
+  hay: string,
+  paragraphs: readonly string[]
+): Array<{ start: number; end: number; forms: string[] }> {
+  const out: Array<{ start: number; end: number; forms: string[] }> = [];
+  const nh = normSpaces(hay);
+  const nps = paragraphs.map(normSpaces);
+  const first = nps[0];
+  if (!first) return out;
+  let start = nh.indexOf(first);
+  while (start !== -1) {
+    let cursor = start + first.length;
+    const forms = [hay.slice(start, cursor)];
+    let ok = true;
+    for (let k = 1; k < nps.length; k += 1) {
+      const at = nh.indexOf(nps[k]!, cursor);
+      if (at === -1 || !/^\s*$/.test(nh.slice(cursor, at))) {
+        ok = false;
+        break;
+      }
+      forms.push(hay.slice(at, at + nps[k]!.length));
+      cursor = at + nps[k]!.length;
+    }
+    if (ok) out.push({ start, end: cursor, forms });
+    start = nh.indexOf(first, start + 1);
+  }
+  return out;
 }
 
 function buildPrompt(modalidade: string, docText: string): string {
@@ -234,6 +295,25 @@ export interface Candidate {
 }
 
 /**
+ * Bloco composto que entra pelo caminho ESTRUTURAL (apagar o intervalo e
+ * inserir a chave), não por `replaceAllText`.
+ *
+ * O caminho de texto troca o 1º parágrafo pela chave e esvazia os demais, um a
+ * um, cada um sob `count === 1`. Bloco cujos parágrafos se repetem no documento
+ * não passa nele: no bloco de assinaturas a linha de sublinhados aparece uma
+ * vez por signatário e "PARTE LOCATÁRIA" aparece dezenas de vezes — em 16 de 16
+ * modelos da Trio a chave `assinaturas` saía como `ambiguous` e o bloco ficava
+ * literal, com os nomes das partes do contrato-fonte. O que identifica esse
+ * bloco é a SEQUÊNCIA consecutiva, e é ela que se exige única.
+ */
+export interface PlannedBlock {
+  token: string;
+  trecho: string;
+  /** Parágrafos na forma REAL do documento, na ordem em que aparecem. */
+  paragraphs: string[];
+}
+
+/**
  * O que seria enviado ao Google — decidido inteiro no texto plano, sem tocar
  * no Doc. É o artefato que a bateria de avaliação pontua: com ele dá para
  * medir precisão e recall do passe sem gastar uma escrita no Drive.
@@ -241,6 +321,8 @@ export interface Candidate {
 export interface InsertionPlan {
   requests: docs_v1.Schema$Request[];
   candidates: Candidate[];
+  /** Blocos que entram pelo caminho estrutural, depois do lote de texto. */
+  blocks: PlannedBlock[];
   skippedAmbiguous: SkippedToken[];
   /** O texto como ficaria se o lote entrasse inteiro — a base da unicidade. */
   simulatedText: string;
@@ -411,10 +493,32 @@ export function planInsertion(input: {
   // primeiro consome o que está contido nele. Se a ordem fosse a da IA, um
   // trecho curto proposto antes derrubaria o bloco longo que o contém como
   // "overlapped" — por acidente de array, não por sobreposição real.
-  const ordenados = mapeamentos
+  const propostas = mapeamentos
     .map((m) => ({ trecho: (m.trecho_literal ?? "").trim(), token: (m.token ?? "").trim() }))
-    .filter((m) => m.trecho && m.token)
-    .sort((a, b) => b.trecho.length - a.trecho.length);
+    .filter((m) => m.trecho && m.token);
+
+  // Valor e extenso na mesma proposta: "R$ 3.000,00 (três mil reais)" proposto
+  // para `aluguel_valor` com "três mil reais" proposto para `aluguel_valor_extenso`.
+  // Longest-first faria o valor engolir o extenso, e o contrato sairia sem o
+  // extenso — em silêncio, porque `{{aluguel_valor}}` imprime só o número.
+  // Medido em 3 de 16 modelos da Trio. O par é inequívoco (o token irmão é
+  // `<token>_extenso` e o trecho termina em `(<extenso>)`), então o conserto é
+  // aparar o valor até antes do parêntese; os dois entram.
+  for (const m of propostas) {
+    const irmao = propostas.find(
+      (o) => o.token === `${m.token}_extenso` && m.trecho.endsWith(`(${o.trecho})`)
+    );
+    if (!irmao) continue;
+    const cabeca = m.trecho.slice(0, m.trecho.length - irmao.trecho.length - 2).trim();
+    if (cabeca) m.trecho = cabeca;
+  }
+
+  // Longest-first, como o reverse-merge: com o texto simulado, quem entra
+  // primeiro consome o que está contido nele. Se a ordem fosse a da IA, um
+  // trecho curto proposto antes derrubaria o bloco longo que o contém como
+  // "overlapped" — por acidente de array, não por sobreposição real.
+  const ordenados = propostas.sort((a, b) => b.trecho.length - a.trecho.length);
+  const blocks: PlannedBlock[] = [];
 
   for (const { trecho, token } of ordenados) {
     // Trava determinística (ver HAS_PLACEHOLDER). A regra também está no
@@ -453,6 +557,36 @@ export function planInsertion(input: {
         continue;
       }
     }
+    // Chave SIMPLES cujo trecho contém as propostas de DUAS OU MAIS outras
+    // chaves simples é frase, não valor: "30 (trinta) meses, a contar de 1º de
+    // março de 2025 e com término em 28 de fevereiro de 2028" proposto para
+    // `vigencia_meses`, com as duas datas propostas para `vigencia_inicio` e
+    // `vigencia_fim`. Aplicar apagaria a frase inteira e deixaria "30 (trinta)"
+    // no lugar. Recusar o de fora deixa as duas datas entrarem. Com UMA só
+    // vizinha contida a regra não decide (uma descrição de imóvel pode conter
+    // legitimamente a matrícula), e vale o longest-first de sempre.
+    if (!composedTokens.has(token)) {
+      const contidas = new Set(
+        ordenados
+          .filter(
+            (o) =>
+              o.token !== token &&
+              o.trecho.length < trecho.length &&
+              !composedTokens.has(o.token) &&
+              trecho.includes(o.trecho)
+          )
+          .map((o) => o.token)
+      );
+      if (contidas.size >= 2) {
+        skippedAmbiguous.push({
+          token,
+          trecho,
+          reason: "engulfs-neighbor",
+          neighbor: [...contidas][0]!,
+        });
+        continue;
+      }
+    }
     // Segunda proposta de bloco composto é descartada SEM entrar no relatório,
     // de propósito: não é falha a corrigir, é o passe recusando duplicar um
     // bloco — o primeiro (o maior, pela ordem acima) já está no documento.
@@ -462,50 +596,73 @@ export function planInsertion(input: {
     // multi-parágrafo (clausula_garantia, assinaturas) são tratados parágrafo
     // a parágrafo: o 1º vira {{token}} e os demais são esvaziados, cada um
     // sob a mesma regra de unicidade (count===1). Parágrafo ambíguo no meio
-    // (ex. linhas de assinatura repetidas) fica no doc e vai pro relatório.
+    // (ex. linhas de assinatura repetidas) iria para o relatório como leftover
+    // — a menos que o bloco inteiro seja único como SEQUÊNCIA, e aí ele entra
+    // pelo caminho estrutural (ver PlannedBlock).
     const paragraphs = trecho
       .split(/\n+/)
       .map((p) => p.trim())
       .filter((p) => p.length > 0);
     const first = paragraphs[0] ?? trecho;
 
-    const firstCount = countOccurrences(sim, first);
-    if (firstCount === 0) {
+    const firstHit = locate(sim, first);
+
+    if (paragraphs.length > 1 && composedTokens.has(token)) {
+      const textoLimpo =
+        firstHit.count === 1 && paragraphs.slice(1).every((p) => locate(sim, p).count === 1);
+      if (!textoLimpo) {
+        const sequencias = locateBlock(sim, paragraphs);
+        if (sequencias.length === 1) {
+          const seq = sequencias[0]!;
+          blocks.push({ token, trecho, paragraphs: seq.forms });
+          sim = `${sim.slice(0, seq.start)}{{${token}}}${sim.slice(seq.end)}`;
+          seenComposed.add(token);
+          continue;
+        }
+      }
+    }
+
+    if (firstHit.count === 0) {
       // Existia no original? Então outra substituição desta passada o levou.
-      const reason: SkipReason = countOccurrences(docText, first) > 0 ? "overlapped" : "not-found";
+      const reason: SkipReason = locate(docText, first).count > 0 ? "overlapped" : "not-found";
       skippedAmbiguous.push({ token, trecho, reason });
       continue;
     }
-    if (firstCount > 1) {
+    if (firstHit.count > 1) {
       skippedAmbiguous.push({ token, trecho, reason: "ambiguous" });
       continue;
     }
+    // Daqui em diante, a forma REAL do documento (NBSP incluso) é o que vai
+    // para o Docs e o que sai do simulado.
+    const firstForm = firstHit.forms[0]!;
 
     const candidate: Candidate = {
       token,
       trecho,
-      first,
+      first: firstForm,
       requestIdx: requests.length,
       rest: [],
       leftover: [],
     };
     requests.push({
       replaceAllText: {
-        containsText: { text: first, matchCase: true },
+        containsText: { text: firstForm, matchCase: true },
         replaceText: `{{${token}}}`,
       },
     });
-    applySim(first, `{{${token}}}`);
+    applySim(firstForm, `{{${token}}}`);
     for (const par of paragraphs.slice(1)) {
-      if (countOccurrences(sim, par) === 1) {
-        candidate.rest.push({ idx: requests.length, par });
+      const hit = locate(sim, par);
+      if (hit.count === 1) {
+        const form = hit.forms[0]!;
+        candidate.rest.push({ idx: requests.length, par: form });
         requests.push({
           replaceAllText: {
-            containsText: { text: par, matchCase: true },
+            containsText: { text: form, matchCase: true },
             replaceText: "",
           },
         });
-        applySim(par, "");
+        applySim(form, "");
       } else {
         candidate.leftover.push(par);
       }
@@ -517,6 +674,7 @@ export function planInsertion(input: {
   return {
     requests,
     candidates,
+    blocks,
     skippedAmbiguous,
     simulatedText: sim,
     docTextFingerprint: textFingerprint(docText),
@@ -644,6 +802,40 @@ export async function commitInsertion(input: {
     }
   }
 
+  // Blocos pelo caminho ESTRUTURAL, depois do lote de texto: `applyDocEdits`
+  // relê o documento, localiza a sequência (única) e apaga/insere por índice,
+  // relendo a estrutura antes de cada bloco. Ele já confere o resultado —
+  // `applied` aqui é releitura confirmada, o mesmo padrão dos candidatos.
+  if (plan.blocks.length > 0) {
+    let outcome: Awaited<ReturnType<typeof applyDocEdits>> | null = null;
+    try {
+      outcome = await applyDocEdits({
+        docId,
+        modalidade,
+        ops: plan.blocks.map((b) => ({
+          op: "replace-block" as const,
+          paragraphs: b.paragraphs,
+          token: b.token,
+        })),
+      });
+    } catch (err) {
+      console.error("[ai-placeholder-insertion] blocos estruturais falharam:", err);
+    }
+    plan.blocks.forEach((b, i) => {
+      const r = outcome?.results[i];
+      if (r?.status === "applied") {
+        inserted.push({ token: b.token, trecho: b.trecho, structural: true });
+        return;
+      }
+      skippedAmbiguous.push({
+        token: b.token,
+        trecho: b.trecho,
+        reason: skipReasonFromDocEdit(r?.reason),
+      });
+    });
+    if (outcome?.finalText) finalText = outcome.finalText;
+  }
+
   return buildInsertionReport({
     modalidade,
     finalText,
@@ -652,6 +844,25 @@ export async function commitInsertion(input: {
     unconfirmed,
     flags,
   });
+}
+
+/** Motivo do `doc-edit` no vocabulário do passe; "não sei" nunca vira "deu certo". */
+function skipReasonFromDocEdit(reason: DocEditReason | undefined): SkipReason {
+  switch (reason) {
+    case "not-found":
+    case "ambiguous":
+    case "unknown-token":
+    case "batch-failed":
+    case "replace-noop":
+    case "over-matched":
+    case "verify-failed":
+    case "verify-unavailable":
+    case "block-not-consecutive":
+    case "structure-not-found":
+      return reason;
+    default:
+      return "verify-unavailable";
+  }
 }
 
 /**

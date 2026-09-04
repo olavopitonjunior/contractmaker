@@ -108,11 +108,61 @@ describe("planInsertion — travas do texto plano", () => {
     ]);
   });
 
-  it("parágrafo ambíguo dentro do bloco vira leftover, nunca request", () => {
-    const doc = ["Bloco X", "repetido", "outro", "repetido"].join("\n");
+  it("parágrafo ambíguo dentro do bloco NÃO consecutivo vira leftover, nunca request", () => {
+    // A IA pulou "meio": o bloco não é uma sequência no documento, então o
+    // caminho estrutural não se aplica e vale o de texto — com o repetido de fora.
+    const doc = ["Bloco X", "meio", "repetido", "outro", "repetido"].join("\n");
     const p = plan(doc, [M("assinaturas", "Bloco X\nrepetido")]);
+    expect(p.blocks).toHaveLength(0);
     expect(p.candidates[0].rest).toHaveLength(0);
     expect(p.candidates[0].leftover).toEqual(["repetido"]);
+  });
+
+  it("bloco com parágrafo repetido, mas SEQUÊNCIA única, entra pelo caminho estrutural", () => {
+    // O bloco de assinaturas da Trio: "____" uma vez por signatário e "PARTE
+    // LOCATÁRIA" dezenas de vezes no contrato. Nenhum parágrafo é único; a
+    // sequência é. Antes: `ambiguous` em 16 de 16 modelos.
+    const doc = [
+      "Cláusula final. A PARTE LOCATÁRIA assina.",
+      "____",
+      "Nome",
+      "PARTE LOCATÁRIA",
+      "____",
+      "Nome",
+      "PARTE LOCADORA",
+      "Rodapé",
+    ].join("\n");
+    const p = plan(doc, [
+      M("assinaturas", "____\nNome\nPARTE LOCATÁRIA\n____\nNome\nPARTE LOCADORA"),
+    ]);
+    expect(p.candidates).toHaveLength(0);
+    expect(p.requests).toHaveLength(0);
+    expect(p.blocks).toEqual([
+      expect.objectContaining({
+        token: "assinaturas",
+        paragraphs: ["____", "Nome", "PARTE LOCATÁRIA", "____", "Nome", "PARTE LOCADORA"],
+      }),
+    ]);
+    expect(p.skippedAmbiguous).toEqual([]);
+    expect(p.simulatedText.split("\n")).toEqual([
+      "Cláusula final. A PARTE LOCATÁRIA assina.",
+      "{{assinaturas}}",
+      "Rodapé",
+    ]);
+  });
+
+  it("bloco cuja sequência aparece duas vezes é ambíguo, sem caminho estrutural", () => {
+    const doc = ["____", "Nome", "x", "____", "Nome"].join("\n");
+    const p = plan(doc, [M("assinaturas", "____\nNome")]);
+    expect(p.blocks).toHaveLength(0);
+    expect(reasons(p)).toEqual({ assinaturas: "ambiguous" });
+  });
+
+  it("bloco de um parágrafo só nunca vai pelo caminho estrutural", () => {
+    const doc = ["A", "B", "A"].join("\n");
+    const p = plan(doc, [M("assinaturas", "A")]);
+    expect(p.blocks).toHaveLength(0);
+    expect(reasons(p)).toEqual({ assinaturas: "ambiguous" });
   });
 
   it("o texto simulado é a base da unicidade dos candidatos seguintes", () => {
@@ -173,5 +223,76 @@ describe("planInsertion — travas do texto plano", () => {
     const p = plan("Contrato qualquer.", []);
     expect(p).toMatchObject({ requests: [], candidates: [], skippedAmbiguous: [] });
     expect(p.simulatedText).toBe("Contrato qualquer.");
+  });
+});
+
+describe("planInsertion — o que a Trio ensinou em 04/09/2026", () => {
+  it("NBSP no documento × espaço na proposta: casa, e o Docs recebe a forma REAL", () => {
+    // "8.1.\u00A0Como garantia" no DOCX; o modelo devolve com espaço comum.
+    const doc = "Cláusula 8.\n8.1.\u00A0Como garantia das obrigações, caução de R$ 1.000,00.\nCláusula 9.";
+    const p = plan(doc, [
+      M("clausula_garantia", "8.1. Como garantia das obrigações, caução de R$ 1.000,00."),
+    ]);
+    expect(reasons(p)).toEqual({});
+    expect(p.candidates).toHaveLength(1);
+    const req = p.requests[0]!.replaceAllText!;
+    expect(req.containsText!.text).toBe("8.1.\u00A0Como garantia das obrigações, caução de R$ 1.000,00.");
+    expect(p.simulatedText).toBe("Cláusula 8.\n{{clausula_garantia}}\nCláusula 9.");
+  });
+
+  it("NBSP na proposta × espaço no documento: idem", () => {
+    const doc = "Aluguel de R$ 1.000,00 mensais.";
+    const p = plan(doc, [M("aluguel_valor", "R$\u00A01.000,00")]);
+    expect(p.candidates[0]!.first).toBe("R$ 1.000,00");
+    expect(p.simulatedText).toBe("Aluguel de {{aluguel_valor}} mensais.");
+  });
+
+  it("valor + extenso na mesma proposta: apara o valor e os DOIS entram", () => {
+    const doc = "O aluguel mensal é de R$ 3.000,00 (três mil reais), pago até o dia 10.";
+    const p = plan(doc, [
+      M("aluguel_valor", "R$ 3.000,00 (três mil reais)"),
+      M("aluguel_valor_extenso", "três mil reais"),
+    ]);
+    expect(reasons(p)).toEqual({});
+    expect(p.simulatedText).toBe(
+      "O aluguel mensal é de {{aluguel_valor}} ({{aluguel_valor_extenso}}), pago até o dia 10."
+    );
+  });
+
+  it("extenso sem o par exato não apara nada (o longest-first de sempre)", () => {
+    const doc = "Valor: R$ 3.000,00 - três mil reais.";
+    const p = plan(doc, [
+      M("aluguel_valor", "R$ 3.000,00 - três mil reais"),
+      M("aluguel_valor_extenso", "três mil reais"),
+    ]);
+    expect(p.simulatedText).toBe("Valor: {{aluguel_valor}}.");
+    expect(reasons(p)).toEqual({ aluguel_valor_extenso: "overlapped" });
+  });
+
+  it("chave simples que engole DUAS outras é frase, não valor: recusada, as duas entram", () => {
+    const doc =
+      "Prazo: 30 (trinta) meses, a contar de 1º de março de 2025 e com término em 28 de fevereiro de 2028.";
+    const p = plan(doc, [
+      M(
+        "vigencia_meses",
+        "30 (trinta) meses, a contar de 1º de março de 2025 e com término em 28 de fevereiro de 2028"
+      ),
+      M("vigencia_inicio", "1º de março de 2025"),
+      M("vigencia_fim", "28 de fevereiro de 2028"),
+    ]);
+    expect(reasons(p)).toEqual({ vigencia_meses: "engulfs-neighbor" });
+    expect(p.simulatedText).toBe(
+      "Prazo: 30 (trinta) meses, a contar de {{vigencia_inicio}} e com término em {{vigencia_fim}}."
+    );
+  });
+
+  it("chave simples que contém UMA outra não decide: o longest-first vale", () => {
+    const doc = "Imóvel: apartamento 45, matrícula 99.001 do 5º RI.";
+    const p = plan(doc, [
+      M("imovel_descricao", "apartamento 45, matrícula 99.001 do 5º RI"),
+      M("imovel_matricula", "99.001"),
+    ]);
+    expect(p.candidates.map((c) => c.token)).toEqual(["imovel_descricao"]);
+    expect(reasons(p)).toEqual({ imovel_matricula: "overlapped" });
   });
 });

@@ -175,7 +175,7 @@ const FIX_LABEL: Record<string, string> = {
   rekey: "Corrigir a chave",
   "remove-leftover": "Remover o trecho",
   "restore-paragraph": "Restaurar o parágrafo",
-  "replace-block": "Trocar a lista pela chave",
+  "replace-block": "Trocar o bloco pela chave",
 };
 
 /**

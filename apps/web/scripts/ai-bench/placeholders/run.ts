@@ -39,19 +39,88 @@ import {
   type CaseScore,
   type GoldCase,
 } from "../../../src/lib/templates/eval/insertion-score";
+import {
+  catalogForModalidade,
+  requiredTokens,
+} from "../../../src/lib/templates/placeholder-catalog";
+import { extractPlaceholdersFromText } from "../../../src/lib/google/replace-placeholders";
+import { buildLocacaoGoogleDocsMap } from "../../../src/lib/templates/gdoc-replacement-map";
+import { enrichLocacaoData } from "../../../src/lib/locacao/enrich";
+import { getPreviewSampleData } from "../../../src/lib/templates/preview-sample-data";
 import { CORPUS_DIR, GOLD_DIR } from "./corpus";
+
+/**
+ * Cobertura honesta: chave que um bloco composto JÁ RENDERIZA não está
+ * faltando. `{{rateio_primeiro_aluguel}}` imprime a qualificação e a conta da
+ * imobiliária; `{{bloco_administradora}}` imprime o dia de vencimento;
+ * `{{clausula_garantia}}` (fiador) imprime a qualificação do fiador. O passe
+ * recusa essas chaves como `overlapped` DE PROPÓSITO — contá-las como
+ * "não cobertas" mandava consertar o que está certo (foi o que a primeira
+ * medição fez: 42 `overlapped`, dos quais 34 eram exatamente isto).
+ *
+ * A decisão é medida, não declarada: o mapa de amostra da geração renderiza
+ * cada bloco presente, e uma chave conta como coberta quando o valor que ela
+ * imprimiria aparece dentro de um bloco que está no documento.
+ */
+function amostraMapa(modalidade: string): Record<string, string> | null {
+  if (!["locacao", "locacao_comercial", "temporada"].includes(modalidade)) return null;
+  const raw = getPreviewSampleData(modalidade);
+  const clone = JSON.parse(JSON.stringify(raw)) as Record<string, unknown>;
+  try {
+    return buildLocacaoGoogleDocsMap({
+      enriched: enrichLocacaoData(clone, {}),
+      rawDataJson: raw,
+      registro: [],
+      orgRecebimento: null,
+      contrato: { numero: "EXEMPLO-0001", id: "exemplo", versao: "1" },
+    });
+  } catch {
+    return null;
+  }
+}
+
+function cobertasPorBloco(
+  modalidade: string,
+  presentes: ReadonlySet<string>
+): Set<string> {
+  const out = new Set<string>();
+  const mapa = amostraMapa(modalidade);
+  if (!mapa) return out;
+  const cat = catalogForModalidade(modalidade);
+  for (const bloco of cat) {
+    if (bloco.kind !== "composed" || !presentes.has(bloco.token)) continue;
+    const texto = mapa[bloco.token] ?? "";
+    if (texto.trim().length < 20) continue;
+    for (const d of cat) {
+      if (d.token === bloco.token || presentes.has(d.token) || out.has(d.token)) continue;
+      const valor = mapa[d.token];
+      if (typeof valor !== "string" || valor.trim().length < 4) continue;
+      if (texto.includes(valor)) out.add(d.token);
+    }
+  }
+  return out;
+}
 
 const arg = (name: string) =>
   process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
 
-/** Cadastro fictício da imobiliária: as checagens semânticas precisam de um. */
+/**
+ * Cadastro fictício da imobiliária: as checagens semânticas precisam de um.
+ *
+ * Os valores são fictícios mas REALISTAS, e isso é requisito, não capricho. A
+ * primeira versão usava `creci: "00000-J"` e `bankAccount: "00000-0"`, e os
+ * cinco zeros casavam dentro de "R$ 00.000,00" — a bateria reportou três
+ * defeitos `org-literal` que eram do bench, não do passe de IA. Um corpus que
+ * inventa defeito é pior que corpus nenhum: manda consertar o que não está
+ * quebrado.
+ */
 const ORG_FICTICIA = {
   legalName: "Imobiliária Exemplo Ltda",
   cnpj: "11.610.282/0001-65",
-  creci: "00000-J",
+  creci: "24.342-J",
   pixAddressKey: "financeiro@exemplo.test",
-  bankBranch: "0001-0",
-  bankAccount: "00000-0",
+  bankBranch: "3971-6",
+  bankAccount: "58204-3",
 };
 
 interface RunRecord {
@@ -80,10 +149,47 @@ function pct(n: number): string {
   return `${(n * 100).toFixed(1)}%`;
 }
 
+/**
+ * Casos a partir de um diretório de textos, SEM gabarito anotado.
+ *
+ * Anotar à mão onde cada chave deveria entrar custa horas por contrato, e para
+ * a pergunta "o passe produz defeito?" existe um oráculo pronto e mais barato:
+ * as próprias checagens semânticas. Elas não dizem o que FALTOU (isso só o
+ * gabarito diz), mas dizem o que saiu ERRADO — que é exatamente a classe de
+ * falha medida nos 16 modelos da RE/MAX Trio.
+ *
+ * `expected: []` deixa precisão/recall degenerados de propósito; neste modo a
+ * tabela só reporta a coluna semântica, e o relatório diz isso em vez de
+ * imprimir 0% como se fosse medida.
+ */
+function loadCorpusSemGabarito(dir: string): GoldCase[] {
+  const only = arg("case");
+  const index = path.join(dir, "index.json");
+  const meta: Array<{ file: string; modalidade: string | null }> = fs.existsSync(index)
+    ? JSON.parse(fs.readFileSync(index, "utf8"))
+    : fs
+        .readdirSync(dir)
+        .filter((f) => f.endsWith(".txt"))
+        .map((f) => ({ file: f, modalidade: null }));
+  return meta
+    .filter((m) => !only || m.file.startsWith(only))
+    .map((m) => ({
+      file: m.file,
+      modalidade: m.modalidade ?? "locacao",
+      expected: [],
+    }));
+}
+
 (async () => {
-  const gold = loadGold();
+  const corpusDir = arg("corpus-dir");
+  const semGabarito = !!corpusDir;
+  const gold = semGabarito ? loadCorpusSemGabarito(corpusDir!) : loadGold();
   if (gold.length === 0) {
-    console.error("Nenhum caso de gabarito encontrado em gold/.");
+    console.error(
+      semGabarito
+        ? `Nenhum .txt em ${corpusDir}.`
+        : "Nenhum caso de gabarito encontrado em gold/."
+    );
     process.exit(1);
   }
 
@@ -98,9 +204,15 @@ function pct(n: number): string {
 
   const records: RunRecord[] = [];
   const scores: CaseScore[] = [];
+  const cobertura: Array<{
+    presentes: number;
+    porBloco: number;
+    total: number;
+    faltamObrigatorias: string[];
+  }> = [];
 
   for (const g of gold) {
-    const docText = fs.readFileSync(path.join(CORPUS_DIR, g.file), "utf8");
+    const docText = fs.readFileSync(path.join(corpusDir ?? CORPUS_DIR, g.file), "utf8");
 
     let record = replay?.find((r) => r.file === g.file);
     if (!record) {
@@ -140,8 +252,67 @@ function pct(n: number): string {
     scores.push(
       scoreInsertion({ gold: g, simulatedText: plan.simulatedText, plan, semantic: semantic.findings })
     );
+    // Cobertura: o outro lado da acurácia. "Sem defeito" não distingue um passe
+    // correto de um passe que não fez nada — só esta coluna faz.
+    const cat = catalogForModalidade(g.modalidade);
+    const presentes = new Set(extractPlaceholdersFromText(plan.simulatedText));
+    const porBloco = cobertasPorBloco(g.modalidade, presentes);
+    const cobertas = new Set([...presentes, ...porBloco]);
+    cobertura.push({
+      presentes: cat.filter((d) => presentes.has(d.token)).length,
+      porBloco: porBloco.size,
+      total: cat.length,
+      faltamObrigatorias: requiredTokens(g.modalidade).filter((t) => !cobertas.has(t)),
+    });
   }
 
+  if (semGabarito) {
+    // Sem gabarito não há o que medir de precisão/recall: imprimir 0% ali seria
+    // um número que parece medida e não é.
+    console.log(
+      "\ncaso                                    | chaves | falta obrig. | defeitos semânticos"
+    );
+    console.log("-".repeat(104));
+    let comDefeito = 0;
+    let somaCob = 0;
+    let semObrig = 0;
+    for (let i = 0; i < scores.length; i += 1) {
+      const s = scores[i]!;
+      const sem = Object.entries(s.semantic).filter(([, v]) => v > 0);
+      if (sem.length) comDefeito += 1;
+      const c = cobertura[i]!;
+      somaCob += (c.presentes + c.porBloco) / Math.max(1, c.total);
+      if (c.faltamObrigatorias.length === 0) semObrig += 1;
+      console.log(
+        s.file.replace(/\.txt$/, "").slice(0, 39).padEnd(39) +
+          " | " +
+          `${c.presentes}${c.porBloco ? `+${c.porBloco}` : ""}/${c.total}`.padStart(8) +
+          " | " +
+          String(c.faltamObrigatorias.length).padStart(12) +
+          " | " +
+          (sem.length ? sem.map(([k, v]) => `${k}:${v}`).join(" ") : "— limpo")
+      );
+    }
+    console.log("-".repeat(96));
+    console.log(
+      `\nSEM DEFEITO: ${scores.length - comDefeito} de ${scores.length} ` +
+        `(${pct((scores.length - comDefeito) / scores.length)}) — o passe não produziu erro que as regras vejam`
+    );
+    console.log(
+      `COBERTURA:   ${pct(somaCob / scores.length)} das chaves do catálogo, em média ` +
+        `("+N" = chaves que um bloco composto presente já renderiza); ` +
+        `${semObrig} de ${scores.length} sem obrigatória faltando`
+    );
+    console.log(
+      "  (as duas medem coisas diferentes: 'sem defeito' é o que saiu ERRADO,\n" +
+        "   'cobertura' é o que NÃO saiu. Um passe que não chaveia nada pontua 100% na primeira.)"
+    );
+    const porCat: Record<string, number> = {};
+    for (const s of scores) {
+      for (const [k, v] of Object.entries(s.semantic)) porCat[k] = (porCat[k] ?? 0) + v;
+    }
+    console.log("defeitos por categoria:", Object.keys(porCat).length ? JSON.stringify(porCat) : "nenhum");
+  } else {
   console.log("\ncaso                    | prec.  | recall | tp/fp/fn   | proibidas | semântica");
   console.log("-".repeat(96));
   for (const s of scores) {
@@ -159,13 +330,16 @@ function pct(n: number): string {
       ].join(" | ")
     );
   }
+  }
   const agg = aggregate(scores);
+  if (!semGabarito) {
   console.log("-".repeat(96));
   console.log(
     `TOTAL${" ".repeat(18)} | ${pct(agg.precision).padStart(6)} | ${pct(agg.recall).padStart(6)} | ` +
       `${agg.tp}/${agg.fp}/${agg.fn}`.padEnd(10) +
       ` | ${String(agg.forbidden).padStart(9)} |`
   );
+  }
 
   // O que o passe DESCARTOU, somado — é onde se lê se uma trava está apertada
   // demais (muito `ambiguous`) ou se o prompt está propondo lixo.

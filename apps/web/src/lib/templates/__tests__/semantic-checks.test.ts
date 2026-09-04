@@ -135,6 +135,33 @@ describe("org-literal — dado da própria imobiliária escrito no modelo", () =
     expect(hits.some((h) => h.message.includes("chave PIX"))).toBe(true);
   });
 
+  it("dado da org que NÃO identifica ninguém é ignorado (00000 dentro de R$ 00.000,00)", () => {
+    // Medido na bateria contra os 16 contratos reais (04/09): a org do bench
+    // tinha `creci: "00000-J"` e `bankAccount: "00000-0"`, e os cinco zeros
+    // casavam dentro de "R$ 00.000,00" — três acusações de "traz o CRECI da
+    // imobiliária" em parágrafos sem CRECI nenhum.
+    //
+    // Não é artefato de laboratório: cadastro novo com campo preenchido como
+    // `00000-0` ou `11111` é comum, e é justamente o tenant recém-criado que
+    // mais precisa que a primeira revisão seja confiável.
+    const orgDegenerada: OrgFacts = {
+      ...ORG,
+      creci: "00000-J",
+      bankAccount: "00000-0",
+      bankBranch: "11111",
+    };
+    const doc =
+      "3.1. O valor do aluguel mensal é de R$ 00.000,00 (reais), corrigido a cada 12 meses.";
+    expect(byCategory(run(doc, { org: orgDegenerada }).findings, "org-literal")).toHaveLength(0);
+  });
+
+  it("o CNPJ real da MESMA org continua sendo acusado", () => {
+    // Controle: sem ele, o caso acima passaria com a regra inteira desligada.
+    const orgDegenerada: OrgFacts = { ...ORG, creci: "00000-J", bankAccount: "00000-0" };
+    const doc = "A ADMINISTRADORA, inscrita no CNPJ sob o nº 12.345.678/0001-90, declara.";
+    expect(byCategory(run(doc, { org: orgDegenerada }).findings, "org-literal")).toHaveLength(1);
+  });
+
   it("não roda sem cadastro da org e diz que não rodou", () => {
     const doc = "CNPJ 12.345.678/0001-90.";
     const report = run(doc, { org: null });
@@ -471,6 +498,82 @@ describe("dangling-reference — citação de item que não existe", () => {
   it("cala quando o item existe no documento", () => {
     const doc = "4.1.1. O pagamento será rateado assim:\n" + cita;
     expect(byCategory(run(doc).findings, "dangling-reference")).toHaveLength(0);
+  });
+});
+
+describe("literal-signature-block — bloco de assinaturas fixo no modelo", () => {
+  // 16 de 16 modelos da Trio (04/09/2026): a IA propôs `assinaturas`, o passe
+  // recusou, e o bloco ficou literal — em dois deles com os nomes das partes
+  // do contrato-fonte. Nenhuma checagem via isso.
+  const corpo = [
+    "CLÁUSULA DÉCIMA - DO FORO",
+    "Fica eleito o foro da comarca de São Paulo.",
+    "São Paulo, 10 de março de 2025.",
+  ];
+  const blocoAnonimo = [
+    "____________________________________________",
+    "Nome",
+    "PARTE LOCATÁRIA",
+    "____________________________________________",
+    "xxxxxxxxxxx",
+    "PARTE LOCADORA",
+    "___________________________________________",
+    "Nome",
+    "CPF",
+    "Testemunha",
+  ];
+
+  it("bloco sem nome de pessoa: warning com replace-block sobre a sequência exata", () => {
+    const r = run([...corpo, ...blocoAnonimo].join("\n"));
+    const f = byCategory(r.findings, "literal-signature-block");
+    expect(f).toHaveLength(1);
+    expect(f[0]!.severity).toBe("warning");
+    expect(f[0]!.paragraphIndex).toBe(corpo.length);
+    expect(f[0]!.token).toBe("assinaturas");
+    expect(f[0]!.suggestedFix).toEqual({
+      op: "replace-block",
+      paragraphs: blocoAnonimo,
+      token: "assinaturas",
+    });
+  });
+
+  it("nome de pessoa do contrato-fonte no bloco: error", () => {
+    const bloco = [
+      "____________________________________________",
+      "JOSÉ MAURÍCIO ZENHA DE TOLEDO",
+      "PARTE LOCATÁRIA",
+      "____________________________________________",
+      "CINDY TAVARES COSTA PARTE LOCATÁRIA",
+      "____________________________________________",
+      "NOME LOCADOR",
+      "PARTE LOCADORA",
+    ];
+    const r = run([...corpo, ...bloco].join("\n"));
+    const f = byCategory(r.findings, "literal-signature-block");
+    expect(f).toHaveLength(1);
+    expect(f[0]!.severity).toBe("error");
+    expect(f[0]!.message).toMatch(/2 partes/);
+    expect(f[0]!.suggestedFix).toMatchObject({ op: "replace-block", paragraphs: bloco });
+  });
+
+  it("para no primeiro parágrafo que não é material de assinatura", () => {
+    const depois = ["ANEXO I - VISTORIA", "O imóvel foi entregue com 3 (três) chaves, pintura nova e piso em bom estado, R$ 0,00 de pendência."];
+    const r = run([...corpo, ...blocoAnonimo, ...depois].join("\n"));
+    const f = byCategory(r.findings, "literal-signature-block");
+    expect(f).toHaveLength(1);
+    expect((f[0]!.suggestedFix as { paragraphs: string[] }).paragraphs).toEqual(blocoAnonimo);
+  });
+
+  it("cala quando {{assinaturas}} já está no documento", () => {
+    const r = run([...corpo, "{{assinaturas}}"].join("\n"));
+    expect(byCategory(r.findings, "literal-signature-block")).toEqual([]);
+  });
+
+  it("cala com uma linha de assinatura só, e fora do catálogo de locação", () => {
+    const uma = [...corpo, "____________________________________________", "PARTE LOCADORA"];
+    expect(byCategory(run(uma.join("\n")).findings, "literal-signature-block")).toEqual([]);
+    const venda = run([...corpo, ...blocoAnonimo].join("\n"), { modalidade: "a_vista" });
+    expect(byCategory(venda.findings, "literal-signature-block")).toEqual([]);
   });
 });
 

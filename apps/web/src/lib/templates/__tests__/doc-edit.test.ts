@@ -503,3 +503,59 @@ describe("várias edições numa chamada", () => {
     expect(out.results[1]).toMatchObject({ status: "applied" });
   });
 });
+
+describe("replace-block — a sequência identifica o bloco, não cada parágrafo", () => {
+  // O bloco de assinaturas: "____" uma vez por signatário, "PARTE LOCATÁRIA"
+  // dezenas de vezes no contrato. A versão anterior exigia cada parágrafo
+  // único e recusava o bloco em 16 de 16 modelos da Trio.
+  const intro = "Cláusula final. A PARTE LOCATÁRIA assina o presente.";
+  const bloco = ["____", "Nome", "PARTE LOCATÁRIA", "____", "Nome", "PARTE LOCADORA"];
+  const doc = [intro, ...bloco, "Rodapé"];
+
+  it("parágrafo repetido no documento, sequência única: aplica", async () => {
+    getDocPlainTextMock
+      .mockResolvedValueOnce(doc.join("\n"))
+      .mockResolvedValueOnce([intro, "{{assinaturas}}", "Rodapé"].join("\n"));
+    getDocStructureMock.mockResolvedValue(fakeDoc(doc));
+
+    const out = await run([{ op: "replace-block", paragraphs: bloco, token: "assinaturas" }]);
+
+    expect(out.results[0]).toMatchObject({ op: "replace-block", status: "applied" });
+    const reqs = batchUpdateDocMock.mock.calls[0][1];
+    expect(reqs[0].deleteContentRange.range.startIndex).toBe(1 + intro.length + 1);
+    expect(reqs[1].insertText.text).toBe("{{assinaturas}}");
+  });
+
+  it("parágrafos em branco na ESTRUTURA entre as linhas do bloco: aplica", async () => {
+    const estrutura = [intro, "____", "", "", "Nome", "PARTE LOCATÁRIA", "", "____", "Nome", "PARTE LOCADORA", "Rodapé"];
+    getDocPlainTextMock
+      .mockResolvedValueOnce(estrutura.join("\n"))
+      .mockResolvedValueOnce([intro, "{{assinaturas}}", "Rodapé"].join("\n"));
+    getDocStructureMock.mockResolvedValue(fakeDoc(estrutura));
+
+    const out = await run([{ op: "replace-block", paragraphs: bloco, token: "assinaturas" }]);
+    expect(out.results[0]).toMatchObject({ op: "replace-block", status: "applied" });
+  });
+
+  it("a mesma sequência duas vezes é ambígua — nada é escrito", async () => {
+    getDocPlainTextMock.mockResolvedValue(["____", "Nome", "x", "____", "Nome"].join("\n"));
+    const out = await run([{ op: "replace-block", paragraphs: ["____", "Nome"], token: "assinaturas" }]);
+    expect(out.results[0]).toMatchObject({ status: "skipped", reason: "ambiguous" });
+    expect(batchUpdateDocMock).not.toHaveBeenCalled();
+  });
+
+  it("primeiro parágrafo repetido: só o início que emenda a sequência conta", async () => {
+    // O 1º "____" é seguido de "PARTE LOCATÁRIA", não de "Nome"/"PARTE LOCADORA".
+    const d = ["____", "PARTE LOCATÁRIA", "____", "Nome", "PARTE LOCADORA"];
+    getDocPlainTextMock
+      .mockResolvedValueOnce(d.join("\n"))
+      .mockResolvedValueOnce(["____", "PARTE LOCATÁRIA", "{{assinaturas}}"].join("\n"));
+    getDocStructureMock.mockResolvedValue(fakeDoc(d));
+    const out = await run([
+      { op: "replace-block", paragraphs: ["____", "Nome", "PARTE LOCADORA"], token: "assinaturas" },
+    ]);
+    expect(out.results[0]).toMatchObject({ status: "applied" });
+    const reqs = batchUpdateDocMock.mock.calls[0][1];
+    expect(reqs[0].deleteContentRange.range.startIndex).toBe(1 + 5 + 16);
+  });
+});

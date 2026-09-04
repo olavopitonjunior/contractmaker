@@ -1,13 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockBatchUpdate, mockGetDocPlainText, mockMessagesCreate } = vi.hoisted(() => ({
-  mockBatchUpdate: vi.fn(),
-  mockGetDocPlainText: vi.fn(),
-  mockMessagesCreate: vi.fn(),
-}));
+const { mockBatchUpdate, mockGetDocPlainText, mockGetDocStructure, mockMessagesCreate } = vi.hoisted(
+  () => ({
+    mockBatchUpdate: vi.fn(),
+    mockGetDocPlainText: vi.fn(),
+    mockGetDocStructure: vi.fn(),
+    mockMessagesCreate: vi.fn(),
+  })
+);
 
 vi.mock("@/lib/google/docs", () => ({
   getDocPlainText: mockGetDocPlainText,
+  getDocStructure: mockGetDocStructure,
   // Mesmo shape que o código antigo chamava direto no client — os testes
   // continuam lendo `mock.calls[0][0].requestBody.requests`.
   batchUpdateDoc: (documentId: string, requests: unknown[]) =>
@@ -31,24 +35,61 @@ function aiResponse(mapeamentos: Array<{ trecho_literal: string; token: string }
 }
 
 type ReplaceReq = { replaceAllText: { containsText: { text: string }; replaceText: string } };
+type AnyReq = Partial<ReplaceReq> & {
+  deleteContentRange?: { range: { startIndex: number; endIndex: number } };
+  insertText?: { location: { index: number }; text: string };
+};
+
+/**
+ * Estrutura simulada do Doc: um `textRun` por parágrafo (linha do estado),
+ * índices absolutos como a API devolve — o corpo começa em 1 e cada parágrafo
+ * ocupa texto + marca. É o que o caminho estrutural (`getDocStructure` →
+ * `findBlockRange` → delete/insert) precisa para localizar um bloco.
+ */
+function fakeStructure(text: string) {
+  let index = 1;
+  const content = text.split("\n").map((p) => {
+    const t = `${p}\n`;
+    const el = { startIndex: index, endIndex: index + t.length, textRun: { content: t } };
+    index += t.length;
+    return { paragraph: { elements: [el] } };
+  });
+  return { body: { content } };
+}
 
 /**
  * Docs simulado: `batchUpdate` aplica os replaceAllText GLOBALMENTE no estado e
- * devolve `occurrencesChanged` real; `getDocPlainText` lê o estado corrente.
- * Assim a releitura do passe enxerga o que o batch fez — e os testes de
- * "a API disse X mas o Doc mostra Y" só precisam mexer num dos dois lados.
+ * devolve `occurrencesChanged` real; delete/insert por índice também mudam o
+ * estado (índice absoluto N = posição N-1 no texto plano); `getDocPlainText` e
+ * `getDocStructure` leem o estado corrente. Assim a releitura do passe enxerga
+ * o que o batch fez — e os testes de "a API disse X mas o Doc mostra Y" só
+ * precisam mexer num dos dois lados.
  */
 let state = "";
 function useDoc(doc: string) {
   state = doc;
   mockGetDocPlainText.mockImplementation(async () => state);
-  mockBatchUpdate.mockImplementation(async (arg: { requestBody: { requests: ReplaceReq[] } }) => {
+  mockGetDocStructure.mockImplementation(async () => fakeStructure(state));
+  mockBatchUpdate.mockImplementation(async (arg: { requestBody: { requests: AnyReq[] } }) => {
     const replies = arg.requestBody.requests.map((r) => {
-      const { text } = r.replaceAllText.containsText;
-      const parts = state.split(text);
-      const occurrencesChanged = parts.length - 1;
-      state = parts.join(r.replaceAllText.replaceText);
-      return { replaceAllText: { occurrencesChanged } };
+      if (r.replaceAllText) {
+        const { text } = r.replaceAllText.containsText;
+        const parts = state.split(text);
+        const occurrencesChanged = parts.length - 1;
+        state = parts.join(r.replaceAllText.replaceText);
+        return { replaceAllText: { occurrencesChanged } };
+      }
+      if (r.deleteContentRange) {
+        const { startIndex, endIndex } = r.deleteContentRange.range;
+        state = state.slice(0, startIndex - 1) + state.slice(endIndex - 1);
+        return {};
+      }
+      if (r.insertText) {
+        const at = r.insertText.location.index - 1;
+        state = state.slice(0, at) + r.insertText.text + state.slice(at);
+        return {};
+      }
+      return {};
     });
     return { data: { replies } };
   });
@@ -88,10 +129,13 @@ describe("insertPlaceholdersWithAI — travas no texto plano", () => {
   });
 
   it("bloco multi-parágrafo: 1º parágrafo vira token, demais únicos viram vazio, repetidos ficam no relatório", async () => {
+    // "Parágrafo fora do trecho" quebra a sequência: o bloco NÃO é consecutivo
+    // no documento, então o caminho estrutural não se aplica e vale o de texto.
     useDoc(
       [
         "8.1. Primeira cláusula da garantia.",
         "8.2. Segunda cláusula única.",
+        "Parágrafo fora do trecho.",
         "____ linha repetida ____",
         "8.3. Terceira cláusula única.",
         "____ linha repetida ____",
@@ -123,8 +167,8 @@ describe("insertPlaceholdersWithAI — travas no texto plano", () => {
     expect(byText["____ linha repetida ____"]).toBeUndefined();
   });
 
-  it("multi-parágrafo com 1º parágrafo ambíguo: skip inteiro", async () => {
-    useDoc("Linha dupla.\nLinha dupla.\nResto único.");
+  it("multi-parágrafo com 1º parágrafo ambíguo E sequência repetida: skip inteiro", async () => {
+    useDoc("Linha dupla.\nResto único.\nLinha dupla.\nResto único.");
     mockMessagesCreate.mockResolvedValue(
       aiResponse([{ trecho_literal: "Linha dupla.\nResto único.", token: "clausula_garantia" }])
     );
@@ -136,6 +180,50 @@ describe("insertPlaceholdersWithAI — travas no texto plano", () => {
       expect.objectContaining({ token: "clausula_garantia", reason: "ambiguous" })
     );
     expect(mockBatchUpdate).not.toHaveBeenCalled();
+  });
+
+  it("bloco de assinaturas (parágrafos repetidos, sequência única) entra pelo caminho estrutural", async () => {
+    // 16 de 16 modelos da Trio: a IA propôs o bloco e o passe recusou como
+    // `ambiguous`. Agora a sequência consecutiva identifica o bloco; o Doc é
+    // editado por índice (delete + insert), e `inserted` só depois da releitura.
+    const bloco = ["____", "Nome", "PARTE LOCATÁRIA", "____", "Nome", "PARTE LOCADORA"];
+    useDoc(["Cláusula final. A PARTE LOCATÁRIA assina.", ...bloco, "Rodapé"].join("\n"));
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([{ trecho_literal: bloco.join("\n"), token: "assinaturas" }])
+    );
+
+    const report = await run("d3b");
+
+    expect(report.inserted).toEqual([
+      expect.objectContaining({ token: "assinaturas", structural: true }),
+    ]);
+    expect(report.skippedAmbiguous).toEqual([]);
+    expect(state).toBe("Cláusula final. A PARTE LOCATÁRIA assina.\n{{assinaturas}}\nRodapé");
+    // Nenhum replaceAllText foi enviado para o bloco: só a edição estrutural.
+    const reqs = mockBatchUpdate.mock.calls.flatMap(
+      (c) => (c[0] as { requestBody: { requests: AnyReq[] } }).requestBody.requests
+    );
+    expect(reqs.some((r) => r.replaceAllText)).toBe(false);
+    expect(reqs.some((r) => r.deleteContentRange)).toBe(true);
+    expect(reqs.some((r) => r.insertText?.text === "{{assinaturas}}")).toBe(true);
+  });
+
+  it("bloco estrutural que o Doc não confirma NÃO vira inserted", async () => {
+    const bloco = ["____", "Nome", "PARTE LOCATÁRIA", "____", "Nome", "PARTE LOCADORA"];
+    useDoc(["Intro.", ...bloco, "Rodapé"].join("\n"));
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([{ trecho_literal: bloco.join("\n"), token: "assinaturas" }])
+    );
+    // A estrutura não localiza o bloco (Doc mudou entre a leitura e a escrita).
+    mockGetDocStructure.mockResolvedValue(fakeStructure("Outro documento."));
+
+    const report = await run("d3c");
+
+    expect(report.inserted).toEqual([]);
+    expect(report.skippedAmbiguous).toEqual([
+      expect.objectContaining({ token: "assinaturas", reason: "structure-not-found" }),
+    ]);
+    expect(state).toContain("PARTE LOCADORA");
   });
 
   // ——— Trecho já tokenizado é intocável ———
