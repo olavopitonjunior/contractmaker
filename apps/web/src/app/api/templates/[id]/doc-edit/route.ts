@@ -105,6 +105,8 @@ function opDoConserto(fix: SemanticFix | undefined): DocEditOp | null {
       return { op: "remove-leftover", phrase: fix.phrase };
     case "restore-paragraph":
       return { op: "restore-paragraph", current: fix.current, source: fix.source };
+    case "replace-block":
+      return { op: "replace-block", paragraphs: fix.paragraphs, token: fix.token };
     default:
       return null;
   }
