@@ -137,6 +137,7 @@ describe("requireAuth — impersonation de tenant (super_admin trocou de tenant)
     mockGetImpersonationFor.mockResolvedValue({
       orgId: "org-tenant",
       ownerUserId: "owner-9",
+      endsAt: new Date("2026-09-05T04:00:00.000Z"),
     });
     mockPrisma.organization.findUnique.mockResolvedValueOnce({
       id: "org-tenant",
