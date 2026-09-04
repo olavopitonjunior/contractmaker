@@ -131,6 +131,20 @@ export function blockToResponse(block: PrepareResult): { status: number; body: u
 }
 
 /**
+ * Marco `sent` (1ª via encaminhada) — só para os corretores PARCEIROS (e-mail);
+ * o dono acabou de clicar e viu o toast. Best-effort: o envio já aconteceu e
+ * já foi cobrado, um erro aqui não pode virar `falha_envio`.
+ */
+async function notifySent(proposal: { id: string; orgId: string; userId: string }): Promise<void> {
+  await notifyProposalMilestone({
+    proposalId: proposal.id,
+    orgId: proposal.orgId,
+    userId: proposal.userId,
+    kind: "sent",
+  }).catch(() => {});
+}
+
+/**
  * Executa o envio de uma proposta: compõe a DECISÃO (prepareSend) e então cria
  * o envelope ClickSign OU os Aceites via WhatsApp, avançando o status pra
  * "enviada". Best-effort no e-mail/link (o wiring da landing vem depois).
@@ -293,6 +307,7 @@ async function sendAceite(
   proposal: {
     id: string;
     orgId: string;
+    userId: string;
     title: string;
     token: string;
     code: string | null;
@@ -394,6 +409,7 @@ async function sendAceite(
     },
   });
   await advanceProposalStatus(proposal.id, "enviada", { sentAt: new Date() });
+  await notifySent(proposal);
   return { ok: true, instrument: "aceite" };
 }
 
@@ -654,6 +670,7 @@ async function sendEnvelope(
   proposal: {
     id: string;
     orgId: string;
+    userId: string;
     title: string;
     code: string | null;
     kind: string;
@@ -700,6 +717,7 @@ async function sendEnvelope(
     data: { instrument: "envelope", sentAt: new Date(), reservedCostCents: decision.planCostCents },
   });
   await advanceProposalStatus(proposal.id, "enviada", { sentAt: new Date() });
+  await notifySent(proposal);
   return { ok: true, instrument: "envelope", envelopeId };
 }
 

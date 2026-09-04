@@ -4,6 +4,29 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-04 - A label de promoção passa a atestar o head
+
+### Corrigido
+
+- **A label `staging-smoke-passed` atestava um head móvel.** O PR `staging → master` tem como head a branch `staging`: se outro merge entrar nela com a promoção aberta, o head avança, a label continua lá e o gate passa — código sem smoke chega a produção sob a label do smoke anterior (issue #591; aconteceu hoje com o #593 entrando na staging entre duas promoções). O gate passa a trabalhar por SHA, sem relógio: quando a label é aplicada, o run carimba o head daquele momento com um commit status; nos runs seguintes o head atual precisa ter o carimbo, senão o gate fica vermelho com a instrução de refazer o smoke e reaplicar a label. Só na promoção normal; o hotfix segue como estava. (A primeira versão comparava datas — a do committer não é a do push, e o feed de eventos do repositório atrasa horas.) Prova viva em 04/09/2026, num PR de promoção descartável: o gate recusou o head que avançou depois da label e continuou recusando ao fechar e reabrir o PR; reaplicar a label carimbou o head novo e liberou.
+
+## [Unreleased] - 2026-09-04 - O banner que afirmava uma sessão já vencida
+
+### Corrigido
+
+- **O banner "Você está operando X como o dono" continuava na tela com a sessão vencida.** A sessão de teste em tenant tem 8 horas; a página é renderizada uma vez e pode ficar aberta além disso — e aí as rotas do tenant já respondem 404 enquanto o banner afirma o contrário. Medido em produção (issue #587): o diagnóstico só fechou indo ao banco. O banner passa a mostrar a hora do vencimento e, passada a hora, troca por "a sessão de teste venceu — as ações serão recusadas; reabra em Tenants". A autoridade continua sendo o servidor; a tela só informa (o relógio do browser pode divergir alguns segundos).
+
+## [Unreleased] - 2026-09-04 - O corretor parceiro acompanha a proposta
+
+### Adicionado
+
+- **Corretores parceiros na proposta (vendas e locação).** Na criação/edição, o corretor informa parceiros — da casa ou de outra imobiliária — com nome, CRECI, telefone e e-mail opcional, escolhendo do cadastro de corretores ou cadastrando na hora. Eles recebem e-mail em três marcos: proposta **encaminhada** (1ª via enviada), **assinada pelo proponente** e **completa**. Quem decide se o e-mail sai é o cadastro em `/corretores` (avisos por e-mail ligados, sem opt-out, com endereço) — nunca o dado da proposta. O detalhe da proposta lista os parceiros e diz se cada um "avisa por e-mail".
+- Os parceiros moram em chave própria do dado da proposta (`corretores_parceiros`), separada da distribuição da comissão. Foi decisão de revisão: a lista de comissão vai para o contrato (cláusula de intermediadora) e para o wizard de repasse; um parceiro que só acompanha não pode virar intermediadora sem CPF nem linha de 0% que trava a cobrança. Na conversão em negócio a chave segue para o Deal, e os parceiros passam a receber também os avisos do negócio.
+
+### Corrigido
+
+- **Angariador de locação nunca recebia aviso do negócio.** O resolvedor de corretores só lia a lista de venda (`comissionados`); a de locação (`angariadores`), preenchida pelo auto-cadastro no envio do formulário, ficava invisível. Agora as duas contam.
+
 ## [Unreleased] - 2026-09-04 - O bloco que nenhum parágrafo identifica
 
 ### Corrigido

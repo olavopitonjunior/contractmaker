@@ -24,6 +24,8 @@ import { hidesComissao } from "@/lib/proposals/hidden-fields";
 import { checkProposalReadiness } from "@/lib/proposals/clicksign-readiness";
 import { plannedProposalCostCents } from "@/lib/proposals/cost";
 import { getSignatureSettings } from "@/lib/clicksign/account";
+import { readPartnerBrokerRows } from "@/lib/proposals/partner-brokers";
+import { resolveDealBrokers } from "@/lib/notifications/deal-brokers";
 
 export const dynamic = "force-dynamic";
 
@@ -229,6 +231,26 @@ export default async function PropostaDetailPage({
   // Mesmo resumo da listagem (lib compartilhada) — o local `summarize()` que
   // vivia aqui divergia dela (sem número do imóvel, sem trim).
   const resumo = summarizeProposalData(d, proposal.kind);
+
+  // Corretores parceiros: linhas do dataJson + "notifica?" resolvido no registry
+  // (mesma regra do e-mail: notifyByEmail, sem opt-out, com endereço).
+  const parceiroRows = readPartnerBrokerRows(d);
+  const parceiroBrokers =
+    parceiroRows.length > 0
+      ? await resolveDealBrokers({ orgId: org.id, formDataJson: d, brokerIds: [] }).catch(
+          () => []
+        )
+      : [];
+  const notifyingIds = new Set(
+    parceiroBrokers.filter((b) => b.notifyByEmail && !!b.email).map((b) => b.splitRecipientId)
+  );
+  const parceiros = parceiroRows.map((p) => ({
+    nome: p.nome,
+    creci: p.creci ?? null,
+    phone: p.mobile_phone ?? null,
+    email: p.email ?? null,
+    notifica: !!p.splitRecipientId && notifyingIds.has(p.splitRecipientId),
+  }));
   const resp = responsibleDisplay({
     responsibleName: proposal.responsibleName,
     responsibleUser: proposal.responsibleUser,
@@ -315,6 +337,7 @@ export default async function PropostaDetailPage({
         responsibleUserId: proposal.responsibleUserId,
         responsibleName: proposal.responsibleName,
         creatorName: proposal.user?.name ?? null,
+        parceiros,
         templateName: proposal.template?.name ?? null,
         // Link rastreado /p/[token] — só chega aqui DEPOIS do gate de acesso
         // acima (a página é autenticada); a rota pública em si não o expõe.

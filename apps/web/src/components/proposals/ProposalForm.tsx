@@ -65,6 +65,8 @@ import {
   tipoTemGarantidor,
   type GarantiaOptionLike,
 } from "@/lib/forms/garantia-catalog";
+import { validatePartnerBrokers } from "@/lib/proposals/partner-brokers";
+import { PartnerBrokersField } from "./PartnerBrokersField";
 
 export interface SchemaOption {
   label: string;
@@ -202,6 +204,11 @@ export function ProposalForm({
     e.preventDefault();
     if (validParties(v.proponentes).length === 0) {
       toast.error(`Informe ao menos um ${proponenteLabel.toLowerCase()}`);
+      return;
+    }
+    const partnerIssues = validatePartnerBrokers(v.corretoresParceiros);
+    if (partnerIssues.length > 0) {
+      toast.error(partnerIssues[0]);
       return;
     }
     setSaving(true);
@@ -350,8 +357,10 @@ export function ProposalForm({
   const observacoesSummary = v.observacoes.trim()
     ? `${v.observacoes.trim().length} caractere(s)`
     : "Sem observações";
+  const parceirosCount = v.corretoresParceiros.filter((p) => p.nome.trim()).length;
   const comissaoSummary = [
     v.comissao ? "Comissão incluída" : "Sem comissão",
+    parceirosCount ? `${parceirosCount} parceiro(s)` : null,
     v.witnesses.length ? `${v.witnesses.length} testemunha(s)` : null,
   ]
     .filter(Boolean)
@@ -960,6 +969,11 @@ export function ProposalForm({
                   />
                 </div>
               </div>
+              <PartnerBrokersField
+                value={v.corretoresParceiros}
+                onChange={(next) => patch({ corretoresParceiros: next })}
+                disabled={saving}
+              />
               {v.comissao && validParties(v.vendedores).length > 0 && (
                 <label className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Checkbox

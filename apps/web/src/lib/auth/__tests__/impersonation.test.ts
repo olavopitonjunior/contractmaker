@@ -34,7 +34,7 @@ function happyPath() {
   mockCookieGet.mockReturnValue({ value: "org1" }); // cookie mt_impersonate = orgId
   mockHeaderGet.mockReturnValue("/locacao"); // x-pathname (superfície de tenant)
   mockPlatformRole.mockResolvedValue({ role: "super_admin", scope: [] });
-  mockImpSession.mockResolvedValue({ id: "imp1" }); // sessão ativa
+  mockImpSession.mockResolvedValue({ id: "imp1", endsAt: new Date("2026-09-05T04:00:00.000Z") }); // sessão ativa
   mockMembership.mockResolvedValue({ userId: "owner-neto" }); // owner da org
 }
 
@@ -55,6 +55,8 @@ describe("getImpersonationFor", () => {
     expect(await getImpersonationFor("admin-b")).toEqual({
       orgId: "org1",
       ownerUserId: "owner-neto",
+      // O vencimento acompanha o contexto: é o que o banner mostra e vigia (#587).
+      endsAt: new Date("2026-09-05T04:00:00.000Z"),
     });
   });
 

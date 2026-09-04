@@ -1,5 +1,9 @@
 import { prisma } from "@/lib/db/prisma";
 import { emitNotification } from "@/lib/notifications/emit";
+import {
+  isPartnerBrokerKind,
+  notifyProposalPartnerBrokers,
+} from "./notify-partner-brokers";
 
 /**
  * Sino pros marcos de PROPOSTA (pré-negócio) — espelha o padrão de
@@ -60,9 +64,22 @@ export type ProposalNotifKind =
   //     ClickSign) e a proposta foi liberada pra reenvio. Sem o sino, o
   //     corretor só descobria abrindo a lista e vendo o badge — o fato nasceu
   //     fora da vista dele (2026-08, decisão de produto).
-  | "send_canceled";
+  | "send_canceled"
+  //   - sent: a 1ª via foi ENCAMINHADA (Aceite ou envelope criado). Marco só
+  //     para os CORRETORES PARCEIROS (e-mail) — o dono acabou de clicar e viu o
+  //     toast; sino aqui seria eco. Por isso `sent` fica FORA do sino e FORA do
+  //     user-channels-registry (e, por construção, invisível ao Max).
+  | "sent";
+
+/** Marcos que NÃO tocam o sino do dono (só o trilho dos parceiros). */
+const OWNER_BELL_SKIP = new Set<ProposalNotifKind>(["sent"]);
 
 const TEXT: Record<ProposalNotifKind, { type: string; title: string; body: string }> = {
+  sent: {
+    type: "proposal_sent",
+    title: "Proposta encaminhada",
+    body: "A proposta foi encaminhada para assinatura.",
+  },
   delivered: {
     type: "proposal_delivered",
     title: "Proposta entregue",
@@ -158,6 +175,16 @@ export async function notifyProposalMilestone(params: {
   bodyOverride?: string;
 }): Promise<void> {
   const { proposalId, orgId, userId, kind, refusedBy, dedupeSuffix, bodyOverride } = params;
+
+  // Corretores parceiros (e-mail) — trilho próprio, dedupe próprio
+  // (ProposalNotificationLog). Fire-and-forget e ANTES do sino: os marcos
+  // `signed_proponente`/`completed` disparam de vários call-sites e o dedupe
+  // do sino (por dono) não cobre destinatário externo. Nunca lança.
+  if (isPartnerBrokerKind(kind)) {
+    await notifyProposalPartnerBrokers({ proposalId, orgId, kind }).catch(() => {});
+  }
+  if (OWNER_BELL_SKIP.has(kind)) return;
+
   const t = TEXT[kind];
   const baseBody =
     bodyOverride ?? (kind === "refused" && refusedBy ? REFUSED_BODY[refusedBy] : t.body);

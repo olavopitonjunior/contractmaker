@@ -290,6 +290,7 @@ model Organization {
   notificationSettings OrgNotificationSettings?
   managerSettings     OrgManagerSettings?
   dealNotificationLogs DealNotificationLog[]
+  proposalNotificationLogs ProposalNotificationLog[]
   userNotificationPrefs      UserNotificationPreference[]
   userNotificationDeliveries UserNotificationDelivery[]
   templates           ContractTemplate[]
@@ -1162,6 +1163,30 @@ model DealNotificationLog {
 
   @@unique([dealId, event, channel, recipientKey, dedupeKey], map: "DealNotificationLog_dedupe_key")
   @@index([orgId, dealId, createdAt])
+}
+
+/// Log de envio aos CORRETORES PARCEIROS de uma proposta (e-mail em
+/// `sent` / `signed_proponente` / `completed`). Irmão magro do
+/// DealNotificationLog: aqui não há dedupeKey por evento — o marco de proposta
+/// acontece uma vez (o status machine é CAS), então (proposta, marco, canal,
+/// destinatário) já é a chave. Insert-first: P2002 = já enviado, o caller pula.
+model ProposalNotificationLog {
+  id             String   @id @default(cuid())
+  orgId          String
+  proposalId     String
+  kind           String // ProposalNotifKind (sent | signed_proponente | completed)
+  channel        String // email
+  recipientKey   String // splitRecipientId
+  recipientLabel String?
+  status         String   @default("pending") // pending (claim) | sent | failed
+  detail         Json?
+  createdAt      DateTime @default(now())
+
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  proposal Proposal     @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@unique([proposalId, kind, channel, recipientKey], map: "ProposalNotificationLog_dedupe_key")
+  @@index([orgId, proposalId, createdAt])
 }
 
 // Preferências de canal externo do USUÁRIO da plataforma, por org — o mesmo
@@ -3776,6 +3801,7 @@ model Proposal {
   attachments    ProposalAttachment[]
   events         ProposalEvent[]
   envelopes      Envelope[]
+  notificationLogs ProposalNotificationLog[]
 
   @@unique([orgId, code])
   reviewRuns ContractReviewRun[]

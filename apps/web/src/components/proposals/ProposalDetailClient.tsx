@@ -120,6 +120,17 @@ interface Proposal {
   responsibleUserId: string | null;
   responsibleName: string | null;
   creatorName: string | null;
+  /**
+   * Corretores parceiros (acompanham por e-mail). `notifica` já vem resolvido
+   * do registry no server: e-mail ligado, sem opt-out e com endereço.
+   */
+  parceiros?: Array<{
+    nome: string;
+    creci: string | null;
+    phone: string | null;
+    email: string | null;
+    notifica: boolean;
+  }>;
   /** Nome do modelo (ContractTemplate) usado no render, ou null. */
   templateName: string | null;
   /** Link público /p/[token] pronto (host resolvido no server). */
@@ -547,6 +558,35 @@ export function ProposalDetailClient({
             <ThreadRow label="Recriação de" target={proposal.thread.parent} />
             <ThreadRow label="Recriada como" target={proposal.thread.supersededBy} />
           </div>
+          {(proposal.parceiros ?? []).length > 0 && (
+            <div className="space-y-1.5 border-t pt-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Corretores parceiros
+              </p>
+              <ul className="space-y-1 text-sm">
+                {(proposal.parceiros ?? []).map((p, i) => (
+                  <li key={`${p.nome}-${i}`} className="flex flex-wrap items-baseline gap-x-2">
+                    <span className="font-medium">{p.nome}</span>
+                    {p.creci && <span className="text-muted-foreground">CRECI {p.creci}</span>}
+                    {p.phone && <span className="text-muted-foreground">{p.phone}</span>}
+                    {p.email && <span className="text-muted-foreground">{p.email}</span>}
+                    <span
+                      className={
+                        p.notifica ? "text-xs text-emerald-700" : "text-xs text-muted-foreground"
+                      }
+                      title={
+                        p.notifica
+                          ? "Recebe e-mail nos marcos da proposta"
+                          : "Sem e-mail ou avisos desligados no cadastro de corretores"
+                      }
+                    >
+                      {p.notifica ? "· avisa por e-mail" : "· sem aviso"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </Card>
 
         <Card className="space-y-2 p-4">
