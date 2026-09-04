@@ -54,6 +54,22 @@ export function findForms(hay: string, needle: string): { count: number; forms: 
 }
 
 /**
+ * Comparação de PARÁGRAFO INTEIRO entre export e estrutura: além do NBSP, o
+ * export troca tabulação por espaços ("Nome\tNome" vira "Nome         Nome")
+ * e apara pontas. Para decidir "é o mesmo parágrafo" isso não importa; para
+ * fatiar texto por índice importa — por isso esta normalização NÃO é usada em
+ * `findForms`. Medido em produção: o bloco de assinaturas em colunas de um
+ * modelo da Trio não casava por causa das tabulações.
+ */
+export function sameParagraph(a: string, b: string): boolean {
+  return collapseWhitespace(a) === collapseWhitespace(b);
+}
+
+function collapseWhitespace(text: string): string {
+  return normalizeSpaces(text).replace(/\s+/g, " ").trim();
+}
+
+/**
  * A forma como `needle` está DE FATO no documento, quando é única lá. É o
  * texto que se manda ao `replaceAllText`: a API não normaliza, e a forma lida
  * pelo export pode não existir no Doc. Ambígua ou ausente → `null` (quem
@@ -171,8 +187,8 @@ function tableTexts(table: docs_v1.Schema$Table): string[] {
           .join("")
           .replace(/\n+$/, "");
         for (const linha of texto.split(SOFT_BREAK_RE)) {
-          const t = linha.trim();
-          if (t) out.push(normalizeSpaces(t));
+          const t = collapseWhitespace(linha);
+          if (t) out.push(t);
         }
       }
     }
@@ -207,7 +223,7 @@ export function findBlockRange(
   if (alvos.length === 0) return null;
 
   const paras = paragraphsOf(doc);
-  const nalvos = alvos.map(normalizeSpaces);
+  const nalvos = alvos.map(collapseWhitespace);
   let achado: ParagraphRange | null = null;
 
   // Bloco que é uma TABELA inteira: o bloco de assinaturas dos modelos da Trio
@@ -226,7 +242,7 @@ export function findBlockRange(
   }
 
   for (let i = 0; i < paras.length; i += 1) {
-    if (normalizeSpaces(paras[i]!.texto) !== nalvos[0]) continue;
+    if (collapseWhitespace(paras[i]!.texto) !== nalvos[0]) continue;
     // Anda pelo `body.content` a partir do primeiro parágrafo casado. Parágrafo
     // VAZIO no meio do bloco é aceito e entra no intervalo: o export do Drive
     // intercala linhas em branco (o bloco de assinaturas é o caso típico, com
@@ -244,12 +260,12 @@ export function findBlockRange(
         casa = false;
         break;
       }
-      if (normalizeSpaces(p.texto) === nalvos[k]) {
+      if (collapseWhitespace(p.texto) === nalvos[k]) {
         k += 1;
         j += 1;
         continue;
       }
-      if (p.texto === "") {
+      if (collapseWhitespace(p.texto) === "") {
         j += 1;
         continue;
       }
@@ -279,7 +295,7 @@ export function findParagraphRange(
   doc: docs_v1.Schema$Document,
   text: string
 ): ParagraphRange | null {
-  const alvo = normalizeSpaces(text.trim());
+  const alvo = collapseWhitespace(text);
   if (!alvo) return null;
 
   let found: ParagraphRange | null = null;
@@ -292,7 +308,7 @@ export function findParagraphRange(
     if (elements.length === 0) continue;
 
     const conteudo = elements.map((el) => el.textRun!.content!).join("");
-    if (normalizeSpaces(conteudo.replace(/\n+$/, "").trim()) !== alvo) continue;
+    if (collapseWhitespace(conteudo.replace(/\n+$/, "")) !== alvo) continue;
     if (found) return null; // ambíguo: dois parágrafos com o mesmo texto
 
     const start = elements[0]!.startIndex!;
