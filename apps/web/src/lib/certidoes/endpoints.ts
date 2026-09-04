@@ -7,7 +7,7 @@
  * picker UI can group them by scope and filter by UF.
  */
 
-export type EndpointScope = "federal" | "estadual" | "municipal" | "serasa";
+export type EndpointScope = "federal" | "estadual" | "municipal" | "serasa" | "credito";
 export type EndpointCategory =
   | "civel"
   | "trabalhista"
@@ -21,7 +21,7 @@ export type EndpointCategory =
   | "score"       // Serasa: Score de crédito (0-1000)
   | "negativacao" // Serasa: Restritivos (Pefin/Refin, protestos, ações)
   | "vinculos";   // Serasa: vínculos PJ↔PF (sociedades, representação)
-export type EndpointProvider = "infosimples" | "serasa";
+export type EndpointProvider = "infosimples" | "serasa" | "fichacerta";
 export type EndpointAppliesTo = "pessoa" | "imovel";
 
 export interface EndpointInfo {
@@ -957,6 +957,44 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     provider: "serasa",
     emitsPdf: false,
     description: "Lista de CNPJs onde o CPF aparece como socio, administrador ou representante. Usado para diligenciar PJ ocultas.",
+  },
+
+  // --- Ficha Certa Digital (análise de crédito para locação, conta por org) ---
+  // 1 CertidaoJob por PRETENDENTE (locatário, cônjuge, fiador, cônjuge do
+  // fiador), agrupados por um CreditAnalysisRequest (a "solicitação" deles).
+  // Laudo assíncrono: o job fica em `awaiting_portal` até o webhook (ou o
+  // poll do cron via GET report) fechar. `costCents` aqui é placeholder — o
+  // real vem de FichaCertaAccount.costCents (créditos pré-pagos); a UI usa o
+  // `totalCostCents` devolvido pela rota de disparo.
+  "fichacerta/laudo-pf": {
+    id: "fichacerta/laudo-pf",
+    label: "Ficha Certa — Análise de crédito PF",
+    costCents: 1500,
+    scope: "credito",
+    appliesTo: ["pessoa"],
+    category: "score",
+    provider: "fichacerta",
+    twoStep: true,
+    initialStatus: "awaiting_portal",
+    emitsPdf: true,
+    expectedWaitMinutes: 30,
+    description:
+      "Laudo Ficha Certa (FC REPORT + FC SCORE) do pretendente pessoa física: restrições, compatibilidade de renda, score e parecer da locação.",
+  },
+  "fichacerta/laudo-pj": {
+    id: "fichacerta/laudo-pj",
+    label: "Ficha Certa — Análise de crédito PJ",
+    costCents: 1500,
+    scope: "credito",
+    appliesTo: ["pessoa"],
+    category: "score",
+    provider: "fichacerta",
+    twoStep: true,
+    initialStatus: "awaiting_portal",
+    emitsPdf: true,
+    expectedWaitMinutes: 30,
+    description:
+      "Laudo Ficha Certa (FC EMPRESA) do pretendente pessoa jurídica.",
   },
 };
 

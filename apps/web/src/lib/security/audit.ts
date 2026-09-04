@@ -231,6 +231,19 @@ export type AuditAction =
   | "SERASA_CONSENT_GIVEN"
   | "SERASA_VINCULOS_EXPAND"
   | "SERASA_BUDGET_EXCEEDED"
+  // Análise de crédito na proposta (Ficha Certa Digital, conta por org).
+  // CREDIT_ANALYSIS_DISPATCH grava o disparo (request + N jobs);
+  // CREDIT_CONSENT_GIVEN o consentimento LGPD na proposta;
+  // CREDIT_WEBHOOK_RECEIVED/REJECTED o webhook do laudo (auth ok / recusado);
+  // CREDIT_ACCOUNT_CONNECTED/DISCONNECTED a conta em Integrações;
+  // CREDIT_BUDGET_EXCEEDED o 402 do teto mensal ou sem créditos pré-pagos.
+  | "CREDIT_ANALYSIS_DISPATCH"
+  | "CREDIT_CONSENT_GIVEN"
+  | "CREDIT_WEBHOOK_RECEIVED"
+  | "CREDIT_WEBHOOK_REJECTED"
+  | "CREDIT_ACCOUNT_CONNECTED"
+  | "CREDIT_ACCOUNT_DISCONNECTED"
+  | "CREDIT_BUDGET_EXCEEDED"
   | "ENVELOPE_CREATE"
   | "ENVELOPE_RESEND"
   | "CLICKSIGN_WEBHOOK_RECEIVED"

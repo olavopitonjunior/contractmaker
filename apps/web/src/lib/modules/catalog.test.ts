@@ -105,5 +105,9 @@ describe("certidoesFeatureForKind", () => {
     expect(featureDefault(FEATURE.VENDAS_CERTIDOES)).toBe(true);
     expect(featureDefault(FEATURE.LOCACAO_CERTIDOES)).toBe(false);
     expect(featureModule(FEATURE.LOCACAO_CERTIDOES)).toBe(MODULE.LOCACAO);
+    // Análise de crédito na proposta nasce OFF: depende de conta Ficha Certa
+    // conectada e cada laudo é pago.
+    expect(featureDefault(FEATURE.LOCACAO_CREDITO)).toBe(false);
+    expect(featureModule(FEATURE.LOCACAO_CREDITO)).toBe(MODULE.LOCACAO);
   });
 });
