@@ -49,6 +49,17 @@ const MOTIVO_CLAUSULA: Record<string, string> = {
   chunked_content: "a linha está partida em pedaços no acervo",
 };
 
+/** "1× trocar a lista inteira por uma chave" — o que o lote fará neste modelo. */
+function resumoDosConsertos(row: LibraryReviewRow): string {
+  const conta = new Map<string, number>();
+  for (const f of row.achados) {
+    if (!f.suggestedFix || f.suggestedFix.op === "manual") continue;
+    const rotulo = FIX_LABEL[f.suggestedFix.op] ?? f.suggestedFix.op;
+    conta.set(rotulo, (conta.get(rotulo) ?? 0) + 1);
+  }
+  return [...conta].map(([rotulo, n]) => `${n}× ${rotulo}`).join("; ");
+}
+
 const FIX_LABEL: Record<string, string> = {
   rekey: "trocar a chave",
   "remove-leftover": "remover o trecho",
@@ -62,6 +73,13 @@ export function LibraryReviewClient() {
   const [erro, setErro] = useState<string | null>(null);
   const [corrigindo, setCorrigindo] = useState<string | null>(null);
   const [confirmar, setConfirmar] = useState<LibraryReviewRow | null>(null);
+  const [confirmarLote, setConfirmarLote] = useState(false);
+  /** Andamento do lote — sem isto a tela fica muda por minutos. */
+  const [progresso, setProgresso] = useState<{
+    atual: number;
+    total: number;
+    nome: string;
+  } | null>(null);
 
   const revisar = useCallback(async () => {
     setCarregando(true);
@@ -97,12 +115,17 @@ export function LibraryReviewClient() {
    * sob os seguintes. Disparar em paralelo faria os outros baterem em
    * `FINDING_STALE` — ou, pior, casarem uma frase que o primeiro já mexeu.
    */
-  async function corrigirModelo(row: LibraryReviewRow) {
-    setConfirmar(null);
-    setCorrigindo(row.templateId);
-    const alvos = row.achados.filter(
-      (f) => f.suggestedFix && f.suggestedFix.op !== "manual"
-    );
+  /**
+   * Aplica os consertos de UM modelo e devolve a conta. NÃO revalida.
+   *
+   * Quem revalida é o chamador, e isso não é detalhe: revalidar custa uma
+   * leitura de CADA modelo da biblioteca no Drive. Fazer isso depois de cada
+   * modelo — como esta função fazia — transforma um lote de 14 em 14 varreduras
+   * completas, e foi exatamente o que saturou a rota em produção em 04/09.
+   * Uma revalidação no fim diz a mesma coisa.
+   */
+  async function aplicarConsertos(row: LibraryReviewRow) {
+    const alvos = row.achados.filter((f) => f.suggestedFix && f.suggestedFix.op !== "manual");
     let feitos = 0;
     const falhas: string[] = [];
     for (const achado of alvos) {
@@ -119,6 +142,13 @@ export function LibraryReviewClient() {
         falhas.push(e instanceof Error ? e.message : String(e));
       }
     }
+    return { feitos, falhas };
+  }
+
+  async function corrigirModelo(row: LibraryReviewRow) {
+    setConfirmar(null);
+    setCorrigindo(row.templateId);
+    const { feitos, falhas } = await aplicarConsertos(row);
     setCorrigindo(null);
     if (feitos) toast.success(`${feitos} conserto(s) aplicado(s) em "${row.name}".`);
     // A CONTA das falhas, não só a primeira: com 4 de 6 falhando, mostrar uma
@@ -133,10 +163,56 @@ export function LibraryReviewClient() {
     await revisar();
   }
 
+  /**
+   * Corrige TODOS os modelos que têm conserto automático, em ordem.
+   *
+   * Existe porque clicar modelo a modelo é trabalho de máquina: os 16 modelos
+   * da RE/MAX Trio tinham o MESMO defeito, e a alternativa era catorze vezes a
+   * mesma sequência de dois cliques. Um lote com o total declarado antes e o
+   * resultado declarado depois é a mesma decisão, tomada uma vez.
+   *
+   * Sequencial, nunca em paralelo: cada conserto é recalculado no servidor
+   * contra o Doc de agora, e a revalidação (cara) acontece UMA vez, no fim.
+   */
+  async function corrigirTudo() {
+    setConfirmarLote(false);
+    // MESMA lista que o botão contou: se o filtro divergisse, o total prometido
+    // no diálogo não seria o que o lote faz.
+    const alvos = alvosLote;
+    let feitos = 0;
+    const falhas: string[] = [];
+    const modelosComFalha: string[] = [];
+    for (let i = 0; i < alvos.length; i += 1) {
+      const row = alvos[i]!;
+      setProgresso({ atual: i + 1, total: alvos.length, nome: row.name });
+      const r = await aplicarConsertos(row);
+      feitos += r.feitos;
+      if (r.falhas.length) {
+        falhas.push(...r.falhas);
+        modelosComFalha.push(row.name);
+      }
+    }
+    setProgresso(null);
+    if (feitos) toast.success(`${feitos} conserto(s) aplicado(s) em ${alvos.length} modelo(s).`);
+    if (falhas.length) {
+      toast.error(
+        `${falhas.length} conserto(s) não aplicado(s) em ${modelosComFalha.length} modelo(s). ` +
+          `O primeiro: ${falhas[0]}`
+      );
+    }
+    await revisar();
+  }
+
   const modelos = dados?.templates?.rows ?? [];
   const clausulas = dados?.clauses?.rows ?? [];
   const modelosOk = modelos.filter((m) => m.pronto && !m.erro).length;
   const clausulasOk = clausulas.filter((c) => c.ok).length;
+  // Modelo ATIVO fica de fora da conta: a rota recusa editá-lo (409), então
+  // incluí-lo no total prometeria um conserto que não vai acontecer.
+  const alvosLote = modelos.filter(
+    (m) => m.consertaveis > 0 && m.status !== "active" && !m.erro
+  );
+  const totalConsertaveis = alvosLote.reduce((a, m) => a + m.consertaveis, 0);
 
   return (
     <div className="space-y-6">
@@ -149,14 +225,33 @@ export function LibraryReviewClient() {
             o que a geração descartaria em silêncio.
           </p>
         </div>
-        <Button variant="outline" onClick={() => void revisar()} disabled={carregando}>
-          {carregando ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <RefreshCw className="mr-2 h-4 w-4" />
+        <div className="flex flex-wrap items-center gap-2">
+          {totalConsertaveis > 0 && (
+            <Button
+              onClick={() => setConfirmarLote(true)}
+              disabled={carregando || !!corrigindo || !!progresso}
+            >
+              {progresso ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Wand2 className="mr-2 h-4 w-4" />
+              )}
+              Corrigir tudo ({totalConsertaveis})
+            </Button>
           )}
-          Conferir de novo
-        </Button>
+          <Button
+            variant="outline"
+            onClick={() => void revisar()}
+            disabled={carregando || !!progresso}
+          >
+            {carregando ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-2 h-4 w-4" />
+            )}
+            Conferir de novo
+          </Button>
+        </div>
       </div>
 
       {erro && (
@@ -170,6 +265,22 @@ export function LibraryReviewClient() {
           Lendo cada modelo no Google Docs e provando cada cláusula — leva alguns
           segundos.
         </p>
+      )}
+
+      {/*
+        Andamento do lote. Sem isto a tela fica muda enquanto 14 documentos são
+        editados um a um, e "parado" é indistinguível de "travado".
+      */}
+      {progresso && (
+        <Card className="border-primary/40 bg-primary/5">
+          <CardContent className="flex items-center gap-3 py-4 text-sm">
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+            <span>
+              Corrigindo {progresso.atual} de {progresso.total}:{" "}
+              <span className="font-medium">{progresso.nome}</span>
+            </span>
+          </CardContent>
+        </Card>
       )}
 
       {dados && (
@@ -231,6 +342,42 @@ export function LibraryReviewClient() {
             ))}
         </section>
       )}
+
+      <AlertDialog open={confirmarLote} onOpenChange={(o) => !o && setConfirmarLote(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Corrigir {totalConsertaveis} problema(s) em {alvosLote.length} modelo(s)?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <p>Vou aplicar, um modelo por vez, nos Google Docs destes modelos:</p>
+                <ul className="max-h-52 list-disc space-y-1 overflow-y-auto pl-5">
+                  {alvosLote.map((m) => (
+                    <li key={m.templateId}>
+                      {m.name}{" "}
+                      <span className="text-muted-foreground">
+                        — {resumoDosConsertos(m)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-muted-foreground">
+                  Cada conserto é recalculado no servidor no momento de aplicar. Modelos
+                  ativos ficam de fora (não aceitam edição), e o que não tiver conserto
+                  automático continua na lista.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void corrigirTudo()}>
+              Corrigir tudo
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!confirmar} onOpenChange={(o) => !o && setConfirmar(null)}>
         <AlertDialogContent>
