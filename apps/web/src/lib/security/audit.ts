@@ -105,6 +105,8 @@ export type AuditAction =
   | "TEMPLATE_DOC_EDIT"
   // Trecho literal trocado por chave de preenchimento (painel de mapeamento).
   | "TEMPLATE_FIELD_MAPPED"
+  // Slots de cláusula reaplicados a partir do plano do lote (botão "Tentar de novo").
+  | "TEMPLATE_SLOTS_REAPPLIED"
   | "ORG_FEES_UPDATED"
   // iList/RexAPI (integração RE/MAX) — provisioning super-admin + sync + import
   | "ILIST_CONNECTION_UPDATED"

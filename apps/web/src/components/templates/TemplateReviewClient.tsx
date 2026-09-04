@@ -326,6 +326,34 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
     }
   }, [template.id]);
 
+  const [reaplicandoSlots, setReaplicandoSlots] = useState(false);
+  const reaplicarSlots = useCallback(async () => {
+    setReaplicandoSlots(true);
+    try {
+      const res = await fetch(`/api/templates/${template.id}/slots/reapply`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Não consegui reaplicar a cláusula.");
+      const slots = (data.slots ?? []) as SlotReport[];
+      const applied = slots.filter((s) => s.applied).length;
+      setReport((prev) => ({
+        ...(prev ?? {}),
+        slots,
+        ...(data.validation?.pii ? { pii: data.validation.pii as TemplatePiiReport } : {}),
+        ...(data.validation?.semantic ? { semantic: data.validation.semantic as SemanticReport } : {}),
+      }));
+      if (data.validation) setValidation(data.validation);
+      if (applied > 0) toast.success(`Cláusula variável aplicada (${applied}).`);
+      else {
+        const motivo = slots.flatMap((s) => s.issues ?? []).map((i) => SLOT_ISSUE_REASON[i.reason] ?? i.reason)[0];
+        toast.error(`A cláusula continua fixa${motivo ? `: ${motivo}` : "."}`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Não consegui reaplicar a cláusula.");
+    } finally {
+      setReaplicandoSlots(false);
+    }
+  }, [template.id]);
+
   const revalidate = useCallback(async () => {
     setValidating(true);
     try {
@@ -731,11 +759,17 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
               </div>
             ))}
             <p className="text-xs">
-              Como resolver: abra o Doc ao lado, apague o texto da cláusula de
-              garantia e escreva{" "}
+              Como resolver: peça para tentar de novo (o sistema reaplica a cláusula a
+              partir do plano do lote, com a forma exata do documento). Se não pegar, abra o
+              Doc ao lado, apague o texto da cláusula de garantia e escreva{" "}
               <code className="rounded bg-muted px-1">{"{{slot_garantia}}"}</code>{" "}
               no lugar. As cláusulas de cada variante já estão no acervo.
             </p>
+            {template.status !== "active" && (
+              <Button size="sm" variant="outline" onClick={reaplicarSlots} disabled={reaplicandoSlots}>
+                {reaplicandoSlots ? "Tentando de novo…" : "Tentar de novo"}
+              </Button>
+            )}
           </div>
         </div>
       )}

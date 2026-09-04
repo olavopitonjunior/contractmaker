@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const batchUpdateDocMock = vi.fn();
 const getDocPlainTextMock = vi.fn();
+const getDocStructureMock = vi.fn();
 vi.mock("@/lib/google/docs", () => ({
+  getDocStructure: (...a: unknown[]) => getDocStructureMock(...a),
   batchUpdateDoc: (...args: unknown[]) => batchUpdateDocMock(...args),
   getDocPlainText: (...args: unknown[]) => getDocPlainTextMock(...args),
 }));
@@ -384,5 +386,48 @@ describe("resolveBlockLiteral — a transcrição do planner vs. o texto do doc"
     expect(requestsOf()[0].replaceAllText.containsText.text).toBe(
       COM_ESPACO_DUPLO
     );
+  });
+});
+
+describe("NBSP — a forma que vai ao Docs é a da estrutura", () => {
+  function estrutura(paragrafos: string[]) {
+    let index = 1;
+    return {
+      body: {
+        content: paragrafos.map((p) => {
+          const texto = `${p}\n`;
+          const el = { startIndex: index, endIndex: index + texto.length, textRun: { content: texto } };
+          index += texto.length;
+          return { paragraph: { elements: [el] } };
+        }),
+      },
+    };
+  }
+
+  it("bloco lido com espaço, Doc com NBSP: o request leva o NBSP e o slot abre", async () => {
+    const real = "8.1.\u00A0Como garantia das obrigações assumidas, a PARTE LOCATÁRIA depositará caução de R$\u00A01.000,00.";
+    const lido = real.replace(/\u00A0/g, " ");
+    getDocPlainTextMock
+      .mockResolvedValueOnce(`8. GARANTIA\n${lido}\n9. FORO`)
+      .mockResolvedValueOnce("8. GARANTIA\n{{slot_garantia}}\n9. FORO");
+    getDocStructureMock.mockResolvedValue(estrutura(["8. GARANTIA", real, "9. FORO"]));
+    batchUpdateDocMock.mockResolvedValue({ data: { replies: [{ replaceAllText: { occurrencesChanged: 1 } }] } });
+
+    const out = await applyClauseSlotToDoc({ docId: "d", slot: "garantia", paragraphs: [lido] });
+
+    expect(out.applied).toBe(true);
+    expect(batchUpdateDocMock.mock.calls.at(-1)![1][0].replaceAllText.containsText.text).toBe(real);
+  });
+
+  it("estrutura indisponível: forma lida segue e a reply decide", async () => {
+    const lido = "8.1. Como garantia das obrigações assumidas, a PARTE LOCATÁRIA depositará caução de R$ 1.000,00.";
+    getDocPlainTextMock.mockResolvedValue(`8. GARANTIA\n${lido}\n9. FORO`);
+    getDocStructureMock.mockRejectedValue(new Error("Drive fora"));
+    batchUpdateDocMock.mockResolvedValue({ data: { replies: [{ replaceAllText: { occurrencesChanged: 0 } }] } });
+
+    const out = await applyClauseSlotToDoc({ docId: "d", slot: "garantia", paragraphs: [lido] });
+    expect(out.applied).toBe(false);
+    expect(out.issues[0]!.reason).toBe("replace-noop");
+    expect(batchUpdateDocMock.mock.calls.at(-1)![1][0].replaceAllText.containsText.text).toBe(lido);
   });
 });
