@@ -1,22 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHash } from "node:crypto";
 import { waitUntil } from "@vercel/functions";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 
-/** Versão da política de privacidade vigente — bump ao alterar /privacy. */
-const PRIVACY_POLICY_VERSION = "2026-07-16";
-
-/** Hash do IP (nunca o IP cru) pra evidência de consentimento LGPD. */
-function hashIp(req: NextRequest): string | null {
-  const ip =
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("x-real-ip") ||
-    null;
-  if (!ip) return null;
-  const secret = process.env.AUTH_SECRET ?? "";
-  return createHash("sha256").update(`${ip}:${secret}`).digest("hex");
-}
+// A evidência de consentimento mora em `lib/legal/privacy-consent.ts` desde
+// 2026-09-04. Era privada desta rota, e por isso a LOCAÇÃO nunca a teve: o
+// wizard de lá coletava o aceite e nunca o gravava. A versão da política, em
+// especial, não pode existir em duas cópias — ela é a prova de QUAL texto o
+// titular aceitou.
 import { matchDealGroup } from "@/lib/newton/group-match";
 import { generateContractForDeal } from "@/lib/services/contract-generation";
 import { emitNotification } from "@/lib/notifications/emit";
@@ -28,6 +19,10 @@ import {
   LocacaoFinalizeBlockedError,
 } from "@/lib/forms/validation-locacao";
 import { sendFormSummary } from "@/lib/forms/form-summary-mailer";
+import {
+  shouldRecordConsent,
+  consentFields,
+} from "@/lib/legal/privacy-consent";
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
 import {
   mergeSalesFormDataJson,
@@ -191,10 +186,11 @@ export async function PATCH(
         // bloqueia o submit sem o checkbox). Evidência gravada na 1ª
         // finalização. Exige aceite EXPLÍCITO (=== true) — `!== false`
         // fabricaria prova de consentimento que o titular nunca deu.
-        const recordConsent =
-          isFinalizing &&
-          !fresh.privacyAcceptedAt &&
-          body.privacyAccepted === true;
+        const recordConsent = shouldRecordConsent({
+          isFinalizing,
+          alreadyAcceptedAt: fresh.privacyAcceptedAt,
+          bodyPrivacyAccepted: body.privacyAccepted,
+        });
         return {
           title: body.title ?? form.title,
           status: newStatus,
@@ -208,13 +204,7 @@ export async function PATCH(
               }
             : {}),
           ...(autoLockOnFinalize ? { lockedAt: new Date() } : {}),
-          ...(recordConsent
-            ? {
-                privacyAcceptedAt: new Date(),
-                privacyIpHash: hashIp(req),
-                privacyPolicyVersion: PRIVACY_POLICY_VERSION,
-              }
-            : {}),
+          ...(recordConsent ? consentFields(req) : {}),
         };
       },
     });
