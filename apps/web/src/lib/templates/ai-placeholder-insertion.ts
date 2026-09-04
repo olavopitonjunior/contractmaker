@@ -6,6 +6,7 @@ import { getAnthropicClient, SONNET_MODEL } from "@/lib/ai/shared/anthropic-clie
 import { recordAIUsage } from "@/lib/ai/usage";
 import {
   maskForReport,
+  splitDocParagraphs,
   type InsertedToken,
   type InsertionReport,
   type SkipReason,
@@ -13,6 +14,7 @@ import {
   type UnmappedReason,
   type UnmappedToken,
 } from "./insertion-report";
+import { runSemanticChecks, type SemanticFinding } from "./semantic-checks";
 
 export {
   maskForReport,
@@ -994,5 +996,276 @@ export async function insertPlaceholdersWithAI(input: {
       responseTruncated: proposal.responseTruncated,
       responseUnparsed: proposal.responseUnparsed,
     },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Propor → confirmar ("Pedir revisão pela IA")
+// ---------------------------------------------------------------------------
+
+/**
+ * Uma proposta da IA já PLANEJADA (passou nas travas do texto plano), mas não
+ * aplicada. É o que a tela mostra para o operador marcar ou desmarcar.
+ *
+ * `trecho`, `before` e `after` vão CRUS na resposta HTTP — quem revisa precisa
+ * ler a cláusula — e nunca são persistidos: o relatório gravado guarda só a
+ * contagem e os motivos dos pulos (ver `rerun-ai/route.ts`).
+ */
+export interface Proposal {
+  /** Estável para a mesma (chave, trecho): a tela usa como key e na seleção. */
+  id: string;
+  token: string;
+  trecho: string;
+  kind: "simple" | "composed";
+  /** O trecho cobre mais de um parágrafo — o bloco inteiro vira uma chave. */
+  multiParagraph: boolean;
+  /**
+   * Índice em {@link splitDocParagraphs} do parágrafo onde a chave entra.
+   * `-1` quando o parágrafo não foi localizado no texto exportado (a forma real
+   * do trecho pode divergir do export): a proposta continua válida — quem
+   * decide é o replanejamento na aplicação —, mas sem vizinhos para as
+   * checagens e sem posição para ordenar.
+   */
+  paragraphIndex: number;
+  /**
+   * O(s) parágrafo(s) como está(ão) hoje. Cada proposta é calculada contra o
+   * texto ORIGINAL, independente das outras: duas chaves no mesmo parágrafo
+   * mostram cada uma só a própria troca. O resultado combinado é o do
+   * replanejamento na aplicação, não a soma das prévias.
+   */
+  before: string;
+  /** Como ficaria(m) depois de aplicar. */
+  after: string;
+  /**
+   * Parágrafos do bloco que NÃO seriam tocados (repetem-se no documento, ou não
+   * casaram): ficam no texto depois da aplicação. Só existe no caminho de texto
+   * de trecho multi-parágrafo; o caminho estrutural exige a sequência única.
+   */
+  leftover: string[];
+  /**
+   * O que as checagens semânticas diriam do parágrafo resultante. Proposta
+   * com aviso nasce DESMARCADA na tela: cláusula inteira virando uma chave
+   * solta é exatamente o erro que a revisão existe para não repetir.
+   */
+  warnings: SemanticFinding[];
+}
+
+export interface ProposeResult {
+  proposals: Proposal[];
+  /** O que a IA propôs e as travas recusaram — trechos já MASCARADOS. */
+  skipped: SkippedToken[];
+  docTruncated: boolean;
+  responseTruncated: boolean;
+  responseUnparsed: boolean;
+  ranAt: string;
+  /**
+   * Impressão do texto sobre o qual as propostas foram montadas. A tela
+   * devolve no `apply`; se o Doc mudou no meio, a aplicação é recusada em vez
+   * de escrever trechos casados contra um texto que não existe mais.
+   */
+  docTextHash: string;
+}
+
+/** O Doc mudou entre a proposta e a aplicação. */
+export class DocChangedError extends Error {
+  readonly code = "DOC_CHANGED";
+  constructor() {
+    super(
+      "O documento mudou desde que a IA propôs estes trechos. Peça a revisão de novo para propor sobre o texto atual."
+    );
+    this.name = "DocChangedError";
+  }
+}
+
+function proposalId(token: string, trecho: string): string {
+  return `${token}:${textFingerprint(trecho)}`;
+}
+
+/** Índice do primeiro parágrafo que contém `needle` (comparação sem NBSP). */
+function indexOfParagraph(paragraphs: readonly string[], needle: string): number {
+  const n = normalizeSpaces(needle);
+  return paragraphs.findIndex((p) => normalizeSpaces(p).includes(n));
+}
+
+/**
+ * Avisos semânticos do parágrafo resultante, no contexto dos vizinhos: a regra
+ * de "cláusula colapsada" olha o parágrafo anterior (termina em `:`? fala de
+ * rateio?), então o parágrafo sozinho não bastaria. Só os achados do
+ * parágrafo proposto contam — os vizinhos já estão no Doc e são assunto do
+ * card "Problemas".
+ *
+ * DEGRADADA de propósito em relação à checagem da ingestão: aqui não há
+ * `sourceText` (o contrato original), então "cláusula colapsada" só dispara
+ * pela heurística fraca (parágrafo anterior termina em `:` ou fala de
+ * rateio/comissão). Um colapso de parágrafo único fora dessas pistas sai sem
+ * aviso — e, se for trecho simples, vem marcado na tela. É o preço de propor
+ * sem o arquivo-fonte; o antes/depois na tela é a segunda linha de defesa.
+ * Sem índice (`-1`), avalia o parágrafo sozinho.
+ */
+function warningsFor(
+  paragraphs: readonly string[],
+  paragraphIndex: number,
+  after: string,
+  modalidade: string
+): SemanticFinding[] {
+  const prev = paragraphIndex > 0 ? paragraphs[paragraphIndex - 1] : null;
+  const next = paragraphIndex >= 0 ? (paragraphs[paragraphIndex + 1] ?? null) : null;
+  const ctx = [prev, after, next].filter((p): p is string => p !== null);
+  const pos = prev !== null ? 1 : 0;
+  const report = runSemanticChecks({ docText: ctx.join("\n"), modalidade, org: null });
+  return report.findings.filter((f) => f.paragraphIndex === pos);
+}
+
+/**
+ * Traduz o plano (requests + blocos) em propostas legíveis: parágrafo antes e
+ * depois, por chave. PURA — a bateria de avaliação pode exercitar sem Doc.
+ */
+export function proposalsFromPlan(input: {
+  docText: string;
+  modalidade: string;
+  plan: InsertionPlan;
+}): Proposal[] {
+  const { docText, modalidade, plan } = input;
+  const paragraphs = splitDocParagraphs(docText);
+  const composed = new Set(
+    catalogForModalidade(modalidade)
+      .filter((d) => d.kind === "composed")
+      .map((d) => d.token)
+  );
+  const out: Proposal[] = [];
+
+  // Não localizado no export é sinal, não "parágrafo 0": fica `-1` e avisa.
+  const locate = (token: string, needle: string): number => {
+    const idx = indexOfParagraph(paragraphs, needle);
+    if (idx < 0) {
+      console.warn(
+        `[ai-placeholder-insertion] proposta ${token}: parágrafo não localizado no texto exportado`
+      );
+    }
+    return idx;
+  };
+
+  for (const c of plan.candidates) {
+    const rest = c.rest.map((r) => r.par);
+    const multiParagraph = rest.length > 0 || c.leftover.length > 0;
+    const paragraphIndex = locate(c.token, c.first);
+    // No caminho de texto, os parágrafos do trecho que se repetem no documento
+    // ficam de fora do lote (`leftover`) e CONTINUAM no texto: a prévia mostra
+    // o bloco inteiro como proposto pela IA, e `leftover` diz o que não sai.
+    const before = multiParagraph
+      ? c.trecho
+      : paragraphIndex >= 0
+        ? paragraphs[paragraphIndex]
+        : c.first;
+    const after = multiParagraph
+      ? [`{{${c.token}}}`, ...c.leftover].join("\n")
+      : before.split(c.trecho).join(`{{${c.token}}}`);
+    out.push({
+      id: proposalId(c.token, c.trecho),
+      token: c.token,
+      trecho: c.trecho,
+      kind: composed.has(c.token) ? "composed" : "simple",
+      multiParagraph,
+      paragraphIndex,
+      before,
+      after,
+      leftover: [...c.leftover],
+      warnings: warningsFor(paragraphs, paragraphIndex, after, modalidade),
+    });
+  }
+
+  for (const b of plan.blocks) {
+    const paragraphIndex = locate(b.token, b.paragraphs[0] ?? "");
+    const after = `{{${b.token}}}`;
+    out.push({
+      id: proposalId(b.token, b.trecho),
+      token: b.token,
+      trecho: b.trecho,
+      kind: composed.has(b.token) ? "composed" : "simple",
+      multiParagraph: true,
+      paragraphIndex,
+      before: b.paragraphs.join("\n"),
+      after,
+      leftover: [],
+      warnings: warningsFor(paragraphs, paragraphIndex, after, modalidade),
+    });
+  }
+
+  // Não localizados (-1) vão para o FIM, não para o topo: sem posição, não
+  // podem reivindicar a primeira linha da revisão.
+  const pos = (p: Proposal) => (p.paragraphIndex < 0 ? Number.MAX_SAFE_INTEGER : p.paragraphIndex);
+  out.sort((a, b) => pos(a) - pos(b));
+  return out;
+}
+
+/**
+ * "Pedir revisão pela IA", metade 1: pergunta à IA e PLANEJA, sem escrever no
+ * Doc. Custa a chamada de modelo; não custa uma edição no Drive.
+ *
+ * Até 2026-09-04 este botão aplicava direto — e num dos dois usos em produção
+ * colapsou um parágrafo inteiro numa chave. A escrita passa a exigir a
+ * confirmação do operador, proposta a proposta ({@link applyAcceptedProposals}).
+ */
+export async function proposePlaceholdersWithAI(input: {
+  docId: string;
+  modalidade: string;
+  orgId: string;
+}): Promise<ProposeResult> {
+  const docText = await getDocPlainText(input.docId);
+  const proposal = await proposeMapeamentos({
+    docText,
+    modalidade: input.modalidade,
+    orgId: input.orgId,
+  });
+  const plan = planInsertion({
+    docText,
+    modalidade: input.modalidade,
+    mapeamentos: proposal.mapeamentos,
+  });
+  return {
+    proposals: proposalsFromPlan({ docText, modalidade: input.modalidade, plan }),
+    skipped: plan.skippedAmbiguous.map((s) => ({
+      ...s,
+      trecho: maskForReport(s.trecho),
+      ...(s.paragraph ? { paragraph: maskForReport(s.paragraph) } : {}),
+    })),
+    docTruncated: proposal.docTruncated,
+    responseTruncated: proposal.responseTruncated,
+    responseUnparsed: proposal.responseUnparsed,
+    ranAt: new Date().toISOString(),
+    docTextHash: textFingerprint(docText),
+  };
+}
+
+/**
+ * Metade 2: aplica as propostas que o operador marcou. NÃO reaproveita o plano
+ * da proposta — replaneja sobre o texto ATUAL do Doc, com todas as travas:
+ * trecho que virou ambíguo desde então degrada para `skippedAmbiguous`, nunca
+ * para uma escrita errada. Com `docTextHash`, texto divergente é recusado
+ * inteiro ({@link DocChangedError}) antes de qualquer edição.
+ *
+ * Sem chamada de modelo: a lista aceita É o mapeamento.
+ */
+export async function applyAcceptedProposals(input: {
+  docId: string;
+  modalidade: string;
+  accepted: ReadonlyArray<{ token: string; trecho: string }>;
+  docTextHash?: string;
+}): Promise<InsertionReport> {
+  const docText = await getDocPlainText(input.docId);
+  if (input.docTextHash && input.docTextHash !== textFingerprint(docText)) {
+    throw new DocChangedError();
+  }
+  const plan = planInsertion({
+    docText,
+    modalidade: input.modalidade,
+    mapeamentos: input.accepted.map((a) => ({ trecho_literal: a.trecho, token: a.token })),
+  });
+  return commitInsertion({
+    docId: input.docId,
+    docText,
+    modalidade: input.modalidade,
+    plan,
+    flags: { docTruncated: false, responseTruncated: false, responseUnparsed: false },
   });
 }

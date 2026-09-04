@@ -107,6 +107,10 @@ export type AuditAction =
   | "TEMPLATE_FIELD_MAPPED"
   // Slots de cláusula reaplicados a partir do plano do lote (botão "Tentar de novo").
   | "TEMPLATE_SLOTS_REAPPLIED"
+  // Propostas da revisão por IA que o operador MARCOU e mandou aplicar no
+  // Doc-modelo. A proposta em si não é auditada (é leitura + chamada de modelo,
+  // com custo em AIUsage); a escrita, sim — com quem confirmou e o que entrou.
+  | "TEMPLATE_AI_PROPOSALS_APPLIED"
   | "ORG_FEES_UPDATED"
   // iList/RexAPI (integração RE/MAX) — provisioning super-admin + sync + import
   | "ILIST_CONNECTION_UPDATED"

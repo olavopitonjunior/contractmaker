@@ -25,7 +25,12 @@ vi.mock("@/lib/ai/usage", () => ({
   recordAIUsage: vi.fn(),
 }));
 
-import { insertPlaceholdersWithAI } from "../ai-placeholder-insertion";
+import {
+  insertPlaceholdersWithAI,
+  proposePlaceholdersWithAI,
+  applyAcceptedProposals,
+  DocChangedError,
+} from "../ai-placeholder-insertion";
 
 function aiResponse(mapeamentos: Array<{ trecho_literal: string; token: string }>) {
   return {
@@ -986,5 +991,155 @@ describe("insertPlaceholdersWithAI — inserted só depois de conferir", () => {
     expect(report.inserted).toHaveLength(1);
     expect(report.inserted[0].leftoverParagraphs).toEqual(["8.2. Segunda."]);
     expect(state).toContain("8.2. Segunda.");
+  });
+});
+
+/**
+ * "Pedir revisão pela IA" em dois tempos. O caso NEGATIVO vem primeiro: propor
+ * nunca escreve, e aplicar com o Doc mudado recusa inteiro.
+ */
+describe("propor → confirmar", () => {
+  const DOC2 = "Aluguel mensal de R$ 1.000,00 por mês.\nVence todo dia 5.";
+  const propor = () =>
+    proposePlaceholdersWithAI({ docId: "d1", modalidade: "locacao", orgId: "org-1" });
+
+  it("propose: planeja, devolve antes/depois e hash — e NÃO chama batchUpdate", async () => {
+    useDoc(DOC2);
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([{ trecho_literal: "R$ 1.000,00", token: "aluguel_valor" }])
+    );
+
+    const r = await propor();
+
+    expect(mockBatchUpdate).not.toHaveBeenCalled();
+    expect(state).toBe(DOC2);
+    expect(r.proposals).toHaveLength(1);
+    expect(r.proposals[0]).toMatchObject({
+      token: "aluguel_valor",
+      trecho: "R$ 1.000,00",
+      kind: "simple",
+      multiParagraph: false,
+      paragraphIndex: 0,
+      before: "Aluguel mensal de R$ 1.000,00 por mês.",
+      after: "Aluguel mensal de {{aluguel_valor}} por mês.",
+    });
+    expect(r.docTextHash).toBeTruthy();
+  });
+
+  it("propose: bloco de vários parágrafos vira UMA proposta 'bloco inteiro'", async () => {
+    useDoc("8. GARANTIA\n8.1. Primeira.\n8.2. Segunda.\n9. FORO");
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([{ trecho_literal: "8.1. Primeira.\n8.2. Segunda.", token: "clausula_garantia" }])
+    );
+
+    const r = await propor();
+
+    expect(mockBatchUpdate).not.toHaveBeenCalled();
+    expect(r.proposals).toHaveLength(1);
+    expect(r.proposals[0]).toMatchObject({
+      token: "clausula_garantia",
+      kind: "composed",
+      multiParagraph: true,
+      paragraphIndex: 1,
+      before: "8.1. Primeira.\n8.2. Segunda.",
+      after: "{{clausula_garantia}}",
+    });
+  });
+
+  it("propose: parágrafo do bloco que se repete no documento sai em `leftover` e fica no 'depois'", async () => {
+    useDoc("Rua A, 10.\nPARTE.\nBairro B.\nPARTE.");
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([{ trecho_literal: "Rua A, 10.\nPARTE.\nBairro B.", token: "imovel_endereco_completo" }])
+    );
+
+    const r = await propor();
+
+    expect(mockBatchUpdate).not.toHaveBeenCalled();
+    expect(r.proposals).toHaveLength(1);
+    expect(r.proposals[0]).toMatchObject({
+      token: "imovel_endereco_completo",
+      multiParagraph: true,
+      leftover: ["PARTE."],
+      before: "Rua A, 10.\nPARTE.\nBairro B.",
+      after: "{{imovel_endereco_completo}}\nPARTE.",
+    });
+  });
+
+  it("propose: o que as travas recusam sai em `skipped`, mascarado, sem virar proposta", async () => {
+    useDoc("Nome Igual aqui. Nome Igual ali.");
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([{ trecho_literal: "Nome Igual", token: "locadores_qualificacao" }])
+    );
+
+    const r = await propor();
+
+    expect(r.proposals).toHaveLength(0);
+    expect(r.skipped).toEqual([
+      expect.objectContaining({ token: "locadores_qualificacao", reason: "ambiguous" }),
+    ]);
+  });
+
+  it("apply: hash divergente → DocChangedError ANTES de qualquer escrita", async () => {
+    useDoc(DOC2);
+
+    await expect(
+      applyAcceptedProposals({
+        docId: "d1",
+        modalidade: "locacao",
+        accepted: [{ token: "aluguel_valor", trecho: "R$ 1.000,00" }],
+        docTextHash: "outro-texto",
+      })
+    ).rejects.toBeInstanceOf(DocChangedError);
+
+    expect(mockBatchUpdate).not.toHaveBeenCalled();
+    expect(state).toBe(DOC2);
+  });
+
+  it("apply: replaneja no texto ATUAL — trecho que virou ambíguo é pulado, não escrito", async () => {
+    useDoc(DOC2);
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([{ trecho_literal: "R$ 1.000,00", token: "aluguel_valor" }])
+    );
+    const r = await propor();
+    // Alguém editou o Doc: o valor passou a aparecer duas vezes.
+    useDoc(DOC2 + "\nMulta de R$ 1.000,00.");
+
+    const report = await applyAcceptedProposals({
+      docId: "d1",
+      modalidade: "locacao",
+      accepted: r.proposals.map((p) => ({ token: p.token, trecho: p.trecho })),
+      // Sem hash: o chamador abriu mão da recusa em bloco; as travas ainda valem.
+    });
+
+    expect(mockBatchUpdate).not.toHaveBeenCalled();
+    expect(report.inserted).toHaveLength(0);
+    expect(report.skippedAmbiguous).toEqual([
+      expect.objectContaining({ token: "aluguel_valor", reason: "ambiguous" }),
+    ]);
+  });
+
+  it("apply: caminho feliz escreve só o aceito e não chama o modelo", async () => {
+    useDoc(DOC2);
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([
+        { trecho_literal: "R$ 1.000,00", token: "aluguel_valor" },
+        { trecho_literal: "5", token: "aluguel_dia_vencimento" },
+      ])
+    );
+    const r = await propor();
+    expect(r.proposals.map((p) => p.token)).toEqual(["aluguel_valor", "aluguel_dia_vencimento"]);
+    mockMessagesCreate.mockClear();
+
+    const report = await applyAcceptedProposals({
+      docId: "d1",
+      modalidade: "locacao",
+      accepted: [{ token: "aluguel_valor", trecho: "R$ 1.000,00" }],
+      docTextHash: r.docTextHash,
+    });
+
+    expect(mockMessagesCreate).not.toHaveBeenCalled();
+    expect(report.inserted.map((i) => i.token)).toEqual(["aluguel_valor"]);
+    expect(state).toContain("{{aluguel_valor}}");
+    expect(state).toContain("Vence todo dia 5.");
   });
 });
