@@ -26,6 +26,10 @@ import {
   LocacaoFinalizeBlockedError,
 } from "@/lib/forms/validation-locacao";
 import { resolveFormRequiredFields } from "@/lib/forms/required-snapshot";
+import {
+  shouldRecordConsent,
+  consentFields,
+} from "@/lib/legal/privacy-consent";
 import { findMissingRequired, getByPath } from "@/lib/forms/party-required";
 import { missingFiadorName } from "@/lib/forms/garantia-fiador-flip";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
@@ -223,6 +227,16 @@ export async function PATCH(
               }
             : {}),
           ...(isFinalizing && autoLockSetting ? { lockedAt: new Date() } : {}),
+          // Evidência de consentimento LGPD, igual à venda. O finalize É o ato
+          // de consentir (o wizard bloqueia o submit sem o checkbox), e até
+          // 2026-09-04 a locação coletava o aceite e não o gravava.
+          ...(shouldRecordConsent({
+            isFinalizing,
+            alreadyAcceptedAt: fresh.privacyAcceptedAt,
+            bodyPrivacyAccepted: body.privacyAccepted,
+          })
+            ? consentFields(req)
+            : {}),
         };
       },
     });

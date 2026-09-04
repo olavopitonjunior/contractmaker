@@ -549,7 +549,12 @@ export function LocacaoFormWizard({
         body: JSON.stringify(
           isParticipant
             ? { dataJson, markCompleted: true }
-            : { dataJson, status: "completo" },
+            : // `privacyAccepted` viaja no finalize do token PRINCIPAL, como em
+              // venda. Sem ele o aceite ficava só como estado de UI: a caixa
+              // travava o botão e `SalesForm.privacyAcceptedAt` seguia nulo —
+              // consentimento coletado e não registrado. O subtoken não envia
+              // porque não é ele quem finaliza o formulário.
+              { dataJson, status: "completo", privacyAccepted },
         ),
       });
       if (res.ok) {
