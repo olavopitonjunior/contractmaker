@@ -29,7 +29,10 @@ const STATUS: Record<SlotReapplyError["code"], number> = {
   TEMPLATE_NOT_FOUND: 404,
   NOT_GOOGLE_DOCS: 400,
   TEMPLATE_ACTIVE: 409,
-  PLAN_MISSING: 404,
+  // A requisição é válida; o dado necessário é que não existe. 404 é "não achei /
+  // não posso ver" — e a impersonação vencida também responde 404, o que já
+  // confundiu um diagnóstico.
+  PLAN_MISSING: 422,
   NO_SLOTS: 422,
 };
 

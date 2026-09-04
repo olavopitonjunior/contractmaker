@@ -30,23 +30,32 @@ describe("plannedSlotBlocksFor", () => {
   it("acha o plano pelo templateId da execução e devolve os blocos do item certo", () => {
     const runs = [
       {
-        libraryPlan: plan([planned("item-a", { garantia: ["Bloco do rascunho"] })]),
-        planReviewed: plan([
+        libraryPlan: plan([
           planned("item-a", { garantia: ["8.1. Como garantia, caução."] }),
           planned("item-b", { garantia: ["Outro bloco"] }),
         ]),
+        // Forma REAL gravada em produção: aprovações por item, não um plano.
+        planReviewed: {
+          reviewedBy: "u1",
+          reviewedAt: "2026-09-02T18:47:33.000Z",
+          templates: [
+            { approved: true, sourceItemId: "item-a" },
+            { approved: true, sourceItemId: "item-b" },
+          ],
+          clauses: [],
+          discards: [],
+        },
         report: execution([
           { sourceItemId: "item-b", status: "created", templateId: "tpl-b" },
           { sourceItemId: "item-a", status: "created", templateId: "tpl-a" },
         ]),
       },
     ];
-    // O plano REVISADO vale, não o rascunho do planner.
     expect(plannedSlotBlocksFor(runs, "tpl-a")).toEqual({ garantia: ["8.1. Como garantia, caução."] });
     expect(plannedSlotBlocksFor(runs, "tpl-b")).toEqual({ garantia: ["Outro bloco"] });
   });
 
-  it("cai no libraryPlan quando não houve revisão", () => {
+  it("os blocos vêm do libraryPlan mesmo sem revisão gravada", () => {
     const runs = [
       {
         libraryPlan: plan([planned("item-a", { garantia: ["Bloco"] })]),
@@ -76,8 +85,13 @@ describe("plannedSlotBlocksFor", () => {
     const runs = [
       { libraryPlan: { version: 99 }, planReviewed: null, report: null },
       {
-        libraryPlan: null,
-        planReviewed: plan([planned("item-a", { garantia: ["Bloco"] })]),
+        libraryPlan: { version: 99, templates: [planned("item-a", { garantia: ["Bloco"] })] },
+        planReviewed: null,
+        report: execution([{ sourceItemId: "item-a", status: "created", templateId: "tpl-a" }]),
+      },
+      {
+        libraryPlan: plan([planned("item-a", { garantia: ["Bloco"] })]),
+        planReviewed: null,
         report: execution([{ sourceItemId: "item-a", status: "created", templateId: "tpl-a" }]),
       },
     ];
