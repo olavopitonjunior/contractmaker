@@ -377,15 +377,19 @@ function checkTokenizedSplitList(
 
 const ASSINATURAS_TOKEN = "assinaturas";
 const ASSINATURAS_RE = /\{\{\s*assinaturas\s*\}\}/;
-/** Linha de assinatura: só sublinhados (o export do Drive preserva). */
-const UNDERSCORE_LINE = /^_{8,}$/;
+/**
+ * Linha de assinatura: só sublinhados (o export do Drive preserva). Duas
+ * colunas separadas por tabulação ("_______   _______") também são UMA linha
+ * de assinatura: é o layout sem tabela, com os signatários lado a lado.
+ */
+const UNDERSCORE_LINE = /^_{8,}(?:\s+_{4,})*$/;
 /** Rótulo de signatário abaixo da linha. */
 const SIGN_LABEL =
   /^(?:PARTE\s+)?(?:LOCAT[ÁA]RI[OA]S?|LOCADOR(?:A|ES|AS)?|FIADOR(?:A|ES|AS)?|TESTEMUNHAS?|INTERVENIENTES?|ANUENTES?|ADMINISTRADORA|VENDEDOR(?:A|ES|AS)?|COMPRADOR(?:A|ES|AS)?|CAUCIONANTES?|PROCURADOR(?:A|ES)?)\b/i;
 /** Campo em branco do bloco ("Nome", "CPF", "CPF: 000.000.000-00", "RG"). */
 const SIGN_FIELD = /^(?:nome|cpf|rg|cnpj)\b[^\n]{0,40}$/i;
 /** Nome de exemplo do arquivo ("xxxxxxxx", "Nome do locador", "_____"). */
-const NAME_PLACEHOLDER = /^(?:x+|nome\b.*|_+)$/i;
+const NAME_PLACEHOLDER = /^(?:x+(?:\s+x+)*|nome\b.*|_+)$/i;
 /** Só letras, espaços e pontuação de nome, curta. Necessário, não suficiente. */
 const NAME_CHARS = /^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ .'\-]{0,90}$/;
 /** Começo de título de seção ou de cláusula ("DA VIGÊNCIA", "ANEXO I"). */
