@@ -605,7 +605,7 @@ export function knownProviderLabels(
 const TEMPLATES_CONCURRENCY = 3;
 
 /** `ItemClassification.isFilledInstance`, lido do JSON cru do item. */
-function isFilledInstance(classification: unknown): boolean {
+export function isFilledInstance(classification: unknown): boolean {
   return (
     !!classification &&
     typeof classification === "object" &&
