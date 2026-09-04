@@ -5,11 +5,12 @@ on:
     branches: [master]
     types: [opened, synchronize, reopened, labeled, unlabeled]
 
-# Menor privilégio: o job só faz `gh pr view --json labels`, que é LEITURA.
-# `pull-requests: write` estava declarado e nunca era exercido.
+# Menor privilégio: leitura do PR e das labels, e ESCRITA só de commit status —
+# é o carimbo "a label foi aplicada com ESTE head" (ver o passo abaixo).
 permissions:
   contents: read
   pull-requests: read
+  statuses: write
 
 # O trigger inclui `labeled`/`unlabeled`, então mexer em label várias vezes
 # empilharia runs redundantes. Escopo por PR: nunca cancela o run de outro.
@@ -36,6 +37,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_REF: ${{ github.head_ref }}
+          # Por `env:`, nunca por `${{ }}` dentro do script: nome de label é texto
+          # de quem tem escrita no repo e, expandido no shell, viraria comando.
+          LABEL_EVENT: ${{ github.event.label.name }}
         run: |
           set -euo pipefail
           LABELS=$(gh pr view ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --json labels --jq '.labels[].name')
@@ -53,10 +57,56 @@ jobs:
 
           # `grep -qx` (linha inteira) e não `-q`: o antigo casava SUBSTRING, então
           # um label chamado "nao-staging-smoke-passed-x" satisfazia o gate.
-          if printf '%s\n' "$LABELS" | grep -qx "$WANTED"; then
-            echo "✓ label '$WANTED' presente (head: $HEAD_REF)"
+          if ! printf '%s\n' "$LABELS" | grep -qx "$WANTED"; then
+            echo "::error::Faltando o label '$WANTED'. $WHY."
+            exit 1
+          fi
+
+          # A label atesta um SHA, não um PR. O head de staging → master é a
+          # BRANCH `staging`: se outro merge entrar nela com a promoção aberta,
+          # o head avança e a label continua lá — e código que nunca passou pelo
+          # smoke chega a produção sob a label do smoke anterior (issue #591).
+          #
+          # Sem relógio: o feed de eventos do repositório atrasa horas e a data
+          # do committer é do commit, não do push. O que vale é o SHA. Quando a
+          # label é aplicada (evento `labeled`, ou `opened` com a label já no
+          # create), este run CARIMBA o head daquele momento com um commit
+          # status. Nos runs seguintes (`synchronize` = o head mudou), o head
+          # atual precisa ter o carimbo; sem ele, o head avançou depois da label.
+          # Remover e reaplicar a label carimba o head novo. `reopened` NÃO
+          # carimba: o carimbo é permanente por SHA, então reabrir com o mesmo
+          # head continua verde, e reabrir com o head avançado tem de ficar
+          # vermelho — senão fechar/reabrir seria o desvio do próprio gate.
+          # Só na promoção normal — o hotfix é consciente por definição.
+          if [ "$HEAD_REF" = "staging" ]; then
+            REPO="${{ github.repository }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            ACTION="${{ github.event.action }}"
+            CONTEXT="promote-gate/label-atesta-head"
+            # Só a label ESPERADA carimba. `labeled` de outra etiqueta (qualquer
+            # uma adicionada depois) é um run comum: exige o carimbo, não o cria.
+            if [ "$ACTION" = "labeled" ] && [ "$LABEL_EVENT" != "$WANTED" ]; then
+              ACTION="check"
+            fi
+            if [ "$ACTION" = "labeled" ] || [ "$ACTION" = "opened" ]; then
+              gh api "repos/$REPO/statuses/$HEAD_SHA" -X POST \
+                -f state=success -f context="$CONTEXT" \
+                -f description="label '$WANTED' aplicada com este head" >/dev/null
+              echo "✓ label '$WANTED' presente; head $HEAD_SHA carimbado ($ACTION)"
+              exit 0
+            fi
+            # Lê tudo antes de cortar: `| head -n1` fecha o cano cedo e, com
+            # pipefail + errexit, um EPIPE abortaria o passo sem a mensagem.
+            RAW=$(gh api "repos/$REPO/commits/$HEAD_SHA/statuses" --paginate \
+              --jq ".[] | select(.context == \"$CONTEXT\" and .state == \"success\") | .context")
+            STAMPED=$(printf '%s\n' "$RAW" | head -n1)
+            if [ -z "$STAMPED" ]; then
+              echo "::error::O head $HEAD_SHA não tem o carimbo da label '$WANTED': a staging recebeu merge com a promoção aberta. Faça o smoke de novo no head atual, remova e reaplique a label."
+              exit 1
+            fi
+            echo "✓ label '$WANTED' presente e head $HEAD_SHA carimbado"
             exit 0
           fi
 
-          echo "::error::Faltando o label '$WANTED'. $WHY."
-          exit 1
+          echo "✓ label '$WANTED' presente (head: $HEAD_REF)"
+          exit 0
