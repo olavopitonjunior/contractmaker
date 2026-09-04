@@ -46,6 +46,11 @@ interface RunLike {
  * revisão não existiu.
  */
 export function plannedSlotBlocksFor(runs: readonly RunLike[], templateId: string): SlotBlocks | null {
+  // A linha de execução NÃO é filtrada por `status`, de propósito: uma linha
+  // `duplicate` aponta para um modelo cujo DOCX é byte a byte o mesmo (a
+  // deduplicação é por sha256 do arquivo), então os `slotBlocks` do plano
+  // daquele run descrevem o mesmo documento. E `templateId` é cuid novo por
+  // modelo — não há como outro run "recriar" o mesmo id.
   for (const run of runs) {
     const execution = readExecutionReport(run.report);
     const line = execution?.templates.find((t) => t.templateId === templateId);
@@ -71,6 +76,24 @@ export class SlotReapplyError extends Error {
     super(message);
     this.name = "SlotReapplyError";
   }
+}
+
+/**
+ * Fonte do modelo com os slots declarados: cabeçalho, declaração, e depois
+ * tudo que já estava lá e não era nem cabeçalho nem declaração. PURA.
+ */
+export function declareSlots(source: string | null | undefined, declared: ClauseSlotKey[]): string {
+  const header = GOOGLE_DOCS_SOURCE_HEADER.trim();
+  const outras = (source ?? "")
+    .split("\n")
+    .filter((linha) => {
+      const t = linha.trim();
+      if (!t || t === header) return false;
+      return detectClauseSlots(t).length === 0;
+    });
+  return [GOOGLE_DOCS_SOURCE_HEADER, slotDeclarationComment(declared), ...outras]
+    .filter((l) => l.length > 0)
+    .join("\n");
 }
 
 export interface ReapplySlotsResult {
@@ -140,6 +163,10 @@ export async function reapplySlotsForTemplate(input: {
   const declared = Array.from(
     new Set<ClauseSlotKey>([...detectClauseSlots(template.handlebarsSource), ...applied])
   );
+  // A fonte de um modelo google_docs é cabeçalho + declaração de slots — mas
+  // o PATCH aceita qualquer texto ali. O que não for nem um nem outro é
+  // preservado: reaplicar um slot não pode apagar uma nota do operador.
+  const handlebarsSource = declareSlots(template.handlebarsSource, declared);
 
   const draftReport = readDraftReport(template.draftReport);
   const previous = Array.isArray(draftReport.slots)
@@ -151,11 +178,7 @@ export async function reapplySlotsForTemplate(input: {
     where: { id: template.id },
     data: {
       draftReport: { ...draftReport, slots } as object,
-      ...(applied.length > 0
-        ? {
-            handlebarsSource: [GOOGLE_DOCS_SOURCE_HEADER, slotDeclarationComment(declared)].join("\n"),
-          }
-        : {}),
+      ...(applied.length > 0 ? { handlebarsSource } : {}),
     },
   });
 
