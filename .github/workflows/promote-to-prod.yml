@@ -37,6 +37,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_REF: ${{ github.head_ref }}
+          # Por `env:`, nunca por `${{ }}` dentro do script: nome de label é texto
+          # de quem tem escrita no repo e, expandido no shell, viraria comando.
+          LABEL_EVENT: ${{ github.event.label.name }}
         run: |
           set -euo pipefail
           LABELS=$(gh pr view ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --json labels --jq '.labels[].name')
@@ -70,20 +73,22 @@ jobs:
           # create), este run CARIMBA o head daquele momento com um commit
           # status. Nos runs seguintes (`synchronize` = o head mudou), o head
           # atual precisa ter o carimbo; sem ele, o head avançou depois da label.
-          # Remover e reaplicar a label carimba o head novo. Só na promoção
-          # normal — o hotfix é consciente por definição.
+          # Remover e reaplicar a label carimba o head novo. `reopened` NÃO
+          # carimba: o carimbo é permanente por SHA, então reabrir com o mesmo
+          # head continua verde, e reabrir com o head avançado tem de ficar
+          # vermelho — senão fechar/reabrir seria o desvio do próprio gate.
+          # Só na promoção normal — o hotfix é consciente por definição.
           if [ "$HEAD_REF" = "staging" ]; then
             REPO="${{ github.repository }}"
             HEAD_SHA="${{ github.event.pull_request.head.sha }}"
             ACTION="${{ github.event.action }}"
-            LABEL_EVENT="${{ github.event.label.name }}"
             CONTEXT="promote-gate/label-atesta-head"
             # Só a label ESPERADA carimba. `labeled` de outra etiqueta (qualquer
             # uma adicionada depois) é um run comum: exige o carimbo, não o cria.
             if [ "$ACTION" = "labeled" ] && [ "$LABEL_EVENT" != "$WANTED" ]; then
               ACTION="check"
             fi
-            if [ "$ACTION" = "labeled" ] || [ "$ACTION" = "opened" ] || [ "$ACTION" = "reopened" ]; then
+            if [ "$ACTION" = "labeled" ] || [ "$ACTION" = "opened" ]; then
               gh api "repos/$REPO/statuses/$HEAD_SHA" -X POST \
                 -f state=success -f context="$CONTEXT" \
                 -f description="label '$WANTED' aplicada com este head" >/dev/null
