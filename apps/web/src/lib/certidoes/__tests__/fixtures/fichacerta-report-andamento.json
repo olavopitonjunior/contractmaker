@@ -1,0 +1,18 @@
+{
+  "solicitacao": { "id": 222, "cliente_id": 142, "status": "PENDENTE", "data_criacao": "2026-09-04 18:00:00" },
+  "pretendentes": [
+    {
+      "pessoa": {
+        "id": 574,
+        "nome": "NOME DO PRETENDENTE",
+        "tipo_pretendente": "INQUILINO",
+        "cpf": "64619844705",
+        "produtos": [
+          { "id": 1, "nome": "FC ANALISE", "status": "SOLICITADO", "data": "2026-09-04 18:00:00", "data_atualizacao": "2026-09-04 18:00:05" },
+          { "id": 9, "nome": "FC SCORE", "status": "ANDAMENTO", "data": "2026-09-04 18:00:00", "data_atualizacao": "2026-09-04 18:00:09" }
+        ]
+      }
+    }
+  ],
+  "parecer": { "sintese": [], "locacao": { "parecer_fiadores": {}, "parecer_inquilinos": {} } }
+}

@@ -1,0 +1,85 @@
+{
+  "solicitacao": {
+    "id": 220,
+    "solicitante": "JOHN DOE",
+    "cliente_id": 142,
+    "cliente_nome": "CLIENTE JOÃO LTDA.",
+    "status": "CONCLUIDA",
+    "data_criacao": "2019-07-15 17:03:41",
+    "data_conclusao": "2019-07-17 19:17:33"
+  },
+  "locacao": {
+    "codigo_imovel": "#C-1234",
+    "aluguel": "5000.00",
+    "condominio": "3500.00",
+    "iptu": "100.50",
+    "tipo_imovel": "RESIDENCIAL"
+  },
+  "pretendentes": [
+    {
+      "pessoa": {
+        "id": 572,
+        "residir": true,
+        "participante": true,
+        "data_nascimento": "1980-02-14",
+        "nome": "ANTONIO NUNES",
+        "tipo_pretendente": "INQUILINO",
+        "cpf": "61223744310",
+        "nome_mae": "PAULA DA SILVA",
+        "produtos": [
+          { "id": 1, "nome": "FC ANALISE", "status": "CONCLUIDO", "data_atualizacao": "2019-07-15 17:03:41", "data": "2019-07-15 17:03:41" }
+        ]
+      },
+      "laudo": {
+        "data_conclusao": "2019-03-20 17:00:36",
+        "restricoes_financeiras": {
+          "result": {
+            "protestos": { "resumo": {}, "detalhes": [], "info": "NADA CONSTA" },
+            "pendencias": { "resumo": {}, "detalhes": [], "info": "NADA CONSTA" },
+            "acoes": { "resumo": {}, "detalhes": [], "info": "NADA CONSTA" },
+            "cheques": { "resumo": {}, "detalhes": [], "info": "NADA CONSTA" }
+          },
+          "icon": "positivo",
+          "recommendation": [],
+          "caution": []
+        },
+        "parecer_sistemico": [
+          {
+            "parecer": "RISCO BAIXO",
+            "score_fc": 812,
+            "recomendacao": ["LOCAÇÃO RECOMENDADA COM COMPROVAÇÃO DE RENDA."],
+            "risco": null
+          }
+        ],
+        "compatibilidade_renda": {
+          "result": { "valor_locacao": 8600, "renda": 27000, "vezes": 3.14 },
+          "icon": "positivo",
+          "recommendation": { "titulo": "Considerando uma locação de imóvel residencial para uso próprio", "observacoes": [] },
+          "caution": []
+        },
+        "situacao_cpf": { "result": "Ativo", "icon": "positivo", "recommendation": [], "caution": [] },
+        "suspeita_obito": { "result": false, "icon": "positivo", "recommendation": [], "caution": [] },
+        "participacao_empresarial": { "result": "Não apurado", "icon": "nulo", "recommendation": [], "caution": [] },
+        "principal_origem_renda": {
+          "result": {
+            "origem": "Funcionário Público (Estatutário)",
+            "documentacao": ["FUNCIONÁRIO PÚBLICO (Com estabilidade): Contracheque atual ou publicação no diário oficial."]
+          },
+          "icon": "neutro",
+          "recommendation": [],
+          "caution": []
+        }
+      }
+    }
+  ],
+  "parecer": {
+    "sintese": [
+      { "cpf": "61223744310", "nome": "ANTONIO NUNES", "pretendente_id": 572, "parecer": [{ "parecer": "RISCO BAIXO", "score_fc": 812, "recomendacao": [], "risco": null }] }
+    ],
+    "locacao": {
+      "parecer_fiadores": {},
+      "parecer_inquilinos": { "parecer": "RISCO BAIXO", "aprovados": "Locação recomendada com o(s) INQUILINO(S): ANTONIO NUNES", "nao_aprovados": null },
+      "risco": "Os riscos acima consideram o valor da locação, as rendas declaradas e presumidas, além dos dados apurados no mercado e aplicados à inteligência imobiliária Ficha Certa."
+    }
+  }
+}

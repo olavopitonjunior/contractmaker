@@ -1,0 +1,30 @@
+{
+  "solicitacao": { "id": 223, "cliente_id": 142, "status": "CONCLUIDA" },
+  "pretendentes": [
+    {
+      "pessoa": {
+        "id": 575,
+        "tipo_pretendente": "OUTROS",
+        "razao_social": "NOME DA EMPRESA LTDA",
+        "cnpj": "38646762000132",
+        "produtos": [
+          { "id": 4, "nome": "FC EMPRESA", "status": "CONCLUIDO", "data": "2026-09-04 18:00:00", "data_atualizacao": "2026-09-04 18:30:00" }
+        ]
+      },
+      "laudo": {
+        "data_conclusao": "2026-09-04 18:30:00",
+        "restricoes_financeiras": {
+          "result": {
+            "protestos": { "info": "NADA CONSTA" },
+            "pendencias": { "info": "CONSTA", "resumo": { "total": 1 } },
+            "acoes": { "info": "NADA CONSTA" },
+            "cheques": { "info": "NADA CONSTA" }
+          },
+          "icon": "negativo"
+        },
+        "parecer_sistemico": [{ "parecer": "RISCO ACIMA DA MÉDIA", "score_fc": 410 }]
+      }
+    }
+  ],
+  "parecer": { "sintese": [], "locacao": { "parecer_inquilinos": { "parecer": "RISCO ACIMA DA MÉDIA" }, "parecer_fiadores": {} } }
+}
