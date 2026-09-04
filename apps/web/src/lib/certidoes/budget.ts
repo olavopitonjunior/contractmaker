@@ -10,20 +10,33 @@ import type { Prisma } from "@prisma/client";
  * 250× maior do que o que realmente bloqueava o disparo.
  */
 
-export type CertidoesProvider = "infosimples" | "serasa";
+export type CertidoesProvider = "infosimples" | "serasa" | "fichacerta";
 
 /** R$ 200,00 — o valor que sempre bloqueou de fato (executor). */
 export const INFOSIMPLES_BUDGET_DEFAULT_CENTS = 20000;
 /** R$ 5.000,00 — placeholder: o Serasa não está integrado (ver docs/certidoes-serasa.md). */
 export const SERASA_BUDGET_DEFAULT_CENTS = 500000;
+/**
+ * R$ 3.000,00 — Ficha Certa Digital (análise de crédito na proposta). A conta é
+ * POR IMOBILIÁRIA e pré-paga em créditos; este teto é o freio da plataforma
+ * contra disparo em loop, não o saldo da conta (esse é `GET /credits`).
+ */
+export const FICHACERTA_BUDGET_DEFAULT_CENTS = 300000;
+
+const BUDGET_ENV: Record<CertidoesProvider, string> = {
+  infosimples: "INFOSIMPLES_MONTHLY_BUDGET_CENTS",
+  serasa: "SERASA_MONTHLY_BUDGET_CENTS",
+  fichacerta: "FICHACERTA_MONTHLY_BUDGET_CENTS",
+};
+const BUDGET_DEFAULT: Record<CertidoesProvider, number> = {
+  infosimples: INFOSIMPLES_BUDGET_DEFAULT_CENTS,
+  serasa: SERASA_BUDGET_DEFAULT_CENTS,
+  fichacerta: FICHACERTA_BUDGET_DEFAULT_CENTS,
+};
 
 export function monthlyBudgetCents(provider: CertidoesProvider): number {
-  const raw =
-    provider === "serasa"
-      ? process.env.SERASA_MONTHLY_BUDGET_CENTS
-      : process.env.INFOSIMPLES_MONTHLY_BUDGET_CENTS;
-  const fallback =
-    provider === "serasa" ? SERASA_BUDGET_DEFAULT_CENTS : INFOSIMPLES_BUDGET_DEFAULT_CENTS;
+  const raw = process.env[BUDGET_ENV[provider]];
+  const fallback = BUDGET_DEFAULT[provider];
   const n = Number.parseInt(raw ?? "", 10);
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }

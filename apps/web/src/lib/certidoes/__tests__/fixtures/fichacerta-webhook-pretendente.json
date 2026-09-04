@@ -1,0 +1,36 @@
+{
+  "solicitacao": { "id": 220, "cliente_id": 142, "status": "CONCLUIDA", "data_conclusao": "2019-07-17 19:17:33" },
+  "locacao": { "codigo_imovel": "#C-1234", "aluguel": "5000.00", "tipo_imovel": "RESIDENCIAL" },
+  "pretendentes": [
+    {
+      "pessoa": {
+        "id": 572,
+        "nome": "ANTONIO NUNES",
+        "tipo_pretendente": "INQUILINO",
+        "cpf": "61223744310",
+        "produtos": [
+          { "id": 1, "nome": "FC ANALISE", "status": "CONCLUIDO", "data_atualizacao": "2019-07-15 17:03:41", "data": "2019-07-15 17:03:41" }
+        ]
+      },
+      "laudo": {
+        "data_conclusao": "2019-03-20 17:00:36",
+        "restricoes_financeiras": {
+          "result": {
+            "protestos": { "info": "NADA CONSTA" },
+            "pendencias": { "info": "NADA CONSTA" },
+            "acoes": { "info": "NADA CONSTA" },
+            "cheques": { "info": "NADA CONSTA" }
+          },
+          "icon": "positivo"
+        },
+        "parecer_sistemico": [{ "parecer": "RISCO MÉDIO", "score_fc": 540, "recomendacao": ["Recomenda-se maior cautela na comprovação de renda."] }],
+        "situacao_cpf": { "result": "Ativo", "icon": "positivo" },
+        "suspeita_obito": { "result": false, "icon": "positivo" }
+      }
+    }
+  ],
+  "parecer": {
+    "sintese": [{ "cpf": "61223744310", "nome": "ANTONIO NUNES", "pretendente_id": 572, "parecer": [{ "parecer": "RISCO MÉDIO", "score_fc": 540 }] }],
+    "locacao": { "parecer_inquilinos": { "parecer": "RISCO MÉDIO", "aprovados": "ANTONIO NUNES", "nao_aprovados": null }, "parecer_fiadores": {} }
+  }
+}

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db/prisma";
+import { applyProposalExtractions } from "./apply-extractions";
 import { DEAL_SOURCE_CHANNEL } from "@/lib/pipeline/source-channel";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { moduleForSchemaType } from "@/lib/modules/resolve";
@@ -119,6 +120,21 @@ export async function convertProposalToDeal(input: {
     }
   }
 
+  const attachments = await prisma.proposalAttachment.findMany({
+    where: { proposalId: proposal.id },
+  });
+
+  // Documentos por parte (2026-09): o OCR feito NA PROPOSTA entra no dado do
+  // negócio aqui, uma vez — só anexos prontos com atribuição humana, sem
+  // sobrescrever campo já preenchido (e, na locação, mover para o fiador
+  // define a garantia). Vem ANTES do `deriveMeta`: título e clientName do Deal
+  // leem `locatarios[0].nome`/`compradores[0].nome`, e quando o único lugar
+  // com o nome é o RG lido por OCR, derivar antes daria card "Locação para"
+  // com o formulário já preenchido. O SalesForm e o Deal recebem o mesmo
+  // `normalizedData`.
+  const extractions = applyProposalExtractions(normalizedData, attachments, proposal.kind);
+  normalizedData = extractions.merged;
+
   // Derive por kind — a variante de venda sobre dataJson de locação devolve
   // value/clientName null (lê compradores/pagamento; locação usa locatarios/
   // aluguel). Mesmo fix já aplicado no apply de anexos e no import.
@@ -140,10 +156,6 @@ export async function convertProposalToDeal(input: {
         : "gerente_invalido"
     );
   }
-
-  const attachments = await prisma.proposalAttachment.findMany({
-    where: { proposalId: proposal.id },
-  });
 
   // Snapshot do preset de obrigatoriedade (só locação grava — ver
   // lib/forms/required-snapshot.ts).
@@ -194,9 +206,13 @@ export async function convertProposalToDeal(input: {
           mime: a.mime,
           url: a.url, // mesmo blob — sem re-upload
           category: a.category ?? "documento",
-          source: "proposal",
+          // Origem preservada: o que o LEAD subiu pela página pública fica
+          // distinguível do que o corretor anexou.
+          source: a.source === "public" ? "proposal_public" : "proposal",
           contentHash: a.contentHash ?? undefined,
           byteSize: a.byteSize ?? undefined,
+          // OCR + assignment viajam verbatim (mesmo contrato do DealAttachment).
+          extractedData: (a.extractedData ?? undefined) as Prisma.InputJsonValue | undefined,
         })),
         skipDuplicates: true,
       });

@@ -4,6 +4,10 @@ import { can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { loadScopedProposal, proposalFeatureGuard } from "@/lib/proposals/route-helpers";
 import { persistProposalDocument } from "@/lib/proposals/attachments";
+import {
+  esteiraForProposalKind,
+  parseProposalAssignment,
+} from "@/lib/proposals/attachment-assignment";
 import { downloadBufferFromUrl, deleteFromStorage } from "@/lib/storage/s3";
 import { extractAuditContextFromRequest } from "@/lib/security/audit";
 
@@ -18,6 +22,11 @@ const bodySchema = z.object({
   filename: z.string().min(1).max(255),
   mime: z.string().min(1).max(255).regex(MIME_SHAPE, "mime inválido"),
   category: z.string().max(120).optional(),
+  // Documentos por parte (2026-09): "de quem é" escolhido no upload. Persiste
+  // como escolha humana (`assignmentPersisted`) — alimenta o convert.
+  assignment: z
+    .object({ kind: z.string().min(1).max(40), index: z.number().int().min(0).max(50) })
+    .optional(),
 });
 
 /**
@@ -54,6 +63,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     );
   }
   const { url, filename, mime, category } = parsed.data;
+  const assignment = parsed.data.assignment
+    ? parseProposalAssignment(parsed.data.assignment, esteiraForProposalKind(proposal.kind))
+    : null;
+  if (parsed.data.assignment && !assignment) {
+    return NextResponse.json({ error: "Atribuição inválida para esta proposta" }, { status: 400 });
+  }
 
   // Validação de propriedade: só aceita URL do store Vercel Blob cujo pathname
   // pertence a ESTA proposta. Impede registrar URL externa arbitrária (que seria
@@ -101,7 +116,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     );
   }
 
-  const { attachment, deduped } = await persistProposalDocument({
+  const { attachment, deduped, assignmentUpdated } = await persistProposalDocument({
     proposalId: proposal.id,
     buffer,
     url,
@@ -109,6 +124,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     mime,
     category: category ?? "documento",
     source: "manual",
+    status: "awaiting_user",
+    ...(assignment ? { extractedData: { assignment, assignmentPersisted: true } } : {}),
     auditCtx: extractAuditContextFromRequest(
       req,
       auth.org.id,
@@ -124,11 +141,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   return NextResponse.json({
     ok: true,
     deduped,
+    // Dedup com parte diferente: o anexo existente foi MOVIDO para a parte
+    // escolhida agora (ver persistProposalDocument).
+    assignmentUpdated,
     attachment: {
       id: attachment.id,
       filename: attachment.filename,
       url: attachment.url,
       category: attachment.category,
+      status: attachment.status,
     },
   });
 }

@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import {
+  FICHACERTA_BUDGET_DEFAULT_CENTS,
   INFOSIMPLES_BUDGET_DEFAULT_CENTS,
   SERASA_BUDGET_DEFAULT_CENTS,
   firstOfCurrentMonth,
@@ -25,6 +26,21 @@ describe("monthlyBudgetCents — um só default", () => {
     expect(monthlyBudgetCents("infosimples")).toBe(20000);
     vi.stubEnv("SERASA_MONTHLY_BUDGET_CENTS", "");
     expect(monthlyBudgetCents("serasa")).toBe(SERASA_BUDGET_DEFAULT_CENTS);
+  });
+
+  it("Ficha Certa: env própria, default R$ 3.000 (freio da plataforma, não saldo da conta)", () => {
+    vi.stubEnv("FICHACERTA_MONTHLY_BUDGET_CENTS", "");
+    expect(monthlyBudgetCents("fichacerta")).toBe(FICHACERTA_BUDGET_DEFAULT_CENTS);
+    expect(FICHACERTA_BUDGET_DEFAULT_CENTS).toBe(300000);
+    vi.stubEnv("FICHACERTA_MONTHLY_BUDGET_CENTS", "777");
+    expect(monthlyBudgetCents("fichacerta")).toBe(777);
+    // A env de um provider não vaza no outro.
+    vi.stubEnv("SERASA_MONTHLY_BUDGET_CENTS", "");
+    expect(monthlyBudgetCents("serasa")).toBe(SERASA_BUDGET_DEFAULT_CENTS);
+  });
+
+  it("monthlySpendWhere filtra pelo provider pedido", () => {
+    expect(monthlySpendWhere("org1", "fichacerta", new Date(0)).provider).toBe("fichacerta");
   });
 });
 

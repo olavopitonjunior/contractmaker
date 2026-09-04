@@ -73,10 +73,14 @@ export default async function CertidoesSettingsPage() {
   // Split Infosimples vs Serasa pra exibir os dois budgets sem se confundir.
   // O type do select acima não inclui `provider`, então usamos o prefixo do
   // endpoint como discriminador (todos os Serasa começam com "serasa/").
-  const monthJobsInfosimples = monthJobs.filter((j) => !j.endpoint.startsWith("serasa/"));
+  const monthJobsInfosimples = monthJobs.filter(
+    (j) => !j.endpoint.startsWith("serasa/") && !j.endpoint.startsWith("fichacerta/")
+  );
   const monthJobsSerasa = monthJobs.filter((j) => j.endpoint.startsWith("serasa/"));
+  const monthJobsFichaCerta = monthJobs.filter((j) => j.endpoint.startsWith("fichacerta/"));
   const monthSpend = monthJobsInfosimples.reduce((a, j) => a + (j.costCents ?? 0), 0);
   const monthSpendSerasa = monthJobsSerasa.reduce((a, j) => a + (j.costCents ?? 0), 0);
+  const monthSpendFichaCerta = monthJobsFichaCerta.reduce((a, j) => a + (j.costCents ?? 0), 0);
   // NÃO mostrar o budget aqui: INFOSIMPLES/SERASA_MONTHLY_BUDGET_CENTS são
   // tetos DA PLATAFORMA (env compartilhado entre todos os tenants) — expor o
   // valor e o percentual pra qualquer membro da org vazava um número de infra
@@ -298,7 +302,7 @@ export default async function CertidoesSettingsPage() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-5">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2">
@@ -323,6 +327,20 @@ export default async function CertidoesSettingsPage() {
             <p className="text-2xl font-semibold">{brl(monthSpendSerasa)}</p>
             <p className="text-xs text-muted-foreground mt-1">
               {monthJobsSerasa.length} consulta{monthJobsSerasa.length === 1 ? "" : "s"} no mês
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Wallet className="h-4 w-4 text-indigo-700" /> Ficha Certa — mês
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold">{brl(monthSpendFichaCerta)}</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {monthJobsFichaCerta.length} laudo{monthJobsFichaCerta.length === 1 ? "" : "s"} no mês
             </p>
           </CardContent>
         </Card>

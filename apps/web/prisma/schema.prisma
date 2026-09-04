@@ -398,6 +398,10 @@ model Organization {
   clicksignAccount  ClickSignAccount?
   signatureSettings OrgSignatureSettings?
   proposals         Proposal[]
+  // Análise de crédito por imobiliária (Ficha Certa Digital) — conta própria
+  // com credencial/webhook criptografados, no molde da ClickSignAccount.
+  fichaCertaAccount      FichaCertaAccount?
+  creditAnalysisRequests CreditAnalysisRequest[]
 
   // iList/RexAPI (Gryphtech RE/MAX) — conexão região+offices por tenant e
   // espelho local de listings (a RexAPI não tem busca textual nem webhooks).
@@ -705,6 +709,7 @@ model Deal {
   contracts              Contract[]
   attachments            DealAttachment[]
   certidaoJobs           CertidaoJob[]
+  creditRequests         CreditAnalysisRequest[]
   certidoesShareLinks    CertidoesShareLink[]
   diligentedPersons      DiligentedPerson[]
   commissionCharges      CommissionCharge[]
@@ -961,6 +966,13 @@ model CertidaoJob {
   // Locação — job escopado a um LeaseClient (prospect) em vez de um Deal. Mutuamente
   // exclusivo com dealId: crédito/certidões de cliente rodam pré-deal (dealId null).
   leaseClientId   String?
+  // Proposta (pré-Deal, 2026-09) — certidões e análise de crédito disparadas
+  // da tela da proposta, antes da conversão. Terceiro sujeito ao lado de
+  // dealId/leaseClientId; o convert relinka `dealId` mantendo `proposalId`.
+  proposalId      String?
+  // Agregado da análise de crédito (a "solicitação" no provedor, ex.: Ficha
+  // Certa). Um request → N jobs (um por pretendente). Null nas certidões.
+  creditRequestId String?
   requestPayload  Json
   status          String    @default("pending")
   resultCode      Int?
@@ -1000,6 +1012,8 @@ model CertidaoJob {
   attachment       DealAttachment?       @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
   diligentedPerson DiligentedPerson?     @relation(fields: [diligentedPersonId], references: [id], onDelete: SetNull)
   leaseClient      LeaseClient?          @relation(fields: [leaseClientId], references: [id], onDelete: SetNull)
+  proposal         Proposal?             @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  creditRequest    CreditAnalysisRequest? @relation(fields: [creditRequestId], references: [id], onDelete: SetNull)
   auditLogs        CertidaoJobAuditLog[]
 
   @@index([dealId, batchId])
@@ -1009,6 +1023,8 @@ model CertidaoJob {
   @@index([userId, createdAt])
   @@index([dealId, diligentedPersonId])
   @@index([leaseClientId, batchId])
+  @@index([proposalId, batchId])
+  @@index([creditRequestId])
 }
 
 // Phase F.II-β — audit log de transições de status do CertidaoJob. Cada
@@ -3783,6 +3799,9 @@ model Proposal {
   // O corretor fechou no telefone e converteu sem esperar assinatura. Exige
   // motivo (audit) e marca o card no kanban.
   convertedWithoutSignature Boolean @default(false)
+  // Consentimentos LGPD registrados na proposta (`creditConsent {at, by,
+  // baseLegal, provider}`), copiados para Deal.complianceJson na conversão.
+  complianceJson Json?
 
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -3802,6 +3821,8 @@ model Proposal {
   events         ProposalEvent[]
   envelopes      Envelope[]
   notificationLogs ProposalNotificationLog[]
+  certidaoJobs   CertidaoJob[]
+  creditRequests CreditAnalysisRequest[]
 
   @@unique([orgId, code])
   reviewRuns ContractReviewRun[]
@@ -3881,15 +3902,30 @@ model ProposalAttachment {
   //                                manual; acceptance-record-sync.ts tenta pegar
   //                                sozinho caso a ClickSign passe a devolver.)
   category    String?
-  source      String   @default("manual") // manual | clicksign_signed | clicksign_acceptance | dossier
+  // manual | clicksign_signed | clicksign_acceptance | dossier
+  // | public      (enviado pelo lead pela página /p/[token])
+  // | infosimples (certidão emitida na proposta) | fichacerta (laudo de crédito)
+  source      String   @default("manual")
   contentHash String?
   byteSize    Int?
+  // Documentos por parte na proposta (2026-09) — mesmo contrato do
+  // DealAttachment/FormAttachment: OCR on-demand com claim atômico e o
+  // assignment ({kind,index}) dentro de extractedData, para o convert copiar
+  // verbatim e a aba do negócio reaproveitar os componentes.
+  extractedData       Json?
+  status              String    @default("awaiting_user") // awaiting_user | queued | extracting | ready | failed
+  extractError        String?
+  extractingStartedAt DateTime?
+  // Job de certidão/laudo que originou o PDF (espelho de LeaseClientAttachment).
+  certidaoJobId       String?
   createdAt   DateTime @default(now())
 
   proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
 
   @@index([proposalId])
   @@index([contentHash])
+  @@index([proposalId, status])
+  @@index([certidaoJobId])
 }
 
 // Timeline append-only. Separa `fetched` (bot/crawler buscou a URL) de `viewed`
@@ -4826,6 +4862,106 @@ model ClickSignAccount {
   updatedAt              DateTime  @updatedAt
 
   org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+/// FichaCertaAccount — conta da Ficha Certa Digital (análise de crédito para
+/// locação) POR IMOBILIÁRIA, no molde da ClickSignAccount: login/senha da API
+/// e os segredos do webhook cifrados com AES-256-GCM (lib/security/crypto.ts).
+/// A Ficha Certa aceita UM webhook por conta e não assina o payload; ela
+/// autentica chamando o nosso `token_url` com `webhookTokenUser/Password`
+/// (POST JSON) e mandando o retorno como `Authorization: Bearer`. O slug
+/// compõe as URLs públicas /api/webhooks/fichacerta/{slug} e .../{slug}/token.
+/// Sem row a org NÃO tem análise de crédito (fail-closed; não há token global).
+model FichaCertaAccount {
+  id                             String    @id @default(cuid())
+  orgId                          String    @unique
+  label                          String?
+  login                          String
+  passwordEncrypted              String    @db.Text
+  passwordIvBase64               String
+  passwordTagBase64              String
+  baseUrl                        String    @default("https://api.fichacertadigital.com.br")
+  webhookSlug                    String    @unique
+  webhookTokenUser               String
+  webhookTokenPasswordEncrypted  String    @db.Text
+  webhookTokenPasswordIvBase64   String
+  webhookTokenPasswordTagBase64  String
+  // Fallback `?k=` na URL do webhook (rotacionável pelo card).
+  webhookQuerySecretEncrypted    String    @db.Text
+  webhookQuerySecretIvBase64     String
+  webhookQuerySecretTagBase64    String
+  fichaCertaWebhookId            String?
+  webhookProvisioned             Boolean   @default(false)
+  // Produtos contratados (ids da API, separados por vírgula). 1 = FC REPORT,
+  // 9 = FC SCORE; PJ usa sempre 4 (FC EMPRESA).
+  products                       String    @default("1,9")
+  // Custo estimado por laudo (créditos pré-pagos — telemetria, não teto).
+  costCents                      Int       @default(1500)
+  clienteId                      String?
+  status                         String    @default("connected") // connected | error | disconnected
+  connectedById                  String?
+  lastValidatedAt                DateTime?
+  lastError                      String?   @db.Text
+  createdAt                      DateTime  @default(now())
+  updatedAt                      DateTime  @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+/// CreditAnalysisRequest — agregado NEUTRO de provedor e de esteira para uma
+/// análise de crédito: a "solicitação" na Ficha Certa (1 locação, N
+/// pretendentes), ou, no futuro, uma análise de seguradora/financiamento.
+/// Cada pretendente vira um CertidaoJob (provider = o mesmo) apontando para
+/// cá por `creditRequestId`; o parecer consolidado fica em `resultJson`.
+/// Nasce na PROPOSTA (`proposalId`) e o convert relinka `dealId`.
+/// `externalId` é único por (org, provider): ids de solicitação são globais
+/// na plataforma deles, mas cada org tem a própria conta.
+///
+/// onDelete de propósito ASSIMÉTRICO em relação ao CertidaoJob.proposal
+/// (Cascade): o request é o agregado COBRADO (créditos pré-pagos consumidos,
+/// `externalId` no provedor) e precisa sobreviver à exclusão da proposta para
+/// conciliação/auditoria — por isso SetNull aqui, como no LeaseClient. Os jobs
+/// são detalhe de execução por pretendente e podem ir junto. A rota de exclusão
+/// de proposta já recusa (409) proposta convertida, então job ligado a Deal
+/// vivo não é apagado por esse caminho; script que chame `proposal.delete()`
+/// direto deve repetir esse guard.
+///
+/// `reportProposalAttachmentId`/`reportDealAttachmentId` são referências SOFT
+/// (sem FK): o anexo pode ser excluído/arquivado independentemente; quem lê
+/// deve tratar id sem row como "PDF indisponível", nunca como erro.
+model CreditAnalysisRequest {
+  id                         String    @id @default(cuid())
+  orgId                      String
+  userId                     String?
+  proposalId                 String?
+  dealId                     String?
+  provider                   String // fichacerta | serasa | seguradora:<slug>
+  purpose                    String    @default("locacao") // locacao | financiamento
+  externalId                 String?
+  status                     String    @default("pending") // pending | submitting | processing | completed | failed | canceled
+  batchId                    String?
+  requestJson                Json?
+  resultJson                 Json?
+  reportUrl                  String?
+  reportProposalAttachmentId String?
+  reportDealAttachmentId     String?
+  costCents                  Int?
+  errorMessage               String?   @db.Text
+  submittedAt                DateTime?
+  completedAt                DateTime?
+  lastSyncedAt               DateTime?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+
+  org      Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  proposal Proposal?     @relation(fields: [proposalId], references: [id], onDelete: SetNull)
+  deal     Deal?         @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  jobs     CertidaoJob[]
+
+  @@unique([orgId, provider, externalId])
+  @@index([proposalId])
+  @@index([dealId])
+  @@index([orgId, provider, createdAt])
 }
 
 /// OrgSignatureSettings — preferências de assinatura por org (independentes da

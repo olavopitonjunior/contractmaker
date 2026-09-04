@@ -4,6 +4,25 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-04 - Documentos por parte na proposta de locação
+
+### Adicionado
+
+- **Documentos por parte na proposta de locação, com leitura por IA.** Na tela da proposta (com a feature "Análise de crédito — locação" ligada), o corretor anexa RG/CNH, comprovantes de renda e de endereço dizendo de quem é cada documento (locatário, cônjuge, fiador, cônjuge do fiador, locador, imóvel), agrupados por papel como na aba de documentos do negócio. "Extrair com IA" lê o documento sob demanda (um clique só paga um OCR — dois cliques no mesmo card não pagam dois); "Mover para…" corrige a atribuição; mover para o fiador avisa que a garantia vira fiança ao converter. Documentos enviados pelo cliente ficam marcados. Subir de novo o mesmo arquivo escolhendo outra parte move o documento existente (antes respondia "ok" e mantinha a parte antiga). O "Anexar Registro do Aceite" continua no mesmo lugar com a feature ligada. Sem a feature, a lista simples de documentos continua igual.
+- **A conversão em negócio aproveita o que foi lido.** CPF, nascimento, endereço e demais campos extraídos de documentos com atribuição feita por uma pessoa entram no formulário e no negócio sem redigitar, sem sobrescrever o que a proposta já trazia; a leitura e a atribuição seguem com o documento para a pasta do negócio, e o que veio do cliente continua identificado.
+
+## [Unreleased] - 2026-09-04 - A imobiliária conecta a própria conta Ficha Certa
+
+### Adicionado
+
+- **Conta Ficha Certa Digital por imobiliária em Configurações › Integrações.** O owner/admin informa login e senha da API (produção ou homologação) e os produtos contratados; a plataforma valida a credencial consultando os créditos, provisiona o webhook da conta apontando para o nosso endereço (com o par usuário/senha que a Ficha Certa usa para se autenticar antes de cada entrega) e guarda tudo cifrado. "Testar" confere créditos e se o webhook cadastrado lá é o nosso; "Reconectar" mantém o endereço do webhook. Sem conta conectada não há análise de crédito — não existe credencial de plataforma. Cliente HTTP, normalizador do laudo (restrição só por protestos/pendências/ações/cheques, CPF irregular ou suspeita de óbito; renda é parecer) e fixtures da documentação entram junto; o disparo pela proposta vem no próximo lote.
+
+## [Unreleased] - 2026-09-04 - Costura para análise de crédito e certidões na proposta
+
+### Adicionado
+
+- **Base de dados para documentos, certidões e análise de crédito na proposta (pré-negócio).** Só a costura: conta da Ficha Certa Digital por imobiliária (credenciais e segredos do webhook cifrados, no molde da conta ClickSign), agregado neutro de provedor para uma análise de crédito com N pretendentes, vínculo do job de certidão/laudo com a proposta, OCR nos anexos da proposta e consentimento LGPD na proposta. Catálogo ganha os laudos Ficha Certa PF/PJ, o alvo "cônjuge do locatário" e a feature `locacao.credito` (nasce desligada). Nenhuma tela ou rota lê isso ainda — os próximos lotes ligam.
+
 ## [Unreleased] - 2026-09-04 - A label de promoção passa a atestar o head
 
 ### Corrigido

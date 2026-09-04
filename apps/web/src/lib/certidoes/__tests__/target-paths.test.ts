@@ -16,6 +16,7 @@ describe("basePathForTarget", () => {
     ["locador", 0, "locacao", "locadores.0"],
     ["fiador", 0, "locacao", "garantia.fiador"],
     ["conjuge_fiador", 0, "locacao", "garantia.fiador.conjuge"],
+    ["conjuge_locatario", 1, "locacao", "locatarios.1.conjuge"],
   ] as const)("%s[%i] (%s) → %s", (kind, index, esteira, expected) => {
     expect(basePathForTarget(kind, index, esteira)).toBe(expected);
   });

@@ -57,6 +57,7 @@ export const FEATURE = {
   LOCACAO_REVISAO_CONTRATO: "locacao.revisao_contrato",
   LOCACAO_REVISAO_PROPOSTA: "locacao.revisao_proposta",
   LOCACAO_CERTIDOES: "locacao.certidoes",
+  LOCACAO_CREDITO: "locacao.credito",
 } as const;
 
 export type FeatureKey = (typeof FEATURE)[keyof typeof FEATURE];
@@ -164,6 +165,10 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
       // cada pessoa gera ~6-10 consultas pagas; entra tenant a tenant pelo
       // painel super-admin, como a Pagadoria.
       { key: FEATURE.LOCACAO_CERTIDOES, label: "Certidões — locação", default: false },
+      // Análise de crédito na PROPOSTA de locação (Ficha Certa Digital, conta
+      // por imobiliária) + documentos por parte. Default OFF (2026-09-04): só
+      // faz sentido com a conta conectada em Integrações; laudo é pago.
+      { key: FEATURE.LOCACAO_CREDITO, label: "Análise de crédito — locação", default: false },
     ],
   },
 ] as const;
