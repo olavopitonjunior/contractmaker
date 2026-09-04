@@ -261,6 +261,47 @@ describe("replace-block — a migração que não tinha caminho", () => {
     expect(reqs[1].insertText.text).toBe("{{rateio_primeiro_aluguel}}");
   });
 
+  it("bloco separado por LINHA EM BRANCO continua sendo o mesmo bloco", async () => {
+    // O harness deste arquivo sempre juntou os parágrafos com um "\n" exato, e
+    // o planejamento exigia essa igualdade byte a byte (`paragrafos.join("\n")`
+    // tinha de aparecer literalmente no texto plano). Documento real não é
+    // assim: o export do Drive intercala parágrafos vazios, e a lista da Trio —
+    // que o operador vê como três itens seguidos — chega com linha em branco
+    // entre eles. O bloco era recusado, e a tela dizia só "não aplicado".
+    const plano = [cabecalho, itens[0], "", itens[1], "", itens[2], depois].join("\n");
+    getDocPlainTextMock
+      .mockResolvedValueOnce(plano)
+      .mockResolvedValueOnce([cabecalho, "{{rateio_primeiro_aluguel}}", depois].join("\n"));
+    getDocStructureMock.mockResolvedValue(fakeDoc(doc));
+
+    const out = await run([
+      { op: "replace-block", paragraphs: itens, token: "rateio_primeiro_aluguel" },
+    ]);
+    expect(out.results[0]).toMatchObject({ op: "replace-block", status: "applied" });
+  });
+
+  it("espaço em branco no fim do parágrafo não quebra o bloco", async () => {
+    const plano = [cabecalho, `${itens[0]} `, `${itens[1]}\t`, itens[2], depois].join("\n");
+    getDocPlainTextMock
+      .mockResolvedValueOnce(plano)
+      .mockResolvedValueOnce([cabecalho, "{{rateio_primeiro_aluguel}}", depois].join("\n"));
+    getDocStructureMock.mockResolvedValue(fakeDoc(doc));
+
+    const out = await run([
+      { op: "replace-block", paragraphs: itens, token: "rateio_primeiro_aluguel" },
+    ]);
+    expect(out.results[0]).toMatchObject({ op: "replace-block", status: "applied" });
+  });
+
+  it("TEXTO entre os itens continua recusado — a tolerância é só a espaço", async () => {
+    const plano = [cabecalho, itens[0], "Parágrafo único: o que estiver aqui é contrato.", itens[1], depois].join("\n");
+    getDocPlainTextMock.mockResolvedValue(plano);
+    const out = await run([
+      { op: "replace-block", paragraphs: [itens[0]!, itens[1]!], token: "rateio_primeiro_aluguel" },
+    ]);
+    expect(out.results[0]).toMatchObject({ status: "skipped", reason: "block-not-consecutive" });
+  });
+
   it("bloco NÃO consecutivo é recusado antes de qualquer escrita", async () => {
     // Apagar do primeiro ao último engoliria o que está no meio — e o que está
     // no meio é contrato.
