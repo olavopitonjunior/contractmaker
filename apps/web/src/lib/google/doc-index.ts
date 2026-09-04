@@ -15,6 +15,55 @@
  */
 import type { docs_v1 } from "googleapis";
 
+/**
+ * Espaço não-quebrável ≠ espaço — e o export `text/plain` do Drive NORMALIZA:
+ * onde o Doc tem NBSP (código 160), o texto que o app lê tem espaço (32). O
+ * DOCX da imobiliária traz NBSP depois de "8.1." e dentro de moedas; um
+ * `replaceAllText` com a forma lida casa ZERO no Docs. Medido em staging
+ * (04/09/2026): a cláusula de garantia por caução saía `replace-noop`.
+ *
+ * Toda comparação entre texto lido e texto do Doc passa por aqui, e o que vai
+ * para a API é a forma REAL (ver {@link findForms}).
+ */
+// INVARIANTE: cada caractere normaliza para EXATAMENTE um caractere. `findForms`
+// fatia o texto ORIGINAL com índices calculados no texto normalizado; um
+// mapeamento de largura diferente (ligadura, sequência composta) deslocaria a
+// fatia e o `replaceAllText` receberia o trecho errado — falhando ao ESCREVER,
+// não ao recusar. Só entra aqui o que é 1:1.
+const NBSP_RE = /[\u00A0\u202F]/g;
+export function normalizeSpaces(text: string): string {
+  return text.replace(NBSP_RE, " ");
+}
+
+/**
+ * Ocorrências de `needle` em `hay` tolerando NBSP≠espaço, com a forma REAL de
+ * cada uma (a fatia de `hay`). A normalização preserva o comprimento, então os
+ * índices do texto normalizado valem no original.
+ */
+export function findForms(hay: string, needle: string): { count: number; forms: string[] } {
+  if (!needle) return { count: 0, forms: [] };
+  const nh = normalizeSpaces(hay);
+  const nn = normalizeSpaces(needle);
+  const forms: string[] = [];
+  let idx = nh.indexOf(nn);
+  while (idx !== -1) {
+    forms.push(hay.slice(idx, idx + nn.length));
+    idx = nh.indexOf(nn, idx + 1);
+  }
+  return { count: forms.length, forms };
+}
+
+/**
+ * A forma como `needle` está DE FATO no documento, quando é única lá. É o
+ * texto que se manda ao `replaceAllText`: a API não normaliza, e a forma lida
+ * pelo export pode não existir no Doc. Ambígua ou ausente → `null` (quem
+ * chama mantém a forma que tinha e deixa a reply decidir).
+ */
+export function realFormOf(realText: string, needle: string): string | null {
+  const hit = findForms(realText, needle);
+  return hit.count === 1 ? hit.forms[0]! : null;
+}
+
 export interface TextSegment {
   text: string;
   /** Índice absoluto da Docs API onde este segmento começa. */
@@ -99,6 +148,26 @@ function paragraphsOf(
   return out;
 }
 
+/** Textos não vazios das células de uma tabela, na ordem de leitura (linha a linha). */
+function tableTexts(table: docs_v1.Schema$Table): string[] {
+  const out: string[] = [];
+  for (const row of table.tableRows || []) {
+    for (const cell of row.tableCells || []) {
+      for (const block of cell.content || []) {
+        const para = block.paragraph;
+        if (!para) continue;
+        const texto = (para.elements || [])
+          .map((el) => el.textRun?.content ?? "")
+          .join("")
+          .replace(/\n+$/, "")
+          .trim();
+        if (texto) out.push(normalizeSpaces(texto));
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * Intervalo que cobre uma sequência CONSECUTIVA de parágrafos, do início do
  * primeiro ao fim do último.
@@ -125,19 +194,60 @@ export function findBlockRange(
   if (alvos.length === 0) return null;
 
   const paras = paragraphsOf(doc);
+  const nalvos = alvos.map(normalizeSpaces);
   let achado: ParagraphRange | null = null;
-  for (let i = 0; i + alvos.length <= paras.length; i += 1) {
-    const casa = alvos.every((t, k) => paras[i + k]!.texto === t);
+
+  // Bloco que é uma TABELA inteira: o bloco de assinaturas dos modelos da Trio
+  // é uma tabela 3×2 com uma linha de assinatura por célula, e o export
+  // `text/plain` a achata em parágrafos, linha a linha, célula a célula. Se os
+  // textos das células — na mesma ordem de leitura, sem os vazios — são
+  // exatamente o bloco, o intervalo é o da tabela inteira: a API só apaga
+  // tabela como unidade, e apagar a unidade é o que se quer. Bloco que cobre
+  // só parte de uma tabela não casa aqui (a fatia teria de partir a tabela).
+  for (const block of doc.body?.content || []) {
+    if (!block.table || block.startIndex == null || block.endIndex == null) continue;
+    const textos = tableTexts(block.table);
+    if (textos.length !== nalvos.length || !textos.every((t, k) => t === nalvos[k])) continue;
+    if (achado) return null;
+    achado = { startIndex: block.startIndex, endIndex: block.endIndex };
+  }
+
+  for (let i = 0; i < paras.length; i += 1) {
+    if (normalizeSpaces(paras[i]!.texto) !== nalvos[0]) continue;
+    // Anda pelo `body.content` a partir do primeiro parágrafo casado. Parágrafo
+    // VAZIO no meio do bloco é aceito e entra no intervalo: o export do Drive
+    // intercala linhas em branco (o bloco de assinaturas é o caso típico, com
+    // várias entre uma linha de assinatura e a próxima), e quem manda o bloco
+    // vem de `splitDocParagraphs`, que as descarta. Texto diferente, ou
+    // qualquer bloco que não seja parágrafo (tabela, quebra de seção — a
+    // posição salta), encerra a tentativa: o que está entre os parágrafos
+    // seria apagado junto.
+    let k = 1;
+    let j = i + 1;
+    let casa = true;
+    while (k < alvos.length) {
+      const p = paras[j];
+      if (!p || p.posicao !== paras[j - 1]!.posicao + 1) {
+        casa = false;
+        break;
+      }
+      if (normalizeSpaces(p.texto) === nalvos[k]) {
+        k += 1;
+        j += 1;
+        continue;
+      }
+      if (p.texto === "") {
+        j += 1;
+        continue;
+      }
+      casa = false;
+      break;
+    }
     if (!casa) continue;
-    // Nada entre eles no `body.content` original — nem bloco que não é parágrafo.
-    const semIntruso = alvos.every(
-      (_t, k) => k === 0 || paras[i + k]!.posicao === paras[i + k - 1]!.posicao + 1
-    );
-    if (!semIntruso) continue;
     if (achado) return null; // a mesma sequência aparece mais de uma vez
     achado = {
       startIndex: paras[i]!.range.startIndex,
-      endIndex: paras[i + alvos.length - 1]!.range.endIndex,
+      endIndex: paras[j - 1]!.range.endIndex,
     };
   }
   return achado;
@@ -156,7 +266,7 @@ export function findParagraphRange(
   doc: docs_v1.Schema$Document,
   text: string
 ): ParagraphRange | null {
-  const alvo = text.trim();
+  const alvo = normalizeSpaces(text.trim());
   if (!alvo) return null;
 
   let found: ParagraphRange | null = null;
@@ -169,7 +279,7 @@ export function findParagraphRange(
     if (elements.length === 0) continue;
 
     const conteudo = elements.map((el) => el.textRun!.content!).join("");
-    if (conteudo.replace(/\n+$/, "").trim() !== alvo) continue;
+    if (normalizeSpaces(conteudo.replace(/\n+$/, "").trim()) !== alvo) continue;
     if (found) return null; // ambíguo: dois parágrafos com o mesmo texto
 
     const start = elements[0]!.startIndex!;

@@ -32,7 +32,14 @@
  */
 import type { docs_v1 } from "googleapis";
 import { batchUpdateDoc, getDocPlainText, getDocStructure } from "@/lib/google/docs";
-import { findBlockRange, findParagraphRange } from "@/lib/google/doc-index";
+import {
+  collectTextSegments,
+  findBlockRange,
+  findForms,
+  findParagraphRange,
+  plainTextOf,
+  realFormOf,
+} from "@/lib/google/doc-index";
 import { countOccurrences } from "@/lib/templates/apply-clause-slot";
 import { isKnownToken } from "@/lib/templates/placeholder-catalog";
 
@@ -112,6 +119,13 @@ interface PlannedStructural {
   target: string;
   /** Parágrafos a substituir, na ordem em que aparecem no Doc. */
   paragrafos: string[];
+  /**
+   * Quantas ocorrências de cada parágrafo o texto simulado prevê DEPOIS da
+   * edição. "Todos saíram" não é "zero no documento": "PARTE LOCATÁRIA" está
+   * no bloco de assinaturas e em dezenas de cláusulas — o que a conferência
+   * exige é que não tenha sobrado MAIS do que a simulação previu.
+   */
+  restantes: number[];
   /** Texto que entra no lugar. */
   texto: string;
 }
@@ -120,6 +134,37 @@ const HAS_PLACEHOLDER = /\{\{[^{}]+\}\}/;
 
 function tokenRe(token: string): RegExp {
   return new RegExp(`\\{\\{\\s*${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\}\\}`, "g");
+}
+
+/**
+ * Toda posição em que `paragrafos` aparecem CONSECUTIVOS em `texto` — cada um
+ * logo depois do anterior, com no máximo espaço em branco entre eles. Cada
+ * ocorrência do primeiro parágrafo é um início candidato.
+ */
+export function findConsecutiveSequences(
+  texto: string,
+  paragrafos: readonly string[]
+): Array<{ inicio: number; fim: number }> {
+  const out: Array<{ inicio: number; fim: number }> = [];
+  const primeiro = paragrafos[0];
+  if (!primeiro) return out;
+  let inicio = texto.indexOf(primeiro);
+  while (inicio !== -1) {
+    let cursor = inicio + primeiro.length;
+    let ok = true;
+    for (let k = 1; k < paragrafos.length; k += 1) {
+      const par = paragrafos[k]!;
+      const at = texto.indexOf(par, cursor);
+      if (at === -1 || !/^\s*$/.test(texto.slice(cursor, at))) {
+        ok = false;
+        break;
+      }
+      cursor = at + par.length;
+    }
+    if (ok) out.push({ inicio, fim: cursor });
+    inicio = texto.indexOf(primeiro, inicio + 1);
+  }
+  return out;
 }
 
 export async function applyDocEdits(input: {
@@ -173,14 +218,15 @@ export async function applyDocEdits(input: {
       if (!source) return recusar(i, "empty-source", current);
       if (countOccurrences(sim, current) === 0) return recusar(i, "not-found", current);
       if (countOccurrences(sim, current) > 1) return recusar(i, "ambiguous", current);
+      aplicarSim(current, source);
       estruturais.push({
         index: i,
         op: "restore-paragraph",
         target: current,
         paragrafos: [current],
+        restantes: [countOccurrences(sim, current)],
         texto: source,
       });
-      aplicarSim(current, source);
       return;
     }
 
@@ -188,12 +234,15 @@ export async function applyDocEdits(input: {
       const paragrafos = op.paragraphs.map((x) => x.trim()).filter(Boolean);
       if (paragrafos.length === 0) return recusar(i, "empty-block", op.token);
       if (!isKnownToken(op.token, modalidade)) return recusar(i, "unknown-token", op.token);
-      // Cada parágrafo tem de ser único: o intervalo a apagar é decidido pela
-      // estrutura, e um parágrafo repetido tornaria a escolha arbitrária.
+      // Cada parágrafo tem de EXISTIR; o que precisa ser único é a SEQUÊNCIA.
+      // A versão anterior exigia cada parágrafo único no documento, e isso
+      // recusava o bloco de assinaturas em 16 de 16 modelos da Trio: "PARTE
+      // LOCATÁRIA" aparece 43 vezes num contrato de locação, e a linha de
+      // assinatura (só sublinhados) aparece uma vez por signatário. Nenhum
+      // desses parágrafos identifica o bloco sozinho — a sequência inteira,
+      // consecutiva, identifica.
       for (const par of paragrafos) {
-        const conta = countOccurrences(sim, par);
-        if (conta === 0) return recusar(i, "not-found", par);
-        if (conta > 1) return recusar(i, "ambiguous", par);
+        if (countOccurrences(sim, par) === 0) return recusar(i, "not-found", par);
       }
       // Consecutivos no texto: o intervalo vai do primeiro ao último, e o que
       // estiver entre eles seria apagado junto. Conferido de novo na estrutura
@@ -207,42 +256,33 @@ export async function applyDocEdits(input: {
       // APARADOS de `splitDocParagraphs`. O bloco da Trio era recusado por essa
       // diferença de separador, e a tela dizia apenas "não aplicado".
       //
-      // Agora a adjacência é medida por POSIÇÃO, e o que se exige do vão entre
-      // um parágrafo e o próximo é que ele seja só espaço em branco. Texto no
-      // meio continua recusado — é a garantia que importa, porque o que está
-      // entre os itens é contrato.
-      const posicoes: number[] = [];
-      let cursor = 0;
-      for (const par of paragrafos) {
-        const at = sim.indexOf(par, cursor);
-        if (at === -1) return recusar(i, "block-not-consecutive", par);
-        posicoes.push(at);
-        cursor = at + par.length;
-      }
-      for (let k = 1; k < paragrafos.length; k += 1) {
-        const fimAnterior = posicoes[k - 1]! + paragrafos[k - 1]!.length;
-        if (!/^\s*$/.test(sim.slice(fimAnterior, posicoes[k]!))) {
-          return recusar(i, "block-not-consecutive", paragrafos[k]!);
-        }
-      }
+      // A adjacência é medida por POSIÇÃO, e o que se exige do vão entre um
+      // parágrafo e o próximo é que ele seja só espaço em branco. Texto no meio
+      // continua recusado — é a garantia que importa, porque o que está entre
+      // os itens é contrato. Toda ocorrência do primeiro parágrafo é tentada
+      // como início: com o primeiro repetido (a linha de sublinhados), só a
+      // tentativa que emenda a sequência inteira conta.
+      const sequencias = findConsecutiveSequences(sim, paragrafos);
+      if (sequencias.length === 0) return recusar(i, "block-not-consecutive", paragrafos[0]!);
+      if (sequencias.length > 1) return recusar(i, "ambiguous", paragrafos[0]!);
       // O trecho REAL (com os separadores como estão no documento) é o que sai
       // do texto simulado — trocar pelo `join("\n")` deixaria os separadores
       // órfãos e faria as operações de texto seguintes casarem contra um
       // simulado que não corresponde ao documento.
-      const inicio = posicoes[0]!;
-      const fim = posicoes[posicoes.length - 1]! + paragrafos[paragrafos.length - 1]!.length;
+      const { inicio, fim } = sequencias[0]!;
       const trechoReal = sim.slice(inicio, fim);
       if (countOccurrences(sim, trechoReal) !== 1) {
         return recusar(i, "ambiguous", paragrafos[0]!);
       }
+      aplicarSim(trechoReal, `{{${op.token}}}`);
       estruturais.push({
         index: i,
         op: "replace-block",
         target: paragrafos[0]!,
         paragrafos,
+        restantes: paragrafos.map((par) => countOccurrences(sim, par)),
         texto: `{{${op.token}}}`,
       });
-      aplicarSim(trechoReal, `{{${op.token}}}`);
       return;
     }
   });
@@ -348,9 +388,29 @@ export async function applyDocEdits(input: {
   // ── BATCH DE TEXTO (depois; `replaceAllText` não usa índices) ───────────
   const pendentes: PlannedText[] = [];
   if (requests.length > 0) {
+    // Forma REAL de cada trecho pela estrutura: o export troca NBSP por espaço
+    // e a API não normaliza (ver `doc-index.realFormOf`). Estrutura
+    // indisponível → forma lida, e a reply decide.
+    const requestsReais = requests.map((r) => ({ ...r }));
+    try {
+      const realText = plainTextOf(collectTextSegments(await getDocStructure(docId)));
+      for (const r of requestsReais) {
+        const t = r.replaceAllText?.containsText?.text;
+        if (!t) continue;
+        const real = realFormOf(realText, t);
+        if (real !== null && real !== t) {
+          r.replaceAllText = {
+            ...r.replaceAllText,
+            containsText: { ...r.replaceAllText!.containsText, text: real },
+          };
+        }
+      }
+    } catch (err) {
+      console.error("[doc-edit] estrutura indisponível; forma lida segue:", err);
+    }
     let replies: docs_v1.Schema$Response[] | null = null;
     try {
-      const res = await batchUpdateDoc(docId, requests);
+      const res = await batchUpdateDoc(docId, requestsReais);
       replies = res?.data?.replies ?? [];
     } catch (err) {
       console.error("[doc-edit] batchUpdate falhou:", err);
@@ -407,10 +467,11 @@ export async function applyDocEdits(input: {
   }
 
   for (const p of pendentes) {
-    const foiEmbora = countOccurrences(finalText, p.needle) === 0;
+    // Releitura pelo export (espaço onde o Doc tem NBSP): tolerar a diferença.
+    const foiEmbora = findForms(finalText, p.needle).count === 0;
     // Substituição por "" não deixa nada para procurar; o que se confere é a
     // ausência do trecho.
-    const chegou = p.replacement === "" || finalText.includes(p.replacement);
+    const chegou = p.replacement === "" || findForms(finalText, p.replacement).count > 0;
     results[p.index] =
       foiEmbora && chegou
         ? { op: p.op, status: "applied", target: p.target }
@@ -427,10 +488,14 @@ export async function applyDocEdits(input: {
       e.texto
     );
     const primeiraLinha = esperado.split("\n")[0]!.trim();
-    const entrou = primeiraLinha.length === 0 || finalText.includes(primeiraLinha);
-    // TODOS os parágrafos do bloco têm de ter saído — um sobrevivente significa
-    // que o intervalo apagado não era o que se pensava.
-    const sumiu = e.paragrafos.every((par) => countOccurrences(finalText, par) === 0);
+    const entrou = primeiraLinha.length === 0 || findForms(finalText, primeiraLinha).count > 0;
+    // TODOS os parágrafos do bloco têm de ter saído — um sobrevivente além do
+    // que a simulação previa significa que o intervalo apagado não era o que
+    // se pensava. (Parágrafo que também existe fora do bloco continua lá, e
+    // isso é o esperado — ver `restantes`.)
+    const sumiu = e.paragrafos.every(
+      (par, k) => findForms(finalText, par).count <= (e.restantes[k] ?? 0)
+    );
     results[e.index] =
       entrou && sumiu
         ? { op: e.op, status: "applied", target: e.target }

@@ -45,7 +45,8 @@ export type SemanticCategory =
   | "leftover-identifier"
   | "collapsed-paragraph"
   | "dangling-reference"
-  | "split-list-tokenized";
+  | "split-list-tokenized"
+  | "literal-signature-block";
 
 export type SemanticSeverity = "error" | "warning" | "info";
 
@@ -110,6 +111,7 @@ export const SEMANTIC_CATEGORY_LABEL: Record<SemanticCategory, string> = {
   "collapsed-paragraph": "cláusula virou uma chave só",
   "dangling-reference": "citação de item inexistente",
   "split-list-tokenized": "lista de rateio chaveada item a item",
+  "literal-signature-block": "bloco de assinaturas fixo no modelo",
 };
 
 const MAX_EXCERPT = 240;
@@ -161,6 +163,32 @@ const LEFTOVER_PII_KINDS: readonly PiiKind[] = ["cpf", "cnpj", "bank_agency", "b
 const LEFTOVER_ERROR_KINDS: ReadonlySet<string> = new Set(["cpf", "bank_agency", "bank_account"]);
 /** Mínimo de dígitos para casar um dado da org sem virar ruído. */
 const MIN_ORG_DIGITS = 5;
+/** Dígitos distintos mínimos: `00000` não identifica ninguém (ver `identifica`). */
+const MIN_ORG_DIGITOS_DISTINTOS = 3;
+
+/**
+ * Esta cadeia de dígitos IDENTIFICA a imobiliária, ou é um preenchimento?
+ *
+ * Comprimento sozinho não basta, e a falha foi medida: `00000` tem cinco
+ * dígitos e casa dentro de `R$ 00.000,00` — que é como um modelo mascara valor,
+ * e como os próprios modelos da RE/MAX Trio trazem o defeito `R$0000`. Com um
+ * CRECI ou uma conta assim no cadastro, a regra acusaria meio contrato de conter
+ * "o CRECI da imobiliária", cada acusação apontando um parágrafo que não tem
+ * CRECI nenhum.
+ *
+ * E não é caso de laboratório: cadastro com campo em branco preenchido como
+ * `00000-0`, `11111`, `12345` é comum em tenant recém-criado — exatamente o
+ * tenant que mais precisa que a revisão seja confiável na primeira vez.
+ *
+ * Exigir 3 dígitos distintos derruba `00000`, `11111` e `000000-0`, e mantém
+ * qualquer CNPJ, CRECI ou conta real.
+ */
+function identifica(digits: string): boolean {
+  return (
+    digits.length >= MIN_ORG_DIGITS &&
+    new Set(digits).size >= MIN_ORG_DIGITOS_DISTINTOS
+  );
+}
 
 const PII_LABEL: Record<string, string> = {
   cpf: "um CPF",
@@ -345,9 +373,166 @@ function checkTokenizedSplitList(
   }
 }
 
+// ── 7. Bloco de assinaturas fixo no modelo ──────────────────────────────────
+
+const ASSINATURAS_TOKEN = "assinaturas";
+const ASSINATURAS_RE = /\{\{\s*assinaturas\s*\}\}/;
+/** Linha de assinatura: só sublinhados (o export do Drive preserva). */
+const UNDERSCORE_LINE = /^_{8,}$/;
+/** Rótulo de signatário abaixo da linha. */
+const SIGN_LABEL =
+  /^(?:PARTE\s+)?(?:LOCAT[ÁA]RI[OA]S?|LOCADOR(?:A|ES|AS)?|FIADOR(?:A|ES|AS)?|TESTEMUNHAS?|INTERVENIENTES?|ANUENTES?|ADMINISTRADORA|VENDEDOR(?:A|ES|AS)?|COMPRADOR(?:A|ES|AS)?|CAUCIONANTES?|PROCURADOR(?:A|ES)?)\b/i;
+/** Campo em branco do bloco ("Nome", "CPF", "CPF: 000.000.000-00", "RG"). */
+const SIGN_FIELD = /^(?:nome|cpf|rg|cnpj)\b[^\n]{0,40}$/i;
+/** Nome de exemplo do arquivo ("xxxxxxxx", "Nome do locador", "_____"). */
+const NAME_PLACEHOLDER = /^(?:x+|nome\b.*|_+)$/i;
+/** Só letras, espaços e pontuação de nome, curta. Necessário, não suficiente. */
+const NAME_CHARS = /^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ .'\-]{0,90}$/;
+/** Começo de título de seção ou de cláusula ("DA VIGÊNCIA", "ANEXO I"). */
+const HEADING_START = /^(?:d[aeo]s?|anexo|cl[áa]usula|cap[íi]tulo|t[íi]tulo|se[çc][ãa]o|par[áa]grafo)\b/i;
+/** Vocabulário de cláusula: uma linha com isto é contrato, não nome. */
+const CLAUSE_WORDS =
+  /\b(?:foro|comarca|contrato|cl[áa]usula|vig[êe]ncia|disposi[çc][õo]es|gerais|pagamento|aluguel|loca[çc][ãa]o|garantia|multa|prazo|rescis[ãa]o|obriga[çc][õo]es|presente|fica|eleito|ser[áa]|dever[áa]|im[óo]vel|valor|data|assinatura|vistoria|anexo|condi[çc][õo]es|entrega|chaves)\b/i;
+/** Partícula de nome que pode ficar em minúscula ("de", "da", "dos"). */
+const NAME_CONNECTOR = /^(?:de|da|do|das|dos|e|di|del|della|van|von|la|le)$/i;
+/** Sufixo de pessoa jurídica que legitima um ponto final ("Ltda."). */
+const PJ_SUFFIX = /\b(?:ltda|s\.a|s\/a|me|epp|eireli)\.?$/i;
+/** Quantas linhas de material cabem depois de cada linha de assinatura. */
+const SIGN_GROUP_LINES = 4;
+
+/**
+ * Tem FORMA de nome: cada palavra começa em maiúscula (ou é partícula), sem
+ * vocabulário de cláusula, sem começo de título, sem ponto final (salvo
+ * sufixo de PJ), no máximo 8 palavras. "Fica eleito o foro da comarca" tem
+ * minúsculas; "DA VIGÊNCIA DO CONTRATO" começa como título e fala de contrato.
+ * A revisão de código do #580 mostrou que a forma anterior (só letras e
+ * espaços) aceitava os dois — e um `error` com conserto "trocar o bloco pela
+ * chave" apagaria cláusula.
+ */
+function nameShaped(t: string): boolean {
+  if (!NAME_CHARS.test(t) || HEADING_START.test(t) || CLAUSE_WORDS.test(t)) return false;
+  if (t.endsWith(".") && !PJ_SUFFIX.test(t)) return false;
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length === 0 || words.length > 8) return false;
+  return words.every((w) => NAME_CONNECTOR.test(w) || /^[A-ZÀ-Ý]/.test(w));
+}
+
+function isSignatureMaterial(p: string): boolean {
+  const t = normalizeForMatch(p).trim();
+  if (UNDERSCORE_LINE.test(t) || SIGN_LABEL.test(t) || SIGN_FIELD.test(t)) return true;
+  if (NAME_PLACEHOLDER.test(t)) return true;
+  return nameShaped(t);
+}
+
+/** Linha que parece nome de PESSOA do contrato-fonte (não rótulo, não campo em branco). */
+function looksLikeRealName(p: string): boolean {
+  const t = normalizeForMatch(p).trim();
+  if (UNDERSCORE_LINE.test(t) || SIGN_LABEL.test(t) || SIGN_FIELD.test(t)) return false;
+  if (NAME_PLACEHOLDER.test(t) || !nameShaped(t)) return false;
+  // Nome de pessoa tem pelo menos duas palavras; um rótulo solto ("Testemunha")
+  // já saiu acima, e uma palavra só ("Locador") não identifica ninguém.
+  return t.split(/\s+/).filter((w) => w.length > 1).length >= 2;
+}
+
+/**
+ * Anda a partir de uma linha de sublinhados aceitando só material de
+ * assinatura, num orçamento curto por linha. Devolve o fim do bloco e quantas
+ * linhas de assinatura e rótulos ele tem.
+ */
+function walkSignatureBlock(
+  docParagraphs: readonly string[],
+  inicio: number
+): { fim: number; linhas: number; rotulos: number } {
+  let fim = inicio;
+  let orcamento = SIGN_GROUP_LINES;
+  let linhas = 1;
+  let rotulos = 0;
+  for (let i = inicio + 1; i < docParagraphs.length; i += 1) {
+    const t = normalizeForMatch(docParagraphs[i]!).trim();
+    if (UNDERSCORE_LINE.test(t)) {
+      linhas += 1;
+      orcamento = SIGN_GROUP_LINES;
+      fim = i;
+      continue;
+    }
+    if (orcamento > 0 && isSignatureMaterial(docParagraphs[i]!)) {
+      if (SIGN_LABEL.test(t)) rotulos += 1;
+      orcamento -= 1;
+      fim = i;
+      continue;
+    }
+    break;
+  }
+  return { fim, linhas, rotulos };
+}
+
+/**
+ * O bloco de assinaturas ficou LITERAL: linhas de sublinhado, rótulos e — no
+ * pior caso — os nomes das partes do contrato-fonte, sem `{{assinaturas}}`.
+ *
+ * Medido em 16 de 16 modelos da RE/MAX Trio (04/09/2026). O passe de IA propôs
+ * a chave nas 16, e o planejador recusou nas 16: a linha de sublinhados se
+ * repete uma vez por signatário e "PARTE LOCATÁRIA" aparece dezenas de vezes,
+ * então nenhum parágrafo do bloco é único — e o caminho de texto exigia isso
+ * de cada um. O gate de PII não vê nome de pessoa, o validador sintático não
+ * exige `assinaturas` (é opcional no catálogo), e o contrato gerado sairia com
+ * a página de assinaturas de OUTRO negócio. Sintaticamente perfeito.
+ *
+ * A regra é conservadora por construção: toda linha de sublinhados é tentada
+ * como início, mas só conta como bloco a que tem pelo menos DUAS linhas de
+ * assinatura e pelo menos UM rótulo de signatário (uma lista de vistoria com
+ * traços para preencher não tem "PARTE LOCADORA"); o material aceito entre as
+ * linhas é rótulo, campo em branco ou coisa com forma de nome, num orçamento
+ * curto; e a caminhada para no primeiro parágrafo que não é isso. O conserto
+ * é `replace-block` sobre a sequência exata — e o `doc-edit` só aplica se a
+ * sequência for única no documento. Um achado por documento: o primeiro
+ * bloco que satisfaz as regras.
+ */
+function checkLiteralSignatureBlock(
+  docParagraphs: readonly string[],
+  modalidade: string,
+  findings: SemanticFinding[],
+  seen: Map<string, number>
+): void {
+  if (!isKnownToken(ASSINATURAS_TOKEN, modalidade)) return;
+  if (docParagraphs.some((p) => ASSINATURAS_RE.test(p))) return;
+
+  let i = 0;
+  while (i < docParagraphs.length) {
+    if (!UNDERSCORE_LINE.test(normalizeForMatch(docParagraphs[i]!).trim())) {
+      i += 1;
+      continue;
+    }
+    const { fim, linhas, rotulos } = walkSignatureBlock(docParagraphs, i);
+    if (linhas < 2 || rotulos < 1) {
+      // Não é bloco de assinaturas; pula o que a caminhada consumiu.
+      i = fim + 1;
+      continue;
+    }
+    const bloco = docParagraphs.slice(i, fim + 1);
+    const nomes = bloco.filter(looksLikeRealName);
+    const comNome = nomes.length > 0;
+    pushFinding(findings, seen, {
+      severity: comNome ? "error" : "warning",
+      category: "literal-signature-block",
+      paragraphIndex: i,
+      token: ASSINATURAS_TOKEN,
+      excerpt: excerptOf(comNome ? nomes[0]! : bloco.slice(0, 3).join(" / ")),
+      message: comNome
+        ? `O bloco de assinaturas ficou fixo no modelo, com o nome de ${nomes.length === 1 ? "uma parte" : `${nomes.length} partes`} do contrato-fonte. ` +
+          `Todo contrato gerado sairia com a página de assinaturas de outro negócio. ` +
+          `O bloco inteiro (${bloco.length} linhas) deve virar {{${ASSINATURAS_TOKEN}}}, que monta as linhas de todas as partes e das testemunhas.`
+        : `O bloco de assinaturas ficou fixo no modelo (${linhas} linhas de assinatura, ${bloco.length} parágrafos). ` +
+          `Sem {{${ASSINATURAS_TOKEN}}} o contrato gerado não lista as partes do negócio na página de assinaturas.`,
+      suggestedFix: { op: "replace-block", paragraphs: bloco, token: ASSINATURAS_TOKEN },
+    });
+    return;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Roda as seis checagens sobre o texto do Doc. Puro: sem rede. */
+/** Roda as sete checagens sobre o texto do Doc. Puro: sem rede. */
 export function runSemanticChecks(input: SemanticCheckInput): SemanticReport {
   const docParagraphs = splitDocParagraphs(input.docText ?? "");
   const srcParagraphs = input.sourceText ? splitDocParagraphs(input.sourceText) : [];
@@ -365,6 +550,7 @@ export function runSemanticChecks(input: SemanticCheckInput): SemanticReport {
   checkCollapsedParagraphs(docParagraphs, srcParagraphs, findings, seen);
   checkDanglingReferences(docParagraphs, srcParagraphs, findings, seen);
   checkTokenizedSplitList(docParagraphs, input.modalidade, findings, seen);
+  checkLiteralSignatureBlock(docParagraphs, input.modalidade, findings, seen);
 
   findings.sort((a, b) => a.paragraphIndex - b.paragraphIndex);
   return {
@@ -488,7 +674,7 @@ function checkOrgLiterals(
   const add = (raw: string | null | undefined, label: string, key: string) => {
     if (!raw) return;
     const digits = onlyDigits(raw);
-    if (digits.length >= MIN_ORG_DIGITS) numeric.push({ digits, label, key });
+    if (identifica(digits)) numeric.push({ digits, label, key });
   };
   add(org.cnpj, "o CNPJ da imobiliária", "imobiliaria_qualificacao");
   add(org.creci, "o CRECI da imobiliária", "imobiliaria_qualificacao");
