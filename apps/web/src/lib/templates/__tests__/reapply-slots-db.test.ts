@@ -25,8 +25,7 @@ import { declareSlots, reapplySlotsForTemplate, SlotReapplyError } from "../reap
 import { GOOGLE_DOCS_SOURCE_HEADER } from "../validate-gdoc";
 
 const run = (templateId: string, blocks: string[]) => ({
-  libraryPlan: null,
-  planReviewed: {
+  libraryPlan: {
     version: 1,
     templates: [
       {

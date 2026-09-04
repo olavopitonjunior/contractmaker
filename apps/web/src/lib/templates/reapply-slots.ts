@@ -33,7 +33,6 @@ export type SlotBlocks = Partial<Record<ClauseSlotKey, string[]>>;
 
 interface RunLike {
   libraryPlan: unknown;
-  planReviewed: unknown;
   report: unknown;
 }
 
@@ -41,9 +40,13 @@ interface RunLike {
  * Os `slotBlocks` planejados para o modelo, ou `null` quando nenhum run da org
  * o criou (envio avulso, run apagado, plano em formato antigo). PURA.
  *
- * O plano que vale é o REVISADO (`planReviewed`) — é o que o executor aplicou;
- * o `libraryPlan` é o rascunho do planner e só serve de fallback quando a
- * revisão não existiu.
+ * Os blocos vivem no `libraryPlan` — o plano do planner, que é o que o
+ * executor lê. O `planReviewed` NÃO é um plano: é a lista de aprovações por
+ * `sourceItemId` (`{approved, sourceItemId}`) que o executor cruza com o plano
+ * via `selectApproved`. A linha `execution.templates[]` já prova que o item
+ * foi aprovado e executado, então aqui a revisão não precisa ser relida.
+ * (A primeira versão deste módulo tentava ler o `planReviewed` como plano e
+ * respondia PLAN_MISSING em produção para os três modelos que o motivaram.)
  */
 export function plannedSlotBlocksFor(runs: readonly RunLike[], templateId: string): SlotBlocks | null {
   // A linha de execução NÃO é filtrada por `status`, de propósito: uma linha
@@ -55,7 +58,7 @@ export function plannedSlotBlocksFor(runs: readonly RunLike[], templateId: strin
     const execution = readExecutionReport(run.report);
     const line = execution?.templates.find((t) => t.templateId === templateId);
     if (!line) continue;
-    const plan = parseLibraryPlan(run.planReviewed ?? run.libraryPlan);
+    const plan = parseLibraryPlan(run.libraryPlan);
     const planned = plan?.templates.find((t) => t.sourceItemId === line.sourceItemId);
     if (!planned) continue;
     return planned.slotBlocks ?? {};
@@ -130,7 +133,7 @@ export async function reapplySlotsForTemplate(input: {
 
   const runs = await prisma.ingestionRun.findMany({
     where: { orgId: input.orgId },
-    select: { libraryPlan: true, planReviewed: true, report: true },
+    select: { libraryPlan: true, report: true },
     orderBy: { createdAt: "desc" },
     // Os planos são JSON grandes; o run que criou o modelo é recente por
     // construção (o modelo é rascunho). Teto contra org com centenas de lotes.
