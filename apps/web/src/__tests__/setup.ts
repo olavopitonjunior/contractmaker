@@ -362,6 +362,12 @@ vi.mock("@/lib/db/prisma", () => {
       update: vi.fn().mockResolvedValue({}),
       findMany: vi.fn().mockResolvedValue([]),
     },
+    // E-mail aos corretores parceiros da proposta (insert-first, P2002 = dup)
+    proposalNotificationLog: {
+      create: vi.fn().mockResolvedValue({ id: "plog-mock" }),
+      update: vi.fn().mockResolvedValue({}),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     // Fallback relacional das partes de locação (lib/deals/parties.ts)
     leaseContract: {
       findFirst: vi.fn().mockResolvedValue(null),

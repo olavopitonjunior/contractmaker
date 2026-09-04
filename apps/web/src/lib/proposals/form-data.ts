@@ -26,6 +26,12 @@ import { OBSERVACOES_MAX } from "@/lib/forms/validation";
 export { OBSERVACOES_MAX };
 import { computeDedupeKey } from "./signer-dedupe";
 import { DEFAULT_PROPOSAL_VALIDITY_DAYS } from "./create-schema";
+import {
+  PARTNER_BROKERS_KEY,
+  partnerBrokersFromData,
+  partnerBrokersToRows,
+  type PartnerBrokerInput,
+} from "./partner-brokers";
 
 /**
  * Modelos (schemaType) oferecidos por tipo de proposta. O 1º é o default da
@@ -140,6 +146,12 @@ export interface ProposalFormValues {
   corretorNome: string;
   /** CRECI do corretor. */
   corretorCreci: string;
+  /**
+   * Corretores PARCEIROS que acompanham o negócio (recebem e-mail nos marcos).
+   * Vão pro `dataJson` na forma canônica de corretor do formulário
+   * (`comissao.comissionados[]` / `angariadores[]`) — ver partner-brokers.ts.
+   */
+  corretoresParceiros: PartnerBrokerInput[];
 }
 
 export interface SignerInput {
@@ -203,6 +215,7 @@ export function emptyProposalForm(
     locacaoFinalidade: "",
     corretorNome: "",
     corretorCreci: "",
+    corretoresParceiros: [],
   };
 }
 
@@ -313,6 +326,12 @@ export function buildProposalDataJson(v: ProposalFormValues): Record<string, unk
     }
     if (Object.keys(comissao).length > 0) data.comissao = comissao;
   }
+
+  // Corretores parceiros → chave própria de topo (NÃO `comissao.comissionados`:
+  // aquela lista é a distribuição da comissão e vai parar no contrato e no
+  // split — ver partner-brokers.ts). Nenhum template lê esta chave.
+  const parceiros = partnerBrokersToRows(v.corretoresParceiros ?? []);
+  if (parceiros.length > 0) data[PARTNER_BROKERS_KEY] = parceiros;
 
   // Corretor da intermediação (nome + CRECI impressos no documento).
   if (trim(v.corretorNome) || trim(v.corretorCreci)) {
@@ -712,6 +731,7 @@ export function parseProposalForm(input: {
     locacaoFinalidade: typeof loc.finalidade === "string" ? loc.finalidade : "",
     corretorNome: typeof corretor.nome === "string" ? corretor.nome : "",
     corretorCreci: typeof corretor.creci === "string" ? corretor.creci : "",
+    corretoresParceiros: partnerBrokersFromData(d),
     // Testemunhas vivem SÓ nas linhas de signer (não no dataJson). Reidratá-las
     // aqui é obrigatório: o PATCH substitui o conjunto de signatários, então uma
     // edição que voltasse `witnesses: []` apagaria as testemunhas da proposta.

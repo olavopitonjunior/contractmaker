@@ -14,6 +14,9 @@ import { sanitizeHiddenPaths } from "@/lib/proposals/hidden-fields";
 import { computeDedupeKey } from "@/lib/proposals/signer-dedupe";
 import { runEnvelopeCancel } from "@/lib/clicksign/cancel-action";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { waitUntil } from "@vercel/functions";
+import { validatePartnerBrokersInData } from "@/lib/proposals/partner-brokers";
+import { autoRegisterProposalCommissioners } from "@/lib/proposals/auto-register-commissioners";
 
 // DELETE cancela envelopes ClickSign vivos antes de excluir → precisa de node + tempo.
 export const runtime = "nodejs";
@@ -107,6 +110,16 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: parsed.error.message }, { status: 400 });
   }
   const p = parsed.data;
+  if (p.dataJson !== undefined) {
+    // Corretores parceiros dentro do dataJson — mesma validação do POST.
+    const partnerIssues = validatePartnerBrokersInData(p.dataJson);
+    if (partnerIssues.length > 0) {
+      return NextResponse.json(
+        { error: partnerIssues.join(" "), issues: partnerIssues },
+        { status: 400 }
+      );
+    }
+  }
   const proposalData = {
     ...(p.title !== undefined ? { title: p.title } : {}),
     ...(p.dataJson !== undefined
@@ -195,6 +208,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       resourceType: "Proposal",
     }
   ).catch(() => {});
+  if (p.dataJson !== undefined) {
+    // Parceiros novos/editados → registry (match-ou-cria + backfill do id).
+    waitUntil(
+      autoRegisterProposalCommissioners({ proposalId: params.id, orgId: r.auth.org.id })
+    );
+  }
   return NextResponse.json({ proposal: updated });
 }
 

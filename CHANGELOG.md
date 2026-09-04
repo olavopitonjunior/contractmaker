@@ -4,6 +4,17 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-04 - O corretor parceiro acompanha a proposta
+
+### Adicionado
+
+- **Corretores parceiros na proposta (vendas e locação).** Na criação/edição, o corretor informa parceiros — da casa ou de outra imobiliária — com nome, CRECI, telefone e e-mail opcional, escolhendo do cadastro de corretores ou cadastrando na hora. Eles recebem e-mail em três marcos: proposta **encaminhada** (1ª via enviada), **assinada pelo proponente** e **completa**. Quem decide se o e-mail sai é o cadastro em `/corretores` (avisos por e-mail ligados, sem opt-out, com endereço) — nunca o dado da proposta. O detalhe da proposta lista os parceiros e diz se cada um "avisa por e-mail".
+- Os parceiros moram em chave própria do dado da proposta (`corretores_parceiros`), separada da distribuição da comissão. Foi decisão de revisão: a lista de comissão vai para o contrato (cláusula de intermediadora) e para o wizard de repasse; um parceiro que só acompanha não pode virar intermediadora sem CPF nem linha de 0% que trava a cobrança. Na conversão em negócio a chave segue para o Deal, e os parceiros passam a receber também os avisos do negócio.
+
+### Corrigido
+
+- **Angariador de locação nunca recebia aviso do negócio.** O resolvedor de corretores só lia a lista de venda (`comissionados`); a de locação (`angariadores`), preenchida pelo auto-cadastro no envio do formulário, ficava invisível. Agora as duas contam.
+
 ## [Unreleased] - 2026-09-04 - O bloco que nenhum parágrafo identifica
 
 ### Corrigido

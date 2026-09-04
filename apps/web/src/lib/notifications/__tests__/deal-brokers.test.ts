@@ -152,4 +152,26 @@ describe("resolveDealBrokers — comissionados do form × registry", () => {
     expect(out).toEqual([]);
     expect(rosterFind).not.toHaveBeenCalled();
   });
+
+  it("locação: lê comissao.angariadores (mesmo shape, outra lista)", async () => {
+    // Até 09/2026 só `comissionados` era lido — o angariador de locação,
+    // auto-cadastrado no finalize, nunca recebia aviso do negócio.
+    rosterFind.mockResolvedValue([recipient({})]);
+    const out = await resolveDealBrokers({
+      orgId: "org1",
+      formDataJson: { comissao: { angariadores: [{ nome: "x", splitRecipientId: "sr1" }] } },
+      brokerIds: [],
+    });
+    expect(out.map((b) => b.splitRecipientId)).toEqual(["sr1"]);
+  });
+
+  it("corretores_parceiros (topo) entram no público broker sem serem comissionados", async () => {
+    rosterFind.mockResolvedValue([recipient({})]);
+    const out = await resolveDealBrokers({
+      orgId: "org1",
+      formDataJson: { corretores_parceiros: [{ nome: "Corretor Um" }] },
+      brokerIds: [],
+    });
+    expect(out.map((b) => b.splitRecipientId)).toEqual(["sr1"]);
+  });
 });
