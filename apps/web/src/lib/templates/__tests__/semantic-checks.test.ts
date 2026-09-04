@@ -371,6 +371,87 @@ describe("collapsed-paragraph — a cláusula virou uma chave só", () => {
   });
 });
 
+describe("split-list-tokenized — a lista de rateio foi chaveada item a item", () => {
+  // COPIADO do Doc de produção da RE/MAX Trio (04/09/2026), com os valores
+  // preservados: é o defeito em 16 de 16 modelos, e a razão desta regra existir.
+  const cabecalho =
+    "4.1.1. O pagamento correspondente ao primeiro aluguel do imóvel objeto deste contrato será liquidado e fracionado diretamente aos intermediadores da locação, da seguinte forma:";
+  const itemA =
+    "a) R$0000 (Três mil, quinhentos e sessenta e nove reais e setenta e um centavos), a ser pago diretamente à imobiliária intermediadora {{imobiliaria_qualificacao}}, como honorários pela intermediação imobiliária na presente locação, por meio {{imobiliaria_dados_pagamento}};";
+  const itemB =
+    "b) R$ 1.315,15 (hum mil, trezentos e quinze reais e quinze centavos), a ser pago diretamente à corretora intermediadora {{corretagem_dados_pagamento}}";
+  const itemC =
+    "c) R$ 1.315,15 (hum mil, trezentos e quinze reais e quinze centavos), a ser pago diretamente ao corretor intermediador {{corretagem_qualificacao}}.";
+  const depois = "4.1.2. Os valores acima serão retidos pela ADMINISTRADORA no primeiro repasse.";
+
+  it("acusa a lista da Trio e propõe trocar os TRÊS itens pela chave composta", () => {
+    const doc = [cabecalho, itemA, itemB, itemC, depois].join("\n");
+    const hits = byCategory(run(doc).findings, "split-list-tokenized");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].severity).toBe("error");
+    expect(hits[0].suggestedFix).toEqual({
+      op: "replace-block",
+      paragraphs: [itemA, itemB, itemC],
+      token: "rateio_primeiro_aluguel",
+    });
+  });
+
+  it("o CABEÇALHO da cláusula fica de fora do bloco a substituir", () => {
+    // Engolir o "4.1.1." apagaria a abertura da cláusula e deixaria a lista
+    // órfã — e o 4.1.2 passaria a citar um item que não existe mais.
+    const doc = [cabecalho, itemA, itemB, itemC, depois].join("\n");
+    const fix = byCategory(run(doc).findings, "split-list-tokenized")[0].suggestedFix;
+    expect(fix?.op).toBe("replace-block");
+    if (fix?.op !== "replace-block") throw new Error("fix errado");
+    expect(fix.paragraphs).not.toContain(cabecalho);
+    expect(fix.paragraphs).not.toContain(depois);
+  });
+
+  it("um item sozinho NÃO é lista — a chave composta não resolveria nada", () => {
+    const doc = [cabecalho, itemA, depois].join("\n");
+    expect(byCategory(run(doc).findings, "split-list-tokenized")).toHaveLength(0);
+  });
+
+  it("lista JÁ corrigida não é acusada de novo", () => {
+    const doc = [cabecalho, "{{rateio_primeiro_aluguel}}", depois].join("\n");
+    expect(byCategory(run(doc).findings, "split-list-tokenized")).toHaveLength(0);
+  });
+
+  it("não acusa em modalidade sem a chave composta no catálogo", () => {
+    // Em venda `rateio_primeiro_aluguel` não existe: apontar um defeito sem
+    // conserto possível é pior que calar.
+    const doc = [cabecalho, itemA, itemB, itemC].join("\n");
+    expect(
+      byCategory(run(doc, { modalidade: "a_vista" }).findings, "split-list-tokenized")
+    ).toHaveLength(0);
+  });
+
+  it("lista sem chave de beneficiário (valores literais) não é este defeito", () => {
+    const doc = [
+      cabecalho,
+      "a) R$ 1.000,00, a ser pago à imobiliária intermediadora Trio Negócios;",
+      "b) R$ 1.000,00, a ser pago ao corretor intermediador João;",
+    ].join("\n");
+    expect(byCategory(run(doc).findings, "split-list-tokenized")).toHaveLength(0);
+  });
+
+  it("duas listas separadas viram dois achados, cada um com o seu bloco", () => {
+    const doc = [cabecalho, itemA, itemB, depois, cabecalho, itemA, itemC].join("\n");
+    const hits = byCategory(run(doc).findings, "split-list-tokenized");
+    expect(hits).toHaveLength(2);
+    expect(hits[0].id).not.toBe(hits[1].id);
+  });
+
+  it("o excerto vai mascarado para a tela", () => {
+    const comCpf =
+      "b) R$ 1.315,15, a ser pago ao corretor intermediador {{corretagem_qualificacao}}, CPF 111.444.777-35";
+    const doc = [cabecalho, itemA, comCpf].join("\n");
+    const hits = byCategory(run(doc).findings, "split-list-tokenized");
+    expect(hits).toHaveLength(1);
+    expect(JSON.stringify(hits[0].excerpt)).not.toContain("111.444.777-35");
+  });
+});
+
 describe("dangling-reference — citação de item que não existe", () => {
   const cita = "4.1.2. Os valores do item 4.1.1 serão retidos no primeiro repasse.";
 

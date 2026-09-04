@@ -44,7 +44,8 @@ export type SemanticCategory =
   | "org-literal"
   | "leftover-identifier"
   | "collapsed-paragraph"
-  | "dangling-reference";
+  | "dangling-reference"
+  | "split-list-tokenized";
 
 export type SemanticSeverity = "error" | "warning" | "info";
 
@@ -57,6 +58,8 @@ export type SemanticFix =
   | { op: "rekey"; phrase: string; fromToken: string; toToken: string }
   | { op: "remove-leftover"; phrase: string }
   | { op: "restore-paragraph"; current: string; source: string }
+  /** Troca um BLOCO de parágrafos consecutivos por uma chave composta. */
+  | { op: "replace-block"; paragraphs: string[]; token: string }
   | { op: "manual" };
 
 export interface SemanticFinding {
@@ -106,6 +109,7 @@ export const SEMANTIC_CATEGORY_LABEL: Record<SemanticCategory, string> = {
   "leftover-identifier": "dado de pessoa ao lado da chave",
   "collapsed-paragraph": "cláusula virou uma chave só",
   "dangling-reference": "citação de item inexistente",
+  "split-list-tokenized": "lista de rateio chaveada item a item",
 };
 
 const MAX_EXCERPT = 240;
@@ -266,9 +270,84 @@ function pushFinding(
   findings.push({ ...finding, id: n === 1 ? base : `${base}:${n}` });
 }
 
+// ── 6. Lista de rateio chaveada item a item ─────────────────────────────────
+
+/** Marcador de item de lista: `a)`, `1.`, `II)` — o que abre um item de rateio. */
+const LIST_MARKER = /^\s*(?:[a-zA-Z]\)|\d+[.)]|[ivxIVX]+[.)])\s+/;
+/** Chave de beneficiário: cada uma imprime a LISTA INTEIRA, não um item. */
+const BENEFICIARIO_TOKEN = /\{\{\s*(?:imobiliaria|corretagem)_[a-z_]+\s*\}\}/;
+/** Linguagem de rateio: o item diz a quem se paga. */
+const RATEIO_LANGUAGE = /a ser pago|ser[áa]\s+pag|honor[áa]rios|intermedia[çc]/i;
+/** A chave composta que substitui a lista inteira. */
+const RATEIO_TOKEN = "rateio_primeiro_aluguel";
+
+/**
+ * A lista a)/b)/c) do rateio do 1º aluguel foi chaveada UM ITEM POR VEZ.
+ *
+ * É o defeito que motivou a chave composta, e o mais caro do acervo: medido em
+ * 16 de 16 modelos da RE/MAX Trio. Cada `{{corretagem_*}}` e `{{imobiliaria_*}}`
+ * imprime a LISTA INTEIRA de beneficiários, não o item onde está — então o item
+ * b) sai com conta sem nome, o c) com nome sem conta, e com dois corretores o
+ * mesmo bloco se repete nos dois. Sintaticamente perfeito: as chaves existem, o
+ * gate de PII passa, e o contrato gerado é ilegível.
+ *
+ * Por que precisa ser regra, e não só uma operação: enquanto o defeito não vira
+ * ACHADO, ele não ganha botão. A operação `replace-block` existia e só podia ser
+ * disparada por quem montasse a chamada à mão — ou seja, o autoatendimento que
+ * esta tela promete não alcançava justamente o caso que a originou.
+ *
+ * Exige DOIS itens no mínimo: um item sozinho não é lista, e a chave composta
+ * resolveria uma coisa que já está certa.
+ */
+function checkTokenizedSplitList(
+  docParagraphs: readonly string[],
+  modalidade: string,
+  findings: SemanticFinding[],
+  seen: Map<string, number>
+): void {
+  // Sem a chave composta no catálogo da modalidade não há conserto a propor —
+  // e apontar um defeito sem saída é pior que calar.
+  if (!isKnownToken(RATEIO_TOKEN, modalidade)) return;
+
+  let i = 0;
+  while (i < docParagraphs.length) {
+    const ehItem = (p: string | undefined) =>
+      !!p &&
+      LIST_MARKER.test(normalizeForMatch(p)) &&
+      BENEFICIARIO_TOKEN.test(p) &&
+      RATEIO_LANGUAGE.test(p);
+
+    if (!ehItem(docParagraphs[i])) {
+      i += 1;
+      continue;
+    }
+    let fim = i;
+    while (fim + 1 < docParagraphs.length && ehItem(docParagraphs[fim + 1])) fim += 1;
+
+    const itens = docParagraphs.slice(i, fim + 1);
+    if (itens.length >= 2) {
+      pushFinding(findings, seen, {
+        severity: "error",
+        category: "split-list-tokenized",
+        paragraphIndex: i,
+        token: RATEIO_TOKEN,
+        excerpt: excerptOf(itens[0]!),
+        message:
+          `Os ${itens.length} itens desta lista foram chaveados um a um, mas cada chave de ` +
+          `beneficiário imprime a LISTA INTEIRA — não o item onde ela está. O contrato sai ` +
+          `com um item trazendo conta sem nome e outro nome sem conta, e com mais de um ` +
+          `corretor o mesmo bloco se repete. A lista inteira deve virar {{${RATEIO_TOKEN}}}, ` +
+          `que monta um item por beneficiário. O cabeçalho da cláusula é preservado.`,
+        suggestedFix: { op: "replace-block", paragraphs: itens, token: RATEIO_TOKEN },
+      });
+    }
+    i = fim + 1;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Roda as cinco checagens sobre o texto do Doc. Puro: sem rede. */
+/** Roda as seis checagens sobre o texto do Doc. Puro: sem rede. */
 export function runSemanticChecks(input: SemanticCheckInput): SemanticReport {
   const docParagraphs = splitDocParagraphs(input.docText ?? "");
   const srcParagraphs = input.sourceText ? splitDocParagraphs(input.sourceText) : [];
@@ -285,6 +364,7 @@ export function runSemanticChecks(input: SemanticCheckInput): SemanticReport {
   checkLeftoverIdentifiers(docParagraphs, findings, seen);
   checkCollapsedParagraphs(docParagraphs, srcParagraphs, findings, seen);
   checkDanglingReferences(docParagraphs, srcParagraphs, findings, seen);
+  checkTokenizedSplitList(docParagraphs, input.modalidade, findings, seen);
 
   findings.sort((a, b) => a.paragraphIndex - b.paragraphIndex);
   return {
