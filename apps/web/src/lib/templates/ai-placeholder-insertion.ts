@@ -74,17 +74,6 @@ export const MAX_OUTPUT_TOKENS = 8192;
  */
 const HAS_PLACEHOLDER = /\{\{[^{}]+\}\}/;
 
-function countOccurrences(haystack: string, needle: string): number {
-  if (!needle) return 0;
-  let count = 0;
-  let idx = haystack.indexOf(needle);
-  while (idx !== -1) {
-    count++;
-    idx = haystack.indexOf(needle, idx + 1);
-  }
-  return count;
-}
-
 /** Casamento tolerante a NBSP — ver `doc-index.findForms`. */
 const locate = findForms;
 const normSpaces = normalizeSpaces;

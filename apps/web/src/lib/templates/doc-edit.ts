@@ -488,7 +488,7 @@ export async function applyDocEdits(input: {
       e.texto
     );
     const primeiraLinha = esperado.split("\n")[0]!.trim();
-    const entrou = primeiraLinha.length === 0 || finalText.includes(primeiraLinha);
+    const entrou = primeiraLinha.length === 0 || findForms(finalText, primeiraLinha).count > 0;
     // TODOS os parágrafos do bloco têm de ter saído — um sobrevivente além do
     // que a simulação previa significa que o intervalo apagado não era o que
     // se pensava. (Parágrafo que também existe fora do bloco continua lá, e

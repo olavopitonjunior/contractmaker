@@ -206,6 +206,19 @@ describe("insertPlaceholdersWithAI — travas no texto plano", () => {
     );
   });
 
+  it("estrutura sem o trecho (vive numa tabela): request mantém a forma lida e a reply decide", async () => {
+    useDoc("Valor do aluguel: R$ 1.000,00 mensais.");
+    mockGetDocStructure.mockResolvedValue(fakeStructure("Parágrafo de nível superior sem o valor."));
+    mockMessagesCreate.mockResolvedValue(
+      aiResponse([{ trecho_literal: "R$ 1.000,00", token: "aluguel_valor" }])
+    );
+    const report = await run("d-nbsp-3");
+    expect(report.inserted.map((i) => i.token)).toEqual(["aluguel_valor"]);
+    const req = mockBatchUpdate.mock.calls[0][0].requestBody.requests[0] as ReplaceReq;
+    expect(req.replaceAllText.containsText.text).toBe("R$ 1.000,00");
+    expect(state).toBe("Valor do aluguel: {{aluguel_valor}} mensais.");
+  });
+
   it("bloco multi-parágrafo NÃO consecutivo no documento é recusado sem escrever", async () => {
     useDoc(
       [
