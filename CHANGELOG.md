@@ -4,6 +4,28 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-03 - O conserto que devolvia o CPF ao modelo
+
+### Corrigido
+
+- **A regra "cláusula virou uma chave só" acusava o trabalho bem feito e propunha desfazê-lo.** Medido no smoke da staging: o único modelo com conserto automático disponível apontava `{{locadores_qualificacao}}` como erro e oferecia o botão "Restaurar o parágrafo" — e o texto a restaurar era a qualificação de uma pessoa real do contrato original, com **nome, RG e CPF**. Trocar a qualificação pela chave é exatamente o que a padronização deve fazer; a regra chamava isso de defeito e oferecia, como remédio, recolocar o dado de um terceiro dentro do modelo. A causa era o comprimento usado como segundo gatilho: a qualificação completa de dois locadores passa de 400 caracteres sem ter nada de cláusula. Agora quem distingue os dois casos é a **linguagem** (R$, %, deverá, pagamento) — que é o que o incidente original tinha —, nunca o tamanho.
+- **Segunda rede, independente da primeira:** nenhum conserto automático pode devolver ao modelo um texto que o gate de ativação bloquearia. Colapso real cujo parágrafo-fonte contém CPF, RG ou conta passa a pedir ajuste manual, com a explicação do porquê. Uma heurística pode errar de novo, por um caminho que ninguém previu; o conserto que ela propõe não pode desfazer o gate de PII.
+
+### Notas
+
+- O defeito já estava em produção (veio com a checagem semântica e a edição no app). A tela de revisão da biblioteca não o criou — ela o tornou visível, e é assim que ele foi encontrado.
+## [Unreleased] - 2026-09-03 - A biblioteca inteira numa tela
+
+### Adicionado
+
+- **"Revisar biblioteca": modelos E cláusulas conferidos de uma vez.** A revisão era modelo a modelo, e a pergunta que importa não é sobre um modelo: é se a biblioteca está pronta. Foi assim que os 16 modelos da RE/MAX Trio chegaram a "prontos" com 10 erros semânticos, e assim que, depois de corrigidos à mão, **16 de 16** seguiram com a lista de rateio chaveada item a item sem ninguém notar — cada tela dizia a verdade sobre si, e ninguém tinha a visão de conjunto. O botão fica no cabeçalho de **Templates** e no de **Banco de cláusulas**, visível antes de escolher qualquer aba: enterrá-lo dentro de uma delas foi exatamente como o botão "Revisar" de cada modelo passou despercebido.
+- **A base de cláusulas ganha a prova que só existia dentro da geração.** Cláusula que não compila, que sobra com `{{chave}}` depois do preenchimento ou que está partida em pedaços no acervo é **descartada em silêncio** na hora de gerar: entra o texto canônico, o contrato sai bonito e sem a redação que a imobiliária escreveu, e o único registro é uma linha de log no servidor. A revisão roda a MESMA função que a geração usa para descartar, contra os dados de exemplo, e mostra o resultado antes de existir um contrato. Cláusula não classificada é provada nas **duas** esteiras, porque é nas duas que ela é lida.
+- **Correção assistida por modelo**, com a lista do que será feito antes de aplicar. Os consertos vão um por vez, e cada um é recalculado no servidor no momento de aplicar — um conserto muda o documento sob os seguintes.
+
+### Interno
+
+- O painel **delega** à validação individual em vez de reimplementar as contagens. Duas fontes de verdade sobre "dá para ativar?" deixariam o operador entre duas telas que discordam sem ter como decidir qual está certa.
+
 ## [Unreleased] - 2026-09-03 - A migração que não tinha ferramenta
 
 ### Adicionado
