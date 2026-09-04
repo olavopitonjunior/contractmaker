@@ -46,7 +46,8 @@
  * nunca pode acontecer é declarar um slot que não existe no documento.
  */
 
-import { batchUpdateDoc, getDocPlainText } from "@/lib/google/docs";
+import { batchUpdateDoc, getDocPlainText, getDocStructure } from "@/lib/google/docs";
+import { collectTextSegments, findForms, plainTextOf, realFormOf } from "@/lib/google/doc-index";
 import { slotToken, type ClauseSlotKey } from "./clause-slots";
 
 /**
@@ -222,7 +223,18 @@ export async function applyClauseSlotToDoc(
   // Tudo ou nada — ver a trava 2 no comentário do topo.
   if (issues.length > 0) return fail(issues);
 
-  const requests = literals.map((text, i) => ({
+  // A forma REAL de cada parágrafo vem da estrutura: o export troca NBSP por
+  // espaço e a API não normaliza — a cláusula de caução da Trio saía
+  // `replace-noop` (ver `doc-index.realFormOf`). Estrutura indisponível →
+  // forma lida, e a reply decide, como antes.
+  let reais = literals;
+  try {
+    const realText = plainTextOf(collectTextSegments(await getDocStructure(input.docId)));
+    reais = literals.map((l) => realFormOf(realText, l) ?? l);
+  } catch (err) {
+    console.error("[apply-clause-slot] estrutura indisponível; forma lida segue:", err);
+  }
+  const requests = reais.map((text, i) => ({
     replaceAllText: {
       containsText: { text, matchCase: true },
       replaceText: i === 0 ? token : "",
@@ -264,7 +276,8 @@ export async function applyClauseSlotToDoc(
   if (!finalText.includes(token)) {
     return fail([issue(blocks[0], "verify-failed")]);
   }
-  const leftover = literals.filter((l) => finalText.includes(l));
+  // Releitura pelo export (espaço onde o Doc tem NBSP): tolerar a diferença.
+  const leftover = literals.filter((l) => findForms(finalText, l).count > 0);
   if (leftover.length > 0) {
     return fail(leftover.map((b) => issue(b, "verify-failed")));
   }

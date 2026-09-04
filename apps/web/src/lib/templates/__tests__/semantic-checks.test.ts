@@ -649,6 +649,26 @@ describe("literal-signature-block — bloco de assinaturas fixo no modelo", () =
     expect((f[0]!.suggestedFix as { paragraphs: string[] }).paragraphs).toEqual(blocoAnonimo);
   });
 
+  it("bloco em COLUNAS (duas assinaturas por linha, separadas por tabulação) é bloco", () => {
+    // Produção, 04/09: um modelo da Trio sem tabela — "_____   _____" e "PARTE
+    // LOCATÁRIA   PARTE LOCATÁRIA" no mesmo parágrafo. A regra via uma linha só.
+    const colunas = [
+      "___________________________________________",
+      "XXXXXXXXXXXXXXX         XXXXXXX",
+      "PARTE LOCATÁRIA         PARTE LOCATÁRIA",
+      "PARTE LOCADORA",
+      "___________________________________________         ________",
+      "Nome         Nome",
+      "CPF         CPF",
+      "Testemunha         Testemunha",
+    ];
+    const r = run([...corpo, ...colunas, "Rua das Flores, 100 │ CEP 00000-000"].join("\n"));
+    const f = byCategory(r.findings, "literal-signature-block");
+    expect(f).toHaveLength(1);
+    expect(f[0]!.severity).toBe("warning");
+    expect((f[0]!.suggestedFix as { paragraphs: string[] }).paragraphs).toEqual(colunas);
+  });
+
   it("cala quando {{assinaturas}} já está no documento", () => {
     const r = run([...corpo, "{{assinaturas}}"].join("\n"));
     expect(byCategory(r.findings, "literal-signature-block")).toEqual([]);
