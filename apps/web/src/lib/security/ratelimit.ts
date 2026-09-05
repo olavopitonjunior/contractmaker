@@ -170,6 +170,16 @@ export const RateLimits = {
     rateLimit({ identifier: `form-attach:${token}`, limit: 40, window: "1 h" }),
 
   /**
+   * Upload de documento pelo LEAD na página pública da proposta: 60 hits/h por
+   * (token, ip). O handshake do Blob e o finalize compartilham o balde (cada
+   * arquivo = 2 hits), então isto são ~30 arquivos/hora — 4 pessoas × 3
+   * documentos cabem numa sessão só. Mesma razão do form: link anônimo, Blob +
+   * OCR custam; o IP entra porque a proposta é de UMA pessoa.
+   */
+  proposalAttachmentPerToken: (token: string, ipHash: string) =>
+    rateLimit({ identifier: `proposal-attach:${token}:${ipHash}`, limit: 60, window: "1 h" }),
+
+  /**
    * Newton API per-token + per-scope. Limites variam por scope:
    *  - metrics:r — 600/min (polling-friendly)
    *  - documents:rw — 30/min (certidões caras)

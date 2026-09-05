@@ -74,6 +74,9 @@ function iconForType(type: string) {
     // marcos que pedem ação.
     case "proposal_delivered":
       return <Send className="h-4 w-4 text-blue-600 shrink-0" />;
+    // O lead subiu documentos pela página pública da proposta.
+    case "proposal_documents_received":
+      return <FileText className="h-4 w-4 text-blue-600 shrink-0" />;
     case "envelope_refused":
     case "proposal_refused":
       return <XCircle className="h-4 w-4 text-red-600 shrink-0" />;

@@ -34,6 +34,7 @@ describe("persistProposalDocument — dedup não descarta a escolha humana da pa
   it("mesmo conteúdo, parte DIFERENTE e persistida → move o anexo existente (assignmentUpdated)", async () => {
     findFirst.mockResolvedValue({
       id: "att-antigo",
+      source: "manual",
       url: "https://blob/antigo.pdf",
       extractedData: { assignment: { kind: "locatario", index: 0 }, assignmentPersisted: true, fields: { x: 1 } },
     });
@@ -57,6 +58,7 @@ describe("persistProposalDocument — dedup não descarta a escolha humana da pa
   it("existente só com SUGESTÃO do OCR → a escolha humana agora persiste", async () => {
     findFirst.mockResolvedValue({
       id: "att-antigo",
+      source: "manual",
       url: "https://blob/antigo.pdf",
       extractedData: { assignment: { kind: "locatario", index: 0 }, assignmentPersisted: false },
     });
@@ -71,6 +73,7 @@ describe("persistProposalDocument — dedup não descarta a escolha humana da pa
   it("mesma parte já persistida → nada a atualizar", async () => {
     findFirst.mockResolvedValue({
       id: "att-antigo",
+      source: "manual",
       url: "https://blob/antigo.pdf",
       extractedData: { assignment: { kind: "fiador", index: 0 }, assignmentPersisted: true },
     });
@@ -83,9 +86,31 @@ describe("persistProposalDocument — dedup não descarta a escolha humana da pa
     expect(update).not.toHaveBeenCalled();
   });
 
+  it("origem DIFERENTE (lead sobe byte-idêntico ao que a imobiliária subiu) → NÃO move o anexo interno", async () => {
+    // Vetor fechado no review do PR 4: a página pública (source "public") não
+    // pode reescrever a parte de um documento "manual" — o convert levaria o
+    // OCR dele para onde o lead apontasse.
+    findFirst.mockResolvedValue({
+      id: "att-interno",
+      source: "manual",
+      url: "https://blob/interno.pdf",
+      extractedData: { assignment: { kind: "locatario", index: 0 }, assignmentPersisted: true, fields: { x: 1 } },
+    });
+    const r = await persistProposalDocument({
+      ...base,
+      source: "public",
+      extractedData: { assignment: { kind: "fiador", index: 0 }, assignmentPersisted: true },
+    });
+    expect(r.deduped).toBe(true);
+    expect(r.assignmentUpdated).toBe(false);
+    expect(update).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("sem atribuição no upload (ex.: Registro do Aceite) → dedup puro, sem tocar no existente", async () => {
     findFirst.mockResolvedValue({
       id: "att-antigo",
+      source: "manual",
       url: "https://blob/antigo.pdf",
       extractedData: { assignment: { kind: "locatario", index: 0 }, assignmentPersisted: true },
     });

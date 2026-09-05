@@ -69,7 +69,12 @@ export type ProposalNotifKind =
   //     para os CORRETORES PARCEIROS (e-mail) — o dono acabou de clicar e viu o
   //     toast; sino aqui seria eco. Por isso `sent` fica FORA do sino e FORA do
   //     user-channels-registry (e, por construção, invisível ao Max).
-  | "sent";
+  | "sent"
+  //   - documents_received: o LEAD subiu documentos pela página pública da
+  //     proposta (`/p/[token]`, 2026-09). Sino do dono com `dedupeSuffix` por
+  //     hora — o lead sobe 5 arquivos em sequência, o corretor recebe um aviso.
+  //     Fora do user-channels-registry (sem WhatsApp, invisível ao Max).
+  | "documents_received";
 
 /** Marcos que NÃO tocam o sino do dono (só o trilho dos parceiros). */
 const OWNER_BELL_SKIP = new Set<ProposalNotifKind>(["sent"]);
@@ -135,6 +140,11 @@ const TEXT: Record<ProposalNotifKind, { type: string; title: string; body: strin
     title: "Envio da proposta cancelado",
     body: "O envio foi cancelado na ClickSign e a proposta foi liberada. Revise e reenvie para assinatura.",
   },
+  documents_received: {
+    type: "proposal_documents_received",
+    title: "Cliente enviou documentos",
+    body: "O cliente enviou documentos pela página da proposta. Confira em Documentos por parte.",
+  },
 };
 
 /** Marcos de andamento — os que pedem um link clicável no WhatsApp. */
@@ -146,6 +156,7 @@ const TRACKING_KINDS = new Set<ProposalNotifKind>([
   // CTA de ação (reenviar): sem o link absoluto, quem recebe pelo WhatsApp
   // não tem porta de entrada — mesma lógica do awaiting_decision.
   "send_canceled",
+  "documents_received",
 ]);
 
 function appUrl(): string {
