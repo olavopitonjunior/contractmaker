@@ -18,6 +18,10 @@ const mockLoad = vi.mocked(loadScopedProposal);
 const mockCan = vi.mocked(can);
 const updateMany = prisma.proposal.updateMany as unknown as ReturnType<typeof vi.fn>;
 const eventCreate = prisma.proposalEvent.create as unknown as ReturnType<typeof vi.fn>;
+const propFindUnique = prisma.proposal.findUnique as unknown as ReturnType<typeof vi.fn>;
+
+/** `updatedAt` que ESTE request leu — é o que o CAS casa na escrita. */
+const SEEN = new Date("2026-09-05T12:00:00Z");
 
 const DATA = {
   locatarios: [{ nome: "Maria", cpf: "52998224725" }],
@@ -29,7 +33,7 @@ function load(over: Partial<{ status: string; kind: string; dataJson: unknown }>
   mockLoad.mockResolvedValue({
     auth: { org: { id: "org-1" }, actor: { effectiveUserId: "u1" } },
     eff: {},
-    proposal: { id: "p1", kind: "locacao", status: "enviada", dataJson: DATA, ...over },
+    proposal: { id: "p1", kind: "locacao", status: "enviada", dataJson: DATA, updatedAt: SEEN, ...over },
   } as never);
 }
 const req = (body: unknown) =>
@@ -79,7 +83,46 @@ describe("PATCH /api/proposals/[id]/partes — o que RECUSA", () => {
 
   it("corrida: virou terminal entre o check e a escrita → 409", async () => {
     updateMany.mockResolvedValue({ count: 0 });
+    propFindUnique.mockResolvedValue({ status: "convertida", updatedAt: SEEN });
     expect((await PATCH(req({ target: { kind: "locatario", index: 0 }, fields: { rg: "1" } }), params)).status).toBe(409);
+  });
+
+  it("uma corrida perdida é ABSORVIDA: reaplica o patch sobre o estado fresco, sem 409 (issue #610)", async () => {
+    // 1ª tentativa perde; a releitura traz dado novo de OUTRA parte; a 2ª vence.
+    updateMany.mockResolvedValueOnce({ count: 0 }).mockResolvedValue({ count: 1 });
+    propFindUnique.mockResolvedValue({
+      status: "enviada",
+      updatedAt: new Date("2026-09-05T12:00:05Z"),
+      dataJson: { ...DATA, locadores: [{ nome: "Escrito por outra aba" }] },
+      complianceJson: null,
+    });
+    const res = await PATCH(req({ target: { kind: "locatario", index: 0 }, fields: { rg: "9" } }), params);
+    expect(res.status).toBe(200);
+    // o patch foi reaplicado SOBRE o estado novo: o que a outra aba gravou sobreviveu
+    const gravado = updateMany.mock.calls[1][0].data.dataJson as Record<string, unknown>;
+    expect(gravado.locadores).toEqual([{ nome: "Escrito por outra aba" }]);
+    expect((gravado.locatarios as Array<{ rg?: string }>)[0].rg).toBe("9");
+    // e o claim da 2ª tentativa casou o updatedAt NOVO
+    expect(updateMany.mock.calls[1][0].where.updatedAt).toEqual(new Date("2026-09-05T12:00:05Z"));
+  });
+
+  it("duas corridas seguidas → 409 stale, sem sobrescrever (issue #610)", async () => {
+    updateMany.mockResolvedValue({ count: 0 });
+    // proposta viva, mas o updatedAt mudou: alguém gravou no meio
+    propFindUnique.mockResolvedValue({ status: "enviada", updatedAt: new Date("2026-09-05T12:00:05Z") });
+    const res = await PATCH(req({ target: { kind: "locatario", index: 0 }, fields: { rg: "1" } }), params);
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.stale).toBe(true);
+    expect(body.error).toMatch(/recarregue/i);
+  });
+
+  it("o CAS entra no where da escrita: id + status vivo + updatedAt do snapshot", async () => {
+    await PATCH(req({ target: { kind: "locatario", index: 0 }, fields: { rg: "1" } }), params);
+    const where = updateMany.mock.calls[0][0].where;
+    expect(where.id).toBe("p1");
+    expect(where.updatedAt).toBe(SEEN);
+    expect(where.status.notIn).toContain("convertida");
   });
 });
 

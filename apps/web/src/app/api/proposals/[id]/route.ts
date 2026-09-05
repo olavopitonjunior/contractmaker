@@ -145,8 +145,16 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       // substituição de signatários rodaria por baixo dele, montando o envelope
       // com uma lista que ninguém aprovou. `count === 0` = perdemos a corrida →
       // 409 e rollback de tudo que veio depois.
+      // O `updatedAt` do snapshot entra no claim (issue #610): além do envio
+      // concorrente, barra outra escrita que tenha entrado entre a leitura e
+      // a transação — este PATCH grava o dataJson inteiro e apagaria o que
+      // ela gravou.
       const claimed = await tx.proposal.updateMany({
-        where: { id: params.id, status: { in: [...EDITABLE_STATUSES] } },
+        where: {
+          id: params.id,
+          status: { in: [...EDITABLE_STATUSES] },
+          updatedAt: r.proposal.updatedAt,
+        },
         data: { updatedAt: new Date() },
       });
       if (claimed.count === 0) throw new ProposalNotEditableError();

@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { loadScopedProposal, proposalFeatureGuard } from "@/lib/proposals/route-helpers";
 import { TERMINAL_STATUSES } from "@/lib/proposals/status-sets";
+import { applyScopedProposalWrite, proposalConflictResponse } from "@/lib/proposals/cas";
 import { can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
@@ -100,15 +101,24 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
   }
 
-  const merged = applyPartyFields(dataJson, path, fields);
-
-  // Guard atômico contra virar terminal entre o check e a escrita.
-  const claimed = await prisma.proposal.updateMany({
-    where: { id: proposal.id, status: { notIn: [...TERMINAL_STATUSES] } },
-    data: { dataJson: merged as Prisma.InputJsonValue },
-  });
-  if (claimed.count === 0) {
-    return NextResponse.json({ error: "Proposta encerrada não pode ser editada." }, { status: 409 });
+  // CAS com re-tentativa (issue #610): sem o `updatedAt` no where, este
+  // read-modify-write do JSON inteiro apagaria em silêncio o que outra
+  // escrita gravou no meio. O patch é escopado a UMA parte, então, perdida a
+  // corrida, ele é reaplicado sobre o estado fresco — salvar o locador e o
+  // locatário quase ao mesmo tempo não vira "recarregue".
+  const written = await applyScopedProposalWrite(
+    proposal.id,
+    { updatedAt: proposal.updatedAt, dataJson: proposal.dataJson, complianceJson: proposal.complianceJson },
+    (cur) => ({
+      dataJson: applyPartyFields(
+        (cur.dataJson ?? {}) as Record<string, unknown>,
+        path,
+        fields
+      ) as Prisma.InputJsonValue,
+    })
+  );
+  if (!written.ok) {
+    return proposalConflictResponse(written.reason, "Proposta encerrada não pode ser editada.");
   }
 
   const keys = Object.keys(fields);
@@ -130,5 +140,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     metadata: { target: { kind, index }, path, fields: keys },
   }).catch(() => {});
 
-  return NextResponse.json({ ok: true, path, party: getAtPath(merged, path) });
+  // A parte devolvida é a do estado REALMENTE gravado (pode ter vindo da
+  // re-tentativa sobre dado mais novo), não a do primeiro cálculo.
+  const saved = (written.written.dataJson ?? {}) as Record<string, unknown>;
+  return NextResponse.json({ ok: true, path, party: getAtPath(saved, path) });
 }

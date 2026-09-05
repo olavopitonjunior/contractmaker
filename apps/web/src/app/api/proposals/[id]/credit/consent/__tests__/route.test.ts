@@ -17,13 +17,16 @@ import { prisma } from "@/lib/db/prisma";
 const mockLoad = vi.mocked(loadScopedProposal);
 const mockCan = vi.mocked(can);
 const updateMany = prisma.proposal.updateMany as unknown as ReturnType<typeof vi.fn>;
+const propFindUnique = prisma.proposal.findUnique as unknown as ReturnType<typeof vi.fn>;
+/** `updatedAt` lido por ESTE request — o CAS casa exatamente ele. */
+const SEEN = new Date("2026-09-05T12:00:00Z");
 const eventCreate = prisma.proposalEvent.create as unknown as ReturnType<typeof vi.fn>;
 
 function load(over: Partial<{ status: string; complianceJson: unknown }> = {}) {
   mockLoad.mockResolvedValue({
     auth: { org: { id: "org-1" }, actor: { effectiveUserId: "u1" } },
     eff: {},
-    proposal: { id: "p1", kind: "locacao", status: "enviada", complianceJson: null, ...over },
+    proposal: { id: "p1", kind: "locacao", status: "enviada", complianceJson: null, updatedAt: SEEN, ...over },
   } as never);
 }
 const post = (body: unknown) =>
@@ -81,9 +84,28 @@ describe("consentimento LGPD na proposta", () => {
 
   it("corrida: proposta virou terminal entre o check e a escrita → POST e DELETE respondem 409, não 'ok'", async () => {
     updateMany.mockResolvedValue({ count: 0 });
+    propFindUnique.mockResolvedValue({ status: "convertida", updatedAt: SEEN });
     expect((await POST(post({ baseLegal: "protecao_credito" }), params)).status).toBe(409);
     load({ complianceJson: { creditConsent: { at: "2026-01-01T00:00:00Z", by: "x", baseLegal: "protecao_credito" } } });
     expect((await DELETE(del(), params)).status).toBe(409);
     expect(eventCreate).not.toHaveBeenCalled();
+  });
+
+  it("escrita concorrente no complianceJson → 409 stale, e o consentimento não sobrescreve o que entrou no meio (#610)", async () => {
+    updateMany.mockResolvedValue({ count: 0 });
+    propFindUnique.mockResolvedValue({ status: "enviada", updatedAt: new Date("2026-09-05T12:00:09Z") });
+    const res = await POST(post({ baseLegal: "protecao_credito" }), params);
+    expect(res.status).toBe(409);
+    expect((await res.json()).stale).toBe(true);
+  });
+
+  it("o CAS entra no where das duas escritas (POST e DELETE)", async () => {
+    await POST(post({ baseLegal: "protecao_credito" }), params);
+    expect(updateMany.mock.calls[0][0].where.updatedAt).toBe(SEEN);
+    vi.clearAllMocks();
+    updateMany.mockResolvedValue({ count: 1 });
+    load({ complianceJson: { creditConsent: { at: "2026-01-01T00:00:00Z", by: "x", baseLegal: "protecao_credito" } } });
+    await DELETE(del(), params);
+    expect(updateMany.mock.calls[0][0].where.updatedAt).toBe(SEEN);
   });
 });
