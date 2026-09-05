@@ -4,6 +4,13 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-05 - Revisão de modelo: as checagens pegam o que a Trio expôs (medido)
+
+### Corrigido
+
+- **Três lacunas nas checagens semânticas da revisão de modelo, medidas por bateria.** Uma bateria nova (`scripts/ai-bench/placeholders/semantic-recall.ts`) reproduz, sobre o texto que a padronização produz hoje, cada defeito registrado na conferência dos 16 modelos da RE/MAX Trio, e mede se a revisão o aponta. Primeira medição: 58% (56 de 96). Os três zeros eram regras: **endereço da imobiliária escrito depois da chave** não contava como sobra (agora conta, com CEP incluído, e o botão "Remover o trecho" cobre o endereço inteiro); **cláusula de rateio colapsada numa chave solta** só era vista quando os parágrafos vizinhos não tinham chave nenhuma — e a cláusula anterior sempre tem o dia do vencimento chaveado (agora o alinhamento é o mesmo da aba "Cláusulas", que casa vizinho chaveado, e a restauração devolve cabeçalho + itens); **"item 4.2." citado com o 4.2 engolido** passava porque "4.2.2." contava como definição (não conta mais). Depois: 100% (96 de 96), zero achado no texto limpo, planejador inalterado nas fixtures.
+- **Decisão registrada: não construir revisor por IA (R7).** O critério do plano era recall determinístico abaixo de 80%; ficou em 100%. Erro novo de produção vira uma injeção na bateria e uma regra, não um prompt.
+
 ## [Unreleased] - 2026-09-05 - Análise de crédito segue da proposta para o negócio
 
 ### Adicionado

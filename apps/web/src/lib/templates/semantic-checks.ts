@@ -30,6 +30,7 @@
  */
 import { DATA_KEYS, isKnownToken } from "@/lib/templates/placeholder-catalog";
 import { maskForReport, splitDocParagraphs } from "@/lib/templates/insertion-report";
+import { alignParagraphs, type AlignedRow } from "@/lib/templates/paragraph-align";
 // Mesma régua do gate de ativação, de propósito: o conserto que esta regra
 // propõe nunca pode devolver ao modelo um texto que o gate barraria.
 import { auditTemplateText } from "@/lib/templates/pii-gate";
@@ -159,7 +160,25 @@ const PIX_RE = /\bchave\s+PIX\b[^\n]{0,60}/gi;
 const REF_RE =
   /\b(?:item|subitem|al[íi]nea|cl[áa]usula)s?\s+(?:n[.º°]?\s*)?(\d+(?:\.\d+){1,3})\b/gi;
 /** Categorias de PII que, ao lado de uma chave de dado, são sobra do titular. */
-const LEFTOVER_PII_KINDS: readonly PiiKind[] = ["cpf", "cnpj", "bank_agency", "bank_account"];
+const LEFTOVER_PII_KINDS: readonly PiiKind[] = ["cpf", "cnpj", "bank_agency", "bank_account", "cep"];
+/**
+ * Endereço escrito por extenso ao lado da chave ("com sede na Rua X, nº 514").
+ * Medido na Trio (73d97y): a chave da imobiliária entrou e o endereço dela
+ * ficou literal depois — e a bateria de recall mostrou 0/16 nesta classe
+ * enquanto só o CEP contava. A pista é a locução de domicílio/sede seguida de
+ * um logradouro; endereço do IMÓVEL não tem essa locução (é "situado em",
+ * "objeto"), e de todo modo vive numa chave própria sem literal ao lado.
+ */
+// Depois do logradouro só entram segmentos (separados por vírgula) com cara
+// de endereço: número ("nº 514", "1000"), parte que começa em maiúscula ou
+// dígito (bairro, cidade/UF, "Apto 91") ou o CEP. O primeiro segmento que
+// começa em minúscula é prosa da cláusula (", como honorários…", ", obrigando-se
+// solidariamente…") e encerra o trecho. A versão anterior ia até um conector
+// conhecido ou o FIM do parágrafo — e sem CEP nem conector levava a frase de
+// obrigação inteira como "endereço", num conserto removível (achado do review
+// do PR). Sem a flag `i`, de propósito: a maiúscula é o critério.
+const ADDRESS_RE =
+  /\b(?:[Cc]om\s+[Ss]ede|[Ss]ediad[oa]s?|[Rr]esidentes?|[Dd]omiciliad[oa]s?|[Ee]stabelecid[oa]s?)\b[^\n]{0,24}?\b(?:na|no|em|à|a|NA|NO|EM)\s+(?:Rua|RUA|R\.|Av\.?|AV\.?|Avenida|AVENIDA|Alameda|Al\.|Travessa|Pra[çc]a|Rodovia|Estrada|Largo)\b[^\n;{,]{0,60}(?:,\s*(?:n[.º°]?\s*\d[^\n;{,]{0,20}|CEP\s*\d{5}-?\d{3}|[A-ZÀ-Ú0-9][^\n;{,]{0,40})){0,5}/g;
 const LEFTOVER_ERROR_KINDS: ReadonlySet<string> = new Set(["cpf", "bank_agency", "bank_account"]);
 /** Mínimo de dígitos para casar um dado da org sem virar ruído. */
 const MIN_ORG_DIGITS = 5;
@@ -195,6 +214,7 @@ const PII_LABEL: Record<string, string> = {
   cnpj: "um CNPJ",
   bank_agency: "uma agência bancária",
   bank_account: "uma conta bancária",
+  cep: "um CEP",
 };
 
 /** NBSP e afins viram espaço só para CASAR — o corte do trecho usa o original. */
@@ -280,10 +300,18 @@ function extendToSeparator(paragraph: string, start: number, end: number): strin
   return paragraph.slice(i, end);
 }
 
-/** Algum parágrafo DEFINE o item `n` (começa com ele)? */
+/**
+ * Algum parágrafo DEFINE o item `n` (começa com ele)?
+ *
+ * "4.2.2." NÃO define "4.2": medido na bateria de recall (05/09/2026), a
+ * citação "item 4.2." com o 4.2 engolido passava em branco em 8 de 16 casos
+ * porque o subitem seguinte começava com os mesmos dígitos. Depois do número
+ * só pode vir o ponto final do marcador (seguido de não-dígito), espaço ou
+ * parêntese.
+ */
 function definesItem(paragraphs: readonly string[], n: string): boolean {
   const escaped = n.replace(/\./g, "\\.");
-  const re = new RegExp(`^\\s*(?:[a-zA-Z]\\)\\s*)?${escaped}(?![\\d])`);
+  const re = new RegExp(`^\\s*(?:[a-zA-Z]\\)\\s*)?${escaped}(?:\\.(?!\\d)|[)\\s:]|[–-](?!\\d)|$)`);
   return paragraphs.some((p) => re.test(p));
 }
 
@@ -747,6 +775,10 @@ function checkLeftoverIdentifiers(
     for (const f of detectPii(norm)) {
       if (f.confidence < DEFAULT_MIN_CONFIDENCE) continue;
       if (!LEFTOVER_PII_KINDS.includes(f.kind)) continue;
+      // O detector de CEP é só o formato NN.NNN-NNN, que um protocolo ou uma
+      // matrícula também têm. Como sobra removível, só vale com a palavra CEP
+      // logo antes — o resto é dado do contrato, não do titular.
+      if (f.kind === "cep" && !/\bCEP\b[\s:nº°.]{0,4}$/i.test(norm.slice(Math.max(0, f.start - 10), f.start))) continue;
       hits.push({ start: f.start, end: f.end, kind: f.kind, label: PII_LABEL[f.kind] ?? f.kind });
     }
     for (const m of norm.matchAll(CRECI_RE)) {
@@ -757,8 +789,19 @@ function checkLeftoverIdentifiers(
       if (m.index === undefined) continue;
       hits.push({ start: m.index, end: m.index + m[0].length, kind: "pix", label: "uma chave PIX" });
     }
+    for (const m of norm.matchAll(ADDRESS_RE)) {
+      // Endereço tem número (nº, numeral ou CEP). Sem dígito é uma locução
+      // solta ("residente na Rua das Flores") — não vale um conserto removível.
+      if (m.index === undefined || !/\d/.test(m[0])) continue;
+      hits.push({ start: m.index, end: m.index + m[0].length, kind: "address", label: "um endereço" });
+    }
+    // O endereço por extenso costuma terminar no CEP: dois acertos sobre o
+    // mesmo trecho seriam dois achados para a mesma remoção. O mais largo fica.
+    const distinct = hits.filter(
+      (h) => !hits.some((o) => o !== h && o.start <= h.start && o.end >= h.end && (o.end - o.start) > (h.end - h.start))
+    );
 
-    for (const hit of hits) {
+    for (const hit of distinct) {
       const phrase = extendToSeparator(paragraph, hit.start, hit.end);
       // Frase que carrega uma chave não pode ser removida: apagaria o campo.
       const removable = !phrase.includes("{{");
@@ -783,6 +826,8 @@ function checkCollapsedParagraphs(
   findings: SemanticFinding[],
   seen: Map<string, number>
 ): void {
+  // Um alinhamento por relatório, não por parágrafo: é quadrático.
+  const rows = srcParagraphs.length ? alignParagraphs(docParagraphs, srcParagraphs).rows : null;
   docParagraphs.forEach((paragraph, paragraphIndex) => {
     const m = ONLY_TOKEN_RE.exec(normalizeForMatch(paragraph));
     if (!m) return;
@@ -796,9 +841,7 @@ function checkCollapsedParagraphs(
     // engolindo o item da cláusula de rateio — é esse o caso a pegar.
     if (!DATA_KEYS.has(token)) return;
 
-    const source = srcParagraphs.length
-      ? findSourceBetweenAnchors(docParagraphs, srcParagraphs, paragraphIndex)
-      : null;
+    const source = rows ? findSourceByAlignment(rows, srcParagraphs, paragraphIndex) : null;
 
     if (source) {
       // Sem linguagem de cláusula, o parágrafo-fonte era uma qualificação — e
@@ -853,37 +896,39 @@ function checkCollapsedParagraphs(
 }
 
 /**
- * Alinha um parágrafo do Doc com o contrato-fonte pelos VIZINHOS: o anterior e
- * o posterior precisam existir sem chaves e aparecer UMA vez no fonte. O que
- * estiver entre eles no fonte é o que o parágrafo do Doc substituiu.
+ * O que o parágrafo do Doc substituiu no contrato-fonte, pelo alinhamento
+ * parágrafo a parágrafo (`paragraph-align.ts`, o mesmo da aba "Cláusulas").
  *
- * Conservador de propósito: âncora ambígua ou já tokenizada devolve `null` e a
- * regra cai no ramo "sem fonte", em vez de propor restaurar o texto errado.
+ * A versão anterior exigia que os VIZINHOS existissem sem chave e fossem
+ * únicos no fonte. A bateria de recall (05/09/2026) mediu 0/16 no colapso da
+ * cláusula de rateio da Trio: o vizinho anterior é a cláusula 4.1, que sempre
+ * carrega `{{aluguel_dia_vencimento}}` — a âncora "limpa" nunca existia, e a
+ * regra caía no ramo sem fonte, que só avisa depois de dois-pontos. O
+ * alinhamento casa vizinho chaveado por curinga; o parágrafo colapsado sai
+ * como `changed` pareado com o primeiro parágrafo que substituiu, e os que
+ * sumiram seguem como `missing-in-doc` — o fonte é a soma. Parágrafo do Doc
+ * sem par no fonte (`added-in-doc`) devolve `null`: nada a restaurar.
+ *
+ * Limite conhecido: dois parágrafos colapsados em sequência dividem a lacuna
+ * por ordem — o primeiro fica com um parágrafo do fonte e o segundo com o
+ * resto. O achado ainda aponta o parágrafo certo; só o texto a restaurar pode
+ * vir curto ou longo demais, e o antes/depois na tela é a segunda defesa.
  */
-function findSourceBetweenAnchors(
-  docParagraphs: readonly string[],
+function findSourceByAlignment(
+  rows: readonly AlignedRow[],
   srcParagraphs: readonly string[],
   index: number
 ): string | null {
-  const prev = docParagraphs[index - 1];
-  const next = docParagraphs[index + 1];
-  if (!prev || !next || prev.includes("{{") || next.includes("{{")) return null;
-  const a = uniqueIndexOf(srcParagraphs, prev);
-  const b = uniqueIndexOf(srcParagraphs, next);
-  if (a === null || b === null || b <= a + 1) return null;
-  return srcParagraphs.slice(a + 1, b).join("\n");
-}
-
-function uniqueIndexOf(paragraphs: readonly string[], needle: string): number | null {
-  const target = normalizeForMatch(needle).replace(/\s+/g, " ").trim();
-  if (target.length < 20) return null;
-  let found = -1;
-  for (let i = 0; i < paragraphs.length; i += 1) {
-    if (normalizeForMatch(paragraphs[i]).replace(/\s+/g, " ").trim() !== target) continue;
-    if (found !== -1) return null;
-    found = i;
+  const at = rows.findIndex((r) => r.docIndex === index);
+  if (at < 0) return null;
+  const row = rows[at];
+  if (row.kind !== "changed" || row.srcIndex === null) return null;
+  const parts = [srcParagraphs[row.srcIndex]];
+  for (let i = at + 1; i < rows.length && rows[i].kind === "missing-in-doc"; i += 1) {
+    const j = rows[i].srcIndex;
+    if (j !== null) parts.push(srcParagraphs[j]);
   }
-  return found === -1 ? null : found;
+  return parts.join("\n");
 }
 
 // ── 5. Citação de item que não existe mais ──────────────────────────────────
