@@ -28,6 +28,7 @@ import type { InspectionView } from "@/components/locacao/lease-detail/VistoriaT
 import Link from "next/link";
 import { FileText, ExternalLink, Receipt, Building2, FileSignature } from "lucide-react";
 import { DealManagerChip } from "@/components/deals/DealManagerChip";
+import { DealCreditAnalysisCard } from "@/components/locacao/DealCreditAnalysisCard";
 import { toast } from "sonner";
 
 /**
@@ -170,6 +171,12 @@ interface LocacaoDealDetailProps {
   surveysEnabled?: boolean;
   /** Feature `locacao.certidoes` (default OFF): mostra a aba Certidões. */
   certidoesEnabled?: boolean;
+  /** Feature `locacao.credito` (default OFF): card "Análise de crédito (Ficha Certa)" na aba Dados. */
+  creditEnabled?: boolean;
+  /** Requests de crédito já relinkados ao negócio (conversão) — mostra o card fora de "Em Aprovação". */
+  creditRequestCount?: number;
+  /** Tem LEASE_CREATE (exigido por `aprovar-ficha`) — sem isso o botão "Aprovar ficha" não aparece. */
+  creditCanApprove?: boolean;
   /** Padrão contratual de LOCAÇÃO da org — piso da aba Configurações do editor
    *  (vale pro contrato de locação E pro de administração). */
   orgDefaults?: LocacaoSettings;
@@ -220,6 +227,9 @@ export function LocacaoDealDetail({
   simplified = false,
   surveysEnabled = false,
   certidoesEnabled = false,
+  creditEnabled = false,
+  creditRequestCount = 0,
+  creditCanApprove = false,
   orgDefaults,
 }: LocacaoDealDetailProps) {
   const router = useRouter();
@@ -441,6 +451,19 @@ export function LocacaoDealDetail({
 
         {/* DADOS — visão do form.dataJson (paridade com a aba Dados de vendas) */}
         <TabsContent value="dados" className="mt-4">
+          {/* ANÁLISE DE CRÉDITO (Ficha Certa) — veio da proposta convertida; em
+              "Em Aprovação" é onde a ficha é aprovada (o card Serasa antigo,
+              único lugar do "Aprovar ficha", está fora das telas desde 02/09). */}
+          {creditEnabled && (creditRequestCount > 0 || deal.stageName === "Em Aprovação") && (
+            <div className="mb-4">
+              <DealCreditAnalysisCard
+                dealId={deal.id}
+                stageName={deal.stageName}
+                originProposalId={deal.fromProposal?.id ?? null}
+                canApprove={creditCanApprove}
+              />
+            </div>
+          )}
           {deal.formToken && (
             <div className="mb-3 flex items-center justify-end">
               <SendFormSummaryDialog dealId={deal.id} />
