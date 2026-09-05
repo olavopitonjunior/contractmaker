@@ -47,6 +47,13 @@ interface Props {
   onSaved: () => void | Promise<void>;
   /** Esteira do negócio — só muda o caminho do imóvel (`imovel` × `imoveis.N`). */
   esteira?: CertidoesEsteira;
+  /**
+   * PROPOSTA (2026-09): de onde ler o dataJson (`/api/proposals/:id`, que
+   * devolve `{ proposal: { dataJson } }`) e a base da rota de certidões
+   * (`/api/proposals/:id/certidoes`). Defaults: as do negócio.
+   */
+  dataUrl?: string;
+  apiBase?: string;
 }
 
 interface PartySnapshot {
@@ -80,6 +87,8 @@ export function EditPartyDialog({
   onOpenChange,
   onSaved,
   esteira = "venda",
+  dataUrl,
+  apiBase,
 }: Props) {
   const [snapshot, setSnapshot] = useState<PartySnapshot | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -93,7 +102,7 @@ export function EditPartyDialog({
     (async () => {
       setLoading(true);
       try {
-        const res = await fetch(`/api/deals/${dealId}`);
+        const res = await fetch(dataUrl ?? `/api/deals/${dealId}`);
         if (!res.ok) {
           toast.error("Não foi possível carregar dados do negócio");
           onOpenChange(false);
@@ -101,7 +110,8 @@ export function EditPartyDialog({
         }
         const data = await res.json();
         if (cancelled) return;
-        const deal = data.deal ?? data; // tolerate both wrapper shapes
+        // Tolerar os três invólucros: `{ deal }`, `{ proposal }` ou o objeto cru.
+        const deal = data.deal ?? data.proposal ?? data;
         // H.8 (Phase H, 2026-04-18) — no fluxo atual, Deal.dataJson vem null
         // (nunca populado); os dados das partes estão em deal.form.dataJson.
         // Antes lia só deal.dataJson → dialog abria com campos vazios.
@@ -127,7 +137,7 @@ export function EditPartyDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, dealId, job, esteira, onOpenChange]);
+  }, [open, dealId, dataUrl, job, esteira, onOpenChange]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -156,7 +166,7 @@ export function EditPartyDialog({
       }
 
       const res = await fetch(
-        `/api/deals/${dealId}/certidoes/${job.id}/complete`,
+        `${apiBase ?? `/api/deals/${dealId}/certidoes`}/${job.id}/complete`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

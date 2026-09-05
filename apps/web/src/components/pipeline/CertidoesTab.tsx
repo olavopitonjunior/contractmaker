@@ -88,6 +88,17 @@ interface CertidoesTabProps {
   locatarios?: Array<{ nome?: string; razao_social?: string }>;
   /** Fiador só quando a garantia É fiança (mesma regra do planner). */
   fiador?: { nome?: string; razao_social?: string; tipo_pessoa?: string; conjuge?: Dependente } | null;
+  /**
+   * PROPOSTA (2026-09): a mesma aba sobre `/api/proposals/:id/certidoes`.
+   * `dealId` passa a ser só a chave de identidade do sujeito; as URLs vêm das
+   * bases. Na proposta não existem diligenciados, análise IA, ZIP,
+   * compartilhamento nem retentar em massa (superfícies do negócio).
+   */
+  subject?: "deal" | "proposal";
+  apiBase?: string;
+  attachmentsBase?: string;
+  /** Onde ler o dataJson para o "Corrigir dados" (default `/api/deals/:id`). */
+  dataUrl?: string;
 }
 
 /** Identidade útil de dependente: tem CPF ou ao menos nome. */
@@ -435,7 +446,14 @@ export function CertidoesTab({
   locadores = [],
   locatarios = [],
   fiador = null,
+  subject = "deal",
+  apiBase: apiBaseProp,
+  attachmentsBase: attachmentsBaseProp,
+  dataUrl,
 }: CertidoesTabProps) {
+  const isProposal = subject === "proposal";
+  const apiBase = apiBaseProp ?? `/api/deals/${dealId}/certidoes`;
+  const attachmentsBase = attachmentsBaseProp ?? `/api/deals/${dealId}/attachments`;
   const {
     jobs,
     loading,
@@ -447,7 +465,7 @@ export function CertidoesTab({
     sweepStale,
     completeSkipped,
     refresh,
-  } = useCertidoesBatch(dealId);
+  } = useCertidoesBatch({ apiBase });
   const [dialogOpen, setDialogOpen] = useState(false);
   // "+ Adicionar outras pessoas" dentro da popup de certidões. Ao criar, remonta
   // a popup (certKey) pra o plano recarregar com a nova pessoa.
@@ -763,7 +781,7 @@ export function CertidoesTab({
   const handleReport = async () => {
     setGeneratingReport(true);
     try {
-      const res = await fetch(`/api/deals/${dealId}/certidoes/report`, {
+      const res = await fetch(`${apiBase}/report`, {
         method: "POST",
       });
       const data = await res.json().catch(() => ({}));
@@ -783,7 +801,7 @@ export function CertidoesTab({
   };
 
   const handleDownloadZip = () => {
-    window.location.href = `/api/deals/${dealId}/certidoes/zip`;
+    window.location.href = `${apiBase}/zip`;
     toast.success("Baixando todas as certidões…");
   };
 
@@ -807,7 +825,7 @@ export function CertidoesTab({
   ) => {
     try {
       const dryRes = await fetch(
-        `/api/deals/${dealId}/certidoes/bulk-retry`,
+        `${apiBase}/bulk-retry`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -839,7 +857,7 @@ export function CertidoesTab({
         return;
       }
       const res = await fetch(
-        `/api/deals/${dealId}/certidoes/bulk-retry`,
+        `${apiBase}/bulk-retry`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -948,7 +966,8 @@ export function CertidoesTab({
 
   return (
     <div className="space-y-4">
-      {/* F3: diligenciados section at the top */}
+      {/* F3: diligenciados section at the top (negócio; a proposta não tem DiligentedPerson) */}
+      {!isProposal && (
       <DiligentedPersonsSection
         dealId={dealId}
         parties={[
@@ -984,6 +1003,7 @@ export function CertidoesTab({
         ]}
         onChange={() => refresh()}
       />
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <Button onClick={() => setDialogOpen(true)} disabled={extracting}>
@@ -1024,7 +1044,7 @@ export function CertidoesTab({
           </Button>
         )}
         {/* G.2 — bulk retry por categoria quando houver failed ou skipped */}
-        {(stats.failed > 0 || stats.skipped > 0) && (
+        {!isProposal && (stats.failed > 0 || stats.skipped > 0) && (
           <DropdownMenu>
             <DropdownMenuTrigger
               className="inline-flex h-9 items-center justify-center gap-1 whitespace-nowrap rounded-md border border-input bg-background px-3 text-sm font-medium shadow-xs ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
@@ -1101,7 +1121,7 @@ export function CertidoesTab({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        {hasJobs && (
+        {hasJobs && !isProposal && (
           <Button
             variant={showAnalysis ? "default" : "outline"}
             onClick={() => setShowAnalysis((v) => !v)}
@@ -1121,14 +1141,18 @@ export function CertidoesTab({
               <FileText className="h-4 w-4 mr-1" />
               {generatingReport ? "Gerando…" : "Gerar relatório"}
             </Button>
-            <Button variant="outline" onClick={handleDownloadZip}>
-              <Download className="h-4 w-4 mr-1" />
-              Baixar todas (ZIP)
-            </Button>
-            <Button variant="outline" onClick={() => setShareOpen(true)}>
-              <Share2 className="h-4 w-4 mr-1" />
-              Compartilhar
-            </Button>
+            {!isProposal && (
+              <>
+                <Button variant="outline" onClick={handleDownloadZip}>
+                  <Download className="h-4 w-4 mr-1" />
+                  Baixar todas (ZIP)
+                </Button>
+                <Button variant="outline" onClick={() => setShareOpen(true)}>
+                  <Share2 className="h-4 w-4 mr-1" />
+                  Compartilhar
+                </Button>
+              </>
+            )}
           </>
         )}
         {hasJobs && (
@@ -1489,7 +1513,7 @@ export function CertidoesTab({
                               title="Abrir PDF"
                             >
                               <a
-                                href={`/api/deals/${dealId}/attachments/${row.attachmentId}/file`}
+                                href={`${attachmentsBase}/${row.attachmentId}/file`}
                                 target="_blank"
                                 rel="noopener noreferrer"
                               >
@@ -1504,7 +1528,7 @@ export function CertidoesTab({
                               title="Baixar PDF"
                             >
                               <a
-                                href={`/api/deals/${dealId}/attachments/${row.attachmentId}/file?download=1`}
+                                href={`${attachmentsBase}/${row.attachmentId}/file?download=1`}
                               >
                                 <Download className="h-3 w-3" />
                               </a>
@@ -1672,8 +1696,9 @@ export function CertidoesTab({
         extractedStatus={extractedStatus}
         inProgressKeys={inProgressKeys}
         onConfirm={handleExtract}
-        onAddPerson={() => setAddPersonOpen(true)}
+        onAddPerson={isProposal ? undefined : () => setAddPersonOpen(true)}
         esteira={esteira}
+        planUrl={`${apiBase}/plan`}
       />
 
       <DiligentedPersonDialog
@@ -1703,6 +1728,7 @@ export function CertidoesTab({
         <CertidaoDetailDialog
           job={detailJob}
           dealId={dealId}
+          attachmentsBase={attachmentsBase}
           open={!!detailJob}
           onOpenChange={(open) => !open && setDetailJob(null)}
           onRetry={() => handleRetry(detailJob)}
@@ -1715,6 +1741,8 @@ export function CertidoesTab({
           job={editingPartyJob}
           dealId={dealId}
           esteira={esteira}
+          apiBase={apiBase}
+          dataUrl={dataUrl}
           open={!!editingPartyJob}
           onOpenChange={(open) => !open && setEditingPartyJob(null)}
           onSaved={async () => {

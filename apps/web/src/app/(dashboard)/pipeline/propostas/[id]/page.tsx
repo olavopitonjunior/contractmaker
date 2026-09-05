@@ -27,7 +27,7 @@ import { getSignatureSettings } from "@/lib/clicksign/account";
 import { readPartnerBrokerRows } from "@/lib/proposals/partner-brokers";
 import { resolveDealBrokers } from "@/lib/notifications/deal-brokers";
 import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
-import { FEATURE } from "@/lib/modules/catalog";
+import { FEATURE, certidoesFeatureForKind } from "@/lib/modules/catalog";
 import { proposalPartiesSnapshot } from "@/lib/proposals/attachment-assignment";
 import { applyProposalExtractions } from "@/lib/proposals/apply-extractions";
 import { derivePretendentes, tipoImovelForSchema } from "@/lib/credit/pretendentes";
@@ -259,6 +259,33 @@ export default async function PropostaDetailPage({
   const creditConsent = creditFeatureEnabled ? readCreditConsent(proposal.complianceJson) : null;
   const tipoImovel = tipoImovelForSchema(proposal.schemaType);
 
+  // Certidões (Infosimples) na proposta — gate pela feature da ESTEIRA (a
+  // mesma do negócio: `vendas.certidoes` ON por padrão, `locacao.certidoes`
+  // OFF). As partes vão no shape que a `CertidoesTab` já lê do Deal.
+  const certidoesEnabled = isFeatureEnabled(modulesView, certidoesFeatureForKind(proposal.kind));
+  type PartyLike = { nome?: string; razao_social?: string; tipo_pessoa?: string; conjuge?: { nome?: string; cpf?: string } };
+  const asParties = (v: unknown): PartyLike[] => (Array.isArray(v) ? (v as PartyLike[]) : []);
+  const imovelRows = (proposal.kind === "locacao" ? (d.imovel ? [d.imovel] : []) : Array.isArray(d.imoveis) ? d.imoveis : [])
+    .map((raw) => {
+      const im = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+      return {
+        rua: (typeof im.rua === "string" ? im.rua : typeof im.endereco === "string" ? im.endereco : undefined) as string | undefined,
+        numero: typeof im.numero === "string" ? im.numero : undefined,
+        cidade: typeof im.cidade === "string" ? im.cidade : undefined,
+      };
+    });
+  const certidoesParties = {
+    vendedores: asParties(d.vendedores),
+    compradores: asParties(d.compradores),
+    imoveis: imovelRows,
+    locadores: asParties(d.locadores),
+    locatarios: asParties(d.locatarios),
+    fiador:
+      partiesSnapshotFull.garantia?.tipo === "fiador" && partiesSnapshotFull.garantia.fiador
+        ? (partiesSnapshotFull.garantia.fiador as PartyLike)
+        : null,
+  };
+
   // Corretores parceiros: linhas do dataJson + "notifica?" resolvido no registry
   // (mesma regra do e-mail: notifyByEmail, sem opt-out, com endereço).
   const parceiroRows = readPartnerBrokerRows(d);
@@ -429,6 +456,8 @@ export default async function PropostaDetailPage({
       pretendentes={pretendentes}
       creditConsent={creditConsent}
       tipoImovel={tipoImovel}
+      certidoesEnabled={certidoesEnabled}
+      certidoesParties={certidoesParties}
       members={memberRows.map((m) => ({ id: m.user.id, name: m.user.name ?? "Sem nome" }))}
       permissions={permissions}
       planVendedores={planVendedores}

@@ -478,7 +478,15 @@ vi.mock("@/lib/db/prisma", () => {
     certidaoJob: {
       findMany: vi.fn().mockResolvedValue([]),
       findFirst: vi.fn(),
+      findUnique: vi.fn().mockResolvedValue(null),
       create: vi.fn(),
+      update: vi.fn().mockResolvedValue({}),
+      // Relink proposta→deal no convert e supersede do dispatch: default 0
+      // (nada a relinkar) — quem precisa de count>0 faz opt-in.
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      aggregate: vi.fn().mockResolvedValue({ _sum: { costCents: 0 } }),
+      count: vi.fn().mockResolvedValue(0),
+      delete: vi.fn().mockResolvedValue({}),
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     actionIntent: {

@@ -63,6 +63,7 @@ export async function GET(req: NextRequest) {
       orgId: true,
       dealId: true,
       leaseClientId: true,
+      proposalId: true,
       endpoint: true,
       label: true,
       errorMessage: true,
@@ -89,12 +90,18 @@ export async function GET(req: NextRequest) {
   const baseUrl = process.env.NEXTAUTH_URL ?? "https://imobpro.ia.br";
   // Link do job: deal, cliente/prospect de locação, ou o painel de certidões
   // (evita o antigo /deals/null pra jobs sem deal — ad-hoc/cliente).
-  const jobLink = (j: { dealId: string | null; leaseClientId: string | null }): string =>
+  const jobLink = (j: {
+    dealId: string | null;
+    leaseClientId: string | null;
+    proposalId: string | null;
+  }): string =>
     j.dealId
       ? `${baseUrl}/deals/${j.dealId}`
       : j.leaseClientId
         ? `${baseUrl}/locacao/pessoas/clientes/${j.leaseClientId}`
-        : `${baseUrl}/settings/certidoes`;
+        : j.proposalId
+          ? `${baseUrl}/pipeline/propostas/${j.proposalId}`
+          : `${baseUrl}/settings/certidoes`;
   let emailsSent = 0;
   const notifiedIds: string[] = [];
 
