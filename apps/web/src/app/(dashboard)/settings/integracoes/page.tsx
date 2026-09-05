@@ -3,6 +3,11 @@ import { prisma } from "@/lib/db/prisma";
 import { PageHeader } from "@/components/layout/page-header";
 import { GoogleDriveCard } from "@/components/settings/GoogleDriveCard";
 import { FichaCertaAccountCard } from "@/components/settings/FichaCertaAccountCard";
+import { SuperlogicaConnectCard } from "@/components/settings/SuperlogicaConnectCard";
+import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
+import { FEATURE } from "@/lib/modules/catalog";
+import { can, getEffectivePermissions } from "@/lib/security/rbac/check";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { formatDateTimeBR } from "@/lib/format/datetime";
 import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import {
@@ -39,6 +44,15 @@ export default async function IntegracoesPage({
   const fc = isOrgAdmin
     ? await prisma.fichaCertaAccount.findUnique({ where: { orgId: org.id } })
     : null;
+  // Superlógica (exportação de vendas) — a MESMA regra das rotas
+  // /api/settings/superlogica: feature ligada na org + permissão
+  // `superlogica.configure` (owner/admin por preset; papel customizado pode
+  // carregá-la). O card busca o status pela rota (mascarado).
+  const modules = await getOrgModules(org.id);
+  const effective = await getEffectivePermissions(effUserId, org.id);
+  const showSuperlogica =
+    isFeatureEnabled(modules, FEATURE.VENDAS_SUPERLOGICA) &&
+    can(effective, PERMISSION.SUPERLOGICA_CONFIGURE);
 
   return (
     <div className="space-y-6">
@@ -77,6 +91,7 @@ export default async function IntegracoesPage({
         }}
       />
       )}
+      {showSuperlogica && <SuperlogicaConnectCard />}
     </div>
   );
 }

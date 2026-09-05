@@ -9,6 +9,7 @@ const dealCreate = prisma.deal.create as unknown as ReturnType<typeof vi.fn>;
 const formCreate = prisma.salesForm.create as unknown as ReturnType<typeof vi.fn>;
 const attFind = prisma.proposalAttachment.findMany as unknown as ReturnType<typeof vi.fn>;
 const attCreateMany = prisma.dealAttachment.createMany as unknown as ReturnType<typeof vi.fn>;
+const formAttCreateMany = prisma.formAttachment.createMany as unknown as ReturnType<typeof vi.fn>;
 
 const BASE_PROPOSAL = {
   id: "p1",
@@ -86,6 +87,36 @@ describe("convertProposalToDeal", () => {
         skipDuplicates: true,
       })
     );
+  });
+
+  it("os mesmos anexos entram no FORMULÁRIO do negócio (FormAttachment), como upload do admin, sem enfileirar OCR", async () => {
+    pFindUnique.mockResolvedValue(BASE_PROPOSAL);
+    attFind.mockResolvedValue([
+      { filename: "rg.jpg", mime: "image/jpeg", url: "s3://rg.jpg", category: "rg", contentHash: "h1", byteSize: 100, status: "ready", extractedData: { fields: { nome: "Marcia" }, assignment: { kind: "locatario", index: 0 } }, source: "public" },
+      { filename: "renda.pdf", mime: "application/pdf", url: "s3://renda.pdf", category: "comprovante_renda", contentHash: "h2", byteSize: 200, status: "awaiting_user", extractedData: null, source: "manual" },
+      { filename: "ilegivel.pdf", mime: "application/pdf", url: "s3://x.pdf", category: null, contentHash: null, byteSize: null, status: "extracting", extractedData: null, source: "manual" },
+    ]);
+    await convertProposalToDeal({ proposalId: "p1", orgId: "org1", actorUserId: "x" });
+    expect(formAttCreateMany).toHaveBeenCalledTimes(1);
+    const rows = formAttCreateMany.mock.calls[0][0].data;
+    expect(rows).toHaveLength(3);
+    // mesmo blob, no form certo, sem participante (visível a todas as partes)
+    expect(rows[0]).toMatchObject({ formId: "form1", participantId: null, url: "s3://rg.jpg", category: "rg", status: "ready" });
+    expect(rows[0].extractedData).toMatchObject({ assignment: { kind: "locatario", index: 0 } });
+    // status nunca vira "queued": ready/failed passam, o resto aguarda o usuário
+    expect(rows[1]).toMatchObject({ status: "awaiting_user", category: "comprovante_renda" });
+    expect(rows[2]).toMatchObject({ status: "awaiting_user", category: "documento" });
+    expect(rows.some((r: { status: string }) => r.status === "queued" || r.status === "extracting")).toBe(false);
+    // e a aba Documentos continua recebendo os mesmos 3
+    expect(attCreateMany.mock.calls[0][0].data).toHaveLength(3);
+  });
+
+  it("proposta sem anexos → não toca FormAttachment nem DealAttachment", async () => {
+    pFindUnique.mockResolvedValue(BASE_PROPOSAL);
+    attFind.mockResolvedValue([]);
+    await convertProposalToDeal({ proposalId: "p1", orgId: "org1", actorUserId: "x" });
+    expect(formAttCreateMany).not.toHaveBeenCalled();
+    expect(attCreateMany).not.toHaveBeenCalled();
   });
 
   it("proposta já convertida → erro", async () => {

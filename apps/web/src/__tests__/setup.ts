@@ -150,6 +150,7 @@ vi.mock("@/lib/db/prisma", () => {
       findUnique: vi.fn(),
       findFirst: vi.fn().mockResolvedValue(null),
       create: vi.fn(),
+      createMany: vi.fn().mockResolvedValue({ count: 0 }),
       update: vi.fn(),
     },
     dealAttachment: {

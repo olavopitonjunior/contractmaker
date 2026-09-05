@@ -7,7 +7,8 @@ import { DealDetail } from "@/components/pipeline/DealDetail";
 import { buildConsolidatedFormSummary } from "@/lib/forms/form-summary";
 import { isNewtonEnabledForDeal } from "@/lib/newton/gate";
 import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
-import { surveyFeatureForKind } from "@/lib/modules/catalog";
+import { FEATURE, surveyFeatureForKind } from "@/lib/modules/catalog";
+import { hasSuperlogicaAccount, superlogicaVendaUrl } from "@/lib/superlogica/account";
 import { getEffectivePermissions, canAccessDeal } from "@/lib/security/rbac/check";
 import { DEAL_MILESTONE_INCLUDE } from "@/lib/pipeline/deal-dates";
 
@@ -48,6 +49,8 @@ export default async function DealPage({
       },
       certidaoJobs: { orderBy: { createdAt: "desc" }, take: 1 },
       ...DEAL_MILESTONE_INCLUDE,
+      // Exportação para a Superlógica (badge + desabilita a cobrança Asaas).
+      superlogicaExport: { select: { status: true, vendaId: true } },
       // Proposta de origem (conversão) — chip "Origem: proposta" no header.
       fromProposal: {
         select: {
@@ -87,6 +90,22 @@ export default async function DealPage({
     modulesView,
     surveyFeatureForKind(deal.kind)
   );
+  // Superlógica: feature ligada na org E conta gravada — só então o botão
+  // "Enviar para Superlógica" aparece na aba Pagamentos (venda). Checagem
+  // SEM decifrar tokens: um decrypt que falhe (chave rotacionada) não pode
+  // derrubar a página de todos os negócios de venda da org.
+  const superlogicaEnabled =
+    deal.kind === "venda" &&
+    isFeatureEnabled(modulesView, FEATURE.VENDAS_SUPERLOGICA) &&
+    (await hasSuperlogicaAccount(deal.pipeline.orgId));
+  // URL da venda derivada no server (fonte única em account.ts).
+  const superlogicaExport = deal.superlogicaExport
+    ? {
+        status: deal.superlogicaExport.status,
+        vendaId: deal.superlogicaExport.vendaId,
+        url: deal.superlogicaExport.vendaId ? superlogicaVendaUrl(deal.superlogicaExport.vendaId) : null,
+      }
+    : null;
 
   // Mesmas seções que vão pro PDF/e-mail do resumo (builder puro). Sem isto a
   // aba Dados mostrava um recorte manual bem menor que o do PDF — etapa de
@@ -105,9 +124,10 @@ export default async function DealPage({
   return (
     <DealDetail
       formSummarySections={formSummarySections}
-      deal={deal}
+      deal={{ ...deal, superlogicaExport }}
       newtonEnabled={newtonEnabled}
       surveysEnabled={surveysEnabled}
+      superlogicaEnabled={superlogicaEnabled}
     />
   );
 }

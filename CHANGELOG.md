@@ -4,6 +4,28 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-05 - A venda vai do negócio para a Superlógica
+
+### Adicionado
+
+- **"Enviar para Superlógica" na aba Pagamentos do negócio de venda.** Com a Superlógica conectada (Configurações › Integrações) e o negócio em "Contrato assinado", o operador abre um preview que espelha a tela "Venda" da Superlógica — data da venda, valor, comissão e parcela, imóvel, proprietários, compradores e comissionados com percentual e valor — com os bloqueios (sem comprador, sem conta bancária, acima do teto, comissão paga por ambas as partes) e os avisos (documento ausente, tipo de imóvel padrão) antes de qualquer envio. Ao confirmar, a plataforma cria na licença da imobiliária as pessoas que ainda não existem (reutilizando pelas que têm o mesmo CPF/CNPJ), os corretores comissionados, o imóvel e a venda completa em uma chamada; o negócio passa para "Cobrança emitida", ganha o selo "Na Superlógica: venda N" com link, e o botão de cobrança de comissão pelo Asaas é desligado, porque a comissão passa a ser cobrada pela Superlógica. Cada passo grava o vínculo antes do seguinte: se algo falhar no meio, uma nova tentativa reaproveita o que já foi criado e a Superlógica não recebe duplicatas. Só quem tem a permissão "Enviar venda para a Superlógica" enxerga o botão, e só para negócios do próprio escopo.
+
+## [Unreleased] - 2026-09-05 - A imobiliária conecta a própria conta Superlógica
+
+### Adicionado
+
+- **Conta Superlógica por imobiliária em Configurações › Integrações.** O owner/admin informa a licença e os tokens (app e access) da conta da própria imobiliária; a plataforma valida a credencial nas duas APIs que a exportação usa — Imobiliárias e Financeiro v2 — antes de gravar, e guarda os tokens cifrados com AES-256-GCM por organização. Não existe credencial de plataforma nem fallback de `.env`: sem conta conectada, a imobiliária não fala com a Superlógica. A tela traz ainda os padrões da exportação (conta bancária das parcelas, filial, conta contábil da comissão, tipo de imóvel padrão, NF/DIMOB, quem paga a comissão, vencimento e teto), com auto-save por campo; "Testar" revalida nas duas APIs, "Reconectar" troca os tokens preservando os padrões e "Desconectar" apaga os tokens. Os tokens nunca voltam do servidor. A feature `vendas.superlogica` nasce desligada — depende de a Superlógica registrar o app do lado deles — e é ligada tenant a tenant no super-admin. Exportar a venda em si vem nos próximos lotes.
+
+## [Unreleased] - 2026-09-05 - Documentos da proposta no formulário e diálogo de certidões da proposta
+
+### Adicionado
+
+- **Documentos da proposta agora aparecem também no formulário do negócio.** Ao converter uma proposta, os documentos anexados (pelo corretor ou pelo cliente) passam a estar na etapa de documentos do formulário, além da aba Documentos — mesmo arquivo, com o que a IA já leu e a parte a que pertencem. A leitura por IA continua sendo por clique.
+
+### Corrigido
+
+- **Diálogo "Emitir certidões" na proposta** não mostra mais "Pessoas adicionais", "Pesquisa Serasa — Em breve" nem a linha de gasto do mês, que são do negócio e não tinham ação na proposta.
+
 ## [Unreleased] - 2026-09-05 - Revisão de modelo: as checagens pegam o que a Trio expôs (medido)
 
 ### Corrigido

@@ -106,6 +106,8 @@ function financeAccess(): PermissionMap {
     [PERMISSION.RECONCILIATION_MATCH]: true,
     [PERMISSION.REPORT_VIEW]: true,
     [PERMISSION.REPORT_EXPORT]: true,
+    // Lançar a venda no ERP é tarefa do financeiro; configurar a conta não.
+    [PERMISSION.SUPERLOGICA_EXPORT]: true,
   };
 }
 

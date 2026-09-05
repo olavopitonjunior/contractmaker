@@ -19,6 +19,7 @@ export type RegressResult =
         | "deal_terminal"
         | "not_in_charges_stage"
         | "still_has_active_charges"
+        | "superlogica_export"
         | "no_target_stage";
     };
 
@@ -41,6 +42,7 @@ export async function regressDealStageAfterChargeCancel(
     include: {
       stage: { select: { id: true, name: true } },
       pipeline: { include: { stages: { select: { id: true, name: true } } } },
+      superlogicaExport: { select: { status: true } },
     },
   });
   if (!deal) return { regressed: false, reason: "deal_not_found" };
@@ -49,6 +51,12 @@ export async function regressDealStageAfterChargeCancel(
   }
   if (deal.stage.name !== "Cobrança emitida") {
     return { regressed: false, reason: "not_in_charges_stage" };
+  }
+  // "Cobrança emitida" também é alcançado pela exportação para a Superlógica
+  // (razão superlogica_export): a cobrança da comissão vive lá, então cancelar
+  // uma cobrança Asaas remanescente não regride o negócio.
+  if (deal.superlogicaExport?.status === "done") {
+    return { regressed: false, reason: "superlogica_export" };
   }
 
   const activeCount = await prisma.commissionCharge.count({
