@@ -4,6 +4,16 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-04 - Certidões direto na proposta
+
+### Adicionado
+
+- **Certidões da proposta, antes do negócio.** A tela da proposta (venda e locação, quando a imobiliária tem certidões habilitadas para a esteira) ganha a seção "Certidões" — a mesma da aba do negócio: plano automático por parte e imóvel, escolha do que emitir, acompanhamento em tempo real, "Corrigir dados" para o que faltou, relatório em PDF. Os PDFs entram em "Documentos" da proposta já atribuídos à parte certa. Ao converter a proposta em negócio, tudo o que foi emitido segue junto: a aba Certidões do negócio nasce preenchida e nada é pedido (nem pago) de novo. Na proposta não há Serasa (a análise de crédito é outra), pessoas adicionais, análise por IA, ZIP nem compartilhamento — são superfícies do negócio.
+
+### Corrigido
+
+- **"Pretendentes & renda" sem botões em proposta enviada.** A seção nascia sem "Editar" e sem "Registrar consentimento" depois do envio, justamente quando a análise de crédito acontece; o corte agora é o mesmo das rotas (só proposta encerrada bloqueia).
+
 ## [Unreleased] - 2026-09-04 - Pretendentes, renda e consentimento LGPD na proposta de locação
 
 ### Adicionado
