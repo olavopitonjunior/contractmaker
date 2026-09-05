@@ -110,6 +110,11 @@ interface ExtractCertidoesDialogProps {
   onAddPerson?: () => void;
   /** Esteira do negócio: define seções, defaults e rótulos. Default venda. */
   esteira?: CertidoesEsteira;
+  /**
+   * URL do plano (`…/certidoes/plan`). Default: a do negócio. A PROPOSTA
+   * (2026-09) passa `/api/proposals/:id/certidoes/plan` — mesmo contrato.
+   */
+  planUrl?: string;
 }
 
 interface DiligentedRow {
@@ -152,6 +157,7 @@ export function ExtractCertidoesDialog({
   onConfirm,
   onAddPerson,
   esteira = "venda",
+  planUrl,
 }: ExtractCertidoesDialogProps) {
   const [plan, setPlan] = useState<ExtractionPlan | null>(null);
   const [expandedPlan, setExpandedPlan] = useState<ExtractionPlan | null>(null);
@@ -187,7 +193,7 @@ export function ExtractCertidoesDialog({
   const fetchPlan = (regions: string[]) => {
     setLoading(true);
     const qs = regions.length ? `&extraRegions=${encodeURIComponent(regions.join(";"))}` : "";
-    fetch(`/api/deals/${dealId}/certidoes/plan?full=1${qs}`)
+    fetch(`${planUrl ?? `/api/deals/${dealId}/certidoes/plan`}?full=1${qs}`)
       .then((r) => r.json())
       .then((data) => {
         setPlan(data.plan);

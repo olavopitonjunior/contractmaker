@@ -51,6 +51,22 @@ export const PROPOSAL_SCHEMA_OPTIONS: Record<
 
 export type TipoPessoa = "fisica" | "juridica";
 
+/**
+ * Cônjuge de uma parte PF (2026-09) — insumo da análise de crédito (a Ficha
+ * Certa consulta cônjuge do inquilino e do fiador) e das certidões.
+ */
+export interface ConjugeInput {
+  nome: string;
+  /** CPF só-texto. */
+  documento: string;
+  dataNascimento?: string;
+  nomeMae?: string;
+  rendaMensal?: string;
+  rendaOrigem?: string;
+  /** Chaves do dataJson que o form não edita — preservadas no round-trip. */
+  extra?: Record<string, unknown>;
+}
+
 /** Uma parte do formulário (proponente, vendedor ou fiador). */
 export interface PartyInput {
   tipoPessoa: TipoPessoa;
@@ -62,6 +78,36 @@ export interface PartyInput {
   phone: string;
   /** Canal de notificação da assinatura: "email" | "whatsapp". */
   canal: string;
+  // Dados para análise de crédito e certidões (2026-09) — todos opcionais.
+  // Nomes espelham o formulário público de locação (`validation-locacao.ts`),
+  // que é quem o planner de certidões e a Ficha Certa leem.
+  /** ISO `YYYY-MM-DD` (input type=date). */
+  dataNascimento?: string;
+  nomeMae?: string;
+  /** "M" | "F" | "". */
+  sexo?: string;
+  rg?: string;
+  cep?: string;
+  endereco?: string;
+  numero?: string;
+  complemento?: string;
+  bairro?: string;
+  cidade?: string;
+  uf?: string;
+  /** "3.500,00" (mesma máscara de `valor`). */
+  rendaMensal?: string;
+  /** Código da tabela de origem de renda (1–16), como string do select. */
+  rendaOrigem?: string;
+  rendaOutraValor?: string;
+  rendaOutraOrigem?: string;
+  conjuge?: ConjugeInput;
+  /**
+   * Chaves do dataJson da parte que o form NÃO edita (`residir`,
+   * `estado_civil`, o que o OCR ou a rota `/partes` gravou…). Vão e voltam
+   * intactas: `buildProposalDataJson` reconstrói o dataJson inteiro, e sem
+   * isto reeditar a proposta apagaria o que outra tela escreveu.
+   */
+  extra?: Record<string, unknown>;
 }
 
 export interface WitnessInput {
@@ -235,10 +281,93 @@ export function validParties(list: PartyInput[]): PartyInput[] {
  * resumo da listagem, pelo `deriveDealMetadata` e pelo título — sem ele a
  * proposta de PJ aparecia sem proponente na tela.
  */
+/** "3.500,00" | "3500" | "3500.5" → número; vazio/inválido → null. */
+export function parseAmountInput(s: string | undefined): number | null {
+  const t = trim(s ?? "");
+  if (!t) return null;
+  const normalized = /,\d{1,2}$/.test(t) ? t.replace(/\./g, "").replace(",", ".") : t.replace(/,/g, "");
+  const n = Number(normalized);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+const CREDIT_STRING_FIELDS: ReadonlyArray<[keyof PartyInput, string]> = [
+  ["dataNascimento", "data_nascimento"],
+  ["nomeMae", "nome_mae"],
+  ["sexo", "sexo"],
+  ["rg", "rg"],
+  ["cep", "cep"],
+  ["endereco", "endereco"],
+  ["numero", "numero"],
+  ["complemento", "complemento"],
+  ["bairro", "bairro"],
+  ["cidade", "cidade"],
+  ["uf", "uf"],
+];
+
+/** Chaves do dataJson que o form edita — tudo o mais entra em `extra`. */
+const PARTY_OWN_KEYS = new Set<string>([
+  "tipo_pessoa",
+  "nome",
+  "razao_social",
+  "cpf",
+  "cnpj",
+  "email",
+  "telefone",
+  "conjuge",
+  "renda_mensal",
+  "renda_origem",
+  "renda_outra_valor",
+  "renda_outra_origem",
+  ...CREDIT_STRING_FIELDS.map(([, k]) => k),
+]);
+const CONJUGE_OWN_KEYS = new Set<string>([
+  "nome",
+  "cpf",
+  "data_nascimento",
+  "nome_mae",
+  "renda_mensal",
+  "renda_origem",
+]);
+
+function conjugeToData(c: ConjugeInput): Record<string, unknown> | null {
+  const nome = trim(c.nome);
+  const cpf = digits(c.documento);
+  if (!nome && !cpf) return null;
+  const out: Record<string, unknown> = { ...(c.extra ?? {}), nome };
+  if (cpf) out.cpf = cpf;
+  else delete out.cpf;
+  if (trim(c.dataNascimento ?? "")) out.data_nascimento = trim(c.dataNascimento ?? "");
+  if (trim(c.nomeMae ?? "")) out.nome_mae = trim(c.nomeMae ?? "");
+  const renda = parseAmountInput(c.rendaMensal);
+  if (renda != null) out.renda_mensal = renda;
+  const origem = Number.parseInt(c.rendaOrigem ?? "", 10);
+  if (Number.isInteger(origem)) out.renda_origem = origem;
+  return out;
+}
+
+function conjugeFromData(raw: unknown): ConjugeInput | undefined {
+  const d = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+  if (!d) return undefined;
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  const extra: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(d)) if (!CONJUGE_OWN_KEYS.has(k)) extra[k] = v;
+  return {
+    nome: str(d.nome),
+    documento: str(d.cpf),
+    dataNascimento: str(d.data_nascimento),
+    nomeMae: str(d.nome_mae),
+    rendaMensal: typeof d.renda_mensal === "number" ? formatAmountInput(d.renda_mensal) : str(d.renda_mensal),
+    rendaOrigem: d.renda_origem != null ? String(d.renda_origem) : "",
+    ...(Object.keys(extra).length > 0 ? { extra } : {}),
+  };
+}
+
 export function partyToData(p: PartyInput): Record<string, unknown> {
   const nome = trim(p.nome);
   const doc = digits(p.documento);
+  // `extra` primeiro: o que o form edita sobrescreve; o resto atravessa.
   const base: Record<string, unknown> = {
+    ...(p.extra ?? {}),
     tipo_pessoa: p.tipoPessoa,
     nome,
     email: trim(p.email),
@@ -247,9 +376,34 @@ export function partyToData(p: PartyInput): Record<string, unknown> {
   if (p.tipoPessoa === "juridica") {
     base.razao_social = nome;
     if (doc) base.cnpj = doc;
-  } else if (doc) {
-    base.cpf = doc;
+    else delete base.cnpj;
+    delete base.cpf;
+  } else {
+    if (doc) base.cpf = doc;
+    else delete base.cpf;
+    delete base.cnpj;
+    delete base.razao_social;
   }
+  for (const [formKey, dataKey] of CREDIT_STRING_FIELDS) {
+    const v = trim((p[formKey] as string | undefined) ?? "");
+    if (v) base[dataKey] = dataKey === "uf" ? v.toUpperCase() : v;
+    else delete base[dataKey];
+  }
+  const renda = parseAmountInput(p.rendaMensal);
+  if (renda != null) base.renda_mensal = renda;
+  else delete base.renda_mensal;
+  const origem = Number.parseInt(p.rendaOrigem ?? "", 10);
+  if (Number.isInteger(origem)) base.renda_origem = origem;
+  else delete base.renda_origem;
+  const outra = parseAmountInput(p.rendaOutraValor);
+  if (outra != null) base.renda_outra_valor = outra;
+  else delete base.renda_outra_valor;
+  const outraOrigem = Number.parseInt(p.rendaOutraOrigem ?? "", 10);
+  if (Number.isInteger(outraOrigem)) base.renda_outra_origem = outraOrigem;
+  else delete base.renda_outra_origem;
+  const conjuge = p.conjuge ? conjugeToData(p.conjuge) : null;
+  if (conjuge) base.conjuge = conjuge;
+  else delete base.conjuge;
   return base;
 }
 
@@ -258,6 +412,9 @@ export function partyFromData(raw: unknown, canal = "email"): PartyInput {
   const d = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const str = (v: unknown) => (typeof v === "string" ? v : "");
   const isPj = d.tipo_pessoa === "juridica" || str(d.cnpj).length > 0;
+  const extra: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(d)) if (!PARTY_OWN_KEYS.has(k)) extra[k] = v;
+  const conjuge = conjugeFromData(d.conjuge);
   return {
     tipoPessoa: isPj ? "juridica" : "fisica",
     nome: str(d.razao_social) || str(d.nome),
@@ -265,6 +422,24 @@ export function partyFromData(raw: unknown, canal = "email"): PartyInput {
     email: str(d.email),
     phone: str(d.telefone),
     canal,
+    dataNascimento: str(d.data_nascimento),
+    nomeMae: str(d.nome_mae),
+    sexo: str(d.sexo),
+    rg: str(d.rg),
+    cep: str(d.cep),
+    endereco: str(d.endereco),
+    numero: str(d.numero),
+    complemento: str(d.complemento),
+    bairro: str(d.bairro),
+    cidade: str(d.cidade),
+    uf: str(d.uf),
+    rendaMensal: typeof d.renda_mensal === "number" ? formatAmountInput(d.renda_mensal) : str(d.renda_mensal),
+    rendaOrigem: d.renda_origem != null ? String(d.renda_origem) : "",
+    rendaOutraValor:
+      typeof d.renda_outra_valor === "number" ? formatAmountInput(d.renda_outra_valor) : str(d.renda_outra_valor),
+    rendaOutraOrigem: d.renda_outra_origem != null ? String(d.renda_outra_origem) : "",
+    ...(conjuge ? { conjuge } : {}),
+    ...(Object.keys(extra).length > 0 ? { extra } : {}),
   };
 }
 

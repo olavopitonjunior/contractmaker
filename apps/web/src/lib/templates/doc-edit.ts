@@ -131,6 +131,9 @@ interface PlannedStructural {
 }
 
 const HAS_PLACEHOLDER = /\{\{[^{}]+\}\}/;
+/** Parágrafo que É uma chave, sozinha (tolerando marcador de lista e pontuação). */
+const ONLY_PLACEHOLDER =
+  /^\s*(?:[a-zA-Z]\)|\d+[.)]|[ivxIVX]+[.)])?\s*\{\{[^{}]+\}\}\s*[.,;:]{0,3}\s*$/;
 
 function tokenRe(token: string): RegExp {
   return new RegExp(`\\{\\{\\s*${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\}\\}`, "g");
@@ -216,6 +219,16 @@ export async function applyDocEdits(input: {
       const current = op.current.trim();
       const source = op.source.trim();
       if (!source) return recusar(i, "empty-source", current);
+      // Restaurar substitui o parágrafo INTEIRO pelo fonte. Se o parágrafo é
+      // prosa + chave ("CEP {{imovel_cep}}"), restaurar apaga a chave e devolve
+      // ao modelo o dado literal de um terceiro — o contrário do que a
+      // padronização fez. O único caso legítimo é o colapso (o parágrafo É a
+      // chave, sozinha), que é o que as checagens semânticas propõem. Guarda
+      // aqui, não só na tela: a aba "Cláusulas" foi a primeira via a alcançar
+      // esta operação com um parágrafo misto, e não será a última.
+      if (HAS_PLACEHOLDER.test(current) && !ONLY_PLACEHOLDER.test(current)) {
+        return recusar(i, "phrase-has-token", current);
+      }
       if (countOccurrences(sim, current) === 0) return recusar(i, "not-found", current);
       if (countOccurrences(sim, current) > 1) return recusar(i, "ambiguous", current);
       aplicarSim(current, source);

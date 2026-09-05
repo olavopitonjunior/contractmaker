@@ -67,6 +67,7 @@ import {
 } from "@/lib/forms/garantia-catalog";
 import { validatePartnerBrokers } from "@/lib/proposals/partner-brokers";
 import { PartnerBrokersField } from "./PartnerBrokersField";
+import { CreditFieldsBlock } from "./CreditFieldsBlock";
 
 export interface SchemaOption {
   label: string;
@@ -325,6 +326,11 @@ export function ProposalForm({
             </SelectContent>
           </Select>
         </div>
+        {/* Locação, PF: insumos da análise de crédito (Ficha Certa) e das
+            certidões — opcionais; o OCR e o editor da tela completam. */}
+        {v.kind === "locacao" && key === "proponentes" && p.tipoPessoa === "fisica" && (
+          <CreditFieldsBlock party={p} onChange={(patch) => updateParty(key, idx, patch)} />
+        )}
       </div>
     ));
 
@@ -824,6 +830,14 @@ export function ProposalForm({
                         No contrato de locação ele (e o cônjuge) assinam como
                         Fiador e Cônjuge do fiador.
                       </p>
+                      {v.garantia.fiador.tipoPessoa === "fisica" && (
+                        <CreditFieldsBlock
+                          party={v.garantia.fiador}
+                          onChange={(fpatch) =>
+                            patch({ garantia: { ...v.garantia, fiador: { ...v.garantia.fiador, ...fpatch } } })
+                          }
+                        />
+                      )}
                     </div>
                   )}
 

@@ -478,7 +478,15 @@ vi.mock("@/lib/db/prisma", () => {
     certidaoJob: {
       findMany: vi.fn().mockResolvedValue([]),
       findFirst: vi.fn(),
+      findUnique: vi.fn().mockResolvedValue(null),
       create: vi.fn(),
+      update: vi.fn().mockResolvedValue({}),
+      // Relink proposta→deal no convert e supersede do dispatch: default 0
+      // (nada a relinkar) — quem precisa de count>0 faz opt-in.
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      aggregate: vi.fn().mockResolvedValue({ _sum: { costCents: 0 } }),
+      count: vi.fn().mockResolvedValue(0),
+      delete: vi.fn().mockResolvedValue({}),
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     actionIntent: {
@@ -585,6 +593,7 @@ vi.mock("@/lib/db/prisma", () => {
     proposalAttachment: {
       create: vi.fn(),
       createMany: vi.fn(),
+      count: vi.fn().mockResolvedValue(0),
       findFirst: vi.fn().mockResolvedValue(null),
       findUnique: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
@@ -594,6 +603,7 @@ vi.mock("@/lib/db/prisma", () => {
     // Análise de crédito na proposta (Ficha Certa) — agregado + conta por org.
     // `updateMany` default count 0: o CAS de submit é opt-in no sucesso.
     creditAnalysisRequest: {
+      count: vi.fn().mockResolvedValue(0),
       create: vi.fn().mockResolvedValue({ id: "car-mock" }),
       findUnique: vi.fn().mockResolvedValue(null),
       findFirst: vi.fn().mockResolvedValue(null),

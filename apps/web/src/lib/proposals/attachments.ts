@@ -75,6 +75,11 @@ function readAssignmentOf(extractedData: unknown): { kind: string; index: number
  * é aplicada ao existente — o mesmo efeito do "Mover para…". Sem isso, subir de
  * novo o mesmo comprovante escolhendo outra parte respondia "ok" e mantinha a
  * parte antiga em silêncio.
+ *
+ * Só entre anexos da MESMA origem (`source`): o lead, pela página pública,
+ * não pode mover um documento que a imobiliária subiu (byte-idêntico ao que
+ * ele mandou) — seria uma rota anônima reescrevendo a parte de um anexo
+ * interno, e o convert leva os campos de OCR para onde o assignment aponta.
  */
 export async function persistProposalDocument(
   args: PersistProposalDocumentArgs
@@ -92,17 +97,25 @@ export async function persistProposalDocument(
       typeof existing.extractedData === "object" &&
       (existing.extractedData as Record<string, unknown>).assignmentPersisted === true;
     const differs = !has || has.kind !== wanted?.kind || has.index !== wanted?.index || !hasPersisted;
-    if (wanted && wantedPersisted && differs) {
+    const sameSource = existing.source === source;
+    const moveAssignment = !!(wanted && wantedPersisted && sameSource && differs);
+    // Certidão retentada com PDF byte-idêntico ao da tentativa anterior: a
+    // linha dedupada tem de passar a apontar para o job NOVO, senão a lista
+    // (que casa PDF↔job por `certidaoJobId`) mostra o job vivo "sem anexo".
+    const relinkJob = !!(args.certidaoJobId && existing.certidaoJobId !== args.certidaoJobId);
+    if (moveAssignment || relinkJob) {
       const merged = {
         ...((existing.extractedData as Record<string, unknown> | null) ?? {}),
-        assignment: wanted,
-        assignmentPersisted: true,
+        ...(moveAssignment ? { assignment: wanted, assignmentPersisted: true } : {}),
       };
       const updated = await prisma.proposalAttachment.update({
         where: { id: existing.id },
-        data: { extractedData: merged as unknown as Prisma.InputJsonValue },
+        data: {
+          ...(moveAssignment ? { extractedData: merged as unknown as Prisma.InputJsonValue } : {}),
+          ...(relinkJob ? { certidaoJobId: args.certidaoJobId } : {}),
+        },
       });
-      return { attachment: updated, deduped: true, assignmentUpdated: true };
+      return { attachment: updated, deduped: true, assignmentUpdated: moveAssignment };
     }
     return { attachment: existing, deduped: true, assignmentUpdated: false };
   }

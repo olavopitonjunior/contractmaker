@@ -135,6 +135,13 @@ const EVENT_LABEL: Record<string, string> = {
   delivered: "Entregue",
   fetched: "Baixada",
   viewed: "Visualizada",
+  // Página pública (`/p/[token]`, 2026-09): o lead subiu/removeu documento.
+  document_uploaded: "Cliente enviou documento",
+  document_removed: "Cliente removeu documento",
+  // Análise de crédito na proposta (2026-09).
+  credit_data_updated: "Dados de parte atualizados",
+  credit_consent_given: "Consentimento LGPD registrado",
+  credit_consent_revoked: "Consentimento LGPD revogado",
   signed_proponente: "Proponente assinou",
   chained_envelope2: "Enviado ao proprietário",
   chained_envelope2_pending: "Aguardando envio ao proprietário",

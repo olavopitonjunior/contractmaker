@@ -34,6 +34,7 @@ describe("persistProposalDocument — dedup não descarta a escolha humana da pa
   it("mesmo conteúdo, parte DIFERENTE e persistida → move o anexo existente (assignmentUpdated)", async () => {
     findFirst.mockResolvedValue({
       id: "att-antigo",
+      source: "manual",
       url: "https://blob/antigo.pdf",
       extractedData: { assignment: { kind: "locatario", index: 0 }, assignmentPersisted: true, fields: { x: 1 } },
     });
@@ -57,6 +58,7 @@ describe("persistProposalDocument — dedup não descarta a escolha humana da pa
   it("existente só com SUGESTÃO do OCR → a escolha humana agora persiste", async () => {
     findFirst.mockResolvedValue({
       id: "att-antigo",
+      source: "manual",
       url: "https://blob/antigo.pdf",
       extractedData: { assignment: { kind: "locatario", index: 0 }, assignmentPersisted: false },
     });
@@ -71,6 +73,7 @@ describe("persistProposalDocument — dedup não descarta a escolha humana da pa
   it("mesma parte já persistida → nada a atualizar", async () => {
     findFirst.mockResolvedValue({
       id: "att-antigo",
+      source: "manual",
       url: "https://blob/antigo.pdf",
       extractedData: { assignment: { kind: "fiador", index: 0 }, assignmentPersisted: true },
     });
@@ -83,9 +86,54 @@ describe("persistProposalDocument — dedup não descarta a escolha humana da pa
     expect(update).not.toHaveBeenCalled();
   });
 
+  it("origem DIFERENTE (lead sobe byte-idêntico ao que a imobiliária subiu) → NÃO move o anexo interno", async () => {
+    // Vetor fechado no review do PR 4: a página pública (source "public") não
+    // pode reescrever a parte de um documento "manual" — o convert levaria o
+    // OCR dele para onde o lead apontasse.
+    findFirst.mockResolvedValue({
+      id: "att-interno",
+      source: "manual",
+      url: "https://blob/interno.pdf",
+      extractedData: { assignment: { kind: "locatario", index: 0 }, assignmentPersisted: true, fields: { x: 1 } },
+    });
+    const r = await persistProposalDocument({
+      ...base,
+      source: "public",
+      extractedData: { assignment: { kind: "fiador", index: 0 }, assignmentPersisted: true },
+    });
+    expect(r.deduped).toBe(true);
+    expect(r.assignmentUpdated).toBe(false);
+    expect(update).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("certidão retentada com PDF byte-idêntico → a linha dedupada passa a apontar para o job NOVO", async () => {
+    // Review do PR 5b: a lista casa PDF↔job por `certidaoJobId`; sem o relink
+    // o job vivo aparecia "sem anexo" mesmo com o PDF baixado.
+    findFirst.mockResolvedValue({
+      id: "att-cert",
+      source: "infosimples",
+      certidaoJobId: "job-velho",
+      url: "https://blob/cndt.pdf",
+      extractedData: { certidao: { endpoint: "tribunais/cndt" }, assignment: { kind: "locatario", index: 0 }, assignmentPersisted: true },
+    });
+    const r = await persistProposalDocument({
+      ...base,
+      source: "infosimples",
+      category: "certidao",
+      certidaoJobId: "job-novo",
+      extractedData: { assignment: { kind: "locatario", index: 0 }, assignmentPersisted: true },
+    });
+    expect(r.deduped).toBe(true);
+    expect(r.assignmentUpdated).toBe(false);
+    expect(update).toHaveBeenCalledOnce();
+    expect(update.mock.calls[0][0].data).toEqual({ certidaoJobId: "job-novo" });
+  });
+
   it("sem atribuição no upload (ex.: Registro do Aceite) → dedup puro, sem tocar no existente", async () => {
     findFirst.mockResolvedValue({
       id: "att-antigo",
+      source: "manual",
       url: "https://blob/antigo.pdf",
       extractedData: { assignment: { kind: "locatario", index: 0 }, assignmentPersisted: true },
     });

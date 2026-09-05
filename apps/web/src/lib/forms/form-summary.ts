@@ -18,6 +18,7 @@ import {
   type SummaryRow,
 } from "@/lib/forms/negotiation-summary";
 import { GARANTIA_LABELS, normalizeGarantiaTipo } from "@/lib/contracts/template-category";
+import { rendaOrigemLabel } from "@/lib/fichacerta/renda-origens";
 import { LOCACAO_SCHEMA_TYPES } from "@/lib/forms/validation-locacao";
 import { TIPO_IMOVEL_TEXTO } from "@/lib/locacao/enrich";
 
@@ -38,6 +39,28 @@ function brl(v: unknown): string {
   const n = typeof v === "number" ? v : Number(v);
   if (!Number.isFinite(n) || n === 0) return "";
   return `R$ ${n.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`;
+}
+
+/** Código da tabela de origem de renda → rótulo; código desconhecido sai cru. */
+function origemRenda(v: unknown): string {
+  if (v === undefined || v === null || v === "") return "";
+  return rendaOrigemLabel(v as number | string) ?? String(v);
+}
+
+/**
+ * Renda/faturamento de uma parte de LOCAÇÃO — insumo da análise de crédito
+ * (renda × aluguel, origem da renda na Ficha Certa). Uma função só para
+ * locatário, locador e fiador: os três mostravam a renda por código repetido
+ * e a origem e a "outra renda" (2026-09) entrariam em um e faltariam no outro.
+ */
+function rendaRows(parte: AnyObj): SummaryRow[] {
+  const rows: SummaryRow[] = [];
+  pushIf(rows, "Renda mensal declarada", brl(parte.renda_mensal));
+  pushIf(rows, "Origem da renda", origemRenda(parte.renda_origem));
+  pushIf(rows, "Outra renda", brl(parte.renda_outra_valor));
+  pushIf(rows, "Origem da outra renda", origemRenda(parte.renda_outra_origem));
+  pushIf(rows, "Faturamento mensal", brl(parte.faturamento_mensal));
+  return rows;
 }
 
 function cpf(v: unknown): string {
@@ -227,6 +250,9 @@ function relatedPersonValue(p: AnyObj): string {
     str(p.estado_civil),
     str(p.profissao),
     dateBR(p.data_nascimento) && `nasc. ${dateBR(p.data_nascimento)}`,
+    // Cônjuge é pretendente na análise de crédito (2026-09): renda e origem.
+    brl(p.renda_mensal) && `renda ${brl(p.renda_mensal)}`,
+    origemRenda(p.renda_origem) && `origem da renda ${origemRenda(p.renda_origem)}`,
     str(p.nome_mae) && `mãe: ${str(p.nome_mae)}`,
     str(p.naturalidade),
     str(p.email),
@@ -648,12 +674,7 @@ function buildLocacaoConsolidatedSummary(
       const sec = partySection(parte, title, "locacao");
       if (!sec) return;
       // Renda/faturamento — insumo da análise de crédito, só existe em locação.
-      const renda = brl(parte.renda_mensal);
-      if (renda) sec.rows.push({ label: "Renda mensal declarada", value: renda });
-      const faturamento = brl(parte.faturamento_mensal);
-      if (faturamento) {
-        sec.rows.push({ label: "Faturamento mensal", value: faturamento });
-      }
+      sec.rows.push(...rendaRows(parte));
       sections.push(sec);
     });
   };
@@ -794,14 +815,7 @@ function buildLocacaoConsolidatedSummary(
       fiadorSec.title = `Fiador${partyName(fiador) ? ` — ${partyName(fiador)}` : ""}`;
       // A capacidade financeira do fiador é o que sustenta a fiança — sem ela o
       // resumo mostrava o fiador sem o dado que justifica aceitá-lo.
-      const rendaFiador = brl(fiador.renda_mensal);
-      if (rendaFiador) {
-        fiadorSec.rows.push({ label: "Renda mensal declarada", value: rendaFiador });
-      }
-      const faturamentoFiador = brl(fiador.faturamento_mensal);
-      if (faturamentoFiador) {
-        fiadorSec.rows.push({ label: "Faturamento mensal", value: faturamentoFiador });
-      }
+      fiadorSec.rows.push(...rendaRows(fiador));
       sections.push(fiadorSec);
     }
   } else if (garantiaRows.length > 0) {

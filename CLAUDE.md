@@ -172,6 +172,10 @@ O que fica aqui é o que os docs não cobrem:
 
 Segundo provider via `CertidaoJob.provider="serasa"` (5 endpoints PF+PJ + vínculos; gate LGPD por deal `Deal.complianceJson.serasaConsent`). Detalhes em [docs/certidoes-serasa.md](docs/certidoes-serasa.md).
 
+### Ficha Certa Digital (2026-09)
+
+Terceiro provider, `CertidaoJob.provider="fichacerta"` + agregado `CreditAnalysisRequest`, disparado da **proposta de locação** (feature `locacao.credito`, default OFF). **Conta POR org** (`FichaCertaAccount`, fail-closed, sem token global). Laudo é assíncrono: job `awaiting_portal` com `resultData.numero_pedido = id da solicitação` (trava por alvo e cron `poll-portal` funcionam sem mudança) fechado pelo webhook `/api/webhooks/fichacerta/[slug]` (Bearer do nosso `/token` ou `?k=`) ou pelo cron. Convert relinka request/jobs/laudo para o Deal. Detalhes em [docs/certidoes-fichacerta.md](docs/certidoes-fichacerta.md).
+
 ## Assinatura digital (ClickSign v3)
 
 Envelope vincula a UM de dois (CHECK XOR): Contract aprovado (`source="contract"`, `Envelope.contractId`) ou DealAttachment avulso (`source="attachment"`, `Envelope.attachmentId`).
@@ -313,7 +317,7 @@ Não-óbvios (enums e structure: ver `prisma/schema.prisma`):
 - **`SplitRecipient.pendingFields`** não-vazio → `active: false` + `splitDispatcher` skip FAILED. Magic link via `completionToken/Exp` (JWT-HMAC 7d)
 - **Multi-account schema:** `AsaasAccount.orgId` não-@unique (N contas/org). `OrgFinancialSettings.accountId @unique`. `AsaasCustomer @@unique([accountId, cpfCnpj])`. `CommissionCharge.accountId` (FK Restrict) persistido na criação — trocar conta ativa NÃO afeta cobranças emitidas. Owner bypassa `AsaasAccountPermission`. RBAC: `ACCOUNT_CREATE/ACTIVATE/ARCHIVE/PERMISSIONS_MANAGE`
 
-**Audit actions:** lista canônica em `lib/audit/actions.ts` (prefixos `DEAL_*`/`FORM_*`/`ATTACHMENT_*`/`CONTRACT_*`/`ENVELOPE_*`/`CERTIDAO_*`/`KYC_*`/`CHARGE_*`/`TRANSFER_*`/`CLICKSIGN_*`/`SPLIT_RECIPIENT_*`/`ACCOUNT_*`).
+**Audit actions:** lista canônica em `lib/security/audit.ts` (não existe `lib/audit/actions.ts`; prefixos `DEAL_*`/`FORM_*`/`ATTACHMENT_*`/`CONTRACT_*`/`ENVELOPE_*`/`CERTIDAO_*`/`KYC_*`/`CHARGE_*`/`TRANSFER_*`/`CLICKSIGN_*`/`SPLIT_RECIPIENT_*`/`ACCOUNT_*`).
 
 ## Gotchas
 

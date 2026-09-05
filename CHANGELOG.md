@@ -4,6 +4,55 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-05 - Análise de crédito segue da proposta para o negócio
+
+### Adicionado
+
+- **A análise de crédito (Ficha Certa) acompanha a conversão da proposta**, para as imobiliárias com a análise de crédito habilitada. Ao converter a proposta de locação em negócio, os laudos já emitidos (situação, Score FC, parecer, PDF) aparecem na aba Dados do negócio, no card "Análise de crédito (Ficha Certa)", sem pedir nem pagar nada de novo. No stage "Em Aprovação" o card traz o botão "Aprovar ficha" (que não tinha mais lugar na tela) e o atalho "Analisar na proposta" para uma nova análise.
+
+### Corrigido
+
+- O `CLAUDE.md` apontava a lista de ações de auditoria para um arquivo que não existe; agora aponta para `lib/security/audit.ts`.
+
+## [Unreleased] - 2026-09-05 - Análise de crédito Ficha Certa na proposta
+
+### Adicionado
+
+- **Análise de crédito (Ficha Certa) disparada da proposta de locação, para as imobiliárias com a análise de crédito habilitada** (nasce desligada). Com a conta da imobiliária conectada, consentimento registrado e os pretendentes completos, "Analisar pretendentes" envia locatário, cônjuge, fiador e cônjuge do fiador para a Ficha Certa de uma vez. O laudo volta sozinho (webhook da conta, com o cron como rede de segurança): cada pessoa aparece com situação (sem restrição / com restrição), Score FC, parecer e recomendações; ao final, o parecer da locação (inquilinos e fiadores) e o PDF do laudo entram em Documentos. "Atualizar" consulta a Ficha Certa na hora. O disparo respeita o teto mensal e os créditos pré-pagos da conta, não reenvia quem já está em análise e explica cada bloqueio (conta não conectada, consentimento, dados faltando).
+
+## [Unreleased] - 2026-09-04 - Cláusulas do modelo lado a lado com o contrato original
+
+### Adicionado
+
+- **Aba "Cláusulas" na revisão do modelo.** Ao lado de "Documento" e "Prévia com dados de exemplo", a nova aba mostra o Doc-modelo parágrafo a parágrafo — cada `{{chave}}` marcada na cor da parte a que pertence (locador, locatário, imóvel, corretor, imobiliária…) — e, na coluna da direita, o parágrafo do contrato ORIGINAL que aquele trecho substituiu. Era o que faltava para ver o que a padronização fez: uma cláusula inteira colapsada numa chave solta aparece como um parágrafo do modelo "valendo" por três do original, com os que sumiram em linhas próprias ("sumiu do modelo"); a chave do corretor no item da imobiliária aparece com o nome da imobiliária a um palmo de distância. Os achados da revisão semântica ficam na linha do parágrafo, com o mesmo botão de conserto do card "Problemas". Filtros "só com chaves" e "só com problemas". O alinhamento tolera espaço fixo e espaçamento; um parágrafo que é só uma chave nunca é dado como "igual" ao original. Modelo sem lote (criado do zero ou enviado avulso) abre a aba em uma coluna e diz por quê.
+- **Consertos por linha, sem sair da aba.** Em rascunho, cada linha oferece "Trocar chave…" (parágrafo com uma chave simples: escolhe a chave certa no catálogo), "Restaurar do original" (parágrafo pareado cujo texto difere do original, desde que não carregue bloco composto) e "Remover ‘trecho’" sobre o texto selecionado na linha. Todos passam pelo mesmo caminho das correções automáticas (`doc-edit`): frase do próprio Doc, uma ocorrência só, revalidação no mesmo passo, linha de auditoria. "Restaurar" só aparece em parágrafo sem chave nenhuma — e o próprio `doc-edit` passa a recusar restaurar um parágrafo de prosa + chave (apagaria a chave e devolveria o dado literal ao modelo); o colapso puro continua restaurável. Linha cujo pareamento tinha mais de um candidato no original vem marcada "correspondência aproximada". Selecionar texto na aba também alimenta o painel "Inserir campos que faltam". Modelo ativo é só leitura. Se a busca do original falhar, a aba diz que não conseguiu e oferece tentar de novo, em vez de cravar "sem arquivo original".
+- **`GET /api/templates/[id]/source-text`** devolve os parágrafos do contrato original do acervo (junção por hash do arquivo e org do lote, como a revalidação já fazia), para o mesmo papel que lê o Doc inteiro.
+
+## [Unreleased] - 2026-09-04 - Certidões direto na proposta
+
+### Adicionado
+
+- **Certidões da proposta, antes do negócio.** A tela da proposta (venda e locação, quando a imobiliária tem certidões habilitadas para a esteira) ganha a seção "Certidões" — a mesma da aba do negócio: plano automático por parte e imóvel, escolha do que emitir, acompanhamento em tempo real, "Corrigir dados" para o que faltou, relatório em PDF. Os PDFs entram em "Documentos" da proposta já atribuídos à parte certa. Ao converter a proposta em negócio, tudo o que foi emitido segue junto: a aba Certidões do negócio nasce preenchida e nada é pedido (nem pago) de novo. Na proposta não há Serasa (a análise de crédito é outra), pessoas adicionais, análise por IA, ZIP nem compartilhamento — são superfícies do negócio.
+
+### Corrigido
+
+- **"Pretendentes & renda" sem botões em proposta enviada.** A seção nascia sem "Editar" e sem "Registrar consentimento" depois do envio, justamente quando a análise de crédito acontece; o corte agora é o mesmo das rotas (só proposta encerrada bloqueia).
+
+## [Unreleased] - 2026-09-04 - Pretendentes, renda e consentimento LGPD na proposta de locação
+
+### Adicionado
+
+- **Quem vai ser analisado, com o que falta, direto na proposta.** Na proposta de locação (com a análise de crédito habilitada), a seção "Pretendentes & renda" lista cada pessoa que a análise de crédito consulta — locatário, cônjuge, fiador e cônjuge do fiador — mostrando CPF, nascimento, renda e cidade, e marcando o que ainda falta para consultar (CPF válido, data de nascimento). "Editar" preenche nascimento, nome da mãe, RG, endereço, renda com origem e outra renda sem abrir o formulário da proposta, e funciona mesmo depois de a proposta ter sido enviada: esses dados não entram no documento assinado. O que já veio de um documento lido por IA aparece preenchido.
+- **Consentimento LGPD na proposta.** Antes de consultar crédito, o corretor registra a base legal (proteção ao crédito ou execução de contrato) na própria proposta; o registro é auditável, pode ser revogado e segue para o negócio na conversão.
+- **Formulário da proposta com "Dados para análise de crédito".** Bloco opcional por proponente pessoa física e no fiador: nascimento, nome da mãe, sexo, RG, endereço, renda e origem, outra renda e cônjuge. Reeditar a proposta preserva o que o OCR ou a edição de partes já tinham gravado.
+- **Formulário público de locação** aceita origem da renda, outra renda e, no cônjuge, nome da mãe e renda; o resumo consolidado mostra renda e origem de cada parte.
+
+## [Unreleased] - 2026-09-04 - O cliente envia documentos pela página da proposta
+
+### Adicionado
+
+- **O interessado envia os próprios documentos pela página pública da proposta de locação.** Na mesma página em que lê a proposta (o link enviado pelo WhatsApp), quando a análise de crédito está habilitada na imobiliária, aparece o bloco "Envie seus documentos": ele diz de quem é cada arquivo (locatário, cônjuge, fiador, cônjuge do fiador ou outro), envia PDF ou foto, vê o que já mandou e pode remover o que subiu por engano. O corretor recebe um aviso "Cliente enviou documentos" (um por hora, não um por arquivo) e encontra tudo em "Documentos por parte" com a marca "enviado pelo cliente" — já com a parte escolhida, pronto para extrair com IA e seguir para o negócio. A página só aceita envio enquanto a proposta está viva para o cliente (não expirou, não foi cancelada nem convertida); documentos da imobiliária, o dossiê e o PDF assinado nunca aparecem nem podem ser removidos por ali.
+
 ## [Unreleased] - 2026-09-04 - Refazer a padronização de um rascunho e descartar um lote
 
 ### Adicionado

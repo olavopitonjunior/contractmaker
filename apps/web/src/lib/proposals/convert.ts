@@ -194,6 +194,11 @@ export async function convertProposalToDeal(input: {
         // default "venda"; sem isto toda locação viraria deal de venda.
         kind: proposal.kind,
         dataJson: normalizedData as Prisma.InputJsonValue,
+        // Consentimento LGPD dado na proposta segue para o negócio (a chave
+        // canônica `creditConsent` é lida pelas rotas de crédito do deal).
+        ...(proposal.complianceJson && typeof proposal.complianceJson === "object"
+          ? { complianceJson: proposal.complianceJson as Prisma.InputJsonValue }
+          : {}),
         stageEnteredAt: new Date(),
       },
     });
@@ -216,6 +221,64 @@ export async function convertProposalToDeal(input: {
         })),
         skipDuplicates: true,
       });
+    }
+
+    // Certidões emitidas NA PROPOSTA (2026-09) seguem para o negócio: os jobs
+    // ganham `dealId` (mantendo `proposalId`) e o PDF copiado acima é casado
+    // ao job pelo blob (`url`), porque `CertidaoJob.attachmentId` é FK de
+    // DealAttachment. Sem isto a aba Certidões do negócio nasceria vazia e o
+    // lock por alvo permitiria reemitir o que a proposta já pagou.
+    const relinked = await tx.certidaoJob.updateMany({
+      where: { proposalId: proposal.id },
+      data: { dealId: d.id },
+    });
+    // Análise de crédito (Ficha Certa) idem: o request ganha `dealId` e o PDF
+    // do laudo (ProposalAttachment) é casado ao DealAttachment copiado pela
+    // url → `reportDealAttachmentId`. Sem isto o card do negócio nasceria
+    // vazio e o laudo só existiria na proposta. Janela conhecida: `attachments`
+    // foi lido antes da transação; um laudo que a Ficha Certa conclua ENTRE a
+    // leitura e o commit fica sem par aqui (card sem PDF, sem erro) — o
+    // request segue relinkado e o PDF continua na proposta de origem.
+    const relinkedCredit = await tx.creditAnalysisRequest.updateMany({
+      where: { proposalId: proposal.id },
+      data: { dealId: d.id },
+    });
+    const withJob = relinked.count > 0 ? attachments.filter((a) => a.certidaoJobId) : [];
+    const creditReports =
+      relinkedCredit.count > 0
+        ? await tx.creditAnalysisRequest.findMany({
+            where: { dealId: d.id, reportProposalAttachmentId: { not: null } },
+            select: { id: true, reportProposalAttachmentId: true },
+          })
+        : [];
+    const attById = new Map(attachments.map((a) => [a.id, a]));
+    const reportUrls = creditReports
+      .map((r) => attById.get(r.reportProposalAttachmentId!)?.url)
+      .filter((u): u is string => !!u);
+    const urls = Array.from(new Set([...withJob.map((a) => a.url), ...reportUrls]));
+    if (urls.length > 0) {
+      const copied = await tx.dealAttachment.findMany({
+        where: { dealId: d.id, url: { in: urls } },
+        select: { id: true, url: true },
+      });
+      const byUrl = new Map(copied.map((c) => [c.url, c.id]));
+      for (const a of withJob) {
+        const attachmentId = byUrl.get(a.url);
+        if (!attachmentId || !a.certidaoJobId) continue;
+        await tx.certidaoJob.updateMany({
+          where: { id: a.certidaoJobId, dealId: d.id },
+          data: { attachmentId },
+        });
+      }
+      for (const r of creditReports) {
+        const url = attById.get(r.reportProposalAttachmentId!)?.url;
+        const reportDealAttachmentId = url ? byUrl.get(url) : undefined;
+        if (!reportDealAttachmentId) continue;
+        await tx.creditAnalysisRequest.updateMany({
+          where: { id: r.id, dealId: d.id },
+          data: { reportDealAttachmentId },
+        });
+      }
     }
 
     // CAS: fecha o loop e garante conversão única.
