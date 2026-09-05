@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { loadScopedProposal, proposalFeatureGuard } from "@/lib/proposals/route-helpers";
 import { TERMINAL_STATUSES } from "@/lib/proposals/status-sets";
+import { applyScopedProposalWrite, proposalConflictResponse } from "@/lib/proposals/cas";
 import { can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
@@ -58,13 +59,17 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     baseLegal: parsed.data.baseLegal,
     provider: CREDIT_PROVIDER,
   };
-  const next = withCreditConsent(proposal.complianceJson, consent);
-  const claimed = await prisma.proposal.updateMany({
-    where: { id: proposal.id, status: { notIn: [...TERMINAL_STATUSES] } },
-    data: { complianceJson: next as Prisma.InputJsonValue },
-  });
-  if (claimed.count === 0) {
-    return NextResponse.json({ error: "Proposta encerrada." }, { status: 409 });
+  // CAS com re-tentativa (issue #610): sem casar o `updatedAt`, o
+  // consentimento sobrescreveria em silêncio outra escrita concorrente no
+  // complianceJson. O patch é uma chave só, então é reaplicado sobre o
+  // estado fresco em vez de virar 409 na primeira corrida.
+  const written = await applyScopedProposalWrite(
+    proposal.id,
+    { updatedAt: proposal.updatedAt, dataJson: proposal.dataJson, complianceJson: proposal.complianceJson },
+    (cur) => ({ complianceJson: withCreditConsent(cur.complianceJson, consent) as Prisma.InputJsonValue })
+  );
+  if (!written.ok) {
+    return proposalConflictResponse(written.reason, "Proposta encerrada.");
   }
 
   await prisma.proposalEvent
@@ -100,15 +105,15 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   const had = readCreditConsent(proposal.complianceJson);
   if (!had) return NextResponse.json({ ok: true, consent: null });
 
-  const next = withoutCreditConsent(proposal.complianceJson);
-  // Mesmo guard atômico do POST: se a proposta virou terminal no meio, a
-  // revogação não pode responder "ok" sem ter escrito.
-  const revoked = await prisma.proposal.updateMany({
-    where: { id: proposal.id, status: { notIn: [...TERMINAL_STATUSES] } },
-    data: { complianceJson: next as Prisma.InputJsonValue },
-  });
-  if (revoked.count === 0) {
-    return NextResponse.json({ error: "Proposta encerrada." }, { status: 409 });
+  // Mesmo guard do POST: se a proposta virou terminal no meio, a revogação
+  // não pode responder "ok" sem ter escrito.
+  const revoked = await applyScopedProposalWrite(
+    proposal.id,
+    { updatedAt: proposal.updatedAt, dataJson: proposal.dataJson, complianceJson: proposal.complianceJson },
+    (cur) => ({ complianceJson: withoutCreditConsent(cur.complianceJson) as Prisma.InputJsonValue })
+  );
+  if (!revoked.ok) {
+    return proposalConflictResponse(revoked.reason, "Proposta encerrada.");
   }
   await prisma.proposalEvent
     .create({

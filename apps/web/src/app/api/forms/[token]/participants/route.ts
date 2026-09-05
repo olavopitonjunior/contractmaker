@@ -8,6 +8,7 @@ import {
   participantRoleSchema,
 } from "@/lib/forms/participant-category";
 import { listOrgParticipantCategories } from "@/lib/forms/participant-category-repo";
+import { claimParticipantAttachments } from "@/lib/forms/participant-attachments";
 import { audit } from "@/lib/security/audit";
 
 const bodySchema = z.object({
@@ -146,6 +147,13 @@ export async function POST(
       data: { formId: form.id, role, partyIndex: 0, token, tokenExp: exp },
     });
     created.push(final);
+  }
+
+  // Link novo herda os documentos que já eram daquela parte (conversão de
+  // proposta, upload do corretor). Best-effort: falhar aqui não pode impedir
+  // a criação do link, que é o que o usuário pediu.
+  if (created.length > 0) {
+    await claimParticipantAttachments(form.id, created).catch(() => 0);
   }
 
   if (created.length > 0) {

@@ -10,6 +10,7 @@ const formCreate = prisma.salesForm.create as unknown as ReturnType<typeof vi.fn
 const attFind = prisma.proposalAttachment.findMany as unknown as ReturnType<typeof vi.fn>;
 const attCreateMany = prisma.dealAttachment.createMany as unknown as ReturnType<typeof vi.fn>;
 const formAttCreateMany = prisma.formAttachment.createMany as unknown as ReturnType<typeof vi.fn>;
+const eventCreate = prisma.proposalEvent.create as unknown as ReturnType<typeof vi.fn>;
 
 const BASE_PROPOSAL = {
   id: "p1",
@@ -117,6 +118,37 @@ describe("convertProposalToDeal", () => {
     await convertProposalToDeal({ proposalId: "p1", orgId: "org1", actorUserId: "x" });
     expect(formAttCreateMany).not.toHaveBeenCalled();
     expect(attCreateMany).not.toHaveBeenCalled();
+  });
+
+  it("proposta incompleta (locação sem locador) → formulário nasce PENDENTE, sem completedAt, e o evento diz o que falta", async () => {
+    pFindUnique.mockResolvedValue(BASE_PROPOSAL); // só locatarios[0].nome
+    await convertProposalToDeal({ proposalId: "p1", orgId: "org1", actorUserId: "x" });
+    const form = formCreate.mock.calls[0][0].data;
+    expect(form.status).toBe("pendente");
+    // sem completedAt o link público segue aberto e o marco de SLA não mente
+    expect(form.completedAt).toBeUndefined();
+    const ev = eventCreate.mock.calls.find((c) => c[0].data.eventName === "converted")![0].data;
+    expect(ev.payload.formStatus).toBe("pendente");
+    expect(ev.payload.missing).toContain("locadores");
+  });
+
+  it("proposta completa → formulário nasce COMPLETO com completedAt (comportamento antigo preservado)", async () => {
+    pFindUnique.mockResolvedValue({
+      ...BASE_PROPOSAL,
+      dataJson: {
+        locadores: [{ tipo_pessoa: "fisica", nome: "João Locador" }],
+        locatarios: [{ tipo_pessoa: "fisica", nome: "Maria Locatária" }],
+        imovel: { descricao: "Apartamento de 2 quartos no Centro" },
+        aluguel: { valor: 2500 },
+      },
+    });
+    await convertProposalToDeal({ proposalId: "p1", orgId: "org1", actorUserId: "x" });
+    const form = formCreate.mock.calls[0][0].data;
+    expect(form.status).toBe("completo");
+    expect(form.completedAt).toBeInstanceOf(Date);
+    const ev = eventCreate.mock.calls.find((c) => c[0].data.eventName === "converted")![0].data;
+    expect(ev.payload.formStatus).toBe("completo");
+    expect(ev.payload.missing).toBeUndefined();
   });
 
   it("proposta já convertida → erro", async () => {

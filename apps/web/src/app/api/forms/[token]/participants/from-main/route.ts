@@ -8,6 +8,7 @@ import {
 } from "@/lib/forms/participant-category";
 import { listOrgParticipantCategories } from "@/lib/forms/participant-category-repo";
 import { formClosedResponse } from "@/lib/forms/form-gate";
+import { claimParticipantAttachments } from "@/lib/forms/participant-attachments";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { rateLimit } from "@/lib/security/ratelimit";
 
@@ -109,6 +110,12 @@ export async function POST(
       data: { formId: form.id, role, partyIndex: 0, token, tokenExp: exp },
     });
     created.push(final);
+  }
+
+  // Mesma herança do POST autenticado: o link nascendo pega os documentos que
+  // já eram daquela parte. Best-effort — não pode derrubar a criação do link.
+  if (created.length > 0) {
+    await claimParticipantAttachments(form.id, created).catch(() => 0);
   }
 
   if (created.length > 0) {

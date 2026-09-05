@@ -4,6 +4,14 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-05 - Conversão honesta, documentos que seguem a parte e edição concorrente
+
+### Corrigido
+
+- **O formulário do negócio não nasce mais "completo" quando faltam partes.** Ao converter uma proposta de locação sem locador, o formulário era marcado como concluído e o contrato podia sair sem uma das partes. Agora ele nasce pendente, com o link aberto para completar, e o histórico da proposta diz o que faltou. Conversões cujo dado está completo seguem como antes, e a esteira de venda não muda.
+- **Quem abre o formulário pelo link da própria parte agora vê os documentos dela.** RG, comprovante de renda e o que mais já estivesse anexado àquela parte ficava invisível no link individual, e a pessoa reenviava tudo.
+- **Edições simultâneas na proposta não se apagam mais em silêncio.** Duas abas salvando campos diferentes, ou a leitura por IA gravando enquanto alguém edita, faziam a segunda gravação sobrescrever a primeira sem aviso. Agora a segunda recebe um aviso para recarregar e nada é perdido.
+
 ## [Unreleased] - 2026-09-05 - A comissão paga na Superlógica fecha o negócio sozinha
 
 ### Adicionado
