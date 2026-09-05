@@ -397,6 +397,9 @@ model Organization {
   // Sem conta conectada, só a org compartilhada legada cai no token global.
   clicksignAccount  ClickSignAccount?
   signatureSettings OrgSignatureSettings?
+  // Superlógica (ERP financeiro da imobiliária) — conta própria da org com
+  // app/access token cifrados + padrões da exportação de vendas.
+  superlogicaAccount SuperlogicaAccount?
   proposals         Proposal[]
   // Análise de crédito por imobiliária (Ficha Certa Digital) — conta própria
   // com credencial/webhook criptografados, no molde da ClickSignAccount.
@@ -4860,6 +4863,63 @@ model ClickSignAccount {
   lastError              String?   @db.Text
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+/// SuperlogicaAccount — conexão da imobiliária com a Superlógica Imobiliárias
+/// (ERP financeiro), no molde da ClickSignAccount: `app_token` (do aplicativo
+/// "contractmaker" registrado na Superlógica) e `access_token` (um por licença)
+/// cifrados com AES-256-GCM (lib/security/crypto.ts). Só o servidor decripta;
+/// o GET de configurações devolve status e metadados, nunca os tokens.
+///
+/// Carrega também os PADRÕES da exportação de venda (conta bancária das
+/// parcelas, filial, conta contábil da comissão, NF/DIMOB, prazo) — são
+/// preferências, não credencial, mas moram aqui porque só fazem sentido com a
+/// conta conectada e são 1:1 com a org. Ver docs/integracoes/superlogica-vendas-export.md.
+model SuperlogicaAccount {
+  id                   String    @id @default(cuid())
+  orgId                String    @unique
+  /// Nome da licença/base na Superlógica (ex.: "adm037585"). Só monta links
+  /// de tela; a API usa o access_token.
+  licenca              String
+  appTokenEncrypted    String    @db.Text
+  appTokenIvBase64     String
+  appTokenTagBase64    String
+  accessTokenEncrypted String    @db.Text
+  accessTokenIvBase64  String
+  accessTokenTagBase64 String
+  status               String    @default("connected") // connected | error | disconnected
+  /// Nome da empresa lido de `filiais` na conexão (só exibição).
+  accountName          String?
+  connectedById        String?
+  lastValidatedAt      DateTime?
+  lastError            String?   @db.Text
+
+  // ---- Padrões da exportação de venda (tabela "Passo 2" do plano) ----
+  /// `ID_CONTABANCO_CB` das parcelas da comissão. Null = ainda não escolhida
+  /// (a exportação bloqueia no preview até o admin escolher).
+  contaBancariaId         Int?
+  /// `ID_FILIAL_FIL` (0 = Matriz).
+  filialId                Int     @default(0)
+  /// Conta (categoria) contábil da despesa de comissão a pagar (fase 2).
+  contaContabilComissao   String  @default("2.2.1")
+  contaContabilDescricao  String  @default("Comissões")
+  /// `ST_TIPO_IMO` quando o formulário de venda não informa o tipo (4 = Apartamento).
+  tipoImovelPadrao        Int     @default(4)
+  /// `FL_TIPOPAGAMENTOCOMISSAO_VEN`: 0 = Imobiliária paga os comissionados, 1 = Cliente.
+  tipoPagamentoComissao   Int     @default(0)
+  /// `FL_TIPORECEBIMENTOCOMISSAO_VEN` padrão: 0 = recebe do vendedor, 1 = do comprador.
+  tipoRecebimentoComissao Int     @default(0)
+  emitirNf                Boolean @default(false)
+  gerarDimob              Boolean @default(false)
+  /// Fallback de vencimento da parcela quando o form não traz prazo.
+  vencimentoDias          Int     @default(7)
+  /// Teto do valor da venda por exportação, em centavos (bloqueio no preview).
+  tetoValorCents          Int     @default(500000000)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 }

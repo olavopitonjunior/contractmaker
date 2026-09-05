@@ -32,8 +32,20 @@ export type SuperlogicaQuery = Record<string, string | number | boolean | undefi
 
 export const SUPERLOGICA_BASE_URL = "https://apps.superlogica.net/imobiliaria/api/";
 
+/**
+ * API Financeiro/Assinaturas v2 — responde aos MESMOS tokens da licença
+ * (verificado ao vivo em 2026-09-02): clientes (sacados), cobranca, caixa
+ * (contas a pagar), produtos, planocontas. Devolve ARRAY direto no corpo (sem
+ * o envelope {status,msg,data}); erro vem como objeto {status,msg} ou HTML.
+ * Doc: https://apiassinaturas.superlogica.com
+ */
+export const SUPERLOGICA_V2_BASE_URL = "https://api.superlogica.net/v2/financeiro/";
+
 /** Teto seguro de itens por página antes do bloqueio anti-abuso. */
 export const MAX_ITENS_POR_PAGINA = 200;
+
+/** Timeout por requisição (a API responde em ~1–3 s; 30 s cobre a v2 lenta). */
+export const SUPERLOGICA_TIMEOUT_MS = 30_000;
 
 export class SuperlogicaError extends Error {
   constructor(
@@ -111,6 +123,7 @@ export async function slGet<T = Record<string, unknown>>(
       access_token: creds.accessToken,
       Accept: "application/json",
     },
+    signal: AbortSignal.timeout(SUPERLOGICA_TIMEOUT_MS),
   });
 
   // Mesmo erros de transporte (raros) viram erro tipado.
@@ -156,4 +169,47 @@ export async function slGetAll<T = Record<string, unknown>>(
     if (resp.data.length !== pageSize) break;
   }
   return out;
+}
+
+/**
+ * GET na API v2 (Financeiro). Sempre paginar: `clientes` sem `pagina` estoura a
+ * memória do servidor deles (Fatal error em HTML). Devolve o array cru.
+ */
+export async function slGetV2<T = Record<string, unknown>>(
+  creds: SuperlogicaCredentials,
+  resource: string,
+  query: SuperlogicaQuery = {},
+): Promise<T[]> {
+  const url = buildUrl(SUPERLOGICA_V2_BASE_URL, resource, {
+    pagina: 1,
+    itensPorPagina: 50,
+    ...query,
+  });
+  const res = await fetch(url, {
+    method: "GET",
+    headers: {
+      app_token: creds.appToken,
+      access_token: creds.accessToken,
+      Accept: "application/json",
+    },
+    signal: AbortSignal.timeout(SUPERLOGICA_TIMEOUT_MS),
+  });
+  const text = await res.text();
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new SuperlogicaError(
+      String(res.status),
+      `resposta não-JSON (${text.slice(0, 80).replace(/\s+/g, " ")})`,
+      `v2/${resource}`,
+    );
+  }
+  if (Array.isArray(json)) return json as T[];
+  const obj = (json ?? {}) as { status?: string | number; msg?: string };
+  throw new SuperlogicaError(
+    String(obj.status ?? res.status),
+    obj.msg || "erro sem mensagem",
+    `v2/${resource}`,
+  );
 }

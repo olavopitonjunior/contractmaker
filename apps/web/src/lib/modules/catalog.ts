@@ -38,6 +38,7 @@ export const FEATURE = {
   VENDAS_INGESTAO_ACERVO: "vendas.ingestao_acervo",
   VENDAS_REVISAO_CONTRATO: "vendas.revisao_contrato",
   VENDAS_REVISAO_PROPOSTA: "vendas.revisao_proposta",
+  VENDAS_SUPERLOGICA: "vendas.superlogica",
 
   // Módulo Locação
   LOCACAO_PIPELINE: "locacao.pipeline",
@@ -119,6 +120,11 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
         label: "Revisão pós-envio de proposta — vendas",
         default: true,
       },
+      // Exportação de vendas para a Superlógica (ERP financeiro da imobiliária):
+      // card de conexão em Configurações › Integrações + botão "Enviar para
+      // Superlógica" no negócio. Default OFF: depende de conta na Superlógica
+      // com o app registrado; liga-se tenant a tenant no painel super-admin.
+      { key: FEATURE.VENDAS_SUPERLOGICA, label: "Superlógica — exportar vendas", default: false },
     ],
   },
   {

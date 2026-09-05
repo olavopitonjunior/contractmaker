@@ -1,10 +1,28 @@
 # Conector Superlógica Imobiliárias
 
-Cliente TypeScript (somente **leitura**) para a API da Superlógica Imobiliárias.
-Base e campos verificados ao vivo em 2026-05-29. Documentação de apoio:
+Cliente TypeScript para a API da Superlógica Imobiliárias. Leitura verificada ao
+vivo em 2026-05-29; **escrita provada em produção em 2026-09-02/03** (venda
+completa em 1 POST, pessoas, imóveis, cobranças, despesas) — ver
+`docs/integracoes/superlogica-vendas-export.md`. Documentação de apoio:
 
+- `docs/integracoes/superlogica-vendas-export.md` — exportação de vendas (fluxo, mapeamento, segurança)
 - `docs/locacao/superlogica-api-benchmark.md` — análise + comparativo vs. nosso módulo
 - `docs/locacao/superlogica-api-data-dictionary.md` — dicionário completo de campos
+
+## Conta por imobiliária (`account.ts`, `connect.ts`)
+
+Os tokens (`app_token` do aplicativo + `access_token` da licença) vivem em
+`SuperlogicaAccount`, cifrados com AES-256-GCM (`lib/security/crypto.ts`), e só
+são remontados no servidor por `getOrgSuperlogicaCreds(orgId)` /
+`requireSuperlogicaCreds(orgId)`. Não há fallback de `.env`: sem conta conectada
+a org não fala com a Superlógica. A conexão (`connectSuperlogicaAccount`) valida
+os tokens nas **duas** bases antes de gravar:
+
+- Imobiliárias (`apps.superlogica.net/imobiliaria/api/`) — `contratos?itensPorPagina=1`
+- Financeiro v2 (`api.superlogica.net/v2/financeiro/`) — `caixa?itensPorPagina=1` (`slGetV2`)
+
+Tela: Configurações › Integrações › card Superlógica (feature `vendas.superlogica`
++ permissão `superlogica.configure`). Rotas: `api/settings/superlogica{,/test,/contas}`.
 
 ## Uso
 
