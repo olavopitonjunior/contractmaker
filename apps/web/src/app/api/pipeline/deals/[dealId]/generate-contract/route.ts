@@ -12,6 +12,7 @@ import {
   TEMPLATE_OVERRIDE_MESSAGE,
 } from "@/lib/contracts/template-category";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { checkFormCompleteness } from "@/lib/forms/form-completeness";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -42,7 +43,7 @@ export async function POST(
     // ficam dentro de cada gerador.
     const deal = await prisma.deal.findUnique({
       where: { id: params.dealId },
-      select: { kind: true },
+      select: { kind: true, form: { select: { schemaType: true, dataJson: true } } },
     });
     if (!deal) {
       return NextResponse.json({ error: "Deal not found" }, { status: 404 });
@@ -79,6 +80,29 @@ export async function POST(
         );
       }
       override = resolved.template;
+    }
+
+    // Contrato sem parte é o dano que o formulário "completo" mentiroso
+    // causava; barrar só o status seria consertar o sintoma e deixar esta
+    // porta aberta. Mesma régua do veto de finalize do cliente: falta parte
+    // (ou o aluguel), não gera. Medido em produção antes de fechar: dos 8
+    // negócios de locação, 3 têm bloqueio e NENHUM deles tem contrato — não
+    // há fluxo vivo dependendo de gerar contrato incompleto.
+    if (deal.kind === "locacao" && deal.form) {
+      const c = checkFormCompleteness(deal.form.schemaType, deal.form.dataJson);
+      if (c.checked && !c.complete) {
+        return NextResponse.json(
+          {
+            // A mensagem diz O QUE falta: "gere depois" sem dizer o quê é o
+            // tipo de bloqueio que vira ticket de suporte.
+            error: `Faltam dados obrigatórios para gerar o contrato. ${c.messages.join(" ")}`,
+            missing: c.missing,
+            messages: c.messages,
+            incomplete: true,
+          },
+          { status: 422 }
+        );
+      }
     }
 
     const generate =

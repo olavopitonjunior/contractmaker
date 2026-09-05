@@ -10,6 +10,7 @@ import {
 } from "@/lib/contracts/derive-deal-metadata";
 import { resolveManagerForCreate } from "@/lib/deals/manager";
 import { resolveRequiredPresetSnapshot } from "@/lib/forms/required-snapshot";
+import { checkFormCompleteness } from "@/lib/forms/form-completeness";
 
 export class ProposalConvertError extends Error {
   constructor(
@@ -164,6 +165,10 @@ export async function convertProposalToDeal(input: {
     proposal.schemaType
   );
 
+  // Fora da transação: é leitura pura sobre o dataJson já normalizado (com o
+  // OCR aplicado), então nada do que vem depois pode mudar o veredito.
+  const completeness = checkFormCompleteness(proposal.schemaType, normalizedData);
+
   const deal = await prisma.$transaction(async (tx) => {
     const form = await tx.salesForm.create({
       data: {
@@ -174,8 +179,14 @@ export async function convertProposalToDeal(input: {
         // compra e venda (default do campo) e o contrato sairia errado.
         schemaType: proposal.schemaType,
         dataJson: normalizedData as Prisma.InputJsonValue,
-        status: "completo",
-        completedAt: new Date(),
+        // "completo" é afirmação: fecha o link público, vira marco de SLA e
+        // libera a geração do contrato. A proposta traz menos campos que o
+        // formulário (a de locação, por exemplo, pode não ter locador), então
+        // só afirma quando o dado passa no MESMO schema que o cliente teria
+        // que satisfazer para finalizar. Incompleto nasce "pendente", com o
+        // formulário aberto para completar — em vez de um contrato sem parte.
+        status: completeness.complete ? "completo" : "pendente",
+        ...(completeness.complete ? { completedAt: new Date() } : {}),
       },
     });
 
@@ -331,6 +342,10 @@ export async function convertProposalToDeal(input: {
           dealId: deal.id,
           unsigned: !signed,
           reason: input.unsignedReason ?? null,
+          // Por que o formulário nasceu pendente — o que falta fica no
+          // histórico da proposta, não só no banco.
+          formStatus: completeness.complete ? "completo" : "pendente",
+          ...(completeness.complete ? {} : { missing: completeness.missing }),
         },
       },
     })
