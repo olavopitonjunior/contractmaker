@@ -89,6 +89,49 @@ O caminho é: extrair → `sanitizePii` → trocar nome por fictício à mão �
 **revisão humana antes de commitar** (não há detector determinístico de nome de
 pessoa, então nenhuma automação fecha essa porta sozinha).
 
+## Recall das checagens semânticas (a decisão do R7)
+
+```bash
+npx tsx scripts/ai-bench/placeholders/semantic-recall.ts \
+  --replay=scripts/ai-bench/placeholders/results-trio-baseline.json \
+  --corpus-dir=<dir com os .txt do replay>
+```
+
+Responde a pergunta do plano de 03/09/2026: *as checagens determinísticas
+pegam os erros semânticos que a Trio expôs, ou é preciso um revisor por IA?*
+Os 10 rascunhos errados foram corrigidos no próprio Google Docs — o texto com
+o defeito não existe mais. O que existe é o registro do QUE estava errado, e
+`src/lib/templates/eval/semantic-inject.ts` reproduz cada registro sobre o
+texto limpo que o planejador produz hoje (replay, sem modelo): item a) com as
+chaves do corretor, CRECI real depois da chave, endereço da imobiliária depois
+da chave, cadastro da própria org literal, cabeçalho + lista do rateio numa
+chave solta, cabeçalho numerado sumido com a citação ficando. Cada injeção tem
+um parágrafo esperado; acertou = a categoria certa a ±1 parágrafo. "n/a"
+quando o texto não tem a cláusula — nunca um zero falso.
+
+**Medido em 05/09/2026, corpus da Trio (16 contratos, 96 injeções):**
+
+| classe | antes | depois |
+|---|---|---|
+| wrong-entity | 16/16 | 16/16 |
+| leftover-creci | 16/16 | 16/16 |
+| leftover-endereco | **0/16** | 16/16 |
+| org-literal | 16/16 | 16/16 |
+| collapsed-list | **0/16** | 16/16 |
+| dangling-only | **8/16** | 16/16 |
+| **total** | **58%** | **100%** |
+
+Ruído de base (achados no texto limpo): 0 nas duas medições. Os três zeros
+eram regras, não limites do método: endereço por extenso não contava como
+sobra; o colapso exigia vizinhos SEM chave (o 4.1 sempre tem
+`{{aluguel_dia_vencimento}}`); "4.2.2." contava como definição do "4.2".
+Consertados no mesmo PR.
+
+**Decisão:** recall ≥ 80% → **o revisor por IA (R7) não é construído.** Erro
+novo de produção vira uma injeção aqui + uma regra em `semantic-checks.ts`,
+e a bateria diz se a regra pegou. A saída (`results-semantic-*.json`) é
+gitignored e não carrega texto de contrato — só categorias e índices.
+
 ## Saída
 
 Tabela no console + `results-<stamp>.json` com as respostas cruas (o que o

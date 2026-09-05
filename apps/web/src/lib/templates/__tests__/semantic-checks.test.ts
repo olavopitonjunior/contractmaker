@@ -230,6 +230,57 @@ describe("leftover-identifier — dado do titular ao lado da chave", () => {
   });
 });
 
+describe("leftover-identifier — endereço e CEP ao lado da chave (bateria 05/09)", () => {
+  it("endereço por extenso depois da chave da imobiliária: warning com a frase a remover", () => {
+    // 73d97y na conferência da Trio: a chave entrou e o endereço da Atrio ficou.
+    const doc =
+      "a) R$ 2.500,00, a ser pago diretamente à imobiliária intermediadora {{imobiliaria_qualificacao}}, com sede na Rua Ribeiro do Vale, nº 514, Brooklin, CEP 04568-001, como honorários pela intermediação, por meio {{imobiliaria_dados_pagamento}};";
+    const hits = byCategory(run(doc).findings, "leftover-identifier");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].severity).toBe("warning");
+    expect(hits[0].message).toContain("um endereço");
+    expect(hits[0].suggestedFix).toEqual({
+      op: "remove-leftover",
+      phrase: ", com sede na Rua Ribeiro do Vale, nº 514, Brooklin, CEP 04568-001",
+    });
+  });
+
+  it("CEP sozinho ao lado da chave também é sobra (sem locução de sede)", () => {
+    const doc = "LOCADOR: {{locadores_qualificacao}}, CEP 80010-000.";
+    const hits = byCategory(run(doc).findings, "leftover-identifier");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].message).toContain("um CEP");
+  });
+
+  it("sem CEP nem conector, o trecho para no primeiro segmento em minúscula — a prosa da cláusula fica", () => {
+    // Achado do review: a versão anterior ia até o fim do parágrafo e propunha
+    // remover "obrigando-se solidariamente…" como se fosse endereço.
+    const doc =
+      "FIADOR: {{fiador_qualificacao}}, residente na Avenida Paulista, 1000, ap 22, obrigando-se solidariamente por todas as obrigações do contrato.";
+    const hits = byCategory(run(doc).findings, "leftover-identifier");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].suggestedFix).toEqual({
+      op: "remove-leftover",
+      phrase: ", residente na Avenida Paulista, 1000",
+    });
+  });
+
+  it("locução sem número não é endereço (nada a remover)", () => {
+    const doc = "{{locatarios_qualificacao}}, residente na Rua das Flores conforme declarado.";
+    expect(byCategory(run(doc).findings, "leftover-identifier")).toHaveLength(0);
+  });
+
+  it("número no formato de CEP sem a palavra CEP (protocolo, matrícula) não é sobra", () => {
+    const doc = "{{imovel_matricula}}, protocolo 12.345-678 do registro.";
+    expect(byCategory(run(doc).findings, "leftover-identifier")).toHaveLength(0);
+  });
+
+  it("endereço do imóvel na cláusula própria, sem locução de domicílio, não é acusado", () => {
+    const doc = "1.1. IMÓVEL: {{imovel_endereco_completo}}, matrícula {{imovel_matricula}}, situado na Rua das Flores.";
+    expect(byCategory(run(doc).findings, "leftover-identifier")).toHaveLength(0);
+  });
+});
+
 describe("collapsed-paragraph — a cláusula virou uma chave só", () => {
   const anterior =
     "4.1.1. O pagamento correspondente ao primeiro aluguel será rateado da seguinte forma:";
@@ -389,10 +440,64 @@ describe("collapsed-paragraph — a cláusula virou uma chave só", () => {
     expect(byCategory(run(outro).findings, "collapsed-paragraph")).toHaveLength(0);
   });
 
-  it("âncora ambígua no fonte não propõe restauração", () => {
+  it("vizinho CHAVEADO não impede achar o fonte (o 4.1 sempre tem {{aluguel_dia_vencimento}})", () => {
+    // Bateria de recall (05/09/2026): 0/16 no colapso do rateio porque a
+    // âncora anterior nunca era "limpa". O alinhamento casa por curinga.
+    const antesDoc = "4.1. O aluguel será pago até o dia {{aluguel_dia_vencimento}} de cada mês.";
+    const antesSrc = "4.1. O aluguel será pago até o dia 20 (vinte) de cada mês.";
+    const doc = [antesDoc, "{{corretagem_dados_pagamento}}", posterior].join("\n");
+    const source = [antesSrc, anterior, itemOriginal, "b) R$ 1.000,00, ao corretor Fulano;", posterior].join("\n");
+    const hits = byCategory(run(doc, { sourceText: source }).findings, "collapsed-paragraph");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].severity).toBe("error");
+    // Cabeçalho + os dois itens: tudo que a chave engoliu.
+    expect(hits[0].suggestedFix).toEqual({
+      op: "restore-paragraph",
+      current: "{{corretagem_dados_pagamento}}",
+      source: [anterior, itemOriginal, "b) R$ 1.000,00, ao corretor Fulano;"].join("\n"),
+    });
+  });
+
+  it("âncora REPETIDA no fonte é resolvida pela ordem — a restauração aponta o item certo", () => {
+    // Antes (âncoras únicas), a repetição fazia a regra desistir. Com o
+    // alinhamento por LCS a ordem decide, e o parágrafo colapsado é pareado com
+    // o que ficou entre os vizinhos certos.
     const repetido = "As partes ajustam o pagamento na forma abaixo descrita neste contrato.";
     const doc = [repetido, "{{imobiliaria_qualificacao}}", posterior].join("\n");
     const source = [repetido, itemOriginal, posterior, repetido].join("\n");
+    const hits = byCategory(run(doc, { sourceText: source }).findings, "collapsed-paragraph");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].suggestedFix).toEqual({
+      op: "restore-paragraph",
+      current: "{{imobiliaria_qualificacao}}",
+      source: itemOriginal,
+    });
+  });
+
+  it("dois colapsos seguidos dividem a lacuna por ordem — o comportamento é este, documentado", () => {
+    const doc = [anterior, "{{imobiliaria_qualificacao}}", "{{corretagem_qualificacao}}", posterior].join("\n");
+    const itemB = "b) R$ 1.200,00 (mil e duzentos reais), a ser pago diretamente ao corretor intermediador Fulano;";
+    const itemC = "c) R$ 800,00 (oitocentos reais), a ser pago diretamente ao corretor intermediador Beltrano.";
+    const source = [anterior, itemOriginal, itemB, itemC, posterior].join("\n");
+    const hits = byCategory(run(doc, { sourceText: source }).findings, "collapsed-paragraph");
+    expect(hits.map((h) => h.paragraphIndex)).toEqual([1, 2]);
+    // O primeiro fica com um parágrafo do fonte; o segundo, com o resto.
+    expect(hits[0].suggestedFix).toMatchObject({ op: "restore-paragraph", source: itemOriginal });
+    expect(hits[1].suggestedFix).toMatchObject({ op: "restore-paragraph", source: [itemB, itemC].join("\n") });
+  });
+
+  it("PII no MEIO da lacuna restaurada também vira conserto manual", () => {
+    const doc = [anterior, "{{corretagem_dados_pagamento}}", posterior].join("\n");
+    const itemB = "b) R$ 1.200,00, ao corretor Fulano, CPF 529.982.247-25;";
+    const source = [anterior, itemOriginal, itemB, posterior].join("\n");
+    const hits = byCategory(run(doc, { sourceText: source }).findings, "collapsed-paragraph");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].suggestedFix).toEqual({ op: "manual" });
+  });
+
+  it("parágrafo só-chave SEM par no fonte (novo no Doc) não propõe restaurar nada", () => {
+    const doc = [anterior, "{{imobiliaria_qualificacao}}", posterior].join("\n");
+    const source = [anterior, posterior].join("\n");
     const hits = byCategory(run(doc, { sourceText: source }).findings, "collapsed-paragraph");
     expect(hits.every((h) => h.suggestedFix?.op !== "restore-paragraph")).toBe(true);
   });
@@ -498,6 +603,21 @@ describe("dangling-reference — citação de item que não existe", () => {
   it("cala quando o item existe no documento", () => {
     const doc = "4.1.1. O pagamento será rateado assim:\n" + cita;
     expect(byCategory(run(doc).findings, "dangling-reference")).toHaveLength(0);
+  });
+
+  it("um SUBITEM com os mesmos dígitos não define o item citado (4.2.2 não é 4.2)", () => {
+    // Bateria de recall (05/09/2026): 8/16 passavam em branco por isto.
+    const doc = "{{rateio_primeiro_aluguel}}\n4.2.2. A comprovação do pagamento dos valores do item 4.2. servirá como quitação.";
+    const source = "4.2. O primeiro aluguel será fracionado:\na) R$ 1.000,00 à imobiliária;\n4.2.2. A comprovação do pagamento dos valores do item 4.2. servirá como quitação.";
+    const hits = byCategory(run(doc, { sourceText: source }).findings, "dangling-reference");
+    expect(hits).toHaveLength(1);
+    expect(hits[0].severity).toBe("error");
+    // Mas "4.2." como marcador, seguido de espaço, continua definindo — e
+    // também "4.2:", "4.2 -" e "4.2)".
+    for (const marcador of ["4.2. Cabeçalho:", "4.2: Cabeçalho", "4.2 - Cabeçalho", "4.2) Cabeçalho"]) {
+      expect(byCategory(run(marcador + "\n" + doc).findings, "dangling-reference")).toHaveLength(0);
+    }
+    expect(byCategory(run("4.20. Outro item\n" + doc).findings, "dangling-reference")).toHaveLength(1);
   });
 });
 
