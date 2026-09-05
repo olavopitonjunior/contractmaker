@@ -9,7 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot, Pencil, Check, CheckCircle2, ClipboardCheck, X, Archive, ArchiveRestore, Lock, LockOpen, ShieldAlert, Users, BellRing } from "lucide-react";
+import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot, Pencil, Check, CheckCircle2, ClipboardCheck, X, Archive, ArchiveRestore, Lock, LockOpen, ShieldAlert, Users, BellRing, Building2 } from "lucide-react";
+import {
+  SuperlogicaExportBadge,
+  SuperlogicaExportDialog,
+  type SuperlogicaExportResult,
+} from "@/components/pipeline/SuperlogicaExportDialog";
+import { SUPERLOGICA_EXPORTABLE_STAGES } from "@/lib/pipeline/stage-config";
 import { buildPartySuggestions } from "@/lib/clicksign/party-suggestions";
 import { isExplicitlyUnmarried } from "@/lib/forms/estado-civil";
 import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
@@ -345,7 +351,15 @@ interface DealDetailProps {
       title: string;
       convertedWithoutSignature: boolean;
     } | null;
+    /** Exportação para a Superlógica (1 por negócio) — badge + trava da cobrança Asaas.
+     *  `url` vem do server (fonte única em lib/superlogica/account.ts). */
+    superlogicaExport?: { status: string; vendaId: string | null; url: string | null } | null;
   };
+  /**
+   * Superlógica habilitada para este negócio: feature `vendas.superlogica`
+   * ligada na org E conta conectada (resolvido no server, page.tsx).
+   */
+  superlogicaEnabled?: boolean;
   /**
    * Newton (agente de WhatsApp) habilitado pra este tenant. Feature default OFF —
    * quem não usa o Newton não vê a aba de pedidos. Resolvido no server (page.tsx),
@@ -371,6 +385,7 @@ export function DealDetail({
   deal,
   newtonEnabled = false,
   surveysEnabled = false,
+  superlogicaEnabled = false,
   formSummarySections,
 }: DealDetailProps) {
   const router = useRouter();
@@ -381,6 +396,8 @@ export function DealDetail({
     perms.loading || perms.can(PERMISSION.CONTRACT_CREATE);
   const canCreateCharge =
     perms.loading || perms.can(PERMISSION.CHARGE_CREATE_FROM_DEAL);
+  const canExportSuperlogica =
+    perms.loading || perms.can(PERMISSION.SUPERLOGICA_EXPORT);
   const canEditDeal = perms.loading || perms.can(PERMISSION.DEAL_EDIT);
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
@@ -419,6 +436,17 @@ export function DealDetail({
     "commission_from_deal" | "avulsa_in_deal"
   >("commission_from_deal");
   const [chargeRefreshKey, setChargeRefreshKey] = useState(0);
+  // Superlógica: estado local espelha o server e é atualizado ao exportar.
+  const [superlogicaDialogOpen, setSuperlogicaDialogOpen] = useState(false);
+  const [superlogicaExport, setSuperlogicaExport] = useState<{
+    status: string;
+    vendaId: string | null;
+    url: string | null;
+  } | null>(deal.superlogicaExport ?? null);
+  const exportedToSuperlogica =
+    superlogicaExport?.status === "done" && !!superlogicaExport.vendaId;
+  // Mesma lista que o server usa (lib/pipeline/stage-config.ts).
+  const superlogicaStageOk = SUPERLOGICA_EXPORTABLE_STAGES.includes(deal.stage.name);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteFormToo, setDeleteFormToo] = useState(false);
@@ -1706,10 +1734,37 @@ export function DealDetail({
               <div>
                 <h3 className="text-lg font-semibold">Cobranças</h3>
                 <p className="text-sm text-muted-foreground">
-                  Gere cobranças de comissão a partir do contrato aprovado.
+                  {exportedToSuperlogica
+                    ? "A comissão desta venda é cobrada pela Superlógica."
+                    : "Gere cobranças de comissão a partir do contrato aprovado."}
                 </p>
+                {exportedToSuperlogica && superlogicaExport?.vendaId && superlogicaExport.url && (
+                  <div className="mt-1">
+                    <SuperlogicaExportBadge
+                      vendaId={superlogicaExport.vendaId}
+                      url={superlogicaExport.url}
+                    />
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-2">
+                {superlogicaEnabled && !exportedToSuperlogica && (
+                  <Button
+                    variant="outline"
+                    onClick={() => setSuperlogicaDialogOpen(true)}
+                    disabled={!canExportSuperlogica || !superlogicaStageOk}
+                    title={
+                      !canExportSuperlogica
+                        ? NO_PERMISSION_HINT
+                        : !superlogicaStageOk
+                          ? `Disponível a partir de "${SUPERLOGICA_EXPORTABLE_STAGES[0]}"`
+                          : undefined
+                    }
+                  >
+                    <Building2 className="h-4 w-4 mr-1" />
+                    Enviar para Superlógica
+                  </Button>
+                )}
                 <Button
                   onClick={() => {
                     const hasApproved = deal.contracts.some(
@@ -1725,8 +1780,14 @@ export function DealDetail({
                     setChargeDialogMode("commission_from_deal");
                     setChargeDialogOpen(true);
                   }}
-                  disabled={!canCreateCharge}
-                  title={canCreateCharge ? undefined : NO_PERMISSION_HINT}
+                  disabled={!canCreateCharge || exportedToSuperlogica}
+                  title={
+                    exportedToSuperlogica
+                      ? "Venda exportada: a comissão é cobrada pela Superlógica, não pelo Asaas."
+                      : canCreateCharge
+                        ? undefined
+                        : NO_PERMISSION_HINT
+                  }
                 >
                   <Wallet className="h-4 w-4 mr-1" />
                   Cobrança de comissão
@@ -1765,6 +1826,18 @@ export function DealDetail({
         )}
       </Tabs>
 
+      {superlogicaEnabled && (
+        <SuperlogicaExportDialog
+          dealId={deal.id}
+          open={superlogicaDialogOpen}
+          onOpenChange={setSuperlogicaDialogOpen}
+          onExported={(r: SuperlogicaExportResult) => {
+            setSuperlogicaExport({ status: "done", vendaId: r.vendaId, url: r.url });
+            // O stage pode ter avançado para "Cobrança emitida" no server.
+            router.refresh();
+          }}
+        />
+      )}
       <CommissionChargeDialog
         dealId={deal.id}
         open={chargeDialogOpen}

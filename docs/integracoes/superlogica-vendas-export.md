@@ -1,7 +1,9 @@
 # Exportar venda do Contractmaker para a Superlógica (módulo Vendas)
 
-> Status: **PR 1 (conta + configurações) e PR 2 (escrita no conector + mapeador puro) entregues**;
-> PR 3 (exportação: preview, orquestrador, UI) e PR 4 (liquidação/"Comissão paga") a seguir.
+> Status: **PR 1 (conta + configurações), PR 2 (escrita no conector + mapeador puro) e PR 3
+> (exportação: `SuperlogicaLink`/`SuperlogicaExport`, orquestrador `export/export-deal.ts`, rotas
+> `api/deals/[dealId]/superlogica/{preview,export}`, botão "Enviar para Superlógica" na aba
+> Pagamentos do negócio) entregues**; PR 4 (liquidação/"Comissão paga") a seguir.
 > Código do mapeador: `apps/web/src/lib/superlogica/export/build-venda-payload.ts`
 > (`extractVendaSource` → `validarVendaSource` → `buildVendaPayload`; `buildPessoaPayload`,
 > `buildCorretorPayload`, `buildImovelPayload`). Escrita: `slPostForm`/`slPostJson`/`slWriteV2`
