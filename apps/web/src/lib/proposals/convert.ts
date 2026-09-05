@@ -223,6 +223,34 @@ export async function convertProposalToDeal(input: {
       });
     }
 
+    // Certidões emitidas NA PROPOSTA (2026-09) seguem para o negócio: os jobs
+    // ganham `dealId` (mantendo `proposalId`) e o PDF copiado acima é casado
+    // ao job pelo blob (`url`), porque `CertidaoJob.attachmentId` é FK de
+    // DealAttachment. Sem isto a aba Certidões do negócio nasceria vazia e o
+    // lock por alvo permitiria reemitir o que a proposta já pagou.
+    const relinked = await tx.certidaoJob.updateMany({
+      where: { proposalId: proposal.id },
+      data: { dealId: d.id },
+    });
+    if (relinked.count > 0) {
+      const withJob = attachments.filter((a) => a.certidaoJobId);
+      if (withJob.length > 0) {
+        const copied = await tx.dealAttachment.findMany({
+          where: { dealId: d.id, url: { in: withJob.map((a) => a.url) } },
+          select: { id: true, url: true },
+        });
+        const byUrl = new Map(copied.map((c) => [c.url, c.id]));
+        for (const a of withJob) {
+          const attachmentId = byUrl.get(a.url);
+          if (!attachmentId || !a.certidaoJobId) continue;
+          await tx.certidaoJob.updateMany({
+            where: { id: a.certidaoJobId, dealId: d.id },
+            data: { attachmentId },
+          });
+        }
+      }
+    }
+
     // CAS: fecha o loop e garante conversão única.
     const upd = await tx.proposal.updateMany({
       where: { id: proposal.id, convertedDealId: null },

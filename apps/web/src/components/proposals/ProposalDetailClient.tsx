@@ -37,6 +37,14 @@ import { ProposalDocumentCard } from "./ProposalDocumentCard";
 import { ProposalAttachmentUpload } from "./ProposalAttachmentUpload";
 import { ProposalDocumentsSection, type ProposalDocumentRow } from "./ProposalDocumentsSection";
 import { PartesEditor } from "./credit/PartesEditor";
+import dynamic from "next/dynamic";
+
+// A aba de certidões do negócio, sobre as rotas da proposta (PR 5b, 2026-09).
+// Import dinâmico: 1.700 linhas que só entram quando a feature está ligada.
+const CertidoesTab = dynamic(
+  () => import("@/components/pipeline/CertidoesTab").then((m) => m.CertidoesTab),
+  { ssr: false }
+);
 import type { Pretendente } from "@/lib/credit/pretendentes";
 import type { CreditConsent } from "@/lib/credit/consent";
 import type { TipoImovel } from "@/lib/fichacerta/types";
@@ -155,6 +163,21 @@ interface Proposal {
   } | null;
 }
 
+type PartyLike = {
+  nome?: string;
+  razao_social?: string;
+  tipo_pessoa?: string;
+  conjuge?: { nome?: string; cpf?: string };
+};
+export interface CertidoesParties {
+  vendedores: PartyLike[];
+  compradores: PartyLike[];
+  imoveis: Array<{ rua?: string; numero?: string; cidade?: string }>;
+  locadores: PartyLike[];
+  locatarios: PartyLike[];
+  fiador: PartyLike | null;
+}
+
 export function ProposalDetailClient({
   proposal,
   signers,
@@ -166,6 +189,8 @@ export function ProposalDetailClient({
   pretendentes = [],
   creditConsent = null,
   tipoImovel = "RESIDENCIAL",
+  certidoesEnabled = false,
+  certidoesParties,
   permissions,
   sentSnapshotHtml,
   planVendedores = [],
@@ -203,6 +228,9 @@ export function ProposalDetailClient({
   pretendentes?: Pretendente[];
   creditConsent?: CreditConsent | null;
   tipoImovel?: TipoImovel;
+  /** Certidões (Infosimples) na proposta — feature `vendas.certidoes`/`locacao.certidoes`. */
+  certidoesEnabled?: boolean;
+  certidoesParties?: CertidoesParties;
   permissions: ProposalPermissions;
   /** Documento congelado no envio (null enquanto a proposta não saiu). */
   sentSnapshotHtml: string | null;
@@ -806,8 +834,32 @@ export function ProposalDetailClient({
           pretendentes={pretendentes}
           consent={creditConsent}
           tipoImovel={tipoImovel}
-          canEdit={canEdit}
+          // Mesmo corte das rotas `/partes` e `/credit/consent` (terminal, não
+          // EDITABLE): a análise de crédito acontece DEPOIS do envio. Com
+          // `canEdit` a seção nascia sem botão em toda proposta enviada.
+          canEdit={canRename}
         />
+      )}
+
+      {/* Certidões (Infosimples) na proposta — venda e locação (PR 5b) */}
+      {certidoesEnabled && certidoesParties && (
+        <Card className="space-y-3 p-4">
+          <h2 className="font-medium">Certidões</h2>
+          <CertidoesTab
+            dealId={proposal.id}
+            subject="proposal"
+            apiBase={`/api/proposals/${proposal.id}/certidoes`}
+            attachmentsBase={`/api/proposals/${proposal.id}/attachments`}
+            dataUrl={`/api/proposals/${proposal.id}`}
+            esteira={proposal.kind === "locacao" ? "locacao" : "venda"}
+            vendedores={certidoesParties.vendedores}
+            compradores={certidoesParties.compradores}
+            imoveis={certidoesParties.imoveis}
+            locadores={certidoesParties.locadores}
+            locatarios={certidoesParties.locatarios}
+            fiador={certidoesParties.fiador}
+          />
+        </Card>
       )}
 
       {/* Documentos por parte (locação com análise de crédito) */}

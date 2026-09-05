@@ -21,6 +21,29 @@ import { monthlyBudgetCents, monthlySpendWhere, type CertidoesProvider } from ".
 import { emitNotification } from "@/lib/notifications/emit";
 import { classifyJobBucket, missingFieldHint } from "./health-monitor";
 import { persistLeaseClientDocument } from "@/lib/locacao/client-attachments";
+import { persistProposalDocument } from "@/lib/proposals/attachments";
+
+/**
+ * Alvos de certidão que as abas de documentos (negócio e proposta) reconhecem
+ * como parte — `DocumentKind` de `extracted-to-form.ts`. Os dependentes do
+ * vendedor (cônjuge/procurador/representante) agrupam sob o vendedor titular;
+ * locação (2026-09-02) tem os quatro alvos próprios; cônjuge do locatário
+ * (2026-09-04) é pretendente da análise de crédito. Fora daqui o PDF cai em
+ * "Outros". Lista ÚNICA: DealAttachment e ProposalAttachment leem a mesma.
+ */
+const ASSIGNABLE_KINDS = new Set([
+  "vendedor",
+  "comprador",
+  "imovel",
+  "conjuge_vendedor",
+  "procurador_vendedor",
+  "representante_vendedor",
+  "locatario",
+  "locador",
+  "fiador",
+  "conjuge_fiador",
+  "conjuge_locatario",
+]);
 
 /**
  * Phase G.1 — audit log helper (fire-and-forget). Registra transições de
@@ -341,16 +364,27 @@ export async function isOrgInfosimplesBlocked(
  * enviado pelo cron diário `certidoes/problem-digest`.
  */
 async function reportCertidaoProblem(
-  job: { id: string; orgId: string | null; dealId: string | null; leaseClientId?: string | null; batchId: string; endpoint: string; label: string },
+  job: {
+    id: string;
+    orgId: string | null;
+    dealId: string | null;
+    leaseClientId?: string | null;
+    proposalId?: string | null;
+    batchId: string;
+    endpoint: string;
+    label: string;
+  },
   reason: string
 ): Promise<void> {
-  // Emite pra jobs de deal OU de cliente/prospect (locação). Ad-hoc puro (sem
-  // deal nem cliente) permanece silencioso — não há superfície pra linkar.
-  if (!job.orgId || (!job.dealId && !job.leaseClientId)) return;
+  // Emite pra jobs de deal, de cliente/prospect (locação) OU de proposta
+  // (2026-09). Ad-hoc puro permanece silencioso — não há superfície pra linkar.
+  if (!job.orgId || (!job.dealId && !job.leaseClientId && !job.proposalId)) return;
   const linkUrl = job.dealId
     ? `/deals/${job.dealId}`
-    : `/locacao/pessoas/clientes/${job.leaseClientId}`;
-  const alvo = job.dealId ? "do negócio" : "do cliente";
+    : job.leaseClientId
+      ? `/locacao/pessoas/clientes/${job.leaseClientId}`
+      : `/pipeline/propostas/${job.proposalId}`;
+  const alvo = job.dealId ? "do negócio" : job.leaseClientId ? "do cliente" : "da proposta";
   await emitNotification({
     orgId: job.orgId,
     type: "certidao_problem",
@@ -492,6 +526,8 @@ async function checkBatchCompletion(batchId: string): Promise<void> {
             form: { select: { orgId: true } },
           },
         },
+        // Lote de PROPOSTA (2026-09): sem deal; título e link vêm daqui.
+        proposal: { select: { id: true, title: true, orgId: true } },
       },
     });
     if (jobs.length === 0) return;
@@ -526,7 +562,7 @@ async function checkBatchCompletion(batchId: string): Promise<void> {
     // Phase C: jobs podem ser deal-scoped (first.deal não-null) ou ad-hoc
     // (first.orgId). Priorizar deal quando existe para manter UX atual.
     const first = jobs[0];
-    const orgId = first.deal?.form?.orgId ?? first.orgId;
+    const orgId = first.deal?.form?.orgId ?? first.proposal?.orgId ?? first.orgId;
     if (!orgId) return; // needs org to scope notifications
 
     const success = jobs.filter((j) => j.status === "success").length;
@@ -538,13 +574,16 @@ async function checkBatchCompletion(batchId: string): Promise<void> {
       return r?.situacao === "positiva" || r?.situacao === "positiva_com_efeitos";
     }).length;
 
-    const dealTitle = first.deal?.title ?? "Diligência avulsa";
+    const dealTitle = first.deal?.title ?? first.proposal?.title ?? "Diligência avulsa";
     const userId = first.userId;
     const linkUrl = first.deal
       ? `/deals/${first.deal.id}`
-      : `/certidoes/adhoc?batch=${batchId}`;
+      : first.proposal
+        ? `/pipeline/propostas/${first.proposal.id}`
+        : `/certidoes/adhoc?batch=${batchId}`;
     const scopeMetadata: Record<string, unknown> = { batchId };
     if (first.deal) scopeMetadata.dealId = first.deal.id;
+    else if (first.proposal) scopeMetadata.proposalId = first.proposal.id;
     else scopeMetadata.orgId = orgId;
 
     // Single-job batches: more specific notification
@@ -882,7 +921,8 @@ export async function runSingleJob(
         job.targetKind,
         job.targetIndex,
         job.leaseClientId,
-        job.id
+        job.id,
+        job.proposalId
       );
     }
 
@@ -938,7 +978,11 @@ export async function runSingleJob(
         // certidaoJobId). CertidaoJob.attachmentId é FK → DealAttachment, então
         // NÃO pode receber o id do anexo de cliente. O classifyOutcome acima já
         // enxergou o PDF via `attachmentId` (lógica requiresPdf preservada).
-        attachmentId: job.leaseClientId ? null : attachmentId,
+        // Idem para job de PROPOSTA ainda não convertida: o PDF vive em
+        // ProposalAttachment (ligado por certidaoJobId); o convert casa o anexo
+        // copiado ao negócio. Depois do relink o job tem dealId E proposalId —
+        // aí o anexo é DealAttachment de verdade e o FK tem de ser gravado.
+        attachmentId: dealId ? attachmentId : job.leaseClientId || job.proposalId ? null : attachmentId,
         costCents:
           detalhesExtraCostCents > 0
             ? (outcome.costCents ?? 0) + detalhesExtraCostCents
@@ -1505,7 +1549,10 @@ export async function pollPortalJob(jobId: string): Promise<void> {
         job.label,
         receipt,
         job.targetKind,
-        job.targetIndex
+        job.targetIndex,
+        job.leaseClientId,
+        job.id,
+        job.proposalId
       );
     }
 
@@ -1626,7 +1673,15 @@ export async function pollPortalJob(jobId: string): Promise<void> {
  */
 async function fetchCenprotDetalhesSp(
   nacionalResp: InfosimplesResponse,
-  job: { endpoint: string; label: string; targetKind: string; targetIndex: number },
+  job: {
+    id?: string;
+    endpoint: string;
+    label: string;
+    targetKind: string;
+    targetIndex: number;
+    leaseClientId?: string | null;
+    proposalId?: string | null;
+  },
   dealId: string | null
 ): Promise<{ detalhesSp: unknown[]; extraCostCents: number }> {
   const tokens = collectObterDetalhesTokens(nacionalResp);
@@ -1651,13 +1706,18 @@ async function fetchCenprotDetalhesSp(
       const receipt = resp.site_receipts?.[0];
       let attachmentId: string | null = null;
       if (receipt) {
+        // Mesmos sujeitos do job-pai: sem eles o PDF de detalhes SP de um job
+        // de cliente/proposta nunca era anexado (só o de negócio).
         attachmentId = await downloadAndAttach(
           dealId,
           detEndpoint,
           `${job.label} — detalhes SP`,
           receipt,
           job.targetKind,
-          job.targetIndex
+          job.targetIndex,
+          job.leaseClientId ?? null,
+          job.id ?? null,
+          job.proposalId ?? null
         );
       }
       detalhesSp.push({
@@ -1706,12 +1766,14 @@ async function downloadAndAttach(
   targetKind: string,
   targetIndex: number,
   leaseClientId: string | null = null,
-  jobId: string | null = null
+  jobId: string | null = null,
+  proposalId: string | null = null
 ): Promise<string | null> {
-  // Phase C: ad-hoc jobs (sem deal E sem cliente) pulam a criação de anexo e
-  // deixam a UI consumir site_receipts[] direto do resultado Infosimples.
-  // Jobs de cliente (leaseClientId) anexam em LeaseClientAttachment (abaixo).
-  if (!dealId && !leaseClientId) return null;
+  // Phase C: ad-hoc jobs (sem deal, sem cliente E sem proposta) pulam a
+  // criação de anexo e deixam a UI consumir site_receipts[] direto do
+  // resultado Infosimples. Jobs de cliente (leaseClientId) anexam em
+  // LeaseClientAttachment; jobs de proposta (2026-09) em ProposalAttachment.
+  if (!dealId && !leaseClientId && !proposalId) return null;
   try {
     const { buffer, contentType } = await downloadReceipt(receiptUrl);
     // Validamos a natureza do conteúdo pelo magic + content-type:
@@ -1751,13 +1813,37 @@ async function downloadAndAttach(
     const bucket = process.env.S3_BUCKET;
     const key = dealId
       ? `deal-certidoes/${dealId}/${safeName}`
-      : `client-certidoes/${leaseClientId}/${safeName}`;
+      : leaseClientId
+        ? `client-certidoes/${leaseClientId}/${safeName}`
+        : `proposal-certidoes/${proposalId}/${safeName}`;
     const url = await uploadBufferToStorage({
       bucket,
       key,
       body: finalBuffer,
       contentType: finalContentType,
     });
+    // Job de PROPOSTA: anexa em ProposalAttachment (ligado por certidaoJobId),
+    // já com a parte (`assignment`) para a seção "Documentos por parte" agrupar
+    // e para o convert copiar verbatim ao negócio.
+    if (!dealId && !leaseClientId && proposalId) {
+      const { attachment } = await persistProposalDocument({
+        proposalId,
+        buffer: finalBuffer,
+        url,
+        filename: safeName,
+        mime: finalContentType,
+        category: "certidao",
+        source: "infosimples",
+        status: "ready",
+        certidaoJobId: jobId,
+        extractedData: {
+          certidao: { endpoint, label },
+          assignment: { kind: ASSIGNABLE_KINDS.has(targetKind) ? targetKind : "outro", index: targetIndex },
+          assignmentPersisted: true,
+        },
+      });
+      return attachment.id;
+    }
     // Job de cliente: anexa em LeaseClientAttachment (ligado por certidaoJobId).
     if (!dealId && leaseClientId) {
       const { attachment } = await persistLeaseClientDocument({
@@ -1771,28 +1857,8 @@ async function downloadAndAttach(
       });
       return attachment.id;
     }
-    // Persist assignment so DocumentsTab groups certidao attachments by part/imovel.
-    // Os dependentes do vendedor (cônjuge/procurador/representante) são mapeados
-    // para os kinds que o DocumentsTab/DealDetail já reconhecem (conjuge_vendedor,
-    // representante_vendedor) — assim o PDF da certidão do cônjuge agrupa sob o
-    // vendedor titular. procurador_vendedor segue o mesmo padrão.
-    // Locação (2026-09-02): os quatro alvos são DocumentKinds reconhecidos pelo
-    // LocacaoDocumentsTab — sem eles o PDF do locatário/fiador caía em "Outros".
-    const ASSIGNABLE_KINDS = new Set([
-      "vendedor",
-      "comprador",
-      "imovel",
-      "conjuge_vendedor",
-      "procurador_vendedor",
-      "representante_vendedor",
-      "locatario",
-      "locador",
-      "fiador",
-      "conjuge_fiador",
-      // 2026-09-04 — cônjuge do locatário (pretendente da análise de crédito);
-      // DocumentKind já existe em extracted-to-form.ts.
-      "conjuge_locatario",
-    ]);
+    // Persist assignment so DocumentsTab groups certidao attachments by part/imovel
+    // (lista única `ASSIGNABLE_KINDS`, no topo do arquivo).
     const assignmentKind = ASSIGNABLE_KINDS.has(targetKind) ? targetKind : "outro";
     // Aqui dealId é garantidamente não-nulo (caso cliente já retornou acima, e
     // ad-hoc puro retornou no topo) — o guard reafirma pro type-checker.
@@ -1851,6 +1917,7 @@ const STALE_REQUEUE_MAX_FETCHING = 1;
 
 export async function sweepStaleJobs(options: {
   dealId?: string;
+  proposalId?: string;
   staleAfterMs?: number;
 } = {}): Promise<{ promoted: number; requeued: number; failed: number }> {
   const staleAfter = options.staleAfterMs ?? 15 * 60_000; // 15 min default
@@ -1859,6 +1926,7 @@ export async function sweepStaleJobs(options: {
   const stale = await prisma.certidaoJob.findMany({
     where: {
       ...(options.dealId ? { dealId: options.dealId } : {}),
+      ...(options.proposalId ? { proposalId: options.proposalId } : {}),
       status: { in: ["fetching", "pending"] },
       OR: [
         { startedAt: { lt: cutoff } },

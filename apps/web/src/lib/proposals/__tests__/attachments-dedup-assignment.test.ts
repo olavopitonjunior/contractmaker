@@ -107,6 +107,29 @@ describe("persistProposalDocument — dedup não descarta a escolha humana da pa
     expect(create).not.toHaveBeenCalled();
   });
 
+  it("certidão retentada com PDF byte-idêntico → a linha dedupada passa a apontar para o job NOVO", async () => {
+    // Review do PR 5b: a lista casa PDF↔job por `certidaoJobId`; sem o relink
+    // o job vivo aparecia "sem anexo" mesmo com o PDF baixado.
+    findFirst.mockResolvedValue({
+      id: "att-cert",
+      source: "infosimples",
+      certidaoJobId: "job-velho",
+      url: "https://blob/cndt.pdf",
+      extractedData: { certidao: { endpoint: "tribunais/cndt" }, assignment: { kind: "locatario", index: 0 }, assignmentPersisted: true },
+    });
+    const r = await persistProposalDocument({
+      ...base,
+      source: "infosimples",
+      category: "certidao",
+      certidaoJobId: "job-novo",
+      extractedData: { assignment: { kind: "locatario", index: 0 }, assignmentPersisted: true },
+    });
+    expect(r.deduped).toBe(true);
+    expect(r.assignmentUpdated).toBe(false);
+    expect(update).toHaveBeenCalledOnce();
+    expect(update.mock.calls[0][0].data).toEqual({ certidaoJobId: "job-novo" });
+  });
+
   it("sem atribuição no upload (ex.: Registro do Aceite) → dedup puro, sem tocar no existente", async () => {
     findFirst.mockResolvedValue({
       id: "att-antigo",

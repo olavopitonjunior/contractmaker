@@ -65,10 +65,15 @@ const TERMINAL = new Set([
 ]);
 
 /**
- * Polls /api/deals/:dealId/certidoes every 2s while any job is still in a
- * non-terminal state. Stops when all jobs are terminal or after 10min hard cap.
+ * Polls `${apiBase}` every 2s while any job is still in a non-terminal state.
+ * Stops when all jobs are terminal or after 10min hard cap.
+ *
+ * `target`: o `dealId` (base `/api/deals/:dealId/certidoes`, comportamento
+ * histórico) OU `{ apiBase }` explícito — a PROPOSTA (2026-09) usa
+ * `/api/proposals/:id/certidoes`, mesma família de rotas.
  */
-export function useCertidoesBatch(dealId: string) {
+export function useCertidoesBatch(target: string | { apiBase: string }) {
+  const apiBase = typeof target === "string" ? `/api/deals/${target}/certidoes` : target.apiBase;
   const [jobs, setJobs] = useState<CertidaoJobRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -79,7 +84,7 @@ export function useCertidoesBatch(dealId: string) {
     async (batchId?: string) => {
       try {
         const qs = batchId ? `?batchId=${batchId}` : "";
-        const res = await fetch(`/api/deals/${dealId}/certidoes${qs}`);
+        const res = await fetch(`${apiBase}${qs}`);
         if (!res.ok) {
           setError("Falha ao carregar certidões");
           return null;
@@ -93,7 +98,7 @@ export function useCertidoesBatch(dealId: string) {
         return null;
       }
     },
-    [dealId]
+    [apiBase]
   );
 
   const stopPolling = useCallback(() => {
@@ -149,7 +154,7 @@ export function useCertidoesBatch(dealId: string) {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`/api/deals/${dealId}/certidoes`, {
+        const res = await fetch(`${apiBase}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(jobs ? { batchId, jobs } : { batchId }),
@@ -177,13 +182,13 @@ export function useCertidoesBatch(dealId: string) {
         return null;
       }
     },
-    [dealId, fetchJobs, startPolling]
+    [apiBase, fetchJobs, startPolling]
   );
 
   const retry = useCallback(
     async (jobId: string): Promise<{ ok: boolean; error?: string }> => {
       const res = await fetch(
-        `/api/deals/${dealId}/certidoes/${jobId}/retry`,
+        `${apiBase}/${jobId}/retry`,
         { method: "POST" }
       );
       const data = await res.json().catch(() => ({}));
@@ -197,7 +202,7 @@ export function useCertidoesBatch(dealId: string) {
       }
       return { ok: true };
     },
-    [dealId, fetchJobs, startPolling, jobs]
+    [apiBase, fetchJobs, startPolling, jobs]
   );
 
   const deleteJob = useCallback(
@@ -206,14 +211,14 @@ export function useCertidoesBatch(dealId: string) {
       opts?: { withAttachment?: boolean }
     ): Promise<boolean> => {
       const qs = opts?.withAttachment ? "?withAttachment=true" : "";
-      const res = await fetch(`/api/deals/${dealId}/certidoes/${jobId}${qs}`, {
+      const res = await fetch(`${apiBase}/${jobId}${qs}`, {
         method: "DELETE",
       });
       if (!res.ok) return false;
       await fetchJobs();
       return true;
     },
-    [dealId, fetchJobs]
+    [apiBase, fetchJobs]
   );
 
   const bulkDelete = useCallback(
@@ -223,7 +228,7 @@ export function useCertidoesBatch(dealId: string) {
       batchId?: string;
       withAttachments?: boolean;
     }): Promise<{ deleted: number; attachmentsDeleted: number } | null> => {
-      const res = await fetch(`/api/deals/${dealId}/certidoes/bulk-delete`, {
+      const res = await fetch(`${apiBase}/bulk-delete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -236,14 +241,14 @@ export function useCertidoesBatch(dealId: string) {
         attachmentsDeleted: data.attachmentsDeleted ?? 0,
       };
     },
-    [dealId, fetchJobs]
+    [apiBase, fetchJobs]
   );
 
   const sweepStale = useCallback(async (): Promise<{
     promoted: number;
     failed: number;
   }> => {
-    const res = await fetch(`/api/deals/${dealId}/certidoes/sweep`, {
+    const res = await fetch(`${apiBase}/sweep`, {
       method: "POST",
     });
     if (!res.ok) return { promoted: 0, failed: 0 };
@@ -253,7 +258,7 @@ export function useCertidoesBatch(dealId: string) {
       promoted: data.promoted ?? 0,
       failed: data.failed ?? 0,
     };
-  }, [dealId, fetchJobs]);
+  }, [apiBase, fetchJobs]);
 
   const completeSkipped = useCallback(
     async (
@@ -261,7 +266,7 @@ export function useCertidoesBatch(dealId: string) {
       fields: Record<string, string | number | null>
     ): Promise<{ ok: boolean; error?: string }> => {
       const res = await fetch(
-        `/api/deals/${dealId}/certidoes/${jobId}/complete`,
+        `${apiBase}/${jobId}/complete`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -277,7 +282,7 @@ export function useCertidoesBatch(dealId: string) {
       if (current) startPolling(current.batchId);
       return { ok: true };
     },
-    [dealId, fetchJobs, startPolling, jobs]
+    [apiBase, fetchJobs, startPolling, jobs]
   );
 
   return {

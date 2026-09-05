@@ -30,6 +30,8 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   onRetry: () => void;
   onDelete: () => void;
+  /** Base do proxy de anexos (`…/attachments`). Default: a do negócio. */
+  attachmentsBase?: string;
 }
 
 function formatDateBR(iso: string | null | undefined): string | null {
@@ -250,6 +252,7 @@ export function CertidaoDetailDialog({
   onOpenChange,
   onRetry,
   onDelete,
+  attachmentsBase,
 }: Props) {
   const [showRaw, setShowRaw] = useState(false);
   const [vinculosOpen, setVinculosOpen] = useState(false);
@@ -390,7 +393,7 @@ export function CertidaoDetailDialog({
             <div>
               <p className="text-xs text-muted-foreground mb-2">Documento</p>
               <iframe
-                src={`/api/deals/${dealId}/attachments/${job.attachmentId}/file`}
+                src={`${attachmentsBase ?? `/api/deals/${dealId}/attachments`}/${job.attachmentId}/file`}
                 className="w-full h-[60vh] border rounded"
                 title={job.label}
               />
@@ -418,7 +421,7 @@ export function CertidaoDetailDialog({
             <>
               <Button variant="outline" size="sm" asChild>
                 <a
-                  href={`/api/deals/${dealId}/attachments/${job.attachmentId}/file`}
+                  href={`${attachmentsBase ?? `/api/deals/${dealId}/attachments`}/${job.attachmentId}/file`}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -428,7 +431,7 @@ export function CertidaoDetailDialog({
               </Button>
               <Button variant="outline" size="sm" asChild>
                 <a
-                  href={`/api/deals/${dealId}/attachments/${job.attachmentId}/file?download=1`}
+                  href={`${attachmentsBase ?? `/api/deals/${dealId}/attachments`}/${job.attachmentId}/file?download=1`}
                 >
                   <Download className="h-3 w-3 mr-1" />
                   Baixar

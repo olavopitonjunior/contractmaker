@@ -98,17 +98,24 @@ export async function persistProposalDocument(
       (existing.extractedData as Record<string, unknown>).assignmentPersisted === true;
     const differs = !has || has.kind !== wanted?.kind || has.index !== wanted?.index || !hasPersisted;
     const sameSource = existing.source === source;
-    if (wanted && wantedPersisted && sameSource && differs) {
+    const moveAssignment = !!(wanted && wantedPersisted && sameSource && differs);
+    // Certidão retentada com PDF byte-idêntico ao da tentativa anterior: a
+    // linha dedupada tem de passar a apontar para o job NOVO, senão a lista
+    // (que casa PDF↔job por `certidaoJobId`) mostra o job vivo "sem anexo".
+    const relinkJob = !!(args.certidaoJobId && existing.certidaoJobId !== args.certidaoJobId);
+    if (moveAssignment || relinkJob) {
       const merged = {
         ...((existing.extractedData as Record<string, unknown> | null) ?? {}),
-        assignment: wanted,
-        assignmentPersisted: true,
+        ...(moveAssignment ? { assignment: wanted, assignmentPersisted: true } : {}),
       };
       const updated = await prisma.proposalAttachment.update({
         where: { id: existing.id },
-        data: { extractedData: merged as unknown as Prisma.InputJsonValue },
+        data: {
+          ...(moveAssignment ? { extractedData: merged as unknown as Prisma.InputJsonValue } : {}),
+          ...(relinkJob ? { certidaoJobId: args.certidaoJobId } : {}),
+        },
       });
-      return { attachment: updated, deduped: true, assignmentUpdated: true };
+      return { attachment: updated, deduped: true, assignmentUpdated: moveAssignment };
     }
     return { attachment: existing, deduped: true, assignmentUpdated: false };
   }
