@@ -232,22 +232,52 @@ export async function convertProposalToDeal(input: {
       where: { proposalId: proposal.id },
       data: { dealId: d.id },
     });
-    if (relinked.count > 0) {
-      const withJob = attachments.filter((a) => a.certidaoJobId);
-      if (withJob.length > 0) {
-        const copied = await tx.dealAttachment.findMany({
-          where: { dealId: d.id, url: { in: withJob.map((a) => a.url) } },
-          select: { id: true, url: true },
+    // Análise de crédito (Ficha Certa) idem: o request ganha `dealId` e o PDF
+    // do laudo (ProposalAttachment) é casado ao DealAttachment copiado pela
+    // url → `reportDealAttachmentId`. Sem isto o card do negócio nasceria
+    // vazio e o laudo só existiria na proposta. Janela conhecida: `attachments`
+    // foi lido antes da transação; um laudo que a Ficha Certa conclua ENTRE a
+    // leitura e o commit fica sem par aqui (card sem PDF, sem erro) — o
+    // request segue relinkado e o PDF continua na proposta de origem.
+    const relinkedCredit = await tx.creditAnalysisRequest.updateMany({
+      where: { proposalId: proposal.id },
+      data: { dealId: d.id },
+    });
+    const withJob = relinked.count > 0 ? attachments.filter((a) => a.certidaoJobId) : [];
+    const creditReports =
+      relinkedCredit.count > 0
+        ? await tx.creditAnalysisRequest.findMany({
+            where: { dealId: d.id, reportProposalAttachmentId: { not: null } },
+            select: { id: true, reportProposalAttachmentId: true },
+          })
+        : [];
+    const attById = new Map(attachments.map((a) => [a.id, a]));
+    const reportUrls = creditReports
+      .map((r) => attById.get(r.reportProposalAttachmentId!)?.url)
+      .filter((u): u is string => !!u);
+    const urls = Array.from(new Set([...withJob.map((a) => a.url), ...reportUrls]));
+    if (urls.length > 0) {
+      const copied = await tx.dealAttachment.findMany({
+        where: { dealId: d.id, url: { in: urls } },
+        select: { id: true, url: true },
+      });
+      const byUrl = new Map(copied.map((c) => [c.url, c.id]));
+      for (const a of withJob) {
+        const attachmentId = byUrl.get(a.url);
+        if (!attachmentId || !a.certidaoJobId) continue;
+        await tx.certidaoJob.updateMany({
+          where: { id: a.certidaoJobId, dealId: d.id },
+          data: { attachmentId },
         });
-        const byUrl = new Map(copied.map((c) => [c.url, c.id]));
-        for (const a of withJob) {
-          const attachmentId = byUrl.get(a.url);
-          if (!attachmentId || !a.certidaoJobId) continue;
-          await tx.certidaoJob.updateMany({
-            where: { id: a.certidaoJobId, dealId: d.id },
-            data: { attachmentId },
-          });
-        }
+      }
+      for (const r of creditReports) {
+        const url = attById.get(r.reportProposalAttachmentId!)?.url;
+        const reportDealAttachmentId = url ? byUrl.get(url) : undefined;
+        if (!reportDealAttachmentId) continue;
+        await tx.creditAnalysisRequest.updateMany({
+          where: { id: r.id, dealId: d.id },
+          data: { reportDealAttachmentId },
+        });
       }
     }
 

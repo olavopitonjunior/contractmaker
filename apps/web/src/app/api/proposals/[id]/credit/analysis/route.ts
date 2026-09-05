@@ -20,6 +20,7 @@ import { isInProgressBlocking } from "@/lib/certidoes/lifecycle";
 import { monthlyBudgetCents, monthlySpendWhere } from "@/lib/certidoes/budget";
 import { submitCreditRequest, type CreditRequestJson } from "@/lib/credit/fichacerta-runner";
 import { withOrgBudgetLock } from "@/lib/security/budget-lock";
+import { listCreditRequests } from "@/lib/credit/analysis-view";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -31,58 +32,6 @@ const WRITE_BLOCKED = new Set([...TERMINAL_STATUSES].filter((s) => s !== "comple
 /** Rótulo do job SEM nome de pessoa — vai cru para as pendências do Max. */
 function jobLabel(p: Pretendente): string {
   return `Análise de crédito (Ficha Certa) — ${p.label}`;
-}
-
-function jobView(j: {
-  id: string;
-  label: string;
-  targetKind: string;
-  targetIndex: number;
-  status: string;
-  errorMessage: string | null;
-  expectedReadyAt: Date | null;
-  resultData: unknown;
-  createdAt: Date;
-}) {
-  const r = (j.resultData && typeof j.resultData === "object" ? j.resultData : {}) as Record<string, unknown>;
-  const raw = (r.raw && typeof r.raw === "object" ? r.raw : {}) as Record<string, unknown>;
-  return {
-    id: j.id,
-    label: j.label,
-    targetKind: j.targetKind,
-    targetIndex: j.targetIndex,
-    status: j.status,
-    situacao: typeof r.situacao === "string" ? r.situacao : null,
-    detalhes: typeof r.detalhes === "string" ? r.detalhes : null,
-    scoreFc: typeof raw.scoreFc === "number" ? raw.scoreFc : null,
-    parecer: typeof raw.parecer === "string" ? raw.parecer : null,
-    recomendacoes: Array.isArray(raw.recomendacoes) ? raw.recomendacoes : [],
-    errorMessage: j.errorMessage,
-    expectedReadyAt: j.expectedReadyAt,
-    createdAt: j.createdAt,
-  };
-}
-
-async function listRequests(proposalId: string) {
-  const requests = await prisma.creditAnalysisRequest.findMany({
-    where: { proposalId, provider: PROVIDER },
-    orderBy: { createdAt: "desc" },
-    include: { jobs: { orderBy: { createdAt: "asc" } } },
-  });
-  return requests.map((r) => ({
-    id: r.id,
-    status: r.status,
-    externalId: r.externalId,
-    createdAt: r.createdAt,
-    submittedAt: r.submittedAt,
-    completedAt: r.completedAt,
-    lastSyncedAt: r.lastSyncedAt,
-    errorMessage: r.errorMessage,
-    costCents: r.costCents,
-    reportAttachmentId: r.reportProposalAttachmentId,
-    parecer: r.resultJson ?? null,
-    jobs: r.jobs.map(jobView),
-  }));
 }
 
 async function gate(req: NextRequest, id: string, write: boolean) {
@@ -113,7 +62,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     configured: !!creds,
     consent: readCreditConsent(g.proposal.complianceJson),
     costCents: creds?.costCents ?? null,
-    requests: await listRequests(g.proposal.id),
+    requests: await listCreditRequests({ proposalId: g.proposal.id }),
   });
 }
 

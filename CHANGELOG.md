@@ -4,6 +4,16 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-05 - Análise de crédito segue da proposta para o negócio
+
+### Adicionado
+
+- **A análise de crédito (Ficha Certa) acompanha a conversão da proposta**, para as imobiliárias com a análise de crédito habilitada. Ao converter a proposta de locação em negócio, os laudos já emitidos (situação, Score FC, parecer, PDF) aparecem na aba Dados do negócio, no card "Análise de crédito (Ficha Certa)", sem pedir nem pagar nada de novo. No stage "Em Aprovação" o card traz o botão "Aprovar ficha" (que não tinha mais lugar na tela) e o atalho "Analisar na proposta" para uma nova análise.
+
+### Corrigido
+
+- O `CLAUDE.md` apontava a lista de ações de auditoria para um arquivo que não existe; agora aponta para `lib/security/audit.ts`.
+
 ## [Unreleased] - 2026-09-05 - Análise de crédito Ficha Certa na proposta
 
 ### Adicionado
