@@ -14,6 +14,7 @@ import {
 } from "@/lib/templates/semantic-checks";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -89,6 +90,49 @@ interface DraftReport {
   /** Achados semânticos persistidos (sem as frases cruas do conserto). */
   semantic?: SemanticReport;
 }
+/** Espelha `Proposal` (lib/templates/ai-placeholder-insertion.ts). */
+interface ProposalView {
+  id: string;
+  token: string;
+  trecho: string;
+  kind: "simple" | "composed";
+  multiParagraph: boolean;
+  paragraphIndex: number;
+  before: string;
+  after: string;
+  /** Parágrafos do bloco que ficariam no texto (repetem-se no documento). */
+  leftover: string[];
+  warnings: { id: string; severity: "error" | "warning" | "info"; message: string }[];
+}
+/** Espelha `ProposeResult`: o que `rerun-ai {action:"propose"}` devolve. */
+interface ProposeView {
+  proposals: ProposalView[];
+  /** Trechos já mascarados pelo servidor. */
+  skipped: { token: string; trecho: string; reason: string }[];
+  docTruncated: boolean;
+  responseTruncated: boolean;
+  responseUnparsed: boolean;
+  docTextHash: string;
+}
+
+/** Texto com as `{{chaves}}` destacadas — o "depois" de cada proposta. */
+function ComChaves({ text }: { text: string }) {
+  const parts = text.split(/(\{\{[a-z0-9_]+\}\})/g);
+  return (
+    <>
+      {parts.map((p, i) =>
+        /^\{\{[a-z0-9_]+\}\}$/.test(p) ? (
+          <code key={i} className="rounded bg-primary/10 px-1 font-mono text-[11px] text-primary">
+            {p}
+          </code>
+        ) : (
+          <span key={i}>{p}</span>
+        )
+      )}
+    </>
+  );
+}
+
 interface TemplateInfo {
   id: string;
   name: string;
@@ -267,6 +311,16 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
   const [report, setReport] = useState<DraftReport | null>(() =>
     parseDraftReport(template.draftReport)
   );
+  // Propostas da última "revisão pela IA": planejadas, NÃO aplicadas. Vivem só
+  // nesta sessão da tela — o Doc é a fonte; se ele mudar, o servidor recusa.
+  const [proposta, setProposta] = useState<ProposeView | null>(null);
+  const [selecionadas, setSelecionadas] = useState<Set<string>>(() => new Set());
+  const [aplicando, setAplicando] = useState(false);
+  // O Doc do modelo pode ser TROCADO nesta sessão ("Refazer padronização"):
+  // o iframe e o link "Abrir no Google Docs" seguem o estado, não a prop.
+  const [doc, setDoc] = useState({ docId: template.docId, embedLink: template.embedLink });
+  const [refazendo, setRefazendo] = useState(false);
+  const [confirmarRefazer, setConfirmarRefazer] = useState(false);
 
   /**
    * Slots de cláusula que a ingestão NÃO conseguiu abrir. O modelo ficou com a
@@ -442,21 +496,111 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
     await patchTemplate({ status: "active" }, "Template ativado.");
   }
 
+  /**
+   * "Pedir revisão pela IA" = PROPOR. Nada é escrito no Doc aqui: a IA lê o
+   * texto, o planejador aplica as travas e a tela recebe cada proposta com o
+   * parágrafo antes e depois. A escrita é {@link aplicarPropostas}, sobre o
+   * que o operador marcou.
+   */
   async function runAI() {
     setAiRunning(true);
     try {
-      const res = await fetch(`/api/templates/${template.id}/rerun-ai`, { method: "POST" });
+      const res = await fetch(`/api/templates/${template.id}/rerun-ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "propose" }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Falha na revisão por IA");
+      const p = data.proposal as ProposeView;
+      setProposta(p);
+      // Simples e sem aviso vêm marcadas. Bloco inteiro e proposta com aviso
+      // nascem DESMARCADAS: são as que precisam de um olhar — foi uma cláusula
+      // inteira virando chave solta que este botão aplicou sozinho uma vez.
+      setSelecionadas(
+        new Set(
+          p.proposals
+            .filter((x) => x.kind === "simple" && !x.multiParagraph && x.warnings.length === 0)
+            .map((x) => x.id)
+        )
+      );
+      toast.success(
+        p.proposals.length > 0
+          ? `A IA propôs ${p.proposals.length} trecho(s). Revise e aplique.`
+          : "A IA não propôs nenhum trecho novo."
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Falha na revisão por IA");
+    } finally {
+      setAiRunning(false);
+    }
+  }
+
+  /**
+   * "Refazer padronização": Doc NOVO a partir do arquivo original do lote, o
+   * pipeline inteiro de novo (slots, neutralização, chaves, checagens); o Doc
+   * atual vai para a lixeira do Drive. O link do modelo não muda — só o Doc.
+   */
+  async function refazerPadronizacao() {
+    if (refazendo) return;
+    setRefazendo(true);
+    setConfirmarRefazer(false);
+    try {
+      const res = await fetch(`/api/templates/${template.id}/redo`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Falha ao refazer a padronização");
+      setDoc({ docId: data.docId, embedLink: data.embedLink });
+      setReport(parseDraftReport(data.report));
+      // Propostas e prévia descreviam o Doc antigo.
+      setProposta(null);
+      setPreviaHtml(null);
+      toast.success(
+        "Padronização refeita a partir do arquivo original. O documento anterior foi para a lixeira do Drive."
+      );
+      await Promise.all([revalidate(), refreshDocText()]);
+      setIframeKey((k) => k + 1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Falha ao refazer a padronização");
+    } finally {
+      setRefazendo(false);
+    }
+  }
+
+  /** Aplica as propostas marcadas. O servidor replaneja no texto atual. */
+  async function aplicarPropostas() {
+    // O botão já desabilita, mas um duplo clique antes do flush dispararia duas
+    // aplicações com o mesmo hash (a segunda cairia em DOC_CHANGED — ruído).
+    if (!proposta || aplicando) return;
+    const accepted = proposta.proposals
+      .filter((p) => selecionadas.has(p.id))
+      .map((p) => ({ token: p.token, trecho: p.trecho }));
+    if (accepted.length === 0) return;
+    setAplicando(true);
+    try {
+      const res = await fetch(`/api/templates/${template.id}/rerun-ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "apply", accepted, docTextHash: proposta.docTextHash }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        // O Doc mudou desde a proposta: a lista não vale mais, e insistir
+        // nela só produziria propostas casadas contra texto que já não existe.
+        if (data.code === "DOC_CHANGED") setProposta(null);
+        throw new Error(data.error ?? "Falha ao aplicar as propostas");
+      }
       // `rerun-ai` só devolve o pass de placeholders — preserva os avisos de
       // slot da ingestão, senão rodar a IA "limparia" a trava da ativação.
       setReport((prev) => ({
         ...(data.report as DraftReport),
         slots: prev?.slots,
       }));
+      setProposta(null);
       const n = (data.report?.inserted ?? []).length;
       toast.success(
-        n > 0 ? `A IA confirmou ${n} trecho(s) no documento.` : "A IA revisou o modelo."
+        n > 0
+          ? `${n} trecho(s) confirmado(s) no documento.`
+          : "Nenhum trecho pôde ser aplicado — os motivos estão em “O que a IA fez”."
       );
       await Promise.all([revalidate(), refreshDocText()]);
       setIframeKey((k) => k + 1);
@@ -465,9 +609,9 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
       // parece confirmação de um estado que não existe mais.
       setPreviaHtml(null);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Falha na revisão por IA");
+      toast.error(err instanceof Error ? err.message : "Falha ao aplicar as propostas");
     } finally {
-      setAiRunning(false);
+      setAplicando(false);
     }
   }
 
@@ -814,7 +958,7 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
               </Button>
             )}
             <a
-              href={`https://docs.google.com/document/d/${template.docId}/edit`}
+              href={`https://docs.google.com/document/d/${doc.docId}/edit`}
               target="_blank"
               rel="noreferrer"
               className="ml-auto text-xs font-medium underline text-muted-foreground hover:text-foreground"
@@ -827,7 +971,7 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
             <div className="min-h-[64vh] overflow-hidden rounded-lg border">
               <iframe
                 key={iframeKey}
-                src={template.embedLink}
+                src={doc.embedLink}
                 className="h-full min-h-[64vh] w-full"
                 title="Modelo da imobiliária"
               />
@@ -931,7 +1075,7 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                 </div>
               )}
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" onClick={runAI} disabled={aiRunning}>
+                <Button size="sm" onClick={runAI} disabled={aiRunning || aplicando}>
                   {aiRunning ? (
                     <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
                   ) : (
@@ -954,6 +1098,21 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                     Ativar template
                   </Button>
                 )}
+                {status !== "active" && !confirmarRefazer && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setConfirmarRefazer(true)}
+                    disabled={refazendo || aiRunning || aplicando || activating}
+                  >
+                    {refazendo ? (
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                    )}
+                    Refazer padronização
+                  </Button>
+                )}
                 {status === "active" && !isDefault && (
                   <Button
                     size="sm"
@@ -966,6 +1125,24 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                   </Button>
                 )}
               </div>
+              {confirmarRefazer && (
+                <div className="space-y-2 rounded-md border border-warning/40 bg-warning/10 p-2 text-xs">
+                  <p>
+                    Cria um Google Doc novo a partir do arquivo original do lote e refaz slots,
+                    neutralização de fornecedor, chaves e checagens. O documento atual vai para a
+                    lixeira do Drive — edições feitas nele se perdem. O link do modelo continua o
+                    mesmo.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="destructive" onClick={refazerPadronizacao} disabled={refazendo}>
+                      Confirmar: refazer do arquivo original
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setConfirmarRefazer(false)} disabled={refazendo}>
+                      Cancelar
+                    </Button>
+                  </div>
+                </div>
+              )}
               {validation && validation.unknown.length > 0 && (
                 <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -1043,6 +1220,137 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                     dado da própria imobiliária ficou fixo no modelo.
                   </p>
                 )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Propostas da IA — planejadas, não aplicadas: quem confirma é o operador. */}
+          {proposta && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-1.5">
+                    <Sparkles className="h-4 w-4 text-primary" />
+                    Propostas da IA
+                  </span>
+                  <Badge variant="outline">
+                    {selecionadas.size}/{proposta.proposals.length}
+                  </Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-xs">
+                {proposta.proposals.length === 0 ? (
+                  <p className="text-muted-foreground">
+                    A IA não propôs nenhum trecho novo: o que ela reconheceu já tem chave, ou foi
+                    recusado pelas travas (abaixo).
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-muted-foreground">
+                      Nada foi escrito ainda. Marque o que deve entrar no documento — bloco
+                      inteiro e proposta com aviso vêm desmarcados de propósito.
+                    </p>
+                    <ul className="space-y-2">
+                      {proposta.proposals.map((p) => {
+                        const on = selecionadas.has(p.id);
+                        return (
+                          <li
+                            key={p.id}
+                            className={`rounded-md border p-2 ${on ? "border-primary/40 bg-primary/5" : ""}`}
+                          >
+                            <label className="flex cursor-pointer items-start gap-2">
+                              <Checkbox
+                                checked={on}
+                                disabled={aplicando}
+                                className="mt-0.5"
+                                onCheckedChange={(v) =>
+                                  setSelecionadas((prev) => {
+                                    const next = new Set(prev);
+                                    if (v === true) next.add(p.id);
+                                    else next.delete(p.id);
+                                    return next;
+                                  })
+                                }
+                              />
+                              <span className="min-w-0 flex-1 space-y-1">
+                                <span className="flex flex-wrap items-center gap-1">
+                                  <code className="font-mono text-[11px]">{`{{${p.token}}}`}</code>
+                                  {p.multiParagraph && <Badge variant="outline">bloco inteiro</Badge>}
+                                  {p.leftover.length > 0 && (
+                                    <Badge variant="outline" className="text-warning">
+                                      {p.leftover.length} parágrafo(s) do bloco ficam no texto
+                                    </Badge>
+                                  )}
+                                  {p.warnings.map((w) => (
+                                    <Badge
+                                      key={w.id}
+                                      variant={w.severity === "error" ? "destructive" : "outline"}
+                                    >
+                                      {w.message}
+                                    </Badge>
+                                  ))}
+                                </span>
+                                <span className="block whitespace-pre-line text-muted-foreground line-through decoration-muted-foreground/50">
+                                  {p.before}
+                                </span>
+                                <span className="block whitespace-pre-line">
+                                  <ComChaves text={p.after} />
+                                </span>
+                              </span>
+                            </label>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </>
+                )}
+                {proposta.skipped.length > 0 && (
+                  <div className="border-t pt-2">
+                    <p className="mb-1 text-muted-foreground">
+                      Recusadas pelas travas ({proposta.skipped.length}):
+                    </p>
+                    <ul className="space-y-0.5">
+                      {proposta.skipped.map((s, i) => (
+                        <li key={`${s.token}-${i}`}>
+                          <code className="font-mono text-[11px]">{`{{${s.token}}}`}</code> —{" "}
+                          {SKIP_REASON[s.reason] ?? s.reason}{" "}
+                          <span className="text-muted-foreground">“{s.trecho}”</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {(proposta.docTruncated || proposta.responseTruncated || proposta.responseUnparsed) && (
+                  <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-warning">
+                    {proposta.docTruncated
+                      ? "O documento é maior que o limite lido pela IA: o fim do texto ficou fora da leitura."
+                      : proposta.responseTruncated
+                        ? "A resposta da IA veio cortada — peça a revisão de novo."
+                        : "A resposta da IA não pôde ser lida por inteiro — peça a revisão de novo."}
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2 border-t pt-2">
+                  <Button
+                    size="sm"
+                    onClick={aplicarPropostas}
+                    disabled={aplicando || selecionadas.size === 0}
+                  >
+                    {aplicando ? (
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+                    )}
+                    Aplicar {selecionadas.size} selecionada(s)
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setProposta(null)}
+                    disabled={aplicando}
+                  >
+                    Descartar
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           )}

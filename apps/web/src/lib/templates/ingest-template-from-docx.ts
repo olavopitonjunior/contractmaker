@@ -141,6 +141,16 @@ export interface IngestTemplateFromDocxInput {
    * este campo existe para acabar.
    */
   sourceText?: string | null;
+  /**
+   * REFAZER a padronização de um modelo que já existe, a partir do MESMO
+   * arquivo: nada de claim-row nem de dedup — a linha `ContractTemplate` é
+   * reaproveitada (nome, critérios e id ficam), um Google Doc NOVO nasce do
+   * DOCX e o pipeline roda inteiro de novo. O Doc anterior vai para a lixeira
+   * do Drive só DEPOIS do sucesso; se o upload falhar, o modelo continua
+   * apontando para o Doc antigo. Exige `sourceHash` igual ao da linha: refazer
+   * "a partir de outro arquivo" é troca de modelo, não refazer.
+   */
+  reuse?: { templateId: string };
 }
 
 export interface IngestTemplateFromDocxResult {
@@ -174,6 +184,29 @@ export class TemplateDriveUploadError extends Error {
     super(message);
     this.name = "TemplateDriveUploadError";
   }
+}
+
+/** O `reuse` não pôde ser honrado. A rota traduz `status`/`code` direto. */
+export class RedoTemplateError extends Error {
+  constructor(
+    readonly code:
+      | "TEMPLATE_NOT_FOUND"
+      | "NOT_GOOGLE_DOCS"
+      | "TEMPLATE_ACTIVE"
+      | "SOURCE_MISMATCH"
+      | "REDO_CONCURRENT",
+    readonly status: 404 | 400 | 409,
+    message: string
+  ) {
+    super(message);
+    this.name = "RedoTemplateError";
+  }
+}
+
+/** Quantas vezes este modelo já foi refeito (lido do `draftReport.redo`). */
+function readRedoCount(raw: unknown): number {
+  const count = (raw as { redo?: { count?: unknown } } | null)?.redo?.count;
+  return typeof count === "number" && Number.isFinite(count) ? count : 0;
 }
 
 /**
@@ -217,42 +250,94 @@ export async function ingestTemplateFromDocx(
   // concorrente enxerga a claim-row (status "draft" participa do dedup) e leva
   // 409 na hora.
   let template: { id: string; name: string };
-  try {
-    template = await prisma.$transaction(async (tx) => {
-      if (!input.force) {
-        const existing = await findDuplicateTemplate(tx, orgId, sourceHash);
-        if (existing) throw new ClaimDuplicate(existing);
-      }
-      const templateName = await resolveUniqueTemplateName(tx, orgId, baseName);
-      return tx.contractTemplate.create({
-        data: {
-          orgId,
-          name: templateName,
-          description: "Template criado a partir do modelo DOCX da imobiliária.",
-          engine: "google_docs",
-          status: "draft",
-          isDefault: false,
-          // Preenchido depois que o Drive converter o DOCX.
-          googleTemplateDocId: null,
-          modalidade,
-          schemaType: schemaTypeForModalidade(modalidade),
-          // Nasce SEM declaração de slot — ver o bloco de slots mais abaixo.
-          handlebarsSource: GOOGLE_DOCS_SOURCE_HEADER,
-          version: "1.0.0",
-          sourceHash,
-          matchCriteria: (matchCriteria ?? undefined) as object | undefined,
-        },
-        select: { id: true, name: true },
-      });
+  /** Só no redo: o Doc anterior, que vai para a lixeira DEPOIS do sucesso. */
+  let previousDocId: string | null = null;
+  /** Só no redo: o que fica gravado em `draftReport.redo`. */
+  let redo: { at: string; previousDocId: string | null; count: number } | null = null;
+  if (input.reuse) {
+    // ─── REDO: reaproveita a linha ─────────────────────────────────────────
+    // Sem transação de claim e sem dedup: o hash JÁ pertence a esta linha — é
+    // por ele que o arquivo foi reencontrado. O guard é o inverso: o arquivo
+    // tem de ser o mesmo que originou o modelo.
+    const existing = await prisma.contractTemplate.findFirst({
+      where: { id: input.reuse.templateId, orgId },
+      select: {
+        id: true,
+        name: true,
+        engine: true,
+        status: true,
+        sourceHash: true,
+        googleTemplateDocId: true,
+        draftReport: true,
+      },
     });
-  } catch (err) {
-    if (err instanceof ClaimDuplicate) throw new DuplicateTemplateError(err.existing);
-    throw err;
+    if (!existing) {
+      throw new RedoTemplateError("TEMPLATE_NOT_FOUND", 404, "Modelo não encontrado.");
+    }
+    if (existing.engine !== "google_docs") {
+      throw new RedoTemplateError("NOT_GOOGLE_DOCS", 400, "Só modelo Google Docs pode ser refeito.");
+    }
+    if (existing.status === "active") {
+      throw new RedoTemplateError(
+        "TEMPLATE_ACTIVE",
+        409,
+        "Modelo ativo não pode ser refeito. Volte-o para rascunho primeiro."
+      );
+    }
+    if (existing.sourceHash !== sourceHash) {
+      throw new RedoTemplateError(
+        "SOURCE_MISMATCH",
+        409,
+        "Este arquivo não é o que originou o modelo — refazer exige o mesmo arquivo."
+      );
+    }
+    template = { id: existing.id, name: existing.name };
+    previousDocId = existing.googleTemplateDocId;
+    redo = {
+      at: new Date().toISOString(),
+      previousDocId,
+      count: readRedoCount(existing.draftReport) + 1,
+    };
+  } else {
+    try {
+      template = await prisma.$transaction(async (tx) => {
+        if (!input.force) {
+          const existing = await findDuplicateTemplate(tx, orgId, sourceHash);
+          if (existing) throw new ClaimDuplicate(existing);
+        }
+        const templateName = await resolveUniqueTemplateName(tx, orgId, baseName);
+        return tx.contractTemplate.create({
+          data: {
+            orgId,
+            name: templateName,
+            description: "Template criado a partir do modelo DOCX da imobiliária.",
+            engine: "google_docs",
+            status: "draft",
+            isDefault: false,
+            // Preenchido depois que o Drive converter o DOCX.
+            googleTemplateDocId: null,
+            modalidade,
+            schemaType: schemaTypeForModalidade(modalidade),
+            // Nasce SEM declaração de slot — ver o bloco de slots mais abaixo.
+            handlebarsSource: GOOGLE_DOCS_SOURCE_HEADER,
+            version: "1.0.0",
+            sourceHash,
+            matchCriteria: (matchCriteria ?? undefined) as object | undefined,
+          },
+          select: { id: true, name: true },
+        });
+      });
+    } catch (err) {
+      if (err instanceof ClaimDuplicate) throw new DuplicateTemplateError(err.existing);
+      throw err;
+    }
   }
 
   // Daqui pra frente a claim-row EXISTE. Qualquer falha tem de removê-la: um
   // draft sem `googleTemplateDocId` seria um template quebrado na listagem E
   // ocuparia o hash pra sempre (o operador nunca mais reingeriria o arquivo).
+  // No redo é o contrário: a linha e o Doc antigo continuam válidos — falha
+  // aqui deixa tudo como estava, sem nada a limpar.
   let uploaded: { docId: string; webViewLink: string; embedLink: string };
   try {
     uploaded = await uploadFileAsGoogleDoc({
@@ -262,21 +347,59 @@ export async function ingestTemplateFromDocx(
       orgId,
     });
   } catch (err) {
-    await dropClaimRow(template.id);
+    if (!input.reuse) await dropClaimRow(template.id);
     const msg = err instanceof Error ? err.message : String(err);
     throw new TemplateDriveUploadError(
       `Falha ao converter DOCX em Google Doc: ${msg}`
     );
   }
 
-  try {
-    await prisma.contractTemplate.update({
-      where: { id: template.id },
-      data: { googleTemplateDocId: uploaded.docId },
-    });
-  } catch (err) {
-    await dropClaimRow(template.id);
-    throw err;
+  if (input.reuse) {
+    // Compare-and-swap contra o Doc que foi LIDO: dois redos concorrentes do
+    // mesmo modelo (duplo clique, duas abas, retry depois de timeout) subiriam
+    // dois Docs e escreveriam na mesma linha por ordem de chegada — o
+    // `googleTemplateDocId` final de um, o relatório do outro, e o Doc
+    // perdedor órfão no Drive. Quem perde a corrida recebe `count = 0`, joga
+    // o próprio Doc fora e avisa. Mesmo idioma de `runClaimWhere`.
+    let swapped = 0;
+    try {
+      const res = await prisma.contractTemplate.updateMany({
+        where: { id: template.id, googleTemplateDocId: previousDocId },
+        data: {
+          googleTemplateDocId: uploaded.docId,
+          status: "draft",
+          // A declaração de slot e o relatório descreviam o Doc antigo, que
+          // deixa de existir: zeram aqui e são refeitos pelo pipeline abaixo.
+          handlebarsSource: GOOGLE_DOCS_SOURCE_HEADER,
+          draftReport: { redo } as object,
+        },
+      });
+      swapped = res.count;
+    } catch (err) {
+      // O modelo ainda aponta para o Doc antigo; o novo ficou órfão no Drive.
+      const { trashDriveFile } = await import("@/lib/google/org-oauth");
+      await trashDriveFile(uploaded.docId, orgId);
+      throw err;
+    }
+    if (swapped === 0) {
+      const { trashDriveFile } = await import("@/lib/google/org-oauth");
+      await trashDriveFile(uploaded.docId, orgId);
+      throw new RedoTemplateError(
+        "REDO_CONCURRENT",
+        409,
+        "Outra padronização deste modelo acabou de ser feita. Recarregue a página para ver o resultado."
+      );
+    }
+  } else {
+    try {
+      await prisma.contractTemplate.update({
+        where: { id: template.id },
+        data: { googleTemplateDocId: uploaded.docId },
+      });
+    } catch (err) {
+      await dropClaimRow(template.id);
+      throw err;
+    }
   }
 
   // ─── GABARITO (A8) ────────────────────────────────────────────────────────
@@ -520,13 +643,26 @@ export async function ingestTemplateFromDocx(
   // O relatório é gravado FORA do try do pass de IA: os avisos de slot precisam
   // chegar à página de revisão mesmo quando a IA falha (antes, um erro na IA
   // engolia junto o motivo de o slot não ter aberto).
-  if (report || finalSlotReports.length > 0 || neutralization || reverseMerge || pii || semantic) {
+  /** O relatório final chegou ao banco? Decide se o Doc antigo pode sair. */
+  let reportPersisted = false;
+  if (
+    report ||
+    finalSlotReports.length > 0 ||
+    neutralization ||
+    reverseMerge ||
+    pii ||
+    semantic ||
+    redo
+  ) {
     try {
       await prisma.contractTemplate.update({
         where: { id: template.id },
         data: {
           draftReport: {
             ...((report ?? {}) as object),
+            // O relatório do redo SUBSTITUI o anterior (que descrevia um Doc
+            // que não existe mais); só a contagem e o Doc anterior atravessam.
+            ...(redo ? { redo } : {}),
             ...(finalSlotReports.length ? { slots: finalSlotReports } : {}),
             ...(neutralization ? { neutralization } : {}),
             ...(reverseMerge ? { reverseMerge: maskReverseMergeReport(reverseMerge) } : {}),
@@ -538,8 +674,26 @@ export async function ingestTemplateFromDocx(
           } as object,
         },
       });
+      reportPersisted = true;
     } catch (err) {
       console.error("[templates/from-docx] falha ao gravar o draftReport:", err);
+    }
+  }
+
+  // Redo: o Doc anterior só sai de cena DEPOIS de o novo estar gravado na
+  // linha E relatado. Se a gravação final falhou (engolida acima, como
+  // sempre foi), a linha ficou com o relatório-tronco `{redo}` — e o Doc
+  // antigo FICA, para o operador ainda ter de onde comparar. Best-effort
+  // (`trashDriveFile` nunca lança): um Doc a mais na lixeira é melhor que um
+  // modelo sem Doc.
+  if (input.reuse && previousDocId && previousDocId !== uploaded.docId) {
+    if (reportPersisted) {
+      const { trashDriveFile } = await import("@/lib/google/org-oauth");
+      await trashDriveFile(previousDocId, orgId);
+    } else {
+      console.error(
+        `[templates/from-docx] redo de ${template.id}: relatório não persistiu; Doc anterior ${previousDocId} mantido fora da lixeira`
+      );
     }
   }
 

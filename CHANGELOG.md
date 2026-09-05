@@ -4,12 +4,25 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-04 - Refazer a padronização de um rascunho e descartar um lote
+
+### Adicionado
+
+- **"Refazer padronização" na revisão do modelo.** Quando o rascunho saiu ruim e os consertos cirúrgicos não bastam, a única saída era reingerir o lote inteiro. Agora o botão refaz SÓ aquele modelo a partir do arquivo original do acervo: reaproveita o plano do lote (blocos de slot, fornecedores a neutralizar, gabarito quando o arquivo era uma instância preenchida), cria um Google Doc novo e roda o pipeline inteiro de novo — na mesma linha do modelo, com o mesmo link. O Doc anterior vai para a lixeira do Drive só depois do sucesso; se o Drive falhar, o modelo continua apontando para o Doc antigo. O relatório da revisão é substituído (descrevia um Doc que não existe mais) e guarda `redo` com o Doc anterior e a contagem. Modelo ativo, modelo enviado avulso (sem arquivo no acervo) e arquivo diferente do que originou o modelo são recusados, cada um com o seu motivo. Linha de auditoria `TEMPLATE_REDO`.
+- **"Descartar lote" na Central de ingestão.** Lote que travou ou que a conferência mostrou não valer a pena ficava para sempre como "lote aberto" no banner de modelos — o estado `cancelled` existia na máquina de estados e ninguém o escrevia. O botão encerra o lote: arquivos ainda não aplicados saem da fila (`discarded`), os modelos já criados ficam como rascunho, e o arquivo e o texto de cada item ficam guardados (é deles que o "refazer" acima se serve). A disponibilidade vai no `WHERE`, como no claim do executor: lote com processamento em voo recebe 409 e o operador tenta em instantes, em vez de o cancelamento ser sobrescrito pelo próximo estágio. Linha de auditoria `INGESTION_RUN_CANCELLED`.
+
 ## [Unreleased] - 2026-09-04 - Documentos por parte na proposta de locação
 
 ### Adicionado
 
 - **Documentos por parte na proposta de locação, com leitura por IA.** Na tela da proposta (com a feature "Análise de crédito — locação" ligada), o corretor anexa RG/CNH, comprovantes de renda e de endereço dizendo de quem é cada documento (locatário, cônjuge, fiador, cônjuge do fiador, locador, imóvel), agrupados por papel como na aba de documentos do negócio. "Extrair com IA" lê o documento sob demanda (um clique só paga um OCR — dois cliques no mesmo card não pagam dois); "Mover para…" corrige a atribuição; mover para o fiador avisa que a garantia vira fiança ao converter. Documentos enviados pelo cliente ficam marcados. Subir de novo o mesmo arquivo escolhendo outra parte move o documento existente (antes respondia "ok" e mantinha a parte antiga). O "Anexar Registro do Aceite" continua no mesmo lugar com a feature ligada. Sem a feature, a lista simples de documentos continua igual.
 - **A conversão em negócio aproveita o que foi lido.** CPF, nascimento, endereço e demais campos extraídos de documentos com atribuição feita por uma pessoa entram no formulário e no negócio sem redigitar, sem sobrescrever o que a proposta já trazia; a leitura e a atribuição seguem com o documento para a pasta do negócio, e o que veio do cliente continua identificado.
+
+## [Unreleased] - 2026-09-04 - A revisão pela IA propõe; quem escreve é o operador
+
+### Alterado
+
+- **"Pedir revisão pela IA" deixa de escrever no modelo por conta própria.** O botão rodava o passe de inserção de chaves de novo e aplicava o resultado direto no Google Doc — e num dos dois usos em produção colapsou um parágrafo inteiro numa chave solta, sem ninguém ver antes. Agora ele PROPÕE: a IA lê o texto, o planejador aplica as mesmas travas de sempre, e a tela mostra cada proposta com o parágrafo como está e como ficaria, por chave, com uma caixa de seleção. Trecho simples e sem aviso vem marcado; bloco inteiro e proposta com aviso das checagens semânticas vêm desmarcados de propósito. "Aplicar N selecionadas" manda só o que foi marcado, e o servidor replaneja sobre o texto atual do Doc: trecho que virou ambíguo desde a proposta é pulado, nunca escrito errado; se o Doc mudou no meio, a aplicação é recusada inteira (`409 DOC_CHANGED`) e a lista some. O que fica no banco é a contagem e os motivos dos pulos — os trechos vivem na resposta e morrem com ela. A escrita ganha linha de auditoria (`TEMPLATE_AI_PROPOSALS_APPLIED`) com chaves e motivos, sem texto de contrato. Modelo ativo pode pedir propostas (é leitura) e não pode aplicar (é escrita). Chamada sem corpo passa a significar "propor": o disparo que escrevia direto deixou de existir.
 
 ## [Unreleased] - 2026-09-04 - A imobiliária conecta a própria conta Ficha Certa
 
