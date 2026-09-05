@@ -115,6 +115,12 @@ interface ExtractCertidoesDialogProps {
    * (2026-09) passa `/api/proposals/:id/certidoes/plan` — mesmo contrato.
    */
   planUrl?: string;
+  /**
+   * Sujeito do diálogo. Na PROPOSTA não existem pessoas adicionais
+   * (diligenciados), Serasa nem teto exposto — essas superfícies são do
+   * negócio e ficam de fora aqui.
+   */
+  subject?: "deal" | "proposal";
 }
 
 interface DiligentedRow {
@@ -158,7 +164,9 @@ export function ExtractCertidoesDialog({
   onAddPerson,
   esteira = "venda",
   planUrl,
+  subject = "deal",
 }: ExtractCertidoesDialogProps) {
+  const isProposal = subject === "proposal";
   const [plan, setPlan] = useState<ExtractionPlan | null>(null);
   const [expandedPlan, setExpandedPlan] = useState<ExtractionPlan | null>(null);
   const [catalog, setCatalog] = useState<EndpointInfo[]>([]);
@@ -181,7 +189,11 @@ export function ExtractCertidoesDialog({
     initialOpenSections(esteira)
   );
   const defaultGroups = useMemo(() => defaultGroupsFor(esteira), [esteira]);
-  const sections = useMemo(() => sectionsFor(esteira), [esteira]);
+  // Proposta: sem a seção "Pessoas adicionais" (não há diligenciados antes do negócio).
+  const sections = useMemo(
+    () => sectionsFor(esteira).filter((s) => !(isProposal && s.kind === "adicionais")),
+    [esteira, isProposal]
+  );
   // Locação sem Serasa (decisão 2026-09-02, não está integrado): o catálogo do
   // seletor "Adicionar outras" vem inteiro da API; sem este filtro um locador
   // podia receber score/restritivos Serasa a R$ 5 a consulta.
@@ -750,6 +762,11 @@ export function ExtractCertidoesDialog({
                   <strong>Locatários</strong> e <strong>fiador</strong> já vêm marcados. Locadores,
                   imóvel e pesquisa de bens são opções — abra cada seção para incluir.
                 </>
+              ) : isProposal ? (
+                <>
+                  <strong>Vendedores</strong> já vêm marcados. Compradores, imóvel e pesquisa de
+                  bens são opções — abra cada seção para incluir.
+                </>
               ) : (
                 <>
                   <strong>Vendedores</strong> e <strong>pessoas adicionais</strong> já vêm marcados. Compradores,
@@ -802,9 +819,9 @@ export function ExtractCertidoesDialog({
                   </Section>
                 ))}
 
-                {/* Em breve — Serasa (venda). Locação: sem menção até a integração
-                    existir (decisão 2026-09-02). */}
-                {esteira === "venda" && (
+                {/* Em breve — Serasa (venda, só no negócio). Locação: sem menção até a
+                    integração existir (decisão 2026-09-02). Proposta: superfície do negócio. */}
+                {esteira === "venda" && !isProposal && (
                 <div className="rounded-lg border border-dashed bg-muted/10 px-3 py-2.5 opacity-80">
                   <div className="flex flex-wrap items-center gap-2">
                     <Sparkles className="h-4 w-4 text-violet-500" />
@@ -826,7 +843,9 @@ export function ExtractCertidoesDialog({
                 <div className="flex-1 min-w-0">
                   <strong>Total:</strong> R$ {custoReais.replace(".", ",")} — {selectedCount} certidão(ões)
                 </div>
-                {spend && (
+                {/* Teto mensal é da PLATAFORMA (env compartilhado) — na proposta não se
+                    expõe; o guard de orçamento continua valendo no servidor e no badge. */}
+                {spend && !isProposal && (
                   <span className="text-xs text-muted-foreground">
                     Gasto: R$ {gastoReais.replace(".", ",")} / R$ {budgetReais.replace(".", ",")}
                   </span>

@@ -16,7 +16,7 @@ vi.mock("@/lib/security/budget-lock", () => ({
   }),
 }));
 
-import { dispatchProposalCertidoes, stripSerasa } from "../proposal-dispatch";
+import { dispatchProposalCertidoes, planProposalCertidoes, stripSerasa } from "../proposal-dispatch";
 import { planCertidoesForDeal } from "../planner";
 import { runBatch, getMonthlySpend } from "../executor";
 import { prisma } from "@/lib/db/prisma";
@@ -74,6 +74,15 @@ describe("stripSerasa — a proposta não consulta Serasa (a análise de crédit
     expect(out.jobs.map((j) => j.endpoint)).toEqual(["tribunais/cndt"]);
     expect(out.totalCostCents).toBe(300);
     expect(out.skipped).toHaveLength(1);
+  });
+});
+
+describe("planProposalCertidoes — a proposta não tem pessoas adicionais (diligenciados)", () => {
+  it("chama o planner com a lista de diligenciados VAZIA — por isso o diálogo pode esconder a seção sem seleção invisível", async () => {
+    await planProposalCertidoes({ dataJson: INPUT.dataJson, esteira: INPUT.esteira, userEmail: INPUT.userEmail, expandAll: false });
+    expect(mockPlan).toHaveBeenCalledTimes(1);
+    // 3º argumento = diligenciados; na proposta é sempre [] (DiligentedPerson.dealId é NOT NULL)
+    expect(mockPlan.mock.calls[0][2]).toEqual([]);
   });
 });
 

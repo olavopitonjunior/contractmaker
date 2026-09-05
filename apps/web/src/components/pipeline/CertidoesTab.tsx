@@ -1699,6 +1699,7 @@ export function CertidoesTab({
         onAddPerson={isProposal ? undefined : () => setAddPersonOpen(true)}
         esteira={esteira}
         planUrl={`${apiBase}/plan`}
+        subject={subject}
       />
 
       <DiligentedPersonDialog
