@@ -44,6 +44,7 @@ export type MoveStageReason =
   | "aprovar_ficha"
   | "charge_created"
   | "superlogica_export"
+  | "superlogica_liquidacao"
   | "charge_cancelled_regress"
   | "contract_approved"
   | "auto_commission_paid"
