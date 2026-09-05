@@ -4,6 +4,15 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-04 - Pretendentes, renda e consentimento LGPD na proposta de locação
+
+### Adicionado
+
+- **Quem vai ser analisado, com o que falta, direto na proposta.** Na proposta de locação (com a análise de crédito habilitada), a seção "Pretendentes & renda" lista cada pessoa que a análise de crédito consulta — locatário, cônjuge, fiador e cônjuge do fiador — mostrando CPF, nascimento, renda e cidade, e marcando o que ainda falta para consultar (CPF válido, data de nascimento). "Editar" preenche nascimento, nome da mãe, RG, endereço, renda com origem e outra renda sem abrir o formulário da proposta, e funciona mesmo depois de a proposta ter sido enviada: esses dados não entram no documento assinado. O que já veio de um documento lido por IA aparece preenchido.
+- **Consentimento LGPD na proposta.** Antes de consultar crédito, o corretor registra a base legal (proteção ao crédito ou execução de contrato) na própria proposta; o registro é auditável, pode ser revogado e segue para o negócio na conversão.
+- **Formulário da proposta com "Dados para análise de crédito".** Bloco opcional por proponente pessoa física e no fiador: nascimento, nome da mãe, sexo, RG, endereço, renda e origem, outra renda e cônjuge. Reeditar a proposta preserva o que o OCR ou a edição de partes já tinham gravado.
+- **Formulário público de locação** aceita origem da renda, outra renda e, no cônjuge, nome da mãe e renda; o resumo consolidado mostra renda e origem de cada parte.
+
 ## [Unreleased] - 2026-09-04 - O cliente envia documentos pela página da proposta
 
 ### Adicionado
