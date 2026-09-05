@@ -4,6 +4,16 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-05 - Documentos da proposta no formulário e diálogo de certidões da proposta
+
+### Adicionado
+
+- **Documentos da proposta agora aparecem também no formulário do negócio.** Ao converter uma proposta, os documentos anexados (pelo corretor ou pelo cliente) passam a estar na etapa de documentos do formulário, além da aba Documentos — mesmo arquivo, com o que a IA já leu e a parte a que pertencem. A leitura por IA continua sendo por clique.
+
+### Corrigido
+
+- **Diálogo "Emitir certidões" na proposta** não mostra mais "Pessoas adicionais", "Pesquisa Serasa — Em breve" nem a linha de gasto do mês, que são do negócio e não tinham ação na proposta.
+
 ## [Unreleased] - 2026-09-05 - Revisão de modelo: as checagens pegam o que a Trio expôs (medido)
 
 ### Corrigido
