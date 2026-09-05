@@ -250,6 +250,12 @@ export type AuditAction =
   // CREDIT_BUDGET_EXCEEDED o 402 do teto mensal ou sem créditos pré-pagos.
   | "CREDIT_ANALYSIS_DISPATCH"
   | "CREDIT_CONSENT_GIVEN"
+  // Revogação do consentimento na proposta (DELETE /credit/consent).
+  | "CREDIT_CONSENT_REVOKED"
+  // Dados de uma parte da proposta editados pela rota granular `/partes`
+  // (nascimento, renda, endereço…) — funciona depois do envio, ao contrário
+  // do PATCH monolítico, por isso tem trilha própria com o alvo e as chaves.
+  | "PROPOSAL_PARTY_DATA_UPDATE"
   | "CREDIT_WEBHOOK_RECEIVED"
   | "CREDIT_WEBHOOK_REJECTED"
   | "CREDIT_ACCOUNT_CONNECTED"

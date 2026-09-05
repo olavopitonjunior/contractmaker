@@ -29,6 +29,9 @@ import { resolveDealBrokers } from "@/lib/notifications/deal-brokers";
 import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
 import { FEATURE } from "@/lib/modules/catalog";
 import { proposalPartiesSnapshot } from "@/lib/proposals/attachment-assignment";
+import { applyProposalExtractions } from "@/lib/proposals/apply-extractions";
+import { derivePretendentes, tipoImovelForSchema } from "@/lib/credit/pretendentes";
+import { readCreditConsent } from "@/lib/credit/consent";
 
 export const dynamic = "force-dynamic";
 
@@ -246,6 +249,15 @@ export default async function PropostaDetailPage({
     locatarios: partiesSnapshotFull.locatarios,
     garantia: partiesSnapshotFull.garantia,
   };
+  // Pretendentes da análise de crédito: derivados do dataJson JÁ com o OCR
+  // dos documentos aplicado (só anexos prontos com atribuição humana) — o
+  // mesmo dado que o convert vai gravar. Consentimento LGPD lido pela chave
+  // canônica (aceita o legado).
+  const pretendentes = creditFeatureEnabled
+    ? derivePretendentes(applyProposalExtractions(d, attachments, proposal.kind).merged)
+    : [];
+  const creditConsent = creditFeatureEnabled ? readCreditConsent(proposal.complianceJson) : null;
+  const tipoImovel = tipoImovelForSchema(proposal.schemaType);
 
   // Corretores parceiros: linhas do dataJson + "notifica?" resolvido no registry
   // (mesma regra do e-mail: notifyByEmail, sem opt-out, com endereço).
@@ -414,6 +426,9 @@ export default async function PropostaDetailPage({
       }))}
       creditFeatureEnabled={creditFeatureEnabled}
       partiesSnapshot={partiesSnapshot}
+      pretendentes={pretendentes}
+      creditConsent={creditConsent}
+      tipoImovel={tipoImovel}
       members={memberRows.map((m) => ({ id: m.user.id, name: m.user.name ?? "Sem nome" }))}
       permissions={permissions}
       planVendedores={planVendedores}

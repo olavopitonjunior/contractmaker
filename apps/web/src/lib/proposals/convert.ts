@@ -194,6 +194,11 @@ export async function convertProposalToDeal(input: {
         // default "venda"; sem isto toda locação viraria deal de venda.
         kind: proposal.kind,
         dataJson: normalizedData as Prisma.InputJsonValue,
+        // Consentimento LGPD dado na proposta segue para o negócio (a chave
+        // canônica `creditConsent` é lida pelas rotas de crédito do deal).
+        ...(proposal.complianceJson && typeof proposal.complianceJson === "object"
+          ? { complianceJson: proposal.complianceJson as Prisma.InputJsonValue }
+          : {}),
         stageEnteredAt: new Date(),
       },
     });
