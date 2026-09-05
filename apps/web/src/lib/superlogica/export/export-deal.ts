@@ -17,6 +17,7 @@ import { moveDealStage } from "@/lib/pipeline/move-stage";
 import { SUPERLOGICA_EXPORTABLE_STAGES } from "@/lib/pipeline/stage-config";
 import { decryptAccountCreds, superlogicaVendaUrl } from "../account";
 import { createSuperlogicaClient } from "../resources";
+import { getLink, putLink } from "./links";
 import { SuperlogicaDuplicateError } from "../client";
 import type { SLVenda } from "../types";
 import {
@@ -282,28 +283,6 @@ export interface ExportDealResult {
 }
 
 type Escrita = ReturnType<typeof createSuperlogicaClient>["escrita"];
-
-async function getLink(orgId: string, entityType: string, localKey: string) {
-  return prisma.superlogicaLink.findUnique({
-    where: { orgId_entityType_localKey: { orgId, entityType, localKey } },
-  });
-}
-
-async function putLink(
-  orgId: string,
-  entityType: string,
-  localKey: string,
-  remoteId: string,
-  remoteAux: string | null,
-  snapshot: Prisma.InputJsonValue | null,
-) {
-  const snapshotJson = snapshot ?? undefined;
-  return prisma.superlogicaLink.upsert({
-    where: { orgId_entityType_localKey: { orgId, entityType, localKey } },
-    create: { orgId, entityType, localKey, remoteId, remoteAux, snapshotJson },
-    update: { remoteId, remoteAux, snapshotJson, lastSyncedAt: new Date() },
-  });
-}
 
 function entityKey(dealId: string, kind: "pessoa" | "corretor", role: string, index: number, doc: string): string {
   return doc ? `${kind}:${doc}` : `deal:${dealId}:${role}:${index}`;
