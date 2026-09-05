@@ -75,6 +75,11 @@ function readAssignmentOf(extractedData: unknown): { kind: string; index: number
  * é aplicada ao existente — o mesmo efeito do "Mover para…". Sem isso, subir de
  * novo o mesmo comprovante escolhendo outra parte respondia "ok" e mantinha a
  * parte antiga em silêncio.
+ *
+ * Só entre anexos da MESMA origem (`source`): o lead, pela página pública,
+ * não pode mover um documento que a imobiliária subiu (byte-idêntico ao que
+ * ele mandou) — seria uma rota anônima reescrevendo a parte de um anexo
+ * interno, e o convert leva os campos de OCR para onde o assignment aponta.
  */
 export async function persistProposalDocument(
   args: PersistProposalDocumentArgs
@@ -92,7 +97,8 @@ export async function persistProposalDocument(
       typeof existing.extractedData === "object" &&
       (existing.extractedData as Record<string, unknown>).assignmentPersisted === true;
     const differs = !has || has.kind !== wanted?.kind || has.index !== wanted?.index || !hasPersisted;
-    if (wanted && wantedPersisted && differs) {
+    const sameSource = existing.source === source;
+    if (wanted && wantedPersisted && sameSource && differs) {
       const merged = {
         ...((existing.extractedData as Record<string, unknown> | null) ?? {}),
         assignment: wanted,

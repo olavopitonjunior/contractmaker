@@ -7,7 +7,13 @@ import {
   PUBLIC_LINK_BLOCKED_STATUSES,
 } from "@/lib/proposals/status-sets";
 import { proposalNumero } from "@/lib/proposals/code";
+import {
+  evaluatePublicUploadGate,
+  isPublicUploadFeatureOn,
+  publicUploadPartyOptions,
+} from "@/lib/proposals/public-upload";
 import { ViewBeacon } from "./ViewBeacon";
+import { PublicDocumentsBlock } from "./PublicDocumentsBlock";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,6 +43,7 @@ export default async function PublicProposalPage({
       code: true,
       title: true,
       status: true,
+      kind: true,
       schemaType: true,
       dataJson: true,
       templateId: true,
@@ -68,6 +75,20 @@ export default async function PublicProposalPage({
     (!SIGNED_OR_LATER_STATUSES.has(proposal.status) &&
       proposal.validUntil != null &&
       new Date() > proposal.validUntil);
+
+  // "Envie seus documentos" (locação com análise de crédito, 2026-09): mesma
+  // regra das rotas públicas de upload — status vivo para o lead, dentro da
+  // validade, locação, feature ligada na org. Quem decide é o helper; a página
+  // só pergunta.
+  const uploadGate = evaluatePublicUploadGate({
+    status: proposal.status,
+    kind: proposal.kind,
+    validUntil: proposal.validUntil,
+  });
+  const canUpload = uploadGate.ok && (await isPublicUploadFeatureOn(proposal.orgId));
+  const partyOptions = canUpload
+    ? publicUploadPartyOptions((proposal.dataJson ?? {}) as Record<string, unknown>)
+    : [];
 
   // Documento: snapshot congelado (o que a pessoa viu/aceita). Fallback ao
   // render atual só pra propostas antigas sem snapshot.
@@ -123,6 +144,7 @@ export default async function PublicProposalPage({
         </div>
       )}
       <div dangerouslySetInnerHTML={{ __html: html }} />
+      {canUpload && <PublicDocumentsBlock token={params.token} options={partyOptions} />}
       {/* Beacon: só um browser real (humano) marca "visualizada"; crawlers não. */}
       {!expired && <ViewBeacon token={params.token} />}
     </main>

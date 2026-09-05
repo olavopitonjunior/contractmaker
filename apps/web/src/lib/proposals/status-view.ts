@@ -135,6 +135,9 @@ const EVENT_LABEL: Record<string, string> = {
   delivered: "Entregue",
   fetched: "Baixada",
   viewed: "Visualizada",
+  // Página pública (`/p/[token]`, 2026-09): o lead subiu/removeu documento.
+  document_uploaded: "Cliente enviou documento",
+  document_removed: "Cliente removeu documento",
   signed_proponente: "Proponente assinou",
   chained_envelope2: "Enviado ao proprietário",
   chained_envelope2_pending: "Aguardando envio ao proprietário",

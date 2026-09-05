@@ -29,6 +29,9 @@ export type ArchiveVia =
   | "ui_deal"
   | "ui_form"
   | "ui_proposal"
+  // O próprio LEAD removeu um documento que subiu pela página pública da
+  // proposta (`/p/[token]`, 2026-09). Sem sessão — `userId` fica null.
+  | "public_proposal"
   | "deal_delete"
   | "certidao";
 

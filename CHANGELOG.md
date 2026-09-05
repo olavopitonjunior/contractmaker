@@ -4,6 +4,12 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-04 - O cliente envia documentos pela página da proposta
+
+### Adicionado
+
+- **O interessado envia os próprios documentos pela página pública da proposta de locação.** Na mesma página em que lê a proposta (o link enviado pelo WhatsApp), quando a análise de crédito está habilitada na imobiliária, aparece o bloco "Envie seus documentos": ele diz de quem é cada arquivo (locatário, cônjuge, fiador, cônjuge do fiador ou outro), envia PDF ou foto, vê o que já mandou e pode remover o que subiu por engano. O corretor recebe um aviso "Cliente enviou documentos" (um por hora, não um por arquivo) e encontra tudo em "Documentos por parte" com a marca "enviado pelo cliente" — já com a parte escolhida, pronto para extrair com IA e seguir para o negócio. A página só aceita envio enquanto a proposta está viva para o cliente (não expirou, não foi cancelada nem convertida); documentos da imobiliária, o dossiê e o PDF assinado nunca aparecem nem podem ser removidos por ali.
+
 ## [Unreleased] - 2026-09-04 - Refazer a padronização de um rascunho e descartar um lote
 
 ### Adicionado
