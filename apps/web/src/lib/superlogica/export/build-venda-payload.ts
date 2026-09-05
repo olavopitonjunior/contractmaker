@@ -504,7 +504,9 @@ export type WarningCode =
   | "comissionado_sem_id"
   | "comissionado_sem_favorecido"
   | "comprador_sem_id"
-  | "imovel_sem_id";
+  | "imovel_sem_id"
+  | "cobranca_asaas_ativa"
+  | "exportacao_em_andamento";
 
 export interface ExportWarning {
   code: WarningCode;

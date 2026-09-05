@@ -30,6 +30,17 @@ export const REOPEN_FALLBACK_BY_KIND: Record<string, string> = {
   locacao: "Em contrato",
 };
 
+/**
+ * Stages de VENDA a partir dos quais a venda pode ser enviada para a
+ * Superlógica (FONTE ÚNICA: server em lib/superlogica/export/export-deal.ts
+ * e botão/tooltip do DealDetail leem daqui). O destino após exportar é
+ * "Cobrança emitida" — a cobrança passa a ser da Superlógica.
+ */
+export const SUPERLOGICA_EXPORTABLE_STAGES: readonly string[] = [
+  "Contrato assinado",
+  "Cobrança emitida",
+];
+
 export interface StageConfig {
   terminalStages: readonly string[];
   reopenFallback: string;

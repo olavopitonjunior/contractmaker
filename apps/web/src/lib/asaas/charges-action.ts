@@ -89,10 +89,23 @@ export async function runCreateCommissionCharge(
         take: 1,
         where: input.contractId ? { id: input.contractId } : { status: "aprovado" },
       },
+      superlogicaExport: { select: { status: true, vendaId: true } },
     },
   });
   if (!deal) {
     return { status: 404, body: { error: "Deal não encontrado" } };
+  }
+  // Exclusividade Asaas × Superlógica (decisão de produto, 03/09/2026): venda
+  // exportada tem a comissão cobrada pela Superlógica — nenhuma cobrança Asaas
+  // nasce a partir dela, por qualquer porta (tela, bearer, Max). O guard do
+  // botão no DealDetail é só conveniência; a regra mora aqui.
+  if (deal.superlogicaExport?.status === "done") {
+    return {
+      status: 409,
+      body: {
+        error: `Venda exportada para a Superlógica (venda ${deal.superlogicaExport.vendaId ?? "?"}): a comissão é cobrada por lá, não pelo Asaas.`,
+      },
+    };
   }
 
   const contract = deal.contracts[0];
