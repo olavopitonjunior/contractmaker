@@ -400,6 +400,8 @@ model Organization {
   // Superlógica (ERP financeiro da imobiliária) — conta própria da org com
   // app/access token cifrados + padrões da exportação de vendas.
   superlogicaAccount SuperlogicaAccount?
+  superlogicaLinks   SuperlogicaLink[]
+  superlogicaExports SuperlogicaExport[]
   proposals         Proposal[]
   // Análise de crédito por imobiliária (Ficha Certa Digital) — conta própria
   // com credencial/webhook criptografados, no molde da ClickSignAccount.
@@ -722,6 +724,9 @@ model Deal {
   notificationLogs       DealNotificationLog[]
   surveyInvites          SurveyInvite[]
   groupLink              DealGroupLink?
+  // Exportação da venda para a Superlógica (1 por negócio; ver
+  // docs/integracoes/superlogica-vendas-export.md).
+  superlogicaExport      SuperlogicaExport?
   // Proposta que originou este deal (conversão). Null = deal criado direto.
   fromProposal           Proposal?               @relation("ProposalConvertedDeal")
 
@@ -4923,6 +4928,62 @@ model SuperlogicaAccount {
   updatedAt DateTime @updatedAt
 
   org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+/// SuperlogicaLink — mapeamento de uma entidade LOCAL para o id dela na
+/// Superlógica, por org. É o que torna a exportação idempotente e retomável:
+/// cada pessoa/corretor/imóvel/venda criado (ou reutilizado) grava o link
+/// ANTES do passo seguinte; uma tentativa nova pula o que já tem link.
+/// `localKey`: documento normalizado (`pessoa:<cpf>`, `corretor:<cnpj>`) ou,
+/// sem documento, a posição no negócio (`deal:<dealId>:comprador:0`);
+/// imóvel e venda usam `deal:<dealId>`. `remoteAux` guarda o favorecido do
+/// corretor (`id_favorecido_fav`), exigido no payload da venda.
+model SuperlogicaLink {
+  id           String   @id @default(cuid())
+  orgId        String
+  entityType   String // pessoa | corretor | imovel | venda
+  localKey     String
+  remoteId     String
+  remoteAux    String?
+  /// Só nome/ids devolvidos pela Superlógica — nunca documento nem contato.
+  snapshotJson Json?
+  lastSyncedAt DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, entityType, localKey])
+  @@index([orgId, entityType, remoteId])
+}
+
+/// SuperlogicaExport — a exportação de UM negócio de venda (1:1 com Deal).
+/// `status`: running (em curso) | done (venda criada, `vendaId` preenchido) |
+/// error (`lastError` com a mensagem da API, sem PII). `payloadJson` é o
+/// payload da venda tal como enviado (nomes e valores; sem documentos — as
+/// pessoas vão em chamadas próprias), `payloadHash` o SHA-256 do payload
+/// completo e `responseJson` só ids/valores/status lidos de volta.
+model SuperlogicaExport {
+  id           String    @id @default(cuid())
+  orgId        String
+  dealId       String    @unique
+  status       String    @default("running") // running | done | error
+  vendaId      String?
+  payloadHash  String?
+  payloadJson  Json?
+  responseJson Json?
+  warningsJson Json?
+  lastError    String?   @db.Text
+  createdById  String?
+  startedAt    DateTime  @default(now())
+  finishedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  deal Deal         @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
 }
 
 /// FichaCertaAccount — conta da Ficha Certa Digital (análise de crédito para

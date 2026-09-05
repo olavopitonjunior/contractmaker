@@ -61,6 +61,20 @@ export async function isSuperlogicaConfigured(orgId: string): Promise<boolean> {
   return (await getOrgSuperlogicaCreds(orgId)) !== null;
 }
 
+/**
+ * Existe conta gravada e não desconectada — SEM decifrar tokens. É o teste
+ * certo para render de página (o decrypt pode lançar por chave de cifra
+ * ausente/rotacionada e não pode derrubar a página do negócio) e é a mesma
+ * regra que `loadExportContext` usa.
+ */
+export async function hasSuperlogicaAccount(orgId: string): Promise<boolean> {
+  const row = await prisma.superlogicaAccount.findUnique({
+    where: { orgId },
+    select: { status: true },
+  });
+  return !!row && row.status !== "disconnected";
+}
+
 /** Link da venda na tela da Superlógica (a tela mora em apps.superlogica.net,
  *  independente da licença; a licença vai só na sessão do usuário). */
 export function superlogicaVendaUrl(vendaId: string | number): string {
