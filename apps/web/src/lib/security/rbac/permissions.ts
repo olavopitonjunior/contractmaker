@@ -148,6 +148,11 @@ export const PERMISSION = {
   CONTRACT_EDIT: "contract.edit",
   ENVELOPE_VIEW: "envelope.view",
   ENVELOPE_SEND: "envelope.send",
+
+  // Superlógica (ERP) — conectar a conta/definir padrões é de owner/admin;
+  // exportar uma venda é ação do financeiro/admin sobre um negócio do escopo.
+  SUPERLOGICA_CONFIGURE: "superlogica.configure",
+  SUPERLOGICA_EXPORT: "superlogica.export",
 } as const;
 
 export type PermissionKey =
@@ -292,6 +297,7 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionKey[]> = {
     PERMISSION.ENVELOPE_VIEW,
     PERMISSION.ENVELOPE_SEND,
   ],
+  "Superlógica": [PERMISSION.SUPERLOGICA_CONFIGURE, PERMISSION.SUPERLOGICA_EXPORT],
 };
 
 /**
@@ -401,6 +407,8 @@ export const PERMISSION_LABELS_PT: Record<PermissionKey, string> = {
   [PERMISSION.RECONCILIATION_MATCH]: "Fazer match de conciliação",
   [PERMISSION.REPORT_VIEW]: "Ver relatórios",
   [PERMISSION.REPORT_EXPORT]: "Exportar relatórios",
+  [PERMISSION.SUPERLOGICA_CONFIGURE]: "Conectar e configurar a Superlógica",
+  [PERMISSION.SUPERLOGICA_EXPORT]: "Enviar venda para a Superlógica",
   [PERMISSION.AUDIT_VIEW]: "Ver log de auditoria",
   [PERMISSION.AUDIT_EXPORT]: "Exportar log de auditoria",
   // Locação
