@@ -1,7 +1,11 @@
 # Exportar venda do Contractmaker para a Superlógica (módulo Vendas)
 
-> Status: **PR 1 (conta + configurações) entregue**; PR 2 (escrita no conector + mapeador),
+> Status: **PR 1 (conta + configurações) e PR 2 (escrita no conector + mapeador puro) entregues**;
 > PR 3 (exportação: preview, orquestrador, UI) e PR 4 (liquidação/"Comissão paga") a seguir.
+> Código do mapeador: `apps/web/src/lib/superlogica/export/build-venda-payload.ts`
+> (`extractVendaSource` → `validarVendaSource` → `buildVendaPayload`; `buildPessoaPayload`,
+> `buildCorretorPayload`, `buildImovelPayload`). Escrita: `slPostForm`/`slPostJson`/`slWriteV2`
+> em `client.ts` e o namespace `escrita` de `createSuperlogicaClient`.
 > Provas ao vivo na licença `adm037585` em 2026-09-02/03: vendas 744 e 745 criadas por API.
 
 ## Decisões (03/09/2026)

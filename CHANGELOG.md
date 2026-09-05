@@ -4,6 +4,12 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-05 - A imobiliária conecta a própria conta Superlógica
+
+### Adicionado
+
+- **Conta Superlógica por imobiliária em Configurações › Integrações.** O owner/admin informa a licença e os tokens (app e access) da conta da própria imobiliária; a plataforma valida a credencial nas duas APIs que a exportação usa — Imobiliárias e Financeiro v2 — antes de gravar, e guarda os tokens cifrados com AES-256-GCM por organização. Não existe credencial de plataforma nem fallback de `.env`: sem conta conectada, a imobiliária não fala com a Superlógica. A tela traz ainda os padrões da exportação (conta bancária das parcelas, filial, conta contábil da comissão, tipo de imóvel padrão, NF/DIMOB, quem paga a comissão, vencimento e teto), com auto-save por campo; "Testar" revalida nas duas APIs, "Reconectar" troca os tokens preservando os padrões e "Desconectar" apaga os tokens. Os tokens nunca voltam do servidor. A feature `vendas.superlogica` nasce desligada — depende de a Superlógica registrar o app do lado deles — e é ligada tenant a tenant no super-admin. Exportar a venda em si vem nos próximos lotes.
+
 ## [Unreleased] - 2026-09-05 - Documentos da proposta no formulário e diálogo de certidões da proposta
 
 ### Adicionado
