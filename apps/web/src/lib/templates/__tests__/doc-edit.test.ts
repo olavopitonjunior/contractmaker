@@ -223,6 +223,28 @@ describe("restore-paragraph — devolver a cláusula que a chave engoliu", () =>
     expect(getDocStructureMock).toHaveBeenCalledTimes(1);
   });
 
+  it("parágrafo com prosa + chave não é restaurado: apagaria a chave (só o colapso puro é)", async () => {
+    // "CEP {{imovel_cep}}" alinhado como `changed` contra "CEP 82000-000, …":
+    // restaurar devolveria o CEP literal ao modelo e sumiria com a chave.
+    const misto = "CEP {{imovel_cep}}";
+    getDocPlainTextMock.mockResolvedValue(["abre:", misto].join("\n"));
+    const out = await run([
+      { op: "restore-paragraph", current: misto, source: "CEP 82000-000, Curitiba/PR" },
+    ]);
+    expect(out.results[0]).toMatchObject({ status: "skipped", reason: "phrase-has-token" });
+    expect(getDocStructureMock).not.toHaveBeenCalled();
+    expect(batchUpdateDocMock).not.toHaveBeenCalled();
+
+    // O colapso (chave sozinha, mesmo com marcador de lista) continua restaurável.
+    const soChave = "a) {{imobiliaria_qualificacao}};";
+    getDocPlainTextMock
+      .mockResolvedValueOnce(["abre:", soChave].join("\n"))
+      .mockResolvedValueOnce(["abre:", original].join("\n"));
+    getDocStructureMock.mockResolvedValue(fakeDoc(["abre:", soChave]));
+    const ok = await run([{ op: "restore-paragraph", current: soChave, source: original }]);
+    expect(ok.results[0]).toMatchObject({ status: "applied" });
+  });
+
   it("parágrafo repetido no documento não é restaurado", async () => {
     const antes = ["abre:", colapsado, "meio", colapsado];
     getDocPlainTextMock.mockResolvedValue(antes.join("\n"));

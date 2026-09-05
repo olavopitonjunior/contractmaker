@@ -42,6 +42,7 @@ import {
   modalidadeLabel,
   templateFamilyForModalidade,
 } from "@/lib/contracts/template-category";
+import { TemplateClauseView, type ClauseViewSource } from "./TemplateClauseView";
 
 interface CatalogEntry {
   token: string;
@@ -343,8 +344,43 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
   const [mapping, setMapping] = useState(false);
   /** Achado cuja correção está sendo aplicada (um por vez: o Doc é um só). */
   const [fixingId, setFixingId] = useState<string | null>(null);
+  /** Edição por linha da aba "Cláusulas" em curso (mesma regra: uma por vez). */
+  const [editandoDoc, setEditandoDoc] = useState(false);
   const [iframeKey, setIframeKey] = useState(0);
-  const [aba, setAba] = useState<"documento" | "previa">("documento");
+  const [aba, setAba] = useState<"documento" | "clausulas" | "previa">("documento");
+  /**
+   * Contrato ORIGINAL que deu origem ao modelo (aba "Cláusulas"). Carregado
+   * sob demanda, uma vez: é o texto do lote, não muda quando o Doc muda.
+   * `unavailable` = modelo criado do zero ou enviado sem lote — a aba mostra
+   * o Doc numa coluna só, e diz por quê.
+   */
+  const [fonte, setFonte] = useState<ClauseViewSource | null>(null);
+  // Ref, não state: dois cliques na aba antes do repaint disparariam duas
+  // buscas (o `if (!fonte)` lê o state velho). Zerado quando a busca falha,
+  // para "Tentar de novo" valer.
+  const fontePedida = useRef(false);
+  const carregarFonte = useCallback(async () => {
+    if (fontePedida.current) return;
+    fontePedida.current = true;
+    setFonte({ status: "loading", paragraphs: [] });
+    try {
+      const res = await fetch(`/api/templates/${template.id}/source-text`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.available && Array.isArray(data.paragraphs)) {
+        setFonte({ status: "ready", paragraphs: data.paragraphs as string[] });
+      } else if (res.ok) {
+        setFonte({ status: "unavailable", paragraphs: [] });
+      } else {
+        // 5xx/401 não é "não há fonte": é "não consegui" — e a aba oferece
+        // tentar de novo em vez de cravar "sem arquivo original" até o reload.
+        fontePedida.current = false;
+        setFonte({ status: "error", paragraphs: [] });
+      }
+    } catch {
+      fontePedida.current = false;
+      setFonte({ status: "error", paragraphs: [] });
+    }
+  }, [template.id]);
   // Só há prévia preenchida onde existe construtor de mapa. Proposta não tem —
   // e oferecer o botão para depois recusar seria pior que não oferecer.
   const temPrevia = ["locacao", "venda"].includes(
@@ -626,10 +662,35 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
   async function fixFinding(findingId: string) {
     setFixingId(findingId);
     try {
+      await docEdit({ findingId }, "Correção aplicada no documento.");
+    } finally {
+      setFixingId(null);
+    }
+  }
+
+  /**
+   * Edição pedida por uma LINHA da aba "Cláusulas" (trocar chave, remover
+   * trecho selecionado, restaurar do original). Mesmo caminho do conserto de
+   * achado — a diferença é que aqui a frase vem da tela, que a leu do próprio
+   * Doc (`doc-text`) ou do fonte (`source-text`).
+   */
+  async function editarDoc(op: Record<string, unknown>, okMsg: string) {
+    if (editandoDoc) return;
+    setEditandoDoc(true);
+    try {
+      await docEdit({ ops: [op] }, okMsg);
+    } finally {
+      setEditandoDoc(false);
+    }
+  }
+
+  /** `POST doc-edit` + o que toda edição do Doc exige depois (um só lugar). */
+  async function docEdit(body: Record<string, unknown>, okMsg: string) {
+    try {
       const res = await fetch(`/api/templates/${template.id}/doc-edit`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ findingId }),
+        body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Não consegui aplicar a correção.");
@@ -640,7 +701,7 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
         // ficou ambíguo ou não está mais lá.
         toast.warning(SKIP_REASON[result?.reason] ?? "A correção não pôde ser aplicada.");
       } else {
-        toast.success("Correção aplicada no documento.");
+        toast.success(okMsg);
       }
 
       // A rota já revalidou; usa o resultado dela em vez de pedir de novo.
@@ -663,8 +724,6 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
       setPreviaHtml(null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha ao aplicar a correção");
-    } finally {
-      setFixingId(null);
     }
   }
 
@@ -944,6 +1003,22 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
             >
               Documento
             </Button>
+            <Button
+              size="sm"
+              variant={aba === "clausulas" ? "default" : "outline"}
+              className="h-7 text-xs"
+              onClick={() => {
+                setAba("clausulas");
+                void carregarFonte();
+              }}
+            >
+              Cláusulas
+              {semanticFindings.length > 0 && (
+                <span className="ml-1 rounded-full bg-warning/20 px-1.5 text-[10px] text-warning-foreground">
+                  {semanticFindings.length}
+                </span>
+              )}
+            </Button>
             {temPrevia && (
               <Button
                 size="sm"
@@ -976,6 +1051,35 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
                 title="Modelo da imobiliária"
               />
             </div>
+          ) : aba === "clausulas" ? (
+            <TemplateClauseView
+              docParagraphs={paragraphs}
+              source={fonte ?? { status: "loading", paragraphs: [] }}
+              findings={semanticFindings}
+              catalog={catalog.map((c) => ({ token: c.token, label: c.label, kind: c.kind }))}
+              // Modelo ativo é imutável (a rota devolve 409): sem ações por linha.
+              editable={status !== "active"}
+              busy={editandoDoc || fixingId !== null || mapping || aiRunning || refazendo}
+              fixingId={fixingId}
+              onFix={(id) => void fixFinding(id)}
+              onRekey={(phrase, fromToken, toToken) =>
+                void editarDoc(
+                  { op: "rekey", phrase, fromToken, toToken },
+                  `Chave trocada por {{${toToken}}}.`
+                )
+              }
+              onRemoveLeftover={(phrase) =>
+                void editarDoc({ op: "remove-leftover", phrase }, "Trecho removido do modelo.")
+              }
+              onRestore={(current, source) =>
+                void editarDoc(
+                  { op: "restore-paragraph", current, source },
+                  "Parágrafo restaurado a partir do original."
+                )
+              }
+              onSelectText={setSelText}
+              onRetrySource={() => void carregarFonte()}
+            />
           ) : (
             <div className="min-h-[64vh] overflow-hidden rounded-lg border">
               {previaErro ? (

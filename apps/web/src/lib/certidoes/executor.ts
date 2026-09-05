@@ -363,7 +363,7 @@ export async function isOrgInfosimplesBlocked(
  * unique constraint em emitNotification). Fire-and-forget. O e-mail resumo é
  * enviado pelo cron diário `certidoes/problem-digest`.
  */
-async function reportCertidaoProblem(
+export async function reportCertidaoProblem(
   job: {
     id: string;
     orgId: string | null;
@@ -514,7 +514,7 @@ async function runBatchHealthActions(
  * For single-job batches (retries, complementar, cherry-picks), emits a
  * more specific `certidao_ready` title instead of the aggregated one.
  */
-async function checkBatchCompletion(batchId: string): Promise<void> {
+export async function checkBatchCompletion(batchId: string): Promise<void> {
   try {
     const jobs = await prisma.certidaoJob.findMany({
       where: { batchId, status: { not: "replaced" } },
@@ -736,6 +736,15 @@ export async function runSingleJob(
   // gerar PDF próprio via Puppeteer e anexar como DealAttachment.
   if (info.provider === "serasa") {
     await runSerasaJob(job, dealId, startedAt);
+    await checkBatchCompletion(job.batchId);
+    return;
+  }
+  // Ficha Certa (2026-09): laudo assíncrono por solicitação — o runner cria a
+  // solicitação e põe os jobs em awaiting_portal; o laudo volta por webhook
+  // ou pelo cron poll-portal. Import dinâmico: o runner importa este módulo.
+  if (info.provider === "fichacerta") {
+    const { runFichaCertaJob } = await import("@/lib/credit/fichacerta-runner");
+    await runFichaCertaJob(job);
     await checkBatchCompletion(job.batchId);
     return;
   }
@@ -1347,6 +1356,13 @@ async function runSerasaJob(
 export async function pollPortalJob(jobId: string): Promise<void> {
   const job = await prisma.certidaoJob.findUnique({ where: { id: jobId } });
   if (!job || job.status !== "awaiting_portal") return;
+
+  // Ficha Certa: "portal" é a solicitação — reconcilia pelo GET report.
+  if (endpointInfo(job.endpoint).provider === "fichacerta") {
+    const { pollFichaCertaJob } = await import("@/lib/credit/fichacerta-runner");
+    await pollFichaCertaJob(job);
+    return;
+  }
 
   const stored = (job.resultData as Record<string, unknown>) ?? {};
   const numeroPedido = stored.numero_pedido as string | undefined;

@@ -10,6 +10,8 @@ const formCreate = prisma.salesForm.create as unknown as ReturnType<typeof vi.fn
 const attFind = prisma.proposalAttachment.findMany as unknown as ReturnType<typeof vi.fn>;
 const dealAttFind = prisma.dealAttachment.findMany as unknown as ReturnType<typeof vi.fn>;
 const jobUpdateMany = prisma.certidaoJob.updateMany as unknown as ReturnType<typeof vi.fn>;
+const reqUpdateMany = prisma.creditAnalysisRequest.updateMany as unknown as ReturnType<typeof vi.fn>;
+const reqFindMany = prisma.creditAnalysisRequest.findMany as unknown as ReturnType<typeof vi.fn>;
 
 const PROPOSAL = {
   id: "p1",
@@ -32,6 +34,42 @@ describe("convertProposalToDeal — certidões emitidas na proposta seguem para 
     dealCreate.mockResolvedValue({ id: "deal1", formId: "form1" });
     pUpdateMany.mockResolvedValue({ count: 1 });
     pFindUnique.mockResolvedValue(PROPOSAL);
+    reqUpdateMany.mockResolvedValue({ count: 0 });
+    reqFindMany.mockResolvedValue([]);
+  });
+
+  it("análise de crédito: relinka o request (proposalId → dealId) e casa o PDF do laudo → reportDealAttachmentId", async () => {
+    attFind.mockResolvedValue([
+      { id: "pa-laudo", filename: "laudo.pdf", mime: "application/pdf", url: "s3://laudo.pdf", category: "laudo_credito", source: "fichacerta", contentHash: "h", byteSize: 10, certidaoJobId: null, extractedData: null },
+    ]);
+    jobUpdateMany.mockResolvedValue({ count: 2 }); // jobs fichacerta relinkados, sem certidaoJobId em anexo
+    reqUpdateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValue({ count: 1 });
+    reqFindMany.mockResolvedValue([{ id: "req1", reportProposalAttachmentId: "pa-laudo" }]);
+    dealAttFind.mockResolvedValue([{ id: "da-laudo", url: "s3://laudo.pdf" }]);
+
+    await convertProposalToDeal({ proposalId: "p1", orgId: "org1", actorUserId: "x" });
+
+    expect(reqUpdateMany).toHaveBeenNthCalledWith(1, { where: { proposalId: "p1" }, data: { dealId: "deal1" } });
+    expect(reqFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { dealId: "deal1", reportProposalAttachmentId: { not: null } } })
+    );
+    expect(dealAttFind).toHaveBeenCalledWith(expect.objectContaining({ where: { dealId: "deal1", url: { in: ["s3://laudo.pdf"] } } }));
+    expect(reqUpdateMany).toHaveBeenNthCalledWith(2, {
+      where: { id: "req1", dealId: "deal1" },
+      data: { reportDealAttachmentId: "da-laudo" },
+    });
+    // nenhum job tinha anexo → não há update de attachmentId de job
+    expect(jobUpdateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("request relinkado sem laudo ainda (em análise) → sem consulta de anexos e sem 2º update", async () => {
+    attFind.mockResolvedValue([]);
+    jobUpdateMany.mockResolvedValue({ count: 1 });
+    reqUpdateMany.mockResolvedValue({ count: 1 });
+    reqFindMany.mockResolvedValue([]);
+    await convertProposalToDeal({ proposalId: "p1", orgId: "org1", actorUserId: "x" });
+    expect(reqUpdateMany).toHaveBeenCalledTimes(1);
+    expect(dealAttFind).not.toHaveBeenCalled();
   });
 
   it("relinka os jobs (proposalId → dealId) e casa o PDF copiado ao job pela url", async () => {

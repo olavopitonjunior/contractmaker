@@ -603,6 +603,7 @@ vi.mock("@/lib/db/prisma", () => {
     // Análise de crédito na proposta (Ficha Certa) — agregado + conta por org.
     // `updateMany` default count 0: o CAS de submit é opt-in no sucesso.
     creditAnalysisRequest: {
+      count: vi.fn().mockResolvedValue(0),
       create: vi.fn().mockResolvedValue({ id: "car-mock" }),
       findUnique: vi.fn().mockResolvedValue(null),
       findFirst: vi.fn().mockResolvedValue(null),

@@ -112,8 +112,11 @@ describe("TemplateReviewClient — motivo por chave ausente", () => {
     // not-found não vira linha (não é ação para o operador) — o CPF nem chega a renderizar.
     expect(screen.queryByText(/529\.982\.247-25/)).toBeNull();
     expect(screen.queryByText(/não encontrei no texto/)).toBeNull();
-    // No catálogo, a chave ausente mostra o gabarito.
-    expect(screen.getByText(/gabarito: “Bloco A”/)).toBeTruthy();
+    // No catálogo, a chave ausente mostra o gabarito. O catálogo vem do
+    // `validate-gdoc` (assíncrono), não do relatório: esperar só pelo card
+    // síncrono acima deixava esta asserção correr contra a validação — passava
+    // local e falhou no CI (run 33941488580).
+    await waitFor(() => expect(screen.getByText(/gabarito: “Bloco A”/)).toBeTruthy());
   });
 
   it("relatório antigo com notMapped: string[] renderiza sem quebrar e sem motivo", async () => {

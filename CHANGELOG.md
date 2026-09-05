@@ -4,6 +4,37 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-05 - Revisão de modelo: as checagens pegam o que a Trio expôs (medido)
+
+### Corrigido
+
+- **Três lacunas nas checagens semânticas da revisão de modelo, medidas por bateria.** Uma bateria nova (`scripts/ai-bench/placeholders/semantic-recall.ts`) reproduz, sobre o texto que a padronização produz hoje, cada defeito registrado na conferência dos 16 modelos da RE/MAX Trio, e mede se a revisão o aponta. Primeira medição: 58% (56 de 96). Os três zeros eram regras: **endereço da imobiliária escrito depois da chave** não contava como sobra (agora conta, com CEP incluído, e o botão "Remover o trecho" cobre o endereço inteiro); **cláusula de rateio colapsada numa chave solta** só era vista quando os parágrafos vizinhos não tinham chave nenhuma — e a cláusula anterior sempre tem o dia do vencimento chaveado (agora o alinhamento é o mesmo da aba "Cláusulas", que casa vizinho chaveado, e a restauração devolve cabeçalho + itens); **"item 4.2." citado com o 4.2 engolido** passava porque "4.2.2." contava como definição (não conta mais). Depois: 100% (96 de 96), zero achado no texto limpo, planejador inalterado nas fixtures.
+- **Decisão registrada: não construir revisor por IA (R7).** O critério do plano era recall determinístico abaixo de 80%; ficou em 100%. Erro novo de produção vira uma injeção na bateria e uma regra, não um prompt.
+
+## [Unreleased] - 2026-09-05 - Análise de crédito segue da proposta para o negócio
+
+### Adicionado
+
+- **A análise de crédito (Ficha Certa) acompanha a conversão da proposta**, para as imobiliárias com a análise de crédito habilitada. Ao converter a proposta de locação em negócio, os laudos já emitidos (situação, Score FC, parecer, PDF) aparecem na aba Dados do negócio, no card "Análise de crédito (Ficha Certa)", sem pedir nem pagar nada de novo. No stage "Em Aprovação" o card traz o botão "Aprovar ficha" (que não tinha mais lugar na tela) e o atalho "Analisar na proposta" para uma nova análise.
+
+### Corrigido
+
+- O `CLAUDE.md` apontava a lista de ações de auditoria para um arquivo que não existe; agora aponta para `lib/security/audit.ts`.
+
+## [Unreleased] - 2026-09-05 - Análise de crédito Ficha Certa na proposta
+
+### Adicionado
+
+- **Análise de crédito (Ficha Certa) disparada da proposta de locação, para as imobiliárias com a análise de crédito habilitada** (nasce desligada). Com a conta da imobiliária conectada, consentimento registrado e os pretendentes completos, "Analisar pretendentes" envia locatário, cônjuge, fiador e cônjuge do fiador para a Ficha Certa de uma vez. O laudo volta sozinho (webhook da conta, com o cron como rede de segurança): cada pessoa aparece com situação (sem restrição / com restrição), Score FC, parecer e recomendações; ao final, o parecer da locação (inquilinos e fiadores) e o PDF do laudo entram em Documentos. "Atualizar" consulta a Ficha Certa na hora. O disparo respeita o teto mensal e os créditos pré-pagos da conta, não reenvia quem já está em análise e explica cada bloqueio (conta não conectada, consentimento, dados faltando).
+
+## [Unreleased] - 2026-09-04 - Cláusulas do modelo lado a lado com o contrato original
+
+### Adicionado
+
+- **Aba "Cláusulas" na revisão do modelo.** Ao lado de "Documento" e "Prévia com dados de exemplo", a nova aba mostra o Doc-modelo parágrafo a parágrafo — cada `{{chave}}` marcada na cor da parte a que pertence (locador, locatário, imóvel, corretor, imobiliária…) — e, na coluna da direita, o parágrafo do contrato ORIGINAL que aquele trecho substituiu. Era o que faltava para ver o que a padronização fez: uma cláusula inteira colapsada numa chave solta aparece como um parágrafo do modelo "valendo" por três do original, com os que sumiram em linhas próprias ("sumiu do modelo"); a chave do corretor no item da imobiliária aparece com o nome da imobiliária a um palmo de distância. Os achados da revisão semântica ficam na linha do parágrafo, com o mesmo botão de conserto do card "Problemas". Filtros "só com chaves" e "só com problemas". O alinhamento tolera espaço fixo e espaçamento; um parágrafo que é só uma chave nunca é dado como "igual" ao original. Modelo sem lote (criado do zero ou enviado avulso) abre a aba em uma coluna e diz por quê.
+- **Consertos por linha, sem sair da aba.** Em rascunho, cada linha oferece "Trocar chave…" (parágrafo com uma chave simples: escolhe a chave certa no catálogo), "Restaurar do original" (parágrafo pareado cujo texto difere do original, desde que não carregue bloco composto) e "Remover ‘trecho’" sobre o texto selecionado na linha. Todos passam pelo mesmo caminho das correções automáticas (`doc-edit`): frase do próprio Doc, uma ocorrência só, revalidação no mesmo passo, linha de auditoria. "Restaurar" só aparece em parágrafo sem chave nenhuma — e o próprio `doc-edit` passa a recusar restaurar um parágrafo de prosa + chave (apagaria a chave e devolveria o dado literal ao modelo); o colapso puro continua restaurável. Linha cujo pareamento tinha mais de um candidato no original vem marcada "correspondência aproximada". Selecionar texto na aba também alimenta o painel "Inserir campos que faltam". Modelo ativo é só leitura. Se a busca do original falhar, a aba diz que não conseguiu e oferece tentar de novo, em vez de cravar "sem arquivo original".
+- **`GET /api/templates/[id]/source-text`** devolve os parágrafos do contrato original do acervo (junção por hash do arquivo e org do lote, como a revalidação já fazia), para o mesmo papel que lê o Doc inteiro.
+
 ## [Unreleased] - 2026-09-04 - Certidões direto na proposta
 
 ### Adicionado

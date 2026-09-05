@@ -7,8 +7,10 @@ import { LOCACAO_SIMPLIFIED_MODE } from "@/lib/env/staging";
 import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
 import { loadOrgLocacaoDefaults } from "@/lib/contracts/org-defaults";
 import { FEATURE } from "@/lib/modules/catalog";
+import { CREDIT_PROVIDER } from "@/lib/credit/analysis-view";
 import { getEffectiveUserId } from "@/lib/auth/impersonation";
-import { getEffectivePermissions, canAccessDeal } from "@/lib/security/rbac/check";
+import { getEffectivePermissions, canAccessDeal, can } from "@/lib/security/rbac/check";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 import type { AgentEvent } from "@/lib/ai/types";
 import {
   DEAL_MILESTONE_INCLUDE,
@@ -194,6 +196,14 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
   const modulesView = await getOrgModules(org.id);
   const surveysEnabled = isFeatureEnabled(modulesView, FEATURE.LOCACAO_PESQUISAS);
   const certidoesEnabled = isFeatureEnabled(modulesView, FEATURE.LOCACAO_CERTIDOES);
+  // Análise de crédito (Ficha Certa) relinkada da proposta na conversão — o
+  // card só aparece quando há request OU no stage "Em Aprovação".
+  const creditEnabled = isFeatureEnabled(modulesView, FEATURE.LOCACAO_CREDITO);
+  const creditRequestCount = creditEnabled
+    ? await prisma.creditAnalysisRequest.count({ where: { dealId: deal.id, provider: CREDIT_PROVIDER } })
+    : 0;
+  // "Aprovar ficha" chama uma rota que exige LEASE_CREATE — quem só lê não vê o botão.
+  const creditCanApprove = can(eff, PERMISSION.LEASE_CREATE);
 
   // Padrão contratual de LOCAÇÃO da org — piso da aba Configurações do editor
   // (contrato de locação e de administração).
@@ -216,6 +226,9 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
       formSummarySections={formSummarySections}
       surveysEnabled={surveysEnabled}
       certidoesEnabled={certidoesEnabled}
+      creditEnabled={creditEnabled}
+      creditRequestCount={creditRequestCount}
+      creditCanApprove={creditCanApprove}
       orgDefaults={orgDefaults}
       deal={{
         id: deal.id,
