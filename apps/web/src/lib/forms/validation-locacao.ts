@@ -44,6 +44,17 @@ const pessoaFisicaLocacaoSchema = z.object({
   cep: z.string().optional().default(""),
   // Renda declarada (insumo da análise de crédito Fase 1: renda × aluguel).
   renda_mensal: z.number().optional().default(0),
+  // 2026-09 — insumos da Ficha Certa (`renda.principal/outra.{origem,valor}`,
+  // `residir`/`participante`). Origem = código 1–16 da tabela deles
+  // (`lib/fichacerta/renda-origens.ts`). Opcionais e sem default: ausência é
+  // "não informado" (origem vazia no payload), não zero.
+  renda_origem: z.number().int().optional(),
+  renda_outra_valor: z.number().optional(),
+  renda_outra_origem: z.number().int().optional(),
+  /** Residencial: vai morar no imóvel. */
+  residir: z.boolean().optional(),
+  /** Comercial: participa do negócio. */
+  participante: z.boolean().optional(),
   // Cônjuge (2026-07-24). Locação não tinha outorga uxória em camada nenhuma:
   // um locador casado assinava sozinho. Espelha o sub-objeto de venda menos
   // nome_mae/sexo/naturalidade. Desde 2026-09-02 o cônjuge do FIADOR é alvo de
@@ -58,6 +69,12 @@ const pessoaFisicaLocacaoSchema = z.object({
     nacionalidade: z.string().optional().default(""),
     profissao: z.string().optional().default(""),
     data_nascimento: z.string().optional().default(""),
+    // 2026-09 — o cônjuge é pretendente na Ficha Certa (CONJUGE_INQUILINO /
+    // CONJUGE_FIADOR) e alvo de certidão: nome da mãe e renda fecham a dívida
+    // declarada acima.
+    nome_mae: z.string().optional().default(""),
+    renda_mensal: z.number().optional(),
+    renda_origem: z.number().int().optional(),
     email: z.string().email("Email inválido").optional().or(z.literal("")),
     mobile_phone: z.string().optional().default(""),
     // Endereço próprio — só usado quando endereco_igual_ao_titular === false.

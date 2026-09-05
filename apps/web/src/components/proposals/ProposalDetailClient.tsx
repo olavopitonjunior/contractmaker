@@ -36,6 +36,10 @@ import type { PlanVendedor } from "./EnviarProprietarioDialog";
 import { ProposalDocumentCard } from "./ProposalDocumentCard";
 import { ProposalAttachmentUpload } from "./ProposalAttachmentUpload";
 import { ProposalDocumentsSection, type ProposalDocumentRow } from "./ProposalDocumentsSection";
+import { PartesEditor } from "./credit/PartesEditor";
+import type { Pretendente } from "@/lib/credit/pretendentes";
+import type { CreditConsent } from "@/lib/credit/consent";
+import type { TipoImovel } from "@/lib/fichacerta/types";
 import { ProposalSignaturesSection } from "./ProposalSignaturesSection";
 import type { ProposalPermissions } from "./ProposalRowActions";
 import type { ProposalDetails, ProposalPartyLine } from "@/lib/proposals/summarize";
@@ -159,6 +163,9 @@ export function ProposalDetailClient({
   members,
   creditFeatureEnabled = false,
   partiesSnapshot,
+  pretendentes = [],
+  creditConsent = null,
+  tipoImovel = "RESIDENCIAL",
   permissions,
   sentSnapshotHtml,
   planVendedores = [],
@@ -192,6 +199,10 @@ export function ProposalDetailClient({
     locatarios: Array<Record<string, unknown>>;
     garantia?: { tipo?: string; fiador?: Record<string, unknown> };
   };
+  /** Pretendentes da análise de crédito (locação com a feature ligada). */
+  pretendentes?: Pretendente[];
+  creditConsent?: CreditConsent | null;
+  tipoImovel?: TipoImovel;
   permissions: ProposalPermissions;
   /** Documento congelado no envio (null enquanto a proposta não saiu). */
   sentSnapshotHtml: string | null;
@@ -787,6 +798,17 @@ export function ProposalDetailClient({
         editable={canEdit}
         snapshotHtml={sentSnapshotHtml}
       />
+
+      {/* Pretendentes & renda + consentimento LGPD (locação com análise de crédito) */}
+      {creditFeatureEnabled && (
+        <PartesEditor
+          proposalId={proposal.id}
+          pretendentes={pretendentes}
+          consent={creditConsent}
+          tipoImovel={tipoImovel}
+          canEdit={canEdit}
+        />
+      )}
 
       {/* Documentos por parte (locação com análise de crédito) */}
       {creditFeatureEnabled && partiesSnapshot && (
