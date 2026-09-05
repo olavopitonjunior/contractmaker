@@ -37,6 +37,7 @@ import { ProposalDocumentCard } from "./ProposalDocumentCard";
 import { ProposalAttachmentUpload } from "./ProposalAttachmentUpload";
 import { ProposalDocumentsSection, type ProposalDocumentRow } from "./ProposalDocumentsSection";
 import { PartesEditor } from "./credit/PartesEditor";
+import { ProposalCreditSection } from "./credit/ProposalCreditSection";
 import dynamic from "next/dynamic";
 
 // A aba de certidões do negócio, sobre as rotas da proposta (PR 5b, 2026-09).
@@ -838,6 +839,17 @@ export function ProposalDetailClient({
           // EDITABLE): a análise de crédito acontece DEPOIS do envio. Com
           // `canEdit` a seção nascia sem botão em toda proposta enviada.
           canEdit={canRename}
+        />
+      )}
+
+      {/* Análise de crédito (Ficha Certa) — locação com a feature ligada (PR 6) */}
+      {creditFeatureEnabled && (
+        <ProposalCreditSection
+          proposalId={proposal.id}
+          canEdit={canRename}
+          incompletos={pretendentes.filter((p) => p.missing.length > 0).length}
+          pretendentesCount={pretendentes.length}
+          hasConsent={!!creditConsent}
         />
       )}
 

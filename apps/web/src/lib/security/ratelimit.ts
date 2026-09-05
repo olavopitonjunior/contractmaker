@@ -180,6 +180,15 @@ export const RateLimits = {
     rateLimit({ identifier: `proposal-attach:${token}:${ipHash}`, limit: 60, window: "1 h" }),
 
   /**
+   * Webhook/token da Ficha Certa por SLUG da conta (não por IP): a Ficha
+   * Certa entrega laudos de todos os clientes dela de um pool de IPs, e um
+   * limite por IP derrubaria entregas legítimas desta conta na rajada de
+   * outra. 120/min por conta é folga para lote de dezenas de pretendentes.
+   */
+  fichaCertaWebhookPerSlug: (slug: string) =>
+    rateLimit({ identifier: `fichacerta-webhook:${slug}`, limit: 120, window: "1 m" }),
+
+  /**
    * Newton API per-token + per-scope. Limites variam por scope:
    *  - metrics:r — 600/min (polling-friendly)
    *  - documents:rw — 30/min (certidões caras)
