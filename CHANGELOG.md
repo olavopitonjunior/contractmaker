@@ -4,6 +4,12 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-05 - A venda vai do negócio para a Superlógica
+
+### Adicionado
+
+- **"Enviar para Superlógica" na aba Pagamentos do negócio de venda.** Com a Superlógica conectada (Configurações › Integrações) e o negócio em "Contrato assinado", o operador abre um preview que espelha a tela "Venda" da Superlógica — data da venda, valor, comissão e parcela, imóvel, proprietários, compradores e comissionados com percentual e valor — com os bloqueios (sem comprador, sem conta bancária, acima do teto, comissão paga por ambas as partes) e os avisos (documento ausente, tipo de imóvel padrão) antes de qualquer envio. Ao confirmar, a plataforma cria na licença da imobiliária as pessoas que ainda não existem (reutilizando pelas que têm o mesmo CPF/CNPJ), os corretores comissionados, o imóvel e a venda completa em uma chamada; o negócio passa para "Cobrança emitida", ganha o selo "Na Superlógica: venda N" com link, e o botão de cobrança de comissão pelo Asaas é desligado, porque a comissão passa a ser cobrada pela Superlógica. Cada passo grava o vínculo antes do seguinte: se algo falhar no meio, uma nova tentativa reaproveita o que já foi criado e a Superlógica não recebe duplicatas. Só quem tem a permissão "Enviar venda para a Superlógica" enxerga o botão, e só para negócios do próprio escopo.
+
 ## [Unreleased] - 2026-09-05 - A imobiliária conecta a própria conta Superlógica
 
 ### Adicionado
