@@ -204,6 +204,27 @@ export async function convertProposalToDeal(input: {
     });
 
     if (attachments.length > 0) {
+      // O FORMULÁRIO do negócio também recebe os documentos (etapa de
+      // documentos lê FormAttachment; a aba Documentos lê DealAttachment).
+      // Mesmo blob, sem re-upload. `participantId: null` = upload do admin,
+      // visível a todas as partes: na conversão ainda não existem
+      // participantes (links por parte) para atribuir, e atribuir errado
+      // vazaria documento entre partes. Status nunca vira `queued` — a OCR
+      // continua on-demand ("Extrair com IA"), como no upload direto.
+      await tx.formAttachment.createMany({
+        data: attachments.map((a) => ({
+          formId: form.id,
+          participantId: null,
+          filename: a.filename,
+          mime: a.mime,
+          url: a.url,
+          category: a.category ?? "documento",
+          contentHash: a.contentHash ?? undefined,
+          byteSize: a.byteSize ?? undefined,
+          extractedData: (a.extractedData ?? undefined) as Prisma.InputJsonValue | undefined,
+          status: a.status === "ready" || a.status === "failed" ? a.status : "awaiting_user",
+        })),
+      });
       await tx.dealAttachment.createMany({
         data: attachments.map((a) => ({
           dealId: d.id,
