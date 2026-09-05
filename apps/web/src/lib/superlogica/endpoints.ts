@@ -9,6 +9,7 @@ export type ReadAvailability =
   | "absent"; // status 404 — não existe
 
 export type WriteAvailability =
+  | "tested" // escrita PROVADA em produção (2026-09-02/03) — ver docs/integracoes/superlogica-vendas-export.md
   | "crud-documented" // POST/PUT documentado no Apiary (não testado em produção)
   | "unconfirmed" // endpoint existe mas escrita não documentada/testada
   | "none";
@@ -24,11 +25,11 @@ export interface SuperlogicaEndpointMeta {
 export const SUPERLOGICA_ENDPOINTS: SuperlogicaEndpointMeta[] = [
   // --- Documentados no Apiary (CRUD) ---
   { resource: "contratos", documentedInApiary: true, read: "read", write: "crud-documented", notes: "GET aceita comDadosDosProprietarios/Inquilinos/Imoveis e comStatus." },
-  { resource: "imoveis", documentedInApiary: true, read: "read", write: "crud-documented" },
-  { resource: "proprietarios", documentedInApiary: true, read: "read", write: "crud-documented" },
+  { resource: "imoveis", documentedInApiary: true, read: "read", write: "tested", notes: "POST JSON provado (imóvel 2088, 2026-09-02)." },
+  { resource: "proprietarios", documentedInApiary: true, read: "read", write: "tested", notes: "POST JSON provado (pessoa 3883, 2026-09-02); comprador também entra aqui." },
   { resource: "locatarios", documentedInApiary: true, read: "read", write: "crud-documented" },
   { resource: "fiadores", documentedInApiary: true, read: "read", write: "crud-documented" },
-  { resource: "corretores", documentedInApiary: true, read: "read", write: "crud-documented" },
+  { resource: "corretores", documentedInApiary: true, read: "read", write: "crud-documented", notes: "POST JSON documentado (mesmo shape de proprietarios, que foi provado); as vendas de teste usaram corretor já existente (pessoa 115) — a criação ainda não foi exercida. A Superlógica cria o favorecido do corretor." },
   { resource: "administradoras", documentedInApiary: true, read: "read", write: "crud-documented" },
   { resource: "seguradoras", documentedInApiary: true, read: "read", write: "crud-documented" },
   { resource: "servicos", documentedInApiary: true, read: "read", write: "crud-documented" },
@@ -36,6 +37,7 @@ export const SUPERLOGICA_ENDPOINTS: SuperlogicaEndpointMeta[] = [
   { resource: "imoveisdespesa", documentedInApiary: true, read: "read", write: "crud-documented", notes: "Despesas do contrato/imóvel." },
 
   // --- NÃO documentados no Apiary, mas REAIS (confirmados ao vivo) ---
+  { resource: "vendas", documentedInApiary: false, read: "read", write: "tested", notes: "GET exige dtInicio/dtFim ou id. `vendas/put` cria (venda 745 em 1 POST, 2026-09-03), `vendas/post` altera (substituição total) / status -1 exclui, `vendas/lancardespesa` lança despesa." },
   { resource: "repasses", documentedInApiary: false, read: "read", write: "unconfirmed", notes: "Repasse ao proprietário: status, txAdm, split, garantido, NF, liquidação/crédito." },
   { resource: "despesas", documentedInApiary: false, read: "read", write: "unconfirmed", notes: "Razão financeiro completo (repasses/movimentações embutidos)." },
   { resource: "dimob", documentedInApiary: false, read: "read", write: "unconfirmed", notes: "Dados da declaração DIMOB por contrato." },

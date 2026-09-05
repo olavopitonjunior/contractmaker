@@ -213,3 +213,232 @@ export async function slGetV2<T = Record<string, unknown>>(
     `v2/${resource}`,
   );
 }
+
+// ---------------------------------------------------------------------------
+// ESCRITA — provada em produção em 2026-09-02/03 (licença adm037585):
+// pessoas, imóveis, venda completa (`vendas/put`), alteração (`vendas/post`),
+// despesa da venda (`vendas/lancardespesa`) e, na v2, clientes/cobranca/caixa.
+// Ver docs/integracoes/superlogica-vendas-export.md.
+// ---------------------------------------------------------------------------
+
+/** Valor aceito num campo de formulário: escalar, ou objeto/array aninhado. */
+export type FormValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | FormValue[]
+  | { [key: string]: FormValue };
+
+export type FormFields = { [key: string]: FormValue };
+
+/**
+ * Achata um objeto para a notação de colchetes que a tela da Superlógica
+ * envia (`VENDEDORES[0][ID_VENDEDOR_VEV]=115`). `null` vira campo vazio —
+ * o assistente manda `ID_ITEM_VEI=` em branco e o servidor espera a chave —
+ * e `undefined` é omitido.
+ */
+export function flattenFormFields(
+  fields: FormFields,
+  prefix = "",
+  out: Array<[string, string]> = [],
+): Array<[string, string]> {
+  for (const [key, value] of Object.entries(fields)) {
+    const name = prefix ? `${prefix}[${key}]` : key;
+    appendFormValue(name, value, out);
+  }
+  return out;
+}
+
+function appendFormValue(name: string, value: FormValue, out: Array<[string, string]>): void {
+  if (value === undefined) return;
+  if (value === null) {
+    out.push([name, ""]);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((v, i) => appendFormValue(`${name}[${i}]`, v, out));
+    return;
+  }
+  if (typeof value === "object") {
+    for (const [k, v] of Object.entries(value)) appendFormValue(`${name}[${k}]`, v, out);
+    return;
+  }
+  out.push([name, typeof value === "boolean" ? (value ? "1" : "0") : String(value)]);
+}
+
+export function encodeForm(fields: FormFields): string {
+  const params = new URLSearchParams();
+  for (const [k, v] of flattenFormFields(fields)) params.append(k, v);
+  return params.toString();
+}
+
+/** Anti-duplicidade da Superlógica: "Já existe uma venda com essas informações. Venda#744". */
+export class SuperlogicaDuplicateError extends SuperlogicaError {
+  constructor(
+    public readonly existingId: string,
+    message: string,
+    endpoint: string,
+  ) {
+    super("409", message, endpoint);
+    this.name = "SuperlogicaDuplicateError";
+  }
+}
+
+const DUPLICATE_RE = /j[áa] existe uma venda[\s\S]*?venda#\s*(\d+)/i;
+
+function stripHtml(s: string): string {
+  return s
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isOkStatus(status: unknown): boolean {
+  const n = Number(status);
+  return Number.isFinite(n) && n >= 200 && n < 300;
+}
+
+interface WriteEnvelope {
+  status?: string | number;
+  msg?: string;
+  multipleresponse?: string;
+  data?: unknown;
+  idcolumnname?: string;
+}
+
+/**
+ * Normaliza a resposta de escrita da Superlógica. Dois formatos convivem:
+ *  - simples: `{status,msg,data}`;
+ *  - lote: `{multipleresponse:"1", status:"200"|"206", data:[{status,msg,data}]}`
+ *    (HTTP 200 mesmo com erro dentro — o status real é o do item).
+ * Devolve o `data` do (primeiro) item, ou lança `SuperlogicaError` /
+ * `SuperlogicaDuplicateError`.
+ */
+export function unwrapWriteResponse<T>(
+  raw: unknown,
+  endpoint: string,
+  httpStatus: number,
+): { data: T; msg: string } {
+  // v2 devolve `[{status,msg,data}]` na raiz; Imobiliárias devolve o envelope
+  // (simples ou `multipleresponse` com `data[]`).
+  const env = (Array.isArray(raw) ? (raw[0] ?? {}) : (raw ?? {})) as WriteEnvelope;
+  let item: WriteEnvelope = env;
+  let status: string | number | undefined = env.status;
+  if (env.multipleresponse === "1" && Array.isArray(env.data)) {
+    // Em lote, o status que vale é o do ITEM — um lote vazio não criou nada.
+    item = (env.data[0] ?? {}) as WriteEnvelope;
+    status = item.status;
+  }
+  const msg = stripHtml(String(item.msg ?? env.msg ?? ""));
+  // Sem `status` no corpo NÃO é sucesso: o transporte responde 200 sempre, e
+  // um corpo vazio/`{}`/`[]` (manutenção, throttle, envelope novo) não prova
+  // que nada foi criado. Erro tipado > `data` undefined silencioso.
+  if (status === undefined) {
+    throw new SuperlogicaError(
+      String(httpStatus),
+      `resposta sem status (${JSON.stringify(raw)?.slice(0, 120) ?? "vazia"})`,
+      endpoint,
+    );
+  }
+  if (!isOkStatus(status)) {
+    const dup = DUPLICATE_RE.exec(msg);
+    if (dup) throw new SuperlogicaDuplicateError(dup[1], msg, endpoint);
+    throw new SuperlogicaError(String(status), msg || "erro sem mensagem", endpoint);
+  }
+  return { data: item.data as T, msg };
+}
+
+async function writeRequest<T>(
+  creds: SuperlogicaCredentials,
+  url: string,
+  endpoint: string,
+  method: "POST" | "PUT" | "DELETE",
+  body: string,
+  contentType: string,
+): Promise<{ data: T; msg: string }> {
+  const res = await fetch(url, {
+    method,
+    headers: {
+      app_token: creds.appToken,
+      access_token: creds.accessToken,
+      Accept: "application/json",
+      "Content-Type": contentType,
+    },
+    body,
+    signal: AbortSignal.timeout(SUPERLOGICA_TIMEOUT_MS),
+  });
+  const text = await res.text();
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new SuperlogicaError(
+      String(res.status),
+      `resposta não-JSON (${stripHtml(text).slice(0, 120)})`,
+      endpoint,
+    );
+  }
+  return unwrapWriteResponse<T>(json, endpoint, res.status);
+}
+
+/**
+ * POST form-urlencoded na API Imobiliárias — o formato que o assistente
+ * "Nova venda" usa (`vendas/put`, `vendas/post`, `vendas/lancardespesa`).
+ */
+export async function slPostForm<T = Record<string, unknown>>(
+  creds: SuperlogicaCredentials,
+  resource: string,
+  fields: FormFields,
+): Promise<{ data: T; msg: string }> {
+  const base = creds.baseUrl ?? SUPERLOGICA_BASE_URL;
+  return writeRequest<T>(
+    creds,
+    `${base}${resource}`,
+    resource,
+    "POST",
+    encodeForm(fields),
+    "application/x-www-form-urlencoded",
+  );
+}
+
+/** POST JSON na API Imobiliárias (`proprietarios`, `corretores`, `imoveis` aceitam JSON). */
+export async function slPostJson<T = Record<string, unknown>>(
+  creds: SuperlogicaCredentials,
+  resource: string,
+  body: FormFields,
+): Promise<{ data: T; msg: string }> {
+  const base = creds.baseUrl ?? SUPERLOGICA_BASE_URL;
+  return writeRequest<T>(
+    creds,
+    `${base}${resource}`,
+    resource,
+    "POST",
+    JSON.stringify(body),
+    "application/json",
+  );
+}
+
+/**
+ * Escrita na API Financeiro v2 (form-urlencoded; POST cria, PUT altera/
+ * invalida, DELETE exclui — o id vai no CORPO, não na URL: `caixa?id=`
+ * responde "Lançamento não encontrado").
+ */
+export async function slWriteV2<T = Record<string, unknown>>(
+  creds: SuperlogicaCredentials,
+  method: "POST" | "PUT" | "DELETE",
+  resource: string,
+  fields: FormFields,
+): Promise<{ data: T; msg: string }> {
+  return writeRequest<T>(
+    creds,
+    `${SUPERLOGICA_V2_BASE_URL}${resource}`,
+    `v2/${resource}`,
+    method,
+    encodeForm(fields),
+    "application/x-www-form-urlencoded",
+  );
+}
