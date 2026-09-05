@@ -4,6 +4,12 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-05 - Análise de crédito Ficha Certa na proposta
+
+### Adicionado
+
+- **Análise de crédito (Ficha Certa) disparada da proposta de locação, para as imobiliárias com a análise de crédito habilitada** (nasce desligada). Com a conta da imobiliária conectada, consentimento registrado e os pretendentes completos, "Analisar pretendentes" envia locatário, cônjuge, fiador e cônjuge do fiador para a Ficha Certa de uma vez. O laudo volta sozinho (webhook da conta, com o cron como rede de segurança): cada pessoa aparece com situação (sem restrição / com restrição), Score FC, parecer e recomendações; ao final, o parecer da locação (inquilinos e fiadores) e o PDF do laudo entram em Documentos. "Atualizar" consulta a Ficha Certa na hora. O disparo respeita o teto mensal e os créditos pré-pagos da conta, não reenvia quem já está em análise e explica cada bloqueio (conta não conectada, consentimento, dados faltando).
+
 ## [Unreleased] - 2026-09-04 - Certidões direto na proposta
 
 ### Adicionado
