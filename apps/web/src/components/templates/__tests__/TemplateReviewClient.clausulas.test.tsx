@@ -94,7 +94,9 @@ describe("TemplateReviewClient — aba Cláusulas", () => {
     await userEvent.click(screen.getByRole("button", { name: "Cláusulas" }));
     expect(calls.filter((c) => c.url.endsWith("/source-text"))).toHaveLength(1);
 
-    await userEvent.click(screen.getByRole("button", { name: "Trocar chave…" }));
+    // O botão depende do catálogo (kind "simple"), que vem do `validate-gdoc`
+    // assíncrono — a linha pode aparecer antes de a validação voltar.
+    await userEvent.click(await screen.findByRole("button", { name: "Trocar chave…" }));
     await userEvent.selectOptions(screen.getByLabelText("Nova chave"), "imobiliaria_qualificacao");
     await userEvent.click(screen.getByRole("button", { name: "Trocar" }));
 
