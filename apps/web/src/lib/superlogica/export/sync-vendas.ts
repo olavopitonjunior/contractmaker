@@ -12,15 +12,24 @@
 // verdade. Cada lançamento grava um SuperlogicaLink `despesa` ANTES do próximo,
 // e o link é conferido antes de lançar — um tick repetido não paga duas vezes.
 
+import type { SuperlogicaAccount } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { audit, type AuditContext } from "@/lib/security/audit";
 import { moveDealStage } from "@/lib/pipeline/move-stage";
 import { decryptAccountCreds } from "../account";
 import { createSuperlogicaClient } from "../resources";
 import type { SLVenda, SLVendaParcela, SLVendaVendedor } from "../types";
-import { despesaKey, getLink, putLink } from "./links";
+import { claimLink, completeLink, despesaKey, LINK_PENDING } from "./links";
 
 const TARGET_STAGE = "Comissão paga";
+/** Stages a partir dos quais o negócio pode avançar para "Comissão paga". */
+const STAGES_ANTERIORES: readonly string[] = [
+  "Formulário",
+  "Confecção de Contrato",
+  "Enviado para assinatura",
+  "Contrato assinado",
+  "Cobrança emitida",
+];
 /** Status da parcela na Superlógica. */
 const PARCELA_LIQUIDADA = "1";
 /** `fl_status_ven`: "" ativa · 1 cancelada · 2 pendente · -1 excluída. */
@@ -77,9 +86,16 @@ export function parcelaLiquidada(venda: SLVenda): SLVendaParcela | null {
   return parcelas.find((p) => String(p.fl_status_recb ?? "") === PARCELA_LIQUIDADA) ?? null;
 }
 
-/** A venda foi cancelada ou excluída do outro lado? */
+/**
+ * A venda foi cancelada ou excluída do outro lado?
+ *
+ * Só com `fl_status_ven` presente e conhecido. Um GET que volta vazio pode ser
+ * rate limit, permissão momentânea ou paginação — declarar "cancelada" na
+ * primeira ausência marcaria a exportação com erro para sempre, e ela sairia
+ * do escopo da varredura. Ausência é "não sei", e "não sei" não vira ação.
+ */
 export function vendaEncerrada(venda: SLVenda | null): boolean {
-  if (!venda) return true; // sumiu do GET = não existe mais
+  if (!venda) return false;
   return VENDA_ENCERRADA.has(String(venda.fl_status_ven ?? ""));
 }
 
@@ -88,17 +104,47 @@ export function comissionadosDaVenda(venda: SLVenda): Array<{ favorecidoId: stri
   const vendedores: SLVendaVendedor[] = Array.isArray(venda.vendedores) ? venda.vendedores : [];
   const itens = Array.isArray(venda.comissoes) ? venda.comissoes : [];
   const out: Array<{ favorecidoId: string; nome: string; valor: string }> = [];
+  const vistos = new Set<string>();
   for (const v of vendedores) {
     const favorecidoId = String(v.id_favorecido_fav ?? "").trim();
     if (!favorecidoId) continue; // sem favorecido não há a quem pagar
-    // O valor em reais vem no item de comissão do mesmo vendedor; o campo do
-    // vendedor pode ser percentual (`fl_valorcomissao_ang`).
-    const item = itens.find((i) => String(i.id_favorecido_fav ?? "") === favorecidoId);
+    // Um favorecido rende UM lançamento (a chave da reserva é por favorecido).
+    if (vistos.has(favorecidoId)) continue;
+    // O valor em reais vem no item de COMISSÃO do mesmo favorecido. Depois do
+    // primeiro lançamento a venda passa a trazer também o item de DESPESA, que
+    // pode repetir o favorecido — casar com ele pagaria o valor errado.
+    const item = itens.find(
+      (i) =>
+        String(i.id_favorecido_fav ?? "") === favorecidoId &&
+        String(i.fl_despesa ?? "0") !== "1" &&
+        String(i.fl_tipo_vei ?? "3") !== "2",
+    );
     const valor = String(item?.vl_item_vei ?? "").trim();
-    if (!valor || Number(valor) <= 0) continue;
+    const num = Number(valor);
+    // `Number("abc") <= 0` é falso: sem o teste de finitude, texto viraria valor.
+    if (!valor || !Number.isFinite(num) || num <= 0) continue;
+    vistos.add(favorecidoId);
     out.push({ favorecidoId, nome: String(v.st_nome_pes ?? "").trim() || `Favorecido ${favorecidoId}`, valor });
   }
   return out;
+}
+
+/**
+ * Id do lançamento na resposta da Superlógica. A escrita devolve
+ * `{ data, msg }`, e o id do movimento vem dentro de `data` — o nome do campo
+ * varia por endpoint, então tentamos os conhecidos. Vazio = não sabemos qual
+ * lançamento foi criado (a reserva continua valendo, ninguém paga de novo).
+ */
+export function extrairIdLancamento(resp: unknown): string {
+  const data = (resp as { data?: unknown } | null)?.data;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row || typeof row !== "object") return "";
+  const candidatos = ["id_movimento_mov", "id_lancamento_mov", "id_movimentacao_mov", "id_item_vei", "id"];
+  for (const campo of candidatos) {
+    const v = (row as Record<string, unknown>)[campo];
+    if (v !== undefined && v !== null && String(v).trim()) return String(v).trim();
+  }
+  return "";
 }
 
 /** `MM/DD/YYYY` — formato de data que a API de escrita aceita. */
@@ -109,6 +155,20 @@ function toApiDay(d: Date): string {
 }
 
 type Client = ReturnType<typeof createSuperlogicaClient>;
+
+/**
+ * Marca a linha como visitada mesmo quando nada mudou.
+ *
+ * A varredura pega as N mais antigas por `updatedAt`. Sem tocar a data, uma
+ * venda que nunca resolve (parcela aberta, erro permanente) fica eternamente
+ * no topo da fila, e a partir da N+1 nenhuma outra venda é consultada nunca —
+ * comissão paga que ninguém vê.
+ */
+async function tocar(id: string, lastError: string | null): Promise<void> {
+  await prisma.superlogicaExport
+    .update({ where: { id }, data: { updatedAt: new Date(), lastError } })
+    .catch(() => {});
+}
 
 /**
  * Lança a despesa de cada comissionado, uma vez só por (negócio, favorecido).
@@ -131,54 +191,90 @@ export async function lancarDespesasComissao(args: {
   let lancadas = 0;
   for (const c of comissionadosDaVenda(venda)) {
     const key = despesaKey(dealId, c.favorecidoId);
-    const existing = await getLink(orgId, "despesa", key);
-    if (existing) continue; // já lançada — nunca duas vezes
-    const created = await client.escrita.vendas.lancarDespesa({
-      ID_VENDA_VEN: vendaId,
-      ID_CONTABANCO_CB: String(contaBancariaId),
-      DT_VENCIMENTO_MOV: toApiDay(vencimento),
-      VL_VALOR_MOV: c.valor,
-      ID_FAVORECIDO_FAV: c.favorecidoId,
-      ST_FANTASIA_FAV: c.nome,
-      ST_CONTA_CONT: contaContabil,
-      ST_DESCRICAO_CONT: contaContabilDescricao,
-      ST_COMPLEMENTO_DES: `Comissão — Contractmaker negócio ${dealId}`,
+    // RESERVA antes de mover dinheiro. Quem cria a linha vence; quem perde
+    // desiste. Nunca "lê, chama a API, escreve" — a janela entre a leitura e a
+    // escrita é exatamente onde nasce o pagamento duplicado.
+    const claim = await claimLink(orgId, "despesa", key);
+    if (!claim) continue;
+    let created: unknown;
+    try {
+      created = await client.escrita.vendas.lancarDespesa({
+        ID_VENDA_VEN: vendaId,
+        ID_CONTABANCO_CB: String(contaBancariaId),
+        DT_VENCIMENTO_MOV: toApiDay(vencimento),
+        VL_VALOR_MOV: c.valor,
+        ID_FAVORECIDO_FAV: c.favorecidoId,
+        ST_FANTASIA_FAV: c.nome,
+        ST_CONTA_CONT: contaContabil,
+        ST_DESCRICAO_CONT: contaContabilDescricao,
+        ST_COMPLEMENTO_DES: `Comissão — Contractmaker negócio ${dealId}`,
+      });
+    } catch (err) {
+      // A reserva FICA. Uma falha aqui é ambígua — a Superlógica pode ter
+      // processado antes de a resposta se perder. Apagar a reserva reabriria a
+      // janela do pagamento em dobro; o lançamento preso em `pending` é
+      // conferido por gente, que é o custo certo a pagar.
+      throw err;
+    }
+    const remoteId = extrairIdLancamento(created);
+    await completeLink(claim.id, remoteId || LINK_PENDING, c.favorecidoId, {
+      valor: c.valor,
+      nome: c.nome,
+      // Sem id de retorno o lançamento existe mas não é rastreável: fica
+      // marcado para conferência, e ainda assim ninguém paga de novo.
+      idAusente: remoteId ? undefined : true,
     });
-    const remoteId = String((created as { id?: unknown })?.id ?? "") || `venda:${vendaId}:${c.favorecidoId}`;
-    await putLink(orgId, "despesa", key, remoteId, c.favorecidoId, { valor: c.valor, nome: c.nome });
     lancadas += 1;
   }
   return lancadas;
 }
 
+type ContaCache = Map<string, SuperlogicaAccount | null>;
+
+/** Conta da org, uma consulta por org por execução (a fila mistura orgs). */
+async function carregarConta(orgId: string, cache?: ContaCache): Promise<SuperlogicaAccount | null> {
+  if (cache?.has(orgId)) return cache.get(orgId) ?? null;
+  const account = await prisma.superlogicaAccount.findUnique({ where: { orgId } });
+  cache?.set(orgId, account);
+  return account;
+}
+
 /** Uma venda exportada: lê o estado remoto e reage. Nunca lança. */
-export async function syncOneVenda(row: {
-  id: string;
-  orgId: string;
-  dealId: string;
-  vendaId: string;
-}): Promise<SyncOutcome> {
+export async function syncOneVenda(
+  row: {
+    id: string;
+    orgId: string;
+    dealId: string;
+    vendaId: string;
+  },
+  cache?: ContaCache,
+): Promise<SyncOutcome> {
   const auditCtx: AuditContext = { orgId: row.orgId, userId: null };
   const base = { dealId: row.dealId, vendaId: row.vendaId };
   try {
-    const account = await prisma.superlogicaAccount.findUnique({ where: { orgId: row.orgId } });
+    const account = await carregarConta(row.orgId, cache);
     if (!account || account.status === "disconnected") {
+      await tocar(row.id, "Superlógica desconectada para esta imobiliária.");
       return { ...base, result: "pendente", message: "conta desconectada" };
     }
     const client = createSuperlogicaClient(decryptAccountCreds(account));
     const venda = await client.escrita.vendas.get(row.vendaId);
 
-    // 1. Sumiu, foi cancelada ou excluída lá.
+    // 1. Sem resposta: não sabemos nada. Tenta de novo no próximo tick.
+    if (!venda) {
+      await tocar(row.id, `A Superlógica não devolveu a venda ${row.vendaId} nesta consulta.`);
+      return { ...base, result: "pendente", message: "venda não retornada" };
+    }
+
+    // 2. Cancelada ou excluída lá.
     if (vendaEncerrada(venda)) {
-      const message = venda
-        ? `A venda ${row.vendaId} foi cancelada ou excluída na Superlógica (status ${venda.fl_status_ven}).`
-        : `A venda ${row.vendaId} não existe mais na Superlógica.`;
+      const message = `A venda ${row.vendaId} foi cancelada ou excluída na Superlógica (status ${venda.fl_status_ven}).`;
       await prisma.superlogicaExport.update({
         where: { id: row.id },
         data: { status: "error", lastError: message, finishedAt: new Date() },
       });
       await audit(auditCtx, {
-        action: "SUPERLOGICA_VENDA_CANCELED",
+        action: "SUPERLOGICA_VENDA_CANCELLED",
         result: "FAILURE",
         resource: row.dealId,
         resourceType: "Deal",
@@ -188,8 +284,11 @@ export async function syncOneVenda(row: {
     }
 
     // 2. Parcela ainda aberta — nada a fazer.
-    const parcela = parcelaLiquidada(venda!);
-    if (!parcela) return { ...base, result: "pendente" };
+    const parcela = parcelaLiquidada(venda);
+    if (!parcela) {
+      await tocar(row.id, null);
+      return { ...base, result: "pendente" };
+    }
 
     // 3. Liquidada: despesas primeiro (idempotentes), depois o funil.
     const liquidadaEm = parseSuperlogicaDate(parcela.dt_liquidacao_recb) ?? new Date();
@@ -197,7 +296,7 @@ export async function syncOneVenda(row: {
       orgId: row.orgId,
       dealId: row.dealId,
       vendaId: row.vendaId,
-      venda: venda!,
+      venda,
       client,
       contaBancariaId: account.contaBancariaId,
       contaContabil: account.contaContabilComissao,
@@ -210,7 +309,11 @@ export async function syncOneVenda(row: {
       select: { pipelineId: true, stage: { select: { name: true } } },
     });
     let movedToStage: string | null = null;
-    if (deal && deal.stage.name !== TARGET_STAGE) {
+    // Guard de regressão, como toda auto-transição do funil: só avança quem
+    // está num stage ANTERIOR. Sem ele, um negócio marcado como perdido entre
+    // a leitura da varredura e este ponto seria ressuscitado, apagando o
+    // motivo da perda que alguém registrou à mão.
+    if (deal && deal.stage.name !== TARGET_STAGE && STAGES_ANTERIORES.includes(deal.stage.name)) {
       const target = await prisma.pipelineStage.findFirst({
         where: { pipelineId: deal.pipelineId, name: TARGET_STAGE },
         select: { id: true },
@@ -239,6 +342,9 @@ export async function syncOneVenda(row: {
     return { ...base, result: "liquidada", movedToStage, despesasLancadas };
   } catch (err) {
     const message = (err instanceof Error ? err.message : String(err)).slice(0, 500);
+    // Registra o erro E gira a fila: sem isso esta linha volta em todo tick,
+    // ocupa uma vaga para sempre e esconde as vendas que vêm atrás.
+    await tocar(row.id, message);
     return { ...base, result: "erro", message };
   }
 }
@@ -267,8 +373,9 @@ export async function syncSuperlogicaVendas(limit = SYNC_MAX_VENDAS): Promise<Sy
     despesasLancadas: 0,
     outcomes: [],
   };
+  const cache: ContaCache = new Map();
   for (const row of rows) {
-    const outcome = await syncOneVenda({ ...row, vendaId: row.vendaId! });
+    const outcome = await syncOneVenda({ ...row, vendaId: row.vendaId! }, cache);
     report.verificadas += 1;
     report.despesasLancadas += outcome.despesasLancadas ?? 0;
     if (outcome.result === "liquidada") report.liquidadas += 1;

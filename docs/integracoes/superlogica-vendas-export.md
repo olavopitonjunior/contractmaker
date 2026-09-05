@@ -3,7 +3,14 @@
 > Status: **PR 1 (conta + configurações), PR 2 (escrita no conector + mapeador puro) e PR 3
 > (exportação: `SuperlogicaLink`/`SuperlogicaExport`, orquestrador `export/export-deal.ts`, rotas
 > `api/deals/[dealId]/superlogica/{preview,export}`, botão "Enviar para Superlógica" na aba
-> Pagamentos do negócio) entregues**; PR 4 (liquidação/"Comissão paga") a seguir.
+> Pagamentos do negócio) e PR 4 (liquidação: cron `api/cron/superlogica/sync-vendas`,
+> `export/sync-vendas.ts`, despesa por comissionado e "Comissão paga") entregues**.
+> **Smoke em staging feito em 05/09/2026 contra a licença real:** venda 746 criada em uma
+> chamada (pessoas 3884/3885, corretor 3886 com favorecido **2320** lido de volta, imóvel
+> 2089, parcela 60344, item de comissão 4894); segunda chamada devolveu a mesma venda sem
+> duplicar. O `ID_FAVORECIDO_FAV` **não** é enviado na criação: a Superlógica o gera e o
+> `GET vendas` o devolve — era a única incerteza do mapeamento, e é ele que o lançamento de
+> despesa usa depois.
 > Código do mapeador: `apps/web/src/lib/superlogica/export/build-venda-payload.ts`
 > (`extractVendaSource` → `validarVendaSource` → `buildVendaPayload`; `buildPessoaPayload`,
 > `buildCorretorPayload`, `buildImovelPayload`). Escrita: `slPostForm`/`slPostJson`/`slWriteV2`

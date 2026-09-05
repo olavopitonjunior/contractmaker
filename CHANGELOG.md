@@ -4,6 +4,13 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-09-05 - A comissão paga na Superlógica fecha o negócio sozinha
+
+### Adicionado
+
+- **O negócio exportado se fecha quando a comissão é paga.** A cobrança da comissão passou a ser da Superlógica, então é de lá que vem a notícia do pagamento. A plataforma agora consulta a cada meia hora as vendas que exportou e, quando a parcela da comissão aparece liquidada, leva o negócio para "Comissão paga" com a data real da liquidação — não a data da consulta — e lança na Superlógica a despesa de cada comissionado, na conta contábil configurada pela imobiliária. O corretor não precisa mais dar baixa à mão em dois sistemas. Cada lançamento fica registrado antes do seguinte, então uma consulta repetida nunca paga o mesmo comissionado duas vezes.
+- **Venda desfeita na Superlógica vira aviso, não mudança silenciosa.** Se alguém cancelar ou excluir por lá a venda que a plataforma criou, a exportação do negócio é marcada com erro explicando o que aconteceu, e o negócio fica onde está. Quem desfez foi uma pessoa, e mexer no funil sozinho esconderia isso de quem acompanha o processo.
+
 ## [Unreleased] - 2026-09-05 - A venda vai do negócio para a Superlógica
 
 ### Adicionado

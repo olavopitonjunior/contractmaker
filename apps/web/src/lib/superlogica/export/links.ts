@@ -6,6 +6,9 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 
+/** `remoteId` de uma reserva ainda não confirmada pela Superlógica. */
+export const LINK_PENDING = "pending";
+
 /** `entityType` conhecidos. `despesa` é do cron de liquidação. */
 export type SuperlogicaEntityType = "pessoa" | "corretor" | "imovel" | "venda" | "despesa";
 
@@ -28,6 +31,46 @@ export async function putLink(
     where: { orgId_entityType_localKey: { orgId, entityType, localKey } },
     create: { orgId, entityType, localKey, remoteId, remoteAux, snapshotJson },
     update: { remoteId, remoteAux, snapshotJson, lastSyncedAt: new Date() },
+  });
+}
+
+/**
+ * RESERVA a chave antes do efeito colateral, como o claim da exportação faz.
+ *
+ * Ler-depois-escrever não serve para dinheiro: entre o `getLink` e o `putLink`
+ * há uma chamada de rede, e duas execuções do cron passariam juntas pela
+ * leitura e pagariam duas vezes. Aqui quem cria a linha vence; a segunda
+ * execução toma o erro de unicidade e desiste.
+ *
+ * Devolve `null` quando a chave já estava reservada (por outro processo ou por
+ * uma execução anterior).
+ */
+export async function claimLink(
+  orgId: string,
+  entityType: SuperlogicaEntityType,
+  localKey: string,
+): Promise<{ id: string } | null> {
+  try {
+    return await prisma.superlogicaLink.create({
+      data: { orgId, entityType, localKey, remoteId: LINK_PENDING },
+      select: { id: true },
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") return null;
+    throw err;
+  }
+}
+
+/** Confirma a reserva com o id que a Superlógica devolveu. */
+export async function completeLink(
+  id: string,
+  remoteId: string,
+  remoteAux: string | null,
+  snapshot: Prisma.InputJsonValue | null,
+) {
+  return prisma.superlogicaLink.update({
+    where: { id },
+    data: { remoteId, remoteAux, snapshotJson: snapshot ?? undefined, lastSyncedAt: new Date() },
   });
 }
 
